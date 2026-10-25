@@ -50,6 +50,25 @@ final class PartyVoice: NSObject {
         didSet { track.isEnabled = talking }
     }
 
+    /// Deafened: no member is heard. Every remote audio track is turned off (and its volume to
+    /// nothing), on the connections there are and on each one made or renegotiated later.
+    var deafened = false {
+        didSet {
+            guard deafened != oldValue else { return }
+            for peer in peers.values { silence(peer.connection) }
+        }
+    }
+
+    /// The remote audio of one connection, heard or not as `deafened` says.
+    private func silence(_ connection: RTCPeerConnection) {
+        for receiver in connection.receivers {
+            guard let audio = receiver.track as? RTCAudioTrack else { continue }
+            if audio.isEnabled == deafened { audio.isEnabled = !deafened }
+            let volume: Double = deafened ? 0 : 1
+            if audio.source.volume != volume { audio.source.volume = volume }
+        }
+    }
+
     init(me: String, call: String, iceServers: [TogetherIceServer],
          send: @escaping (_ to: String, _ device: String, _ kind: TogetherSignalKind, _ data: Any?) -> Void, changed: @escaping () -> Void) {
         self.me = me
@@ -109,6 +128,7 @@ final class PartyVoice: NSObject {
             do {
                 if collision { try await target.connection.setLocalDescription(RTCSessionDescription(type: .rollback, sdp: "")) }
                 try await target.connection.setRemoteDescription(RTCSessionDescription(type: .offer, sdp: description.sdp))
+                silence(target.connection)
                 await flush(target)
                 let answer = try await target.connection.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
                 let tuned = RTCSessionDescription(type: .answer, sdp: TogetherVoice.tuneOpus(answer.sdp))
@@ -119,6 +139,7 @@ final class PartyVoice: NSObject {
             guard let target = peer, target.device == signal.device, let description = signal.description,
                   target.connection.signalingState == .haveLocalOffer else { return }
             try? await target.connection.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: description.sdp))
+            silence(target.connection)
             await flush(target)
         case .candidate:
             guard let target = peer, target.device == signal.device, let candidate = signal.candidate else { return }
@@ -164,6 +185,7 @@ final class PartyVoice: NSObject {
         connection.add(track, streamIds: ["voice"])
         let peer = Peer(userId: target.userId, device: target.device, connection: connection)
         peers[target.userId] = peer
+        silence(connection)
         changed()
         return peer
     }
@@ -191,6 +213,7 @@ final class PartyVoice: NSObject {
 
     /// Levels from the connections' statistics, for the speaking rings.
     private func measure() {
+        if deafened { for peer in peers.values { silence(peer.connection) } }
         for peer in peers.values {
             peer.connection.statistics { [weak self] report in
                 var remote = 0.0, local = 0.0
@@ -245,4 +268,12 @@ extension PartyVoice: RTCPeerConnectionDelegate {
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
     nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
+
+    /// A member's audio arriving: silent at once while deafened.
+    nonisolated func peerConnection(_ peerConnection: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams mediaStreams: [RTCMediaStream]) {
+        Task { @MainActor in
+            guard self.peer(for: peerConnection) != nil else { return }
+            self.silence(peerConnection)
+        }
+    }
 }

@@ -104,6 +104,33 @@ class TogetherSocket extends ChangeNotifier {
     _connect();
   }
 
+  /// The gateway's limit on topics one socket watches.
+  static const maxTopics = 8;
+
+  /// The public topics (the board, the public lists) each part of the phone watches, by who
+  /// asked; the gateway hears them together, and again on every new socket.
+  final _watchers = <Object, Set<String>>{};
+  List<String> _watched = const [];
+
+  /// The topics the gateway is told to watch: everyone's, the ones asked first first.
+  List<String> get topics => _watched;
+
+  /// Watches [topics] for [owner] in place of what it watched before; empty stops. The
+  /// gateway carries only "changed" events on them, for the lists to read themselves again.
+  void watchTopics(Object owner, Set<String> topics) {
+    if (topics.isEmpty) {
+      _watchers.remove(owner);
+    } else {
+      _watchers[owner] = {...topics};
+    }
+    final next = <String>{for (final wanted in _watchers.values) ...wanted}
+        .take(maxTopics)
+        .toList();
+    if (listEquals(next, _watched)) return;
+    _watched = next;
+    send({'op': 'watch', 'topics': next});
+  }
+
   /// Sends a frame while connected; false when it could not go.
   bool send(Map<String, dynamic> frame) {
     final socket = _socket;
@@ -156,7 +183,8 @@ class TogetherSocket extends ChangeNotifier {
     }
     socket.listen(
       (message) {
-        if (message is String) _frame(message);
+        // A socket stopped or replaced may still deliver what was on its way.
+        if (message is String && mine == _generation) _frame(message);
       },
       onDone: () => _closed(mine, socket.closeCode),
       onError: (_) {},
@@ -186,6 +214,8 @@ class TogetherSocket extends ChangeNotifier {
           }),
         );
         _set(SocketStatus.ready);
+        // A new socket watches nothing until told.
+        if (_watched.isNotEmpty) send({'op': 'watch', 'topics': _watched});
         _events.add(const TogetherEvent('', 'live.ready', null));
       case 'event':
         final id = frame['id'] as String? ?? '';

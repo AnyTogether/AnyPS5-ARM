@@ -65,7 +65,7 @@ std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes) {
     input.sequence = read<std::uint32_t>(bytes, 8);
     input.sentMicros = read<std::uint64_t>(bytes, 16);
     input.session = read<std::uint64_t>(bytes, 24);
-    if (const auto seat = bytes[13]; seat >= 2 && seat <= kPadPlayers) input.seat = seat;
+    if (const auto seat = bytes[13]; seat >= 2 && seat <= PAD_MAX_CONTROLLERS) input.seat = seat;
     auto& state = input.state;
     state.buttons = read<std::uint32_t>(bytes, 32) & KnownButtons;
     for (std::size_t axis = 0; axis < 4; ++axis) state.sticks[axis] = bytes[36 + axis];
@@ -244,7 +244,7 @@ std::vector<std::unique_ptr<Channel>> OpenAllFromEnvironment() {
     auto first = OpenNamed("ANYPS5_REMOTE_PAD");
     if (!first) return channels;
     channels.push_back(std::move(first));
-    for (int player = 2; player <= kPadPlayers; ++player) {
+    for (int player = 2; player <= PAD_MAX_CONTROLLERS; ++player) {
         const auto name = "ANYPS5_REMOTE_PAD_" + std::to_string(player);
         auto channel = OpenNamed(name.c_str());
         if (!channel) break;
@@ -288,12 +288,12 @@ int Seats::Of(std::uint32_t device) const {
 }
 
 bool Seats::Held(int player) const {
-    return player >= 0 && player < kPadPlayers && holders[static_cast<std::size_t>(player)].has_value();
+    return player >= 0 && player < PAD_MAX_CONTROLLERS && holders[static_cast<std::size_t>(player)].has_value();
 }
 
 std::array<std::uint8_t, 3> PlayerColor(int player) {
-    static constexpr std::array<std::array<std::uint8_t, 3>, kPadPlayers> colors{{{0, 64, 255}, {255, 24, 32}, {32, 220, 64}, {255, 64, 200}}};
-    return colors[static_cast<std::size_t>(std::clamp(player, 0, kPadPlayers - 1))];
+    static constexpr std::array<std::array<std::uint8_t, 3>, PAD_MAX_CONTROLLERS> colors{{{0, 64, 255}, {255, 24, 32}, {32, 220, 64}, {255, 64, 200}}};
+    return colors[static_cast<std::size_t>(std::clamp(player, 0, PAD_MAX_CONTROLLERS - 1))];
 }
 
 }

@@ -5,6 +5,7 @@
 #include "SDL_gamecontroller.h"
 #include "prx/libScePad/include/KeyboardMouse.hpp"
 #include "prx/libScePad/include/PadState.hpp"
+#include "prx/libScePad/include/Pad.hpp"
 #include "prx/libSceVideoOut/include/PadOutputPacing.hpp"
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
 #include <array>
@@ -26,6 +27,7 @@ public:
     void HandleEvent(const SDL_Event& event, DisplayWindow& window);
     void Update(const DisplayWindow& window);
     bool MouseModeEnabled() const { return keyboardMouse.MouseMode(); }
+    bool SlotOccupied(int slot) const { return seats.Held(slot); }
 
 private:
     struct Controller {
@@ -68,8 +70,8 @@ private:
     std::vector<Controller> controllers;
     std::vector<Remote> remotes;
     RemotePad::Seats seats;
-    std::array<Output, kPadPlayers> outputs{};
-    std::array<bool, kPadPlayers> published{};
+    std::array<Output, PAD_MAX_CONTROLLERS> outputs{};
+    std::array<bool, PAD_MAX_CONTROLLERS> published{};
     VideoOutTelemetry::PadChangeFilter telemetryFilter;
 };
 

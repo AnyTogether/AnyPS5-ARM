@@ -68,8 +68,39 @@ class SharePresence {
   final int maxViewers;
 }
 
+/// A game session a friend hosts: friends may join it from the Mac's launcher while it is
+/// [joinable] (open to friends and not full).
+class GamePresence {
+  const GamePresence({
+    required this.sessionId,
+    required this.titleId,
+    this.joinable = false,
+    this.players = 0,
+    this.capacity = 0,
+  });
+
+  static GamePresence? fromJson(Object? json) {
+    if (json is! Map<String, dynamic> || json['sessionId'] is! String) {
+      return null;
+    }
+    return GamePresence(
+      sessionId: json['sessionId'] as String,
+      titleId: json['titleId'] as String? ?? '',
+      joinable: json['joinable'] == true,
+      players: (json['players'] as num?)?.toInt() ?? 0,
+      capacity: (json['capacity'] as num?)?.toInt() ?? 0,
+    );
+  }
+
+  final String sessionId;
+  final String titleId;
+  final bool joinable;
+  final int players;
+  final int capacity;
+}
+
 /// What a friend shows: in a game (which, since when), online, away or offline, the party
-/// they are in, and the game they share.
+/// they are in, the game session they host, and the game they share.
 class Presence {
   const Presence({
     this.state = PresenceState.offline,
@@ -77,6 +108,7 @@ class Presence {
     this.since,
     this.partyId,
     this.partyOpen = false,
+    this.game,
     this.share,
   });
 
@@ -94,6 +126,7 @@ class Presence {
       since: DateTime.tryParse(json['since'] as String? ?? ''),
       partyId: party is Map<String, dynamic> ? party['id'] as String? : null,
       partyOpen: party is Map<String, dynamic> && party['open'] == true,
+      game: GamePresence.fromJson(json['game']),
       share: SharePresence.fromJson(json['share']),
     );
   }
@@ -107,6 +140,9 @@ class Presence {
   /// The party they are in, and whether friends may walk in.
   final String? partyId;
   final bool partyOpen;
+
+  /// The game session they host, while they do.
+  final GamePresence? game;
 
   /// Their share play, while they share.
   final SharePresence? share;

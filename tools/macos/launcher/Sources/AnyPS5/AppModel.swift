@@ -24,6 +24,8 @@ struct Preferences: Codable, Equatable {
     var musicVolume: Int?
     /// nil checks GitHub for a newer launcher, as true does.
     var checkUpdates: Bool?
+    /// Which releases the update check offers (Updates.Channel); nil is Stable.
+    var updateChannel: String?
     var hideWhilePlaying = false
     /// The party's voice sends only while ⌥V is held; nil means off (open microphone).
     var pushToTalk: Bool?
@@ -33,6 +35,8 @@ struct Preferences: Codable, Equatable {
     var togetherServer: String?
     /// The running game on the user's Discord profile; nil means on.
     var discordPresence: Bool?
+    /// A Join button with it, opening the party's or share play's join code page; nil means on.
+    var discordJoin: Bool?
     /// Keeping the last seconds of the game playing, to save as a clip (Create, ⌥F12 or the
     /// phone); nil means off. clipLength is in seconds, nil for 30.
     var clips: Bool?
@@ -41,12 +45,20 @@ struct Preferences: Codable, Equatable {
     /// off. syncFolder nil is iCloud Drive.
     var saveSync: Bool?
     var syncFolder: String?
+    /// Save Sync through the AnyTogether cloud ("together") instead of the folder; nil is the folder.
+    var syncThrough: String?
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
     var screenshotsFolder: String?
-    /// Console system font files for the games (ANYPS5_SYSTEM_FONTS), nil for none.
+    /// The user's own system font files for the games, before the launcher's (SystemFonts); nil
+    /// for none.
     var fontsFolder: String?
+    /// The games (title IDs) that opened a font set with Japanese, Chinese or Korean in it: their
+    /// start waits for those fonts to be downloaded.
+    var cjkGames: [String]?
+    /// Hidden trophies show what they are before they are earned; nil means off.
+    var alwaysShowHiddenTrophies: Bool?
     /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
     /// the built-in one, "custom" the folder below, else a downloaded version).
     var engine: String?
@@ -118,6 +130,18 @@ enum Overlay: Equatable {
     case notifications
     /// "How did it run?" after a session.
     case compat
+    /// A game's last start: why it stopped, the report to export and the issue to open.
+    case crashReport
+    /// Find players: the looking-for-group board, the user's posts, Live now and public parties, people.
+    case findPlayers
+    /// "Find players for <game>": a post being written.
+    case lfgPost
+    /// One game's hub: who plays it now, posts, public share plays and parties, its players.
+    case gameHub
+    /// The profile picture being cut square.
+    case cropPicture
+    /// Settings → Cloud Storage: the usage, the cloud saves and the media on AnyTogether.
+    case cloudStorage
 }
 
 struct Toast: Identifiable, Equatable {
@@ -141,15 +165,36 @@ final class AppModel: ObservableObject {
     @Published private(set) var scanning = false
     @Published var selected = 0
     @Published var focus = HomeFocus.tiles
-    @Published var overlay: Overlay?
+    @Published var overlay: Overlay? {
+        didSet { if oldValue != overlay { discoverOverlayChanged() } }
+    }
     @Published var panelCategory = 0
-    @Published var panelRow = 0
+    @Published var panelRow = 0 {
+        didSet { if !keepingFocus { panelFocusID = nil } }
+    }
+    /// The item the panel's focus is on, so rows coming in above it do not move it to another.
+    var panelFocusID: String?
+    private var keepingFocus = false
+
+    /// Focuses row `index` of `rows`, remembering which item that is.
+    func focusRow(_ index: Int, in rows: [PanelRow]) {
+        keepingFocus = true
+        panelRow = index
+        panelFocusID = rows.indices.contains(index) ? rows[index].id : nil
+        keepingFocus = false
+    }
+
+    /// Where the focused item is in `rows` now.
+    func focusedRow(in rows: [PanelRow]) -> Int { ListFocus.index(of: panelFocusID, in: rows.map(\.id), fallback: panelRow) }
     @Published var panelInRows = false
     /// The pad action waiting for a key in the controls panel.
     @Published var capturing: PadAction?
     @Published var libraryIndex = 0
     /// The focused row of the trophy list.
     @Published var trophyIndex = 0
+    /// The hidden trophies shown in the list this time (Show), by game and trophy; forgotten
+    /// when the list closes.
+    @Published var revealedTrophies: Set<String> = []
     @Published var galleryIndex = 0
     /// One screenshot over the whole screen, instead of the grid.
     @Published var galleryViewing = false
@@ -167,6 +212,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var trophies: [String: TrophySet] = [:]
     /// Why each game stopped the last time it was started, when it stopped on an error.
     @Published private(set) var diagnoses: [String: Diagnosis] = [:]
+    /// The crash panel's report, while it is open.
+    @Published var sessionReport: SessionReportState?
+    /// What each game's last start was beyond its log: its process, detailed logging, its end.
+    var lastSessions: [String: LastSession] = [:]
+    /// Keeps a detailed log under its cap while the game runs.
+    private var traceTrim: Task<Void, Never>?
     /// A phone asking to be allowed, shown over everything until the user answers.
     @Published var pairing: PairingRequest?
     /// The connected phone and its last reported latency.
@@ -213,12 +264,27 @@ final class AppModel: ObservableObject {
     @Published var engineDownloads: [String: Double] = [:]
     /// The custom toolkit folder, when it holds a toolkit.
     @Published var customToolkit: Toolkit?
+    /// The Noto fonts inside the app (SystemFontsPanel.swift).
+    let builtInFonts = SystemFonts.locateBuiltIn()
+    /// The Japanese, Chinese and Korean fonts, downloaded the first time a game needs them.
+    let fontDownloads: FontDownloads
+    /// The folder of links to the fonts a game gets (ANYPS5_SYSTEM_FONTS).
+    let gameFonts: URL
+    /// How far the Japanese, Chinese and Korean fonts' download is, while it runs.
+    @Published var cjkProgress: Double?
+    @Published var cjkInstalled = false
+    /// The game waiting for those fonts before it starts.
+    @Published var fontWait: Game?
+    var cjkWaiters: [@MainActor (Bool) -> Void] = []
+    /// Where each start's lines begin in the game's log, until the fonts it opened are known.
+    var fontLogOffsets: [String: UInt64] = [:]
+    var fontWatch: Task<Void, Never>?
     private var installer: Installer?
     private var installLog: [String: [String]] = [:]
     private var watcher: DispatchSourceFileSystemObject?
     private var lastScan = Date.distantPast
     private var trophiesRead: Set<String> = []
-    private let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
+    let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
     private var starts: [String: Date] = [:]
     private(set) var remote: RemoteServer?
     /// iPhones on a cable reach the phone server through it, with no Wi-Fi.
@@ -247,13 +313,18 @@ final class AppModel: ObservableObject {
         self.preferences = preferences ?? Preferences.load()
         toolkitStore = preferences == nil ? ToolkitStore() : ToolkitStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-toolkits-\(UUID().uuidString)"))
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
+        let fonts = preferences == nil ? FontDownloads.root : FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-fonts-\(UUID().uuidString)")
+        fontDownloads = FontDownloads(folder: fonts.appendingPathComponent("CJK"))
+        gameFonts = fonts.appendingPathComponent("Games")
+        cjkInstalled = fontDownloads.installed
         designs = themes.all
         if persists {
             togetherUser = together.user
+            DispatchQueue.main.async { [weak self] in self?.startFamily() }
             if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
         }
         apply()
-        if persists { loadEngines() }
+        if persists { loadEngines(); loadProfilePicture() }
         if persists {
             AppModel.opener = { [weak self] urls in self?.open(urls) }
             AppModel.beforeQuit = { [weak self] in self?.leaveTogetherOnQuit() }
@@ -342,6 +413,21 @@ final class AppModel: ObservableObject {
 
     static var runningVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
 
+    var updateChannel: Updates.Channel { preferences.updateChannel.flatMap(Updates.Channel.init(rawValue:)) ?? .stable }
+
+    /// Settings → About → Update Channel: the new channel is asked at once. Nightly offers its
+    /// newest build; Stable offers its release only when it is newer than this version, so going
+    /// back to Stable never installs an older launcher.
+    func setUpdateChannel(_ channel: Updates.Channel) {
+        guard channel != updateChannel else { return }
+        preferences.updateChannel = channel == .stable ? nil : channel.rawValue
+        availableUpdate = nil
+        guard updateProgress == nil else { return }
+        // A check on its way asks again for the new channel when it ends.
+        guard !checkingUpdates else { return }
+        lookUpUpdate(told: true)
+    }
+
     func checkForUpdate() {
         guard persists, preferences.checkUpdates ?? true, updateProgress == nil, !checkingUpdates else { return }
         lookUpUpdate(told: false)
@@ -359,10 +445,13 @@ final class AppModel: ObservableObject {
 
     private func lookUpUpdate(told: Bool) {
         let current = AppModel.runningVersion
+        let channel = updateChannel
         checkingUpdates = true
         Task { @MainActor in
-            let found = await Updates.lookup(current: current)
+            let found = await Updates.lookup(current: current, channel: channel)
             self.checkingUpdates = false
+            // The channel changed meanwhile: this answer is the other channel's.
+            if channel != self.updateChannel { return self.lookUpUpdate(told: true) }
             switch found {
             case .newer(let release):
                 self.lastUpdateCheck = Date()
@@ -372,7 +461,12 @@ final class AppModel: ObservableObject {
             case .current:
                 self.lastUpdateCheck = Date()
                 self.availableUpdate = nil
-                if told { self.show(T.format(.launcherUpToDate, current), symbol: "checkmark.circle.fill") }
+                // On Stable after a nightly: this version stays until a newer release.
+                if told, channel == .stable, Updates.Version(current)?.isNightly == true {
+                    self.show(T.format(.updateChannelStays, current), symbol: "checkmark.circle.fill")
+                } else if told {
+                    self.show(T.format(.launcherUpToDate, current), symbol: "checkmark.circle.fill")
+                }
             case .failed:
                 if told { self.show(T.text(.updateCheckFailed), symbol: "exclamationmark.triangle.fill") }
             }
@@ -428,9 +522,15 @@ final class AppModel: ObservableObject {
     var togetherFlush: Task<Void, Never>?
     /// The social screens' state: activity, leaderboards, notifications.
     lazy var social = SocialState(owner: self)
+    /// Cloud saves and media: whether the server keeps files, Settings → Cloud Storage.
+    lazy var cloud = CloudState(owner: self)
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?
+    /// Family limits on this Mac, and the watch over play time (FamilyGate.swift).
+    @Published var family = FamilyStanding.free
+    lazy var familyCache = persists ? FamilyCache() : FamilyCache(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-family"), defaults: UserDefaults(suiteName: "AnyPS5-preview-family") ?? .standard)
+    let familyWatch = FamilyWatch()
     @Published var togetherFriends: [TogetherFriend] = []
     @Published var togetherRequests = TogetherRequests(incoming: [], outgoing: [])
     var friendHandle = ""
@@ -443,6 +543,11 @@ final class AppModel: ObservableObject {
     var profileReturn: ProfileReturn?
     /// The user's own profile with its privacy, and the edits typed in Settings → AnyTogether.
     @Published var togetherProfile: TogetherOwnProfile?
+    /// The profile picture (ProfilePicture.file), the crop open on a new one, and an upload or
+    /// download of AnyTogether's on its way.
+    @Published var profilePicture: NSImage?
+    @Published var pictureCrop: PictureCrop?
+    @Published var pictureBusy = false
     var profileDraft = ProfileDraft()
     /// Messages: the conversations and threads, the row selected on the left, whether the thread
     /// has the focus (a quick reply, or the field at the end), and whether the field is typed in.
@@ -460,27 +565,57 @@ final class AppModel: ObservableObject {
     @Published var groupName = ""
     @Published var groupFocus = 0
     /// The party the user is in, the invites waiting, and whether a new party is open to friends.
-    @Published var party: TogetherParty?
+    @Published var party: TogetherParty? {
+        didSet { partyChanged() }
+    }
     @Published var partyInvites: [TogetherPartyInvite] = []
     @Published var partyStartsOpen = false
+    /// "Join with a code": what was typed, what it opens, and asking with it.
+    @Published var joinEntry = JoinEntry()
+    var joinLookup: Task<Void, Never>?
+    /// Parties and share plays (by ID) whose code the user stopped this session, or for which one
+    /// was made for Discord already: no code is made for the Join button again.
+    var codeStopped: Set<String> = []
+    var codeMakingForDiscord: Set<String> = []
+    /// Who asked with the code (party.request / share_play.request said so), by user ID.
+    @Published var codeAskers: Set<String> = []
+    /// The Discord link typed for the party, sent once it reads as one.
+    var discordLinkSend: Task<Void, Never>?
+    /// What Discord was shown last, and since when the user is in the party.
+    var discordShown: DiscordActivity?
+    var discordCleared = true
+    /// When the running game's window showed: its time on Discord.
+    var discordSince: Date?
+    var partySince: (id: String, at: Date)?
     /// The game session the user hosts or joined, and invitations to friends' games.
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
     var openingSession = false
+    /// Find players, Live now, public parties, discovery and game hubs.
+    @Published var discover = DiscoverState()
     /// Share play: what the friends panel shows, and the running share play's pieces.
-    @Published var share = ShareState()
+    @Published var share = ShareState() {
+        didSet {
+            // Discord's Join button follows the share play hosted and its code.
+            if oldValue.hosting?.id != share.hosting?.id || oldValue.hosting?.joinCode != share.hosting?.joinCode { updateDiscord() }
+        }
+    }
     var shareSession: ShareSession?
     var shareWatch: ShareWatchSession?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
     var partyVoice: PartyVoice?
-    @Published var micOn = true
+    /// The microphone's switch and deafening.
+    @Published var mic = TogetherVoiceMic()
+    var micOn: Bool { mic.on }
+    var deafened: Bool { mic.deafened }
     @Published var talkHeld = false
     @Published var voiceSpeaking: Set<String> = []
-    /// Who in the call muted themselves, as the server says.
+    /// Who in the call muted or deafened themselves, as the server says.
     @Published var voiceMuted: Set<String> = []
-    /// Whether the server was last told the user is muted.
-    var voiceSentMuted = false
+    @Published var voiceDeafened: Set<String> = []
+    /// What the server was last told about the user (nil: nothing yet in this call).
+    var voiceSent: TogetherVoiceMic.State?
     /// The friend in a direct call (nil in the party's voice), and whether they have not answered yet.
     @Published var callFriend: TogetherPerson?
     @Published var callWaiting = false
@@ -704,6 +839,7 @@ final class AppModel: ObservableObject {
                 self.progress[id] = nil
                 switch result {
                 case .success(let bundle):
+                    try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: nil, titleID: game.titleID)
                     if let record = Installer.record(of: bundle) { self.installedRecords[id] = record }
                     Sounds.shared.play(.unlocked)
                     self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
@@ -714,6 +850,7 @@ final class AppModel: ObservableObject {
                 case .failure(let error) where error is CancellationError:
                     break
                 case .failure(let error):
+                    try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: error.localizedDescription, titleID: game.titleID)
                     self.failures[id] = error.localizedDescription
                     self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
                 }
@@ -752,6 +889,7 @@ final class AppModel: ObservableObject {
     // MARK: Playing
 
     func primaryAction(_ game: Game) {
+        if familyPrimaryAction(game) { return }
         switch state(of: game) {
         case .installed(let outdated): outdated ? open(.updateChoice) : play(game)
         case .locked, .failed: unlock(game)
@@ -762,13 +900,14 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Plays the game, its saves brought in step first where save sync is on.
-    func play(_ game: Game) {
-        guard root != nil, starting == nil, running == nil, syncing == nil else { return }
-        syncSaves(game) { self.start(game) }
+    /// Plays the game, its saves brought in step first where save sync is on; `trace` turns
+    /// detailed logging on for this start only.
+    func play(_ game: Game, trace: Bool = false) {
+        guard root != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
+        familyGate(game) { self.syncSaves(game) { self.ensureFonts(game) { self.start(game, trace: trace) } } }
     }
 
-    private func start(_ game: Game) {
+    private func start(_ game: Game, trace: Bool = false) {
         guard let root, starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -780,12 +919,12 @@ final class AppModel: ObservableObject {
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
-        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder)
+        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: gameFontsFolder(), trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
             .merging(OnlinePlayHost.environment(for: game, client: together)) { _, online in online }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
-        markStart(of: game)
+        markStart(of: game, traced: trace || settings.trace == true)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -799,8 +938,11 @@ final class AppModel: ObservableObject {
                 }
                 if let app {
                     self.running = (game, app)
+                    self.lastSessions[game.id]?.pid = app.processIdentifier
                     self.sessionStart = Date()
+                    self.familyGameStarted()
                     self.watchTrophies(game)
+                    self.watchFonts(game)
                     self.watchForExit(of: app.processIdentifier)
                     self.watchForWindow(of: app)
                 } else {
@@ -884,7 +1026,7 @@ final class AppModel: ObservableObject {
     // MARK: Save sync
 
     /// The game whose saves are being synced, so it does not start twice meanwhile.
-    @Published private(set) var syncing: String?
+    @Published var syncing: String?
 
     var syncRoot: URL? { preferences.syncFolder.map { URL(fileURLWithPath: $0) } ?? SaveSync.iCloudDrive }
 
@@ -895,6 +1037,11 @@ final class AppModel: ObservableObject {
 
     /// Syncs the game's saves off the main thread, says what came from another Mac, then goes on.
     private func syncSaves(_ game: Game, then: @escaping @MainActor () -> Void) {
+        if preferences.syncThrough == AppModel.syncThroughTogether, preferences.saveSync == true {
+            // Through AnyTogether's cloud; signed out or a server without files, nothing syncs.
+            guard let cloudSync = cloudSave(for: game) else { return then() }
+            return syncThroughCloud(cloudSync, game: game, then: then)
+        }
         guard let sync = saveSync(for: game) else { return then() }
         syncing = game.id
         Task.detached {
@@ -956,6 +1103,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: Broadcasting
+
+    /// Live to Twitch, YouTube or an RTMP server (Broadcaster.swift, BroadcastPanel.swift).
+    lazy var broadcaster: Broadcaster = makeBroadcaster()
+
     // MARK: Clips
 
     let clipRecorder = ClipRecorder()
@@ -990,6 +1142,7 @@ final class AppModel: ObservableObject {
     /// Create, ⌥F12 or the phone: the last seconds of the game playing go to the gallery.
     func saveClip() {
         guard let game = running?.game else { return }
+        guard familyAllows(.mediaSharing) else { return TrophyBanner.shared.notice(FS.refusal(.mediaSharing), detail: "", symbol: "hand.raised.fill", sounds: preferences.sounds) }
         guard preferences.clips == true else {
             return TrophyBanner.shared.notice(T.text(.clipsOff), detail: T.text(.clipsOffDetail), symbol: "record.circle", sounds: preferences.sounds)
         }
@@ -1045,10 +1198,11 @@ final class AppModel: ObservableObject {
             }
             NSApp.yieldActivation(to: app)
             app.activate()
-            if let game = running?.game, preferences.discordPresence ?? true { discord.playing(game.name, since: Date()) }
+            discordSince = Date()
             if let game = running?.game { tellLowPower(about: game) }
             startClips(for: app)
             gameWindowShown = true
+            updateDiscord()
             updateRemotePlay()
             updateTogetherPresence()
             withAnimation(Motion.overlay) { starting = nil }
@@ -1094,15 +1248,23 @@ final class AppModel: ObservableObject {
         self.running = nil
         if let start = sessionStart { recordPlay(running.game, from: start) }
         sessionStart = nil
+        familyGameEnded()
         clipRecorder.stop()
+        broadcaster.stop()
         gameWindowShown = false
         updateRemotePlay()
         followSharePlay()
         updateTogetherPresence()
         syncSaves(running.game) {}
-        discord.clear()
+        discordSince = nil
+        updateDiscord()
         loadTrophies(running.game, again: true)
-        diagnose(running.game)
+        lastSessions[running.game.id]?.ended = Date()
+        lastSessions[running.game.id]?.withoutWindow = starting != nil
+        traceTrim?.cancel()
+        traceTrim = nil
+        diagnose(running.game, pid: running.app.processIdentifier)
+        checkFontsAfterEnd(running.game)
         trophyWatch?.cancel()
         trophyWatch = nil
         exitWatch?.cancel()
@@ -1110,7 +1272,6 @@ final class AppModel: ObservableObject {
         if starting != nil {
             startWatch?.cancel()
             withAnimation(Motion.overlay) { starting = nil }
-            startedWithoutWindow = true
         }
         showWindows()
         NSApp.activate(ignoringOtherApps: true)
@@ -1141,6 +1302,7 @@ final class AppModel: ObservableObject {
                 if !NSApp.isActive {
                     TrophyBanner.shared.notice(T.format(.phoneConnected, name), detail: T.text(.phoneConnectedDetail), symbol: "iphone.gen3", sounds: self.preferences.sounds)
                 }
+                self.tellPhoneBroadcast(self.broadcaster.phase.active)
                 self.phoneLibrary = nil
                 self.phoneLookSent = nil
                 self.phoneActivity = nil
@@ -1232,12 +1394,77 @@ final class AppModel: ObservableObject {
         updateProgress = progress
     }
 
-    func discordOff() { discord.clear() }
+    func discordOff() { updateDiscord() }
 
     /// Turned on again with a game in front: Discord shows it at once, from when it started.
-    func discordOn() {
-        guard let game = running?.game else { return }
-        discord.playing(game.name, since: sessionStart ?? Date())
+    func discordOn() { updateDiscord() }
+
+    /// Since when the user is in the party, for Discord; a party left forgets who asked with its code.
+    func partyChanged() {
+        guard party?.id != partySince?.id else { return updateDiscord() }
+        partySince = party.map { ($0.id, Date()) }
+        codeAskers = []
+        updateDiscord()
+    }
+
+    /// What the user's Discord profile shows, when the presence setting is on: the game once its
+    /// window is up, the party they are in ("In a party", with its size, even with no game), and
+    /// the Join button with the share play's or party's code. The party's leader or the share
+    /// play's host gets a code made for the button when none works, but not where they stopped
+    /// it themselves. Discord is told only when something changed.
+    func updateDiscord() {
+        guard persists else { return }
+        let game = gameWindowShown ? running?.game : nil
+        guard preferences.discordPresence ?? true, game != nil || party != nil else {
+            discordShown = nil
+            if !discordCleared {
+                discordCleared = true
+                discord.clear()
+            }
+            return
+        }
+        var button: DiscordActivity.Button?
+        if preferences.discordJoin ?? true, let me = togetherUser?.id {
+            let allowed = familyAllows(.publicMatchmaking)
+            let hosting = share.hosting.map {
+                DiscordJoin.Source(id: $0.id, code: $0.joinCode, mine: true, mayMake: allowed && !codeStopped.contains($0.id) && !codeMakingForDiscord.contains($0.id))
+            }
+            let partySource = party.map {
+                DiscordJoin.Source(id: $0.id, code: $0.joinCode, mine: $0.isLeader(me), mayMake: allowed && !codeStopped.contains($0.id) && !codeMakingForDiscord.contains($0.id))
+            }
+            switch DiscordJoin.plan(share: hosting, party: partySource) {
+            case .button(let url): button = DiscordActivity.Button(label: JS.text(.discordJoinLabel), url: url)
+            case .makeShare(let id): makeCodeForDiscord(id, sharePlay: true)
+            case .makeParty(let id): makeCodeForDiscord(id, sharePlay: false)
+            case .none: break
+            }
+        }
+        let activity = DiscordActivity(game: game?.name, since: game != nil ? discordSince ?? sessionStart : partySince?.at,
+                                       party: party.map { DiscordActivity.Party(id: $0.id, size: $0.members.count, max: TogetherParty.maxSize) },
+                                       button: button, partyText: JS.text(.inParty))
+        guard activity != discordShown else { return }
+        discordShown = activity
+        discordCleared = false
+        discord.show(activity)
+    }
+
+    /// A code for the Join button, made once; one that fails is not tried again this session.
+    private func makeCodeForDiscord(_ id: String, sharePlay: Bool) {
+        codeMakingForDiscord.insert(id)
+        let client = together
+        Task {
+            do {
+                let code = sharePlay ? try await client.makeJoinCode(sharePlay: id) : try await client.makeJoinCode(party: id)
+                codeMakingForDiscord.remove(id)
+                if sharePlay, let hosting = share.hosting, hosting.id == id {
+                    share.hosting = hosting.with(joinCode: code)
+                } else if !sharePlay, let current = party, current.id == id {
+                    party = current.with(joinCode: code)
+                }
+            } catch {
+                // Refused (family settings, a muted account, too many): no button for it.
+            }
+        }
     }
 
     /// A trophy just earned shows on the phone too, with its icon made small.
@@ -1344,6 +1571,9 @@ final class AppModel: ObservableObject {
         case .command("capture"):
             // Create on the phone's pad: a clip of the game, the game staying in front.
             saveClip()
+        case .command("broadcastStart"), .command("broadcastStop"):
+            // Go live and Stop broadcast in the phone's PS menu.
+            phoneBroadcast(message == .command(name: "broadcastStart"))
         case .command(let name):
             let commands: [String: Command] = ["left": .left, "right": .right, "up": .up, "down": .down, "select": .select, "back": .back, "options": .options,
                                                "l1": .previousGame, "r1": .nextGame]
@@ -1450,20 +1680,31 @@ final class AppModel: ObservableObject {
 
     // MARK: Diagnosis
 
-    /// Set when the game that just ended never showed a window, so the toast says it did not start.
-    private var startedWithoutWindow = false
-
     nonisolated static func logFile(for game: Game) -> URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/\(game.titleID).log")
     }
 
-    /// The log line the diagnosis reads from, so only this start's output counts.
-    private func markStart(of game: Game) {
+    /// The log line the diagnosis reads from, so only this start's output counts. A log grown
+    /// too big is set aside first; a detailed one is kept under its cap while the game runs.
+    private func markStart(of game: Game, traced: Bool) {
         diagnoses[game.id] = nil
         starts[game.id] = Date()
+        lastSessions[game.id] = LastSession(traced: traced)
         let file = AppModel.logFile(for: game)
         try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\n"
+        GameLog.rollForStart(file)
+        traceTrim?.cancel()
+        traceTrim = nil
+        if traced {
+            traceTrim = Task.detached(priority: .utility) {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    GameLog.trim(file, cap: TraceMode.cap)
+                }
+            }
+            TrophyBanner.shared.notice(TC.text(.traceOnNotice), detail: TC.text(.traceOnNoticeDetail), symbol: "text.magnifyingglass", sounds: false)
+        }
+        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n"
         if let handle = try? FileHandle(forWritingTo: file) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: Data(line.utf8))
@@ -1471,6 +1712,7 @@ final class AppModel: ObservableObject {
         } else {
             try? Data(line.utf8).write(to: file)
         }
+        markFontLog(of: game, at: UInt64(max(0, GameLog.size(of: file))))
     }
 
     /// The log of the game's last start, read from the end of its log file.
@@ -1482,52 +1724,32 @@ final class AppModel: ObservableObject {
         return Diagnosis.lastSession(String(decoding: handle.readDataToEndOfFile(), as: UTF8.self))
     }
 
-    private func diagnose(_ game: Game) {
+    /// Reads why the game stopped once macOS has had a few seconds to write its crash report,
+    /// and offers the report when it stopped abnormally.
+    private func diagnose(_ game: Game, pid: pid_t) {
         let start = starts[game.id] ?? Date().addingTimeInterval(-600)
-        let withoutWindow = startedWithoutWindow
-        startedWithoutWindow = false
+        let withoutWindow = lastSessions[game.id]?.withoutWindow ?? false
         Task.detached(priority: .userInitiated) {
-            // macOS writes the crash report a moment after the process is gone.
-            try? await Task.sleep(for: .seconds(1.5))
-            let report = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
+            // macOS writes the crash report a moment after the process is gone: up to six
+            // seconds, less for a log that ends on the engine's orderly shutdown.
+            var report: String?
+            for attempt in 1...12 {
+                try? await Task.sleep(for: .milliseconds(500))
+                report = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier, pid: pid)
+                if report != nil { break }
+                if attempt == 3 && Diagnosis.cleanShutdown(AppModel.lastSession(of: game)) { break }
+            }
             let found = Diagnosis.read(session: AppModel.lastSession(of: game), crashReport: report)
             await MainActor.run {
                 self.diagnoses[game.id] = found
-                if let found {
-                    self.show(game.name + ": " + found.summary, symbol: "exclamationmark.triangle.fill")
-                } else if withoutWindow {
-                    self.show(T.text(.startFailed), symbol: "exclamationmark.triangle.fill")
-                }
+                if found != nil || withoutWindow { self.offerReport(game) }
             }
         }
     }
 
-    /// Writes a report for a bug report or a Discord message and shows it in Finder.
+    /// The crash panel for the last session of the game, from its options or the log.
     func makeReport(_ game: Game) {
-        let settings = settings(for: game)
-        let diagnosis = diagnoses[game.id]?.summary
-        let launcher = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
-        let toolkitVersion = installedRecords[game.id]?.toolkit ?? engineVersion(for: game) ?? "none"
-        let start = starts[game.id] ?? Date().addingTimeInterval(-86_400)
-        Task.detached(priority: .userInitiated) {
-            let crash = Diagnosis.crashReport(since: start, bundleIdentifier: game.bundleIdentifier)
-            let text = DiagnosticReport.text(game: game, settings: settings, launcherVersion: launcher, toolkitVersion: toolkitVersion,
-                                             diagnosis: diagnosis, session: AppModel.lastSession(of: game), crashReport: crash)
-            let formatter = DateFormatter()
-            formatter.dateFormat = "yyyyMMdd-HHmmss"
-            let folder = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/AnyPS5/Reports")
-            let file = folder.appendingPathComponent("\(game.titleID)-\(formatter.string(from: Date())).txt")
-            let written = (try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)) != nil
-                && (try? Data(text.utf8).write(to: file)) != nil
-            await MainActor.run {
-                if written {
-                    NSWorkspace.shared.activateFileViewerSelecting([file])
-                    self.show(T.text(.reportSaved), symbol: "doc.badge.checkmark")
-                } else {
-                    self.show(T.text(.reportFailed), symbol: "exclamationmark.triangle.fill")
-                }
-            }
-        }
+        openSessionReport(game, afterCrash: false)
     }
 
     // MARK: Sharing settings
@@ -1687,13 +1909,16 @@ final class AppModel: ObservableObject {
     func open(_ next: Overlay) {
         panelCategory = 0
         panelRow = 0
-        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice
+        panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport
         // The controls panel opens on its first key, below the hint.
         if next == .controls {
             panelRow = 1
             if let game = selectedGame { readControls(game) }
         }
-        if next == .trophies { trophyIndex = 0 }
+        if next == .trophies {
+            trophyIndex = 0
+            revealedTrophies = []
+        }
         if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }
         panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends || next == .party

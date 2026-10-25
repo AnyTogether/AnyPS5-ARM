@@ -32,8 +32,23 @@ public struct TogetherSharePlay: Codable, Equatable, Sendable, Identifiable {
     public let viewers: [Viewer]
     /// Invited and not here yet; only the host is told.
     public let invited: [TogetherPerson]?
+    /// In the public list, and how; nil when it is not listed.
+    public let listing: TogetherShareListing?
+    /// People who asked to watch, from the public list or with the code; only the host is told.
+    public let requests: [TogetherPerson]?
+    /// The code anyone may ask to watch with, while one works; only the host is told.
+    public let joinCode: TogetherJoinCode?
 
-    public init(id: String, host: TogetherPerson?, hostDevice: String, titleId: String, title: String?, open: Bool, maxViewers: Int, viewers: [Viewer], invited: [TogetherPerson]? = nil) {
+    enum CodingKeys: String, CodingKey {
+        case id, host, hostDevice, titleId, title, open, maxViewers, viewers, invited, requests, joinCode
+        case listing = "public"
+    }
+
+    public init(id: String, host: TogetherPerson?, hostDevice: String, titleId: String, title: String?, open: Bool, maxViewers: Int, viewers: [Viewer], invited: [TogetherPerson]? = nil,
+                listing: TogetherShareListing? = nil, requests: [TogetherPerson]? = nil, joinCode: TogetherJoinCode? = nil) {
+        self.listing = listing
+        self.requests = requests
+        self.joinCode = joinCode
         self.id = id
         self.host = host
         self.hostDevice = hostDevice
@@ -43,6 +58,12 @@ public struct TogetherSharePlay: Codable, Equatable, Sendable, Identifiable {
         self.maxViewers = maxViewers
         self.viewers = viewers
         self.invited = invited
+    }
+
+    /// The same share play with a new code, or none (made or stopped here before the server says).
+    public func with(joinCode: TogetherJoinCode?) -> TogetherSharePlay {
+        TogetherSharePlay(id: id, host: host, hostDevice: hostDevice, titleId: titleId, title: title, open: open, maxViewers: maxViewers, viewers: viewers, invited: invited,
+                          listing: listing, requests: requests, joinCode: joinCode)
     }
 }
 
@@ -126,8 +147,9 @@ extension TogetherSocket {
 
 extension TogetherClient {
     /// Shares the game this launcher runs (ending any share play the user had).
-    public func startSharePlay(titleId: String, title: String?, open: Bool, maxViewers: Int) async throws -> TogetherSharePlayJoin {
+    public func startSharePlay(titleId: String, title: String?, open: Bool, maxViewers: Int, listing: TogetherShareListing? = nil) async throws -> TogetherSharePlayJoin {
         var body: [String: Any] = ["titleId": titleId, "open": open, "maxViewers": maxViewers]
+        if let listing { body["public"] = listing.body }
         if let title, !title.isEmpty { body["title"] = String(title.prefix(80)) }
         return try JSONDecoder.together.decode(TogetherSharePlayJoin.self, from: try await authorized("POST", "share-plays", body))
     }

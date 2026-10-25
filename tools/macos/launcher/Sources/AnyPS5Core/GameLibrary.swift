@@ -20,6 +20,8 @@ public struct Game: Identifiable, Hashable, Sendable {
     public let background: URL?
     public let music: URL?
     public let executable: Executable
+    /// The age ratings in param.json's `ageLevel`: "default" or a region ("US") to an age.
+    public var ageLevels: [String: Int]? = nil
 
     public var bundleIdentifier: String {
         "org.anyps5." + titleID.lowercased().filter { $0.isLetter || $0.isNumber }
@@ -80,7 +82,18 @@ public enum GameLibrary {
         } else {
             executable = .unreadable
         }
-        return Game(folder: folder, titleID: titleID, name: name, version: version, icon: existing("icon0.png"), background: existing("pic0.png"), music: existing("snd0.at9"), executable: executable)
+        return Game(folder: folder, titleID: titleID, name: name, version: version, icon: existing("icon0.png"), background: existing("pic0.png"), music: existing("snd0.at9"), executable: executable,
+                    ageLevels: ageLevels(parameters["ageLevel"]))
+    }
+
+    /// The numbers of an `ageLevel` object; nil when there is none.
+    static func ageLevels(_ value: Any?) -> [String: Int]? {
+        guard let object = value as? [String: Any] else { return nil }
+        let levels = object.compactMapValues { value -> Int? in
+            guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+            return number.intValue
+        }
+        return levels.isEmpty ? nil : levels
     }
 
     /// The total allocated size of a folder.

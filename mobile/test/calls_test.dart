@@ -193,7 +193,11 @@ void main() {
       await until(() => calls().incoming.isNotEmpty);
       await calls().decline(calls().incoming.single);
       expect(calls().incoming, isEmpty);
-      expect(server.requests.last.$2, '/api/v1/calls/in1/decline');
+      // The phone's own reads after the socket came up may land after it: GETs all.
+      expect(
+        server.requests.lastWhere((r) => r.$1 == 'POST').$2,
+        '/api/v1/calls/in1/decline',
+      );
     });
 
     test('calling a friend: ringing, answered, then hung up', () async {

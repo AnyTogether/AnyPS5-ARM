@@ -1,4 +1,5 @@
 import AnyPS5Core
+import CShareAudio
 import Foundation
 import WebRTC
 
@@ -51,13 +52,28 @@ public enum ShareSignal: Sendable, Equatable {
 public enum ShareWebRTC {
     /// Pads: viewer → host 80-byte input packets, host → viewer 32-byte answers.
     public static let padLabel = "pad"
-    /// The game's sound: host → viewer, StreamPacket audio (5 ms of 16-bit stereo at 48 kHz).
+    /// The game's sound: host → viewer, StreamPacket audio (5 ms of 16-bit stereo at 48 kHz),
+    /// until the viewer's hello (viewer → host, text) gets them the Opus track instead.
     public static let audioLabel = "audio"
 
-    /// Its own factory, apart from the party voice's: no microphone is ever opened for it.
+    /// The factory's audio device: the game's sound goes in where a microphone would, what the
+    /// viewer receives comes out to whoever pulls it. No real device is ever opened.
+    public static let audioDevice = ShareAudioDevice()
+
+    /// Its own factory, apart from the party voice's, with `audioDevice` for its sound.
     public static let factory: RTCPeerConnectionFactory = {
         RTCInitializeSSL()
-        return RTCPeerConnectionFactory(encoderFactory: RTCDefaultVideoEncoderFactory(), decoderFactory: RTCDefaultVideoDecoderFactory())
+        return ShareAudioFactory(audioDevice)
+    }()
+
+    /// The game's sound as one audio track every Opus viewer's connection sends: straight from
+    /// `audioDevice`, none of WebRTC's voice processing (echo cancelling would also fold it to
+    /// mono; gain control and noise suppression would pump and eat the music).
+    public static let gameAudio: RTCAudioTrack = {
+        let off = ["googEchoCancellation": "false", "googAutoGainControl": "false", "googNoiseSuppression": "false",
+                   "googHighpassFilter": "false"]
+        let source = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: off, optionalConstraints: nil))
+        return factory.audioTrack(with: source, trackId: "game-audio")
     }()
 
     public static func configuration(_ iceServers: [TogetherIceServer]) -> RTCConfiguration {
@@ -89,6 +105,12 @@ public enum ShareWebRTC {
             return profile.hasPrefix("64") && packetized ? 0 : packetized ? 1 : 2
         }
         return all.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+    }
+
+    /// Opus first (the game's sound track is always Opus), then the rest as WebRTC orders them.
+    public static func audioCodecs() -> [RTCRtpCodecCapability] {
+        let all = factory.rtpSenderCapabilities(forKind: kRTCMediaStreamTrackKindAudio).codecs
+        return all.filter { $0.name.lowercased() == "opus" } + all.filter { $0.name.lowercased() != "opus" }
     }
 
     static let noConstraints = RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)

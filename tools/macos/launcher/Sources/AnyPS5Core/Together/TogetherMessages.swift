@@ -11,8 +11,15 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
     public let editedAt: Date?
     public let deletedAt: Date?
     public let createdAt: Date
+    /// "text", "image", "clip" or "voice"; nil from a server that knows no media.
+    public let kind: String?
+    /// A media message's caption alone (its `text` is the caption or a stand-in like "[photo]").
+    public let caption: String?
+    /// The one piece of media a media message has, as this member may see it.
+    public let attachments: [TogetherAttachment]?
 
-    public init(id: String, conversationId: String, seq: Int, authorId: String?, text: String?, replyTo: Int? = nil, editedAt: Date? = nil, deletedAt: Date? = nil, createdAt: Date) {
+    public init(id: String, conversationId: String, seq: Int, authorId: String?, text: String?, replyTo: Int? = nil, editedAt: Date? = nil, deletedAt: Date? = nil, createdAt: Date,
+                kind: String? = nil, caption: String? = nil, attachments: [TogetherAttachment]? = nil) {
         self.id = id
         self.conversationId = conversationId
         self.seq = seq
@@ -22,6 +29,21 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
         self.editedAt = editedAt
         self.deletedAt = deletedAt
         self.createdAt = createdAt
+        self.kind = kind
+        self.caption = caption
+        self.attachments = attachments
+    }
+
+    /// The media it carries, when it is a media message (and not deleted).
+    public var attachment: TogetherAttachment? {
+        guard deletedAt == nil else { return nil }
+        return attachments?.first
+    }
+
+    /// What it says in words: the caption of a media message (nil without one), else the text.
+    public var words: String? {
+        guard attachment != nil else { return text }
+        return caption.flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 
@@ -94,6 +116,13 @@ extension TogetherClient {
     /// `id` is the message's own ID, so sending again after a timeout stores it once.
     public func send(_ text: String, in conversationId: String, id: UUID = UUID()) async throws -> TogetherMessage {
         let body: [String: Any] = ["clientId": id.uuidString.lowercased(), "text": text]
+        return try JSONDecoder.together.decode(TogetherMessage.self, from: try await authorized("POST", "conversations/\(conversationId)/messages", body))
+    }
+
+    /// A piece of the user's media (uploaded first) as a message, with an optional caption.
+    public func send(media mediaId: String, caption: String? = nil, in conversationId: String, id: UUID = UUID()) async throws -> TogetherMessage {
+        var body: [String: Any] = ["clientId": id.uuidString.lowercased(), "attachments": [["mediaId": mediaId]]]
+        if let caption = caption?.trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty { body["text"] = caption }
         return try JSONDecoder.together.decode(TogetherMessage.self, from: try await authorized("POST", "conversations/\(conversationId)/messages", body))
     }
 

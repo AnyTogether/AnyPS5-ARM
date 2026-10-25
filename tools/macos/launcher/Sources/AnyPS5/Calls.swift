@@ -42,6 +42,7 @@ extension AppModel {
 
     /// Rings until answered, declined, or long enough to count as not answered.
     func ring(_ call: TogetherRinging) {
+        guard familyAllows(.voiceChat) else { return }
         stopRinging()
         withAnimation(Motion.overlay) { ringing = call }
         if !NSApp.isActive { RingBanner.shared.show(call) }
@@ -112,7 +113,7 @@ extension AppModel {
 
     /// Rings the friend; the call is joined here already and waits for them to answer.
     func startCall(with friend: TogetherPerson) {
-        guard togetherUser != nil else { return }
+        guard togetherUser != nil, familyPermits(.voiceChat) else { return }
         Task {
             guard await PartyVoice.microphoneAllowed() else {
                 return show(T.text(.voiceNoMic), symbol: "mic.slash.fill")
@@ -140,7 +141,11 @@ extension AppModel {
     func callRows() -> [PanelRow] {
         guard let friend = callFriend, voiceCall != nil else { return [] }
         var details: [String] = []
-        if voiceMuted.contains(friend.userId) { details.append(T.text(.voiceMuted)) }
+        if voiceDeafened.contains(friend.userId) {
+            details.append(JS.text(.deafened))
+        } else if voiceMuted.contains(friend.userId) {
+            details.append(T.text(.voiceMuted))
+        }
         if voiceSpeaking.contains(friend.userId) { details.append(T.text(.voiceSpeaking)) }
         return [PanelRow(id: "call-\(friend.userId)", title: T.format(callWaiting ? .callCalling : .callWith, friend.displayName),
                          detail: details.isEmpty ? "@\(friend.handle)" : details.joined(separator: " · "), symbol: "phone.fill", kind: .info(""),
@@ -159,12 +164,15 @@ extension AppModel {
 
     func previewRinging(_ call: TogetherRinging?) { ringing = call }
 
-    func previewCall(with friend: TogetherPerson, waiting: Bool, speaking: Set<String> = [], muted: Set<String> = []) {
+    func previewCall(with friend: TogetherPerson, waiting: Bool, speaking: Set<String> = [], muted: Set<String> = [], deafened: Set<String> = [], deafenedHere: Bool = false) {
         voiceCall = "call-preview"
         callFriend = friend
         callWaiting = waiting
         voiceSpeaking = speaking
         voiceMuted = muted
+        voiceDeafened = deafened
+        mic = TogetherVoiceMic()
+        if deafenedHere { mic.deafen() }
     }
 }
 

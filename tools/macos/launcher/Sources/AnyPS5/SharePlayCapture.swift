@@ -11,6 +11,7 @@ import ScreenCaptureKit
 final class SharePlayCapture {
     private var stream: SCStream?
     private var output: Output?
+    private var watch: Task<Void, Never>?
     private(set) var pid: pid_t?
 
     func start(pid: pid_t, host: SharePlayHost) async throws {
@@ -27,21 +28,11 @@ final class SharePlayCapture {
         guard let app = content.applications.first(where: { $0.processID == pid }), let window = ClipRecorder.mainWindow(of: pid, in: content),
               let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) ?? content.displays.first else { throw RemotePlay.Failure.noWindow }
         let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
-        let configuration = SCStreamConfiguration()
-        let area = ClipRecorder.area(of: window, on: display)
-        configuration.sourceRect = area
-        // The game's shape within 1280 x 720, even sizes for the encoder.
-        let scale = min(1, 720 / area.height, 1280 / area.width)
-        configuration.width = max(160, Int(area.width * scale) & ~1)
-        configuration.height = max(90, Int(area.height * scale) & ~1)
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        configuration.queueDepth = 3
-        configuration.showsCursor = false
-        configuration.capturesAudio = true
-        configuration.sampleRate = 48000
-        configuration.channelCount = 2
-        configuration.excludesCurrentProcessAudio = true
+        // The game's pixels within 1280 x 720, following the window while it changes.
+        let configure = { (window: SCWindow, display: SCDisplay, scale: CGFloat) in
+            ClipRecorder.configuration(window: window, display: display, scale: scale, maxWidth: 1280, maxHeight: 720, queueDepth: 3)
+        }
+        let configuration = configure(window, display, CGFloat(filter.pointPixelScale))
         let output = Output(host: host)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
@@ -50,9 +41,12 @@ final class SharePlayCapture {
         self.stream = stream
         self.output = output
         self.pid = pid
+        watch = ClipRecorder.follow(stream, pid: pid, app: app, window: window, display: display, configure: configure)
     }
 
     func stop() {
+        watch?.cancel()
+        watch = nil
         if let stream { Task { try? await stream.stopCapture() } }
         stream = nil
         output = nil

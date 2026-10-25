@@ -1,0 +1,31 @@
+Noto fonts the launcher gives games that ask for the console's system fonts (sceFontOpenFontSet),
+under the names core/libs/prx/libSceFont/src/SystemFont.cpp looks for. SIL Open Font License 1.1: OFL.txt.
+
+Source: https://github.com/notofonts/notofonts.github.io at d3abdda968b38bb6eb0ec59f6f9f58b8c2139bca,
+fonts/<family>/unhinted/ttf/ (unhinted: FreeType scales them, and they are half the size of the hinted ones).
+
+Japanese, Chinese and Korean (NotoSansCJK-*.ttc, about 76 MB) are not here: the launcher downloads them
+from https://github.com/notofonts/noto-cjk/releases/tag/Sans2.004 the first time a game needs them.
+
+SHA-256:
+87cb2d84472a7d66da659ee47b6cdb9552326e8c128245231f191b6ac72529d9  NotoSans-Bold.ttf
+3d367743f371f28671d2764e911a53d7c20ec9b6aa8791d059e7090389fc52a5  NotoSans-BoldItalic.ttf
+678288f868807d4d64a6f3b51466871d117d915780381ce9d0ed4b3bcbd06d37  NotoSans-Italic.ttf
+8897d5cba2567d06d437b1de90b65d37ea4c4b40db6b8979ea26d8789ce6e030  NotoSans-Light.ttf
+ad3012e341f196abf83dc2c680a0ee70917f505135b8662b37d5ed5c020a0a8c  NotoSans-LightItalic.ttf
+220e74546aee1b9a17cd50025dd917a064d0224e653f562287446c2328e4160b  NotoSans-Medium.ttf
+52e3470eace3028fd4a979f71ba4ffbb97b743934e28618174d92afaeafc7436  NotoSans-MediumItalic.ttf
+f3961a9cde016d41a4879aecda1474d3a36d6bf54fa0e4643de029cc2248b0e8  NotoSans-Regular.ttf
+f4cb79f842a07d1bcf597879574358fb7010f73761396d1d0f2445dfedb4d2ca  NotoSansArabic-Bold.ttf
+5d3a69f96142d4e11b27f65704f75d00fc69775b78fa041378a9f907af28fe01  NotoSansArabic-Light.ttf
+a66dfdfd2fd345d500a8f169d07297eb29fc683938c61d6bdd5717cafca86d51  NotoSansArabic-Medium.ttf
+bd86ca02f087d7f3c3788ba458fb6b73744c7639ed276b8d870dba6def6c40d0  NotoSansArabic-Regular.ttf
+1100772b2f79c102402a1011df5e2226517d0f40ac553a25fb12fdbad8c11b85  NotoSansMono-Bold.ttf
+0bc8e5d1dab81e0c6fc030cbca49d2532e431ef711758cf9abed06f5774f4c7b  NotoSansMono-Light.ttf
+6abb985490fa4397bae53d2e68d443a81a41653f8ec7363bdc459ef3fea3560c  NotoSansMono-Medium.ttf
+87f8ce0522a6c99b743ee5fc75b4073cfdd575639119672828b7b9944b65b4f4  NotoSansMono-Regular.ttf
+5227602d7f9108252cfb7d75d6f7b2a26bdb2fc2fa89a702f9063758fb2f86c7  NotoSansThai-Bold.ttf
+a4d69e70e373d0b1cb8429791d8a65918683ab2d22032d7d407f3654a1705a82  NotoSansThai-Light.ttf
+043a0473caaca159557b0965709cbef586125167771e7714cc7163960175d2f9  NotoSansThai-Medium.ttf
+d4303fe9c63ebb72759ca8b6d2040c8ae81689f7d08d7b91c656154382b49313  NotoSansThai-Regular.ttf
+f2095b08bed08b23a6fe26112fcd679a2bee3f002eef077eb05d215ed1051bd8  OFL.txt

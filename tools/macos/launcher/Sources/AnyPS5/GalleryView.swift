@@ -37,6 +37,13 @@ struct Gallery: View {
                 .padding(.vertical, 56 * scale)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
+            if model.cloud.sharing {
+                HStack(spacing: 0) {
+                    Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture { model.closeShareMenu() }
+                    ShareMenu()
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
     }
 
@@ -58,7 +65,10 @@ struct Gallery: View {
                     .foregroundStyle(.white.opacity(0.7))
             }
             Spacer(minLength: 0)
-            HintBar()
+            // △ shares where AnyTogether keeps files (else it shows the file in Finder, as before).
+            let sharing = model.cloudAvailable && !shots.isEmpty
+            HintBar(options: !sharing)
+            if sharing { Hint(keys: "O / △", label: TCloud.text(.hintShare)) }
         }
     }
 

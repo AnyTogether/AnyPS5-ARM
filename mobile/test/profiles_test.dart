@@ -312,6 +312,18 @@ void main() {
       );
     });
 
+    test('the gallery privacy key and keys this phone does not know parse', () {
+      final privacy = privacyFrom({
+        'library': 'everyone',
+        'gallery': 'nobody',
+        'somethingNew': 'friends',
+      });
+      expect(privacy[PrivacySection.gallery], Audience.nobody);
+      expect(privacy[PrivacySection.library], Audience.everyone);
+      expect(privacy[PrivacySection.trophies], Audience.friends);
+      expect(privacyFrom({})[PrivacySection.gallery], Audience.friends);
+    });
+
     test('privacy sends only the section changed', () async {
       server.answer = (method, path, body) =>
           (200, {'library': 'nobody', 'trophies': 'everyone'});

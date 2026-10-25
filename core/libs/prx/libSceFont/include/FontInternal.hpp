@@ -53,8 +53,6 @@ struct FontState {
     std::shared_ptr<const std::vector<unsigned char>> faceData;
     FT_Face face = nullptr;
     std::vector<FallbackFace> fallbacks;
-    float scaleW = 16.0f;
-    float scaleH = 16.0f;
     std::map<int, int> scriptLanguages;
     AttributeSet attributes = DEFAULT_ATTRIBUTES;
 
@@ -151,7 +149,7 @@ void CachedStyleSetScalar(CachedStyle& style, float value);
 void ClearRenderOutputs(FontGlyphMetrics* metrics, FontRenderOutput* result);
 int ComputeHorizontalLayout(FontHandle handle, const StyleStateBlock* style, std::uint8_t* outWords);
 int ComputeVerticalLayout(FontHandle handle, const StyleStateBlock* style, std::uint8_t* outWords);
-int GetCharGlyphMetrics(FontHandle handle, std::uint32_t code, FontGlyphMetrics* metrics, bool useCachedStyle);
+int GetCharGlyphMetrics(FontHandle handle, std::uint32_t code, FontGlyphMetrics* metrics, bool useCachedStyle, float* usedScaleW = nullptr, float* usedScaleH = nullptr);
 int RenderFaceGlyphToSurface(FT_Face face, FT_UInt glyphIndex, FT_Vector shift, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result);
 int RenderCharGlyphImageCore(FontHandle handle, std::uint32_t code, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result);
 

@@ -4,10 +4,13 @@ import Foundation
 public struct TogetherRawBody: Sendable {
     public let data: Data
     public let contentType: String
+    /// More headers to send with it (a part's X-Part-SHA256).
+    public let headers: [String: String]
 
-    public init(data: Data, contentType: String) {
+    public init(data: Data, contentType: String, headers: [String: String] = [:]) {
         self.data = data
         self.contentType = contentType
+        self.headers = headers
     }
 
     /// multipart/form-data of text fields and files.

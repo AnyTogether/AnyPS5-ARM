@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../discover_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
+import '../together/discover.dart';
 import '../together/notifications.dart';
 import '../together/people.dart';
 import '../together/together_hub.dart';
 import '../together/together_socket.dart';
 import 'feed_view.dart';
+import 'find_players_view.dart';
 import 'friends_view.dart';
 import 'leaderboard_view.dart';
 import 'messages_view.dart';
@@ -14,6 +17,7 @@ import 'notifications_view.dart';
 import 'party_view.dart';
 import 'profile_edit.dart';
 import 'profile_view.dart';
+import 'share_watch_screen.dart';
 import 'together_widgets.dart';
 
 enum TogetherTab {
@@ -21,6 +25,7 @@ enum TogetherTab {
   feed,
   messages,
   party,
+  findPlayers,
   leaderboards,
   profile,
   notifications,
@@ -80,6 +85,9 @@ class TogetherScreen extends StatefulWidget {
 class _TogetherScreenState extends State<TogetherScreen> {
   late TogetherTab _tab = widget.tab;
 
+  /// The part of Find players last shown, to open on again.
+  DiscoverView _find = DiscoverView.board;
+
   @override
   void initState() {
     super.initState();
@@ -119,6 +127,21 @@ class _TogetherScreenState extends State<TogetherScreen> {
         if (id != null) widget.hub.messages.show(id).catchError((_) {});
       case NoticeKind.partyInvite:
         _show(TogetherTab.party);
+      case NoticeKind.lfgRequest:
+        setState(() {
+          _find = DiscoverView.mine;
+          _tab = TogetherTab.findPlayers;
+        });
+      case NoticeKind.lfgAccepted:
+        final invite = notice.data['invite'];
+        if (invite is Map && invite['kind'] == 'share_play') {
+          final id = invite['id'];
+          if (id is String) {
+            openShareWatch(context, hub: widget.hub, sharePlayId: id);
+          }
+        } else {
+          _show(TogetherTab.party);
+        }
       case NoticeKind.friendAccepted || NoticeKind.missedCall
           when actor != null:
         _profile(actor.handle);
@@ -139,51 +162,63 @@ class _TogetherScreenState extends State<TogetherScreen> {
             children: [
               SizedBox(width: 196, child: _rail(texts)),
               Expanded(
-                child: Container(
-                  margin: const EdgeInsets.fromLTRB(0, 10, 12, 10),
-                  decoration: BoxDecoration(
+                // A Material, not a coloured box: the switches and rows in the panes splash
+                // their ink on it, where it shows.
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(0, 10, 12, 10),
+                  child: Material(
                     color: togetherPanel,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(color: const Color(0x14FFFFFF)),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: KeyedSubtree(
-                      key: ValueKey(_tab),
-                      child: switch (_tab) {
-                        TogetherTab.friends => FriendsPane(
-                          hub: widget.hub,
-                          gameName: widget.gameName,
-                          onMessage: _message,
-                          onProfile: _profile,
-                          onCall: _call,
-                        ),
-                        TogetherTab.feed => FeedPane(
-                          hub: widget.hub,
-                          onProfile: _profile,
-                        ),
-                        TogetherTab.leaderboards => LeaderboardPane(
-                          hub: widget.hub,
-                          onProfile: _profile,
-                        ),
-                        TogetherTab.notifications => NotificationsPane(
-                          hub: widget.hub,
-                          gameName: widget.gameName,
-                          onOpen: _openNotice,
-                        ),
-                        TogetherTab.messages => MessagesPane(hub: widget.hub),
-                        TogetherTab.party => PartyPane(hub: widget.hub),
-                        TogetherTab.profile => ProfileView(
-                          hub: widget.hub,
-                          handle: widget.hub.account.user?.handle ?? '',
-                          gameName: widget.gameName,
-                          onEdit: () => openProfileEdit(
-                            context,
-                            account: widget.hub.account,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(22),
+                      side: const BorderSide(color: Color(0x14FFFFFF)),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: KeyedSubtree(
+                        key: ValueKey(_tab),
+                        child: switch (_tab) {
+                          TogetherTab.friends => FriendsPane(
+                            hub: widget.hub,
+                            gameName: widget.gameName,
+                            onMessage: _message,
+                            onProfile: _profile,
+                            onCall: _call,
                           ),
-                        ),
-                      },
+                          TogetherTab.feed => FeedPane(
+                            hub: widget.hub,
+                            onProfile: _profile,
+                          ),
+                          TogetherTab.leaderboards => LeaderboardPane(
+                            hub: widget.hub,
+                            onProfile: _profile,
+                          ),
+                          TogetherTab.notifications => NotificationsPane(
+                            hub: widget.hub,
+                            gameName: widget.gameName,
+                            onOpen: _openNotice,
+                          ),
+                          TogetherTab.messages => MessagesPane(hub: widget.hub),
+                          TogetherTab.party => PartyPane(hub: widget.hub),
+                          TogetherTab.findPlayers => FindPlayersPane(
+                            hub: widget.hub,
+                            view: _find,
+                            onView: (view) => _find = view,
+                            gameName: widget.gameName,
+                            onProfile: _profile,
+                            onParty: () => _show(TogetherTab.party),
+                          ),
+                          TogetherTab.profile => ProfileView(
+                            hub: widget.hub,
+                            handle: widget.hub.account.user?.handle ?? '',
+                            gameName: widget.gameName,
+                            onEdit: () => openProfileEdit(
+                              context,
+                              account: widget.hub.account,
+                            ),
+                          ),
+                        },
+                      ),
                     ),
                   ),
                 ),
@@ -295,10 +330,21 @@ class _TogetherScreenState extends State<TogetherScreen> {
                 _RailItem(
                   icon: Icons.celebration_rounded,
                   label: texts.party,
-                  count: hub.parties.invites.length,
+                  count:
+                      hub.parties.invites.length +
+                      (hub.parties.party?.leaderId == hub.me
+                          ? hub.parties.party?.requests.length ?? 0
+                          : 0),
                   live: hub.parties.party != null,
                   selected: _tab == TogetherTab.party,
                   onTap: () => _show(TogetherTab.party),
+                ),
+                _RailItem(
+                  icon: Icons.travel_explore_rounded,
+                  label: texts.findPlayers,
+                  count: hub.discover.waiting,
+                  selected: _tab == TogetherTab.findPlayers,
+                  onTap: () => _show(TogetherTab.findPlayers),
                 ),
                 _RailItem(
                   icon: Icons.leaderboard_rounded,

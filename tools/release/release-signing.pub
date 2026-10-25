@@ -1,0 +1,4 @@
+# The Ed25519 keys AnyPS5 releases are signed with (docs/dev/SIGNED_UPDATES.md), one per line:
+# "ed25519 <raw public key, base64> <name>". The launchers trust every key listed here; the
+# private halves never leave the release Mac.
+ed25519 T+482y7DXfmE+OHR0IhD9WzkL2GNjMAY9RBVGboojKk= release-2026-10

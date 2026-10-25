@@ -8,13 +8,14 @@
 #ifdef __APPLE__
 #include <net/if_dl.h>
 #include <net/if_types.h>
-#else
-#include <linux/if_link.h>
-#include <netpacket/packet.h>
 #endif
 #include <net/if.h>
-#include <net/if_arp.h>
 #include <netinet/in.h>
+#ifdef __linux__
+#include <linux/if_link.h>
+#include <net/if_arp.h>
+#include <netpacket/packet.h>
+#endif
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -165,6 +166,7 @@ int HostEntries(std::vector<Entry>& entries) {
     return 0;
 }
 #else
+#if defined(__linux__) || defined(__APPLE__)
 constexpr std::uint8_t guestLinkFamily = 18;
 constexpr std::size_t guestLinkNameArea = 8 + 16;
 constexpr std::size_t guestLinkMinimum = 54;
@@ -178,6 +180,7 @@ constexpr std::size_t guestInterfaceDataSize = 152;
 #ifndef __APPLE__
 constexpr unsigned int hostLowerUp = 0x10000;
 #endif
+#endif
 
 struct HostInterface {
     std::string name;
@@ -186,6 +189,7 @@ struct HostInterface {
     std::vector<Entry> addresses;
 };
 
+#if defined(__linux__) || defined(__APPLE__)
 template<typename TValue>
 void Store(std::vector<std::uint8_t>& bytes, std::size_t offset, TValue value) {
     std::memcpy(bytes.data() + offset, &value, sizeof(value));
@@ -286,6 +290,7 @@ std::vector<std::uint8_t> GuestInterfaceData(const std::string& name, unsigned i
     return data;
 }
 #endif
+#endif
 
 std::uint32_t InterfaceFlags(unsigned int host) {
     constexpr std::pair<unsigned int, std::uint32_t> flags[] = {
@@ -336,7 +341,7 @@ int HostEntries(std::vector<Entry>& entries) {
                 owner.linked = true;
                 continue;
             }
-#else
+#elif defined(__linux__)
             if (item->ifa_addr->sa_family == AF_PACKET) {
                 const auto& link = *reinterpret_cast<const sockaddr_ll*>(item->ifa_addr);
                 HostInterface& owner = interfaceFor(CheckedName(item->ifa_name));

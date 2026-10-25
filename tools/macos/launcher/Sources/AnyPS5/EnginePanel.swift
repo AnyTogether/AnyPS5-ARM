@@ -104,20 +104,24 @@ extension AppModel {
         }
     }
 
-    func downloadEngine(_ entry: EngineCatalogue.Entry) {
+    /// `allowUnsigned`: the user chose an older unsigned release under its warning.
+    func downloadEngine(_ entry: EngineCatalogue.Entry, allowUnsigned: Bool = false) {
         guard engineDownloads[entry.release] == nil else { return }
+        if entry.trust == .unsignedRefused { return show(TE.text(.engineUnsignedRefusedDetail), symbol: "xmark.shield.fill") }
         engineDownloads[entry.release] = 0
         let store = toolkitStore
         let current = AppModel.runningVersion
         Task { @MainActor in
             do {
-                let installed = try await store.download(entry, launcherVersion: current) { fraction in
+                let installed = try await store.download(entry, launcherVersion: current, allowUnsigned: allowUnsigned) { fraction in
                     Task { @MainActor in if self.engineDownloads[entry.release] != nil { self.engineDownloads[entry.release] = fraction } }
                 }
                 self.engineDownloads[entry.release] = nil
                 self.installedToolkits = store.installed()
                 Sounds.shared.play(.unlocked)
-                self.show(TE.format(.engineReady, Toolkit.shortVersion(installed.version)), symbol: "checkmark.seal.fill")
+                let unsigned = entry.trust != .signed
+                self.show(TE.format(unsigned ? .engineUnsignedReady : .engineReady, Toolkit.shortVersion(installed.version)),
+                          symbol: unsigned ? "exclamationmark.shield.fill" : "checkmark.seal.fill")
             } catch {
                 self.engineDownloads[entry.release] = nil
                 self.show(TE.text(.engineDownloadFailed) + ": " + error.localizedDescription, symbol: "exclamationmark.triangle.fill")
@@ -191,14 +195,29 @@ extension AppModel {
         rows.append(PanelRow(id: "engineAvailable", title: TE.text(.engineAvailableSection), kind: .info("")))
         // The release the app itself comes from carries the built-in toolkit.
         let downloaded = Set(installedToolkits.map(\.release) + [builtInToolkit.map { Toolkit.release(of: $0.version) }].compactMap { $0 })
-        for entry in engineCatalogue where !downloaded.contains(entry.release) {
+        // Nightly toolkits only on the Nightly update channel.
+        for entry in EngineCatalogue.offered(engineCatalogue, channel: updateChannel) where !downloaded.contains(entry.release) {
             let date = entry.date?.formatted(date: .abbreviated, time: .omitted)
+            let trust = entry.trust
+            let warning: String? = switch trust {
+            case .signed: nil
+            case .unsignedOlder: TE.text(.engineUnsignedOlderDetail)
+            case .unsignedRefused: TE.text(.engineUnsignedRefusedDetail)
+            }
             let detail = engineDownloads[entry.release].map { TE.format(.engineDownloading, Int($0 * 100)) }
-                ?? [date, entry.summary.nilIfEmpty ?? TE.text(.engineDownloadHint)].compactMap { $0 }.joined(separator: " · ")
-            let title = entry.release + (entry.prerelease ? " · " + TE.text(.enginePrerelease) : "")
-            rows.append(PanelRow(id: "engineGet-" + entry.release, title: title, detail: detail,
-                                 symbol: engineDownloads[entry.release] == nil ? "arrow.down.circle" : "arrow.down.circle.dotted",
-                                 kind: .action(destructive: false) { [weak self] in self?.downloadEngine(entry) }))
+                ?? warning ?? [date, entry.summary.nilIfEmpty ?? TE.text(.engineDownloadHint)].compactMap { $0 }.joined(separator: " · ")
+            let label: TE.Key = switch trust {
+            case .signed: .engineSigned
+            case .unsignedOlder: .engineUnsignedOlder
+            case .unsignedRefused: .engineUnsignedRefused
+            }
+            let title = entry.release + (entry.prerelease ? " · " + TE.text(.enginePrerelease) : "") + " · " + TE.text(label)
+            let symbol = engineDownloads[entry.release] != nil ? "arrow.down.circle.dotted"
+                : trust == .signed ? "arrow.down.circle" : trust == .unsignedOlder ? "exclamationmark.shield" : "xmark.shield"
+            rows.append(PanelRow(id: "engineGet-" + entry.release, title: title, detail: detail, symbol: symbol,
+                                 kind: .action(destructive: trust != .signed) { [weak self] in
+                                     self?.downloadEngine(entry, allowUnsigned: trust == .unsignedOlder)
+                                 }))
         }
         let checked: String
         if checkingEngines {

@@ -10,6 +10,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_server.dart';
+import 'support/quiet_hub.dart';
+import 'support/scripted_hub.dart';
 
 Map<String, dynamic> party(
   String id, {
@@ -17,6 +19,8 @@ Map<String, dynamic> party(
   String leader = 'me',
   List<String> invited = const [],
   Map<String, dynamic>? call,
+  Map<String, dynamic>? public,
+  List<String>? requests,
 }) => {
   'id': id,
   'leaderId': leader,
@@ -27,6 +31,10 @@ Map<String, dynamic> party(
   ],
   'invited': [for (final person in invited) card(person)],
   'call': call,
+  'public': public,
+  'requests': ?(requests == null
+      ? null
+      : [for (final person in requests) card(person)]),
   'createdAt': '2026-10-24T12:00:00Z',
 };
 
@@ -53,7 +61,28 @@ void main() {
                 'invitedAt': '2026-10-24T12:00:00Z',
               },
             ],
+            'requests': [
+              {'partyId': 'p7', 'askedAt': '2026-10-24T12:00:00Z'},
+            ],
           },
+        ),
+        ('PATCH', '/api/v1/parties/p1') => (
+          200,
+          party(
+            'p1',
+            public: body?['public'] == null
+                ? null
+                : {
+                    'join': (body!['public'] as Map)['join'],
+                    'titleId': (body['public'] as Map)['titleId'],
+                    'language': (body['public'] as Map)['language'],
+                  },
+            requests: const [],
+          ),
+        ),
+        ('POST', '/api/v1/parties/p1/requests/ali/accept') => (
+          200,
+          party('p1', invited: ['ali'], requests: const []),
         ),
         ('POST', '/api/v1/parties') => (201, party('p1')),
         ('POST', '/api/v1/parties/p1/invites') => (
@@ -133,6 +162,58 @@ void main() {
       expect(parties().kicked, isTrue);
     });
 
+    test('the public parties this phone asked to join', () async {
+      await until(() => parties().loaded);
+      expect(parties().asked, {'p7'});
+      server.push('party.request_answered', {
+        'partyId': 'p7',
+        'answer': 'declined',
+      });
+      await until(() => parties().asked.isEmpty);
+    });
+
+    test('the leader lists the party in public and lets someone in', () async {
+      await until(() => parties().loaded);
+      await parties().create();
+      await parties().setPublic(
+        const PartyListing(
+          join: PublicJoin.open,
+          titleId: 'PPSA01234',
+          language: 'tr',
+        ),
+      );
+      expect(server.requests.lastWhere((r) => r.$1 == 'PATCH').$3, {
+        'public': {'join': 'open', 'titleId': 'PPSA01234', 'language': 'tr'},
+      });
+      expect(parties().party?.listing?.join, PublicJoin.open);
+      expect(parties().party?.listing?.language, 'tr');
+      server.push('party.request', {'partyId': 'p1', 'from': card('ali')});
+      await until(() => parties().party!.requests.length == 1);
+      // The leader is the one to answer: it waits on the badge.
+      expect(hub.badge, 2);
+      // Told twice (the event, then the party as it is now): still one.
+      server.push('party.request', {'partyId': 'p1', 'from': card('ali')});
+      server.push('party.request', {'partyId': 'p1', 'from': card('can')});
+      await until(() => parties().party!.requests.length == 2);
+      server.push('party.request_cancelled', {
+        'partyId': 'p1',
+        'userId': 'can',
+      });
+      await until(() => parties().party!.requests.length == 1);
+      await parties().answerRequest('ali', accept: true);
+      expect(
+        server.requests.lastWhere((r) => r.$1 == 'POST').$2,
+        '/api/v1/parties/p1/requests/ali/accept',
+      );
+      expect(parties().party?.requests, isEmpty);
+      expect(parties().party?.invited.single.id, 'ali');
+      await parties().setPublic(null);
+      expect(server.requests.lastWhere((r) => r.$1 == 'PATCH').$3, {
+        'public': null,
+      });
+      expect(parties().party?.listing, isNull);
+    });
+
     test('leaving tells the server', () async {
       await until(() => parties().loaded);
       await parties().create();
@@ -196,6 +277,145 @@ void main() {
     // Two members in voice, and the button to join them.
     expect(find.byIcon(Icons.headset_mic_rounded), findsNWidgets(3));
     expect(find.text('2 in voice'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the leader\'s switches ripple on a Material, not under a box', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final hub = await quietHub();
+    addTearDown(hub.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TogetherScreen(hub: hub, tab: TogetherTab.party),
+      ),
+    );
+    hub.parties
+      ..party = Party.fromJson(party('p1', members: ['me', 'ece']))
+      ..notifyListeners();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final ink = find.descendant(
+      of: find.byType(SwitchListTile),
+      matching: find.byType(InkWell),
+    );
+    expect(ink, findsWidgets);
+    // Between the switch's ink and the Material it splashes on, nothing paints a colour over it.
+    final painted = <String>[];
+    tester.element(ink.first).visitAncestorElements((element) {
+      final widget = element.widget;
+      if (widget is Material) return false;
+      if (widget is DecoratedBox &&
+          widget.decoration is BoxDecoration &&
+          ((widget.decoration as BoxDecoration).color?.a ?? 0) > 0) {
+        painted.add('$widget');
+      }
+      return true;
+    });
+    expect(painted, isEmpty);
+    // Requests this test never answers run out.
+    await tester.pump(const Duration(seconds: 30));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('the leader lists the party in public and answers who asks', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final (hub, account) = await scriptedHub();
+    addTearDown(hub.dispose);
+    Map<String, dynamic>? listing;
+    var requests = ['zeynep'];
+    account.answer = (method, path, body) => switch ((method, path)) {
+      ('GET', 'me/party') => {
+        'party': party(
+          'p1',
+          members: ['me', 'ece'],
+          public: listing,
+          requests: requests,
+        ),
+        'invites': <Object>[],
+        'requests': <Object>[],
+      },
+      ('PATCH', 'parties/p1') => party(
+        'p1',
+        members: ['me', 'ece'],
+        public: listing = body!['public'] as Map<String, dynamic>?,
+        requests: requests,
+      ),
+      ('POST', 'parties/p1/requests/zeynep/accept') => party(
+        'p1',
+        members: ['me', 'ece'],
+        invited: ['zeynep'],
+        public: listing,
+        requests: requests = [],
+      ),
+      _ => null,
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TogetherScreen(hub: hub, tab: TogetherTab.party),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+    for (final text in ['ASKING TO JOIN', 'ZEYNEP', 'Accept', 'Decline']) {
+      final box = tester.getRect(find.text(text).first);
+      expect(box.bottom, lessThanOrEqualTo(screen.height), reason: text);
+      expect(box.right, lessThanOrEqualTo(screen.width), reason: text);
+    }
+    // A request waits for the leader: counted on the rail.
+    expect(find.text('1'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Anyone can join'),
+      80,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).last,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pump();
+    final box = tester.getRect(find.text('Anyone can join'));
+    expect(box.right, lessThanOrEqualTo(screen.width));
+    await tester.tap(find.text('Anyone can join'));
+    await tester.pump();
+    expect(account.calls.lastWhere((c) => c.$1 == 'PATCH').$3, {
+      'public': {'join': 'open', 'titleId': null, 'language': null},
+    });
+    expect(hub.parties.party?.listing?.join, PublicJoin.open);
+    await tester.ensureVisible(find.text('Any'));
+    await tester.pump();
+    await tester.tap(find.text('Any'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Turkish').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(account.calls.lastWhere((c) => c.$1 == 'PATCH').$3, {
+      'public': {'join': 'open', 'titleId': null, 'language': 'tr'},
+    });
+    await tester.tap(find.text('Accept'));
+    await tester.pump();
+    expect(
+      account.paths('POST'),
+      contains('parties/p1/requests/zeynep/accept'),
+    );
+    expect(find.text('ASKING TO JOIN'), findsNothing);
+    await tester.ensureVisible(find.text('Off'));
+    await tester.pump();
+    await tester.tap(find.text('Off'));
+    await tester.pump();
+    expect(account.calls.lastWhere((c) => c.$1 == 'PATCH').$3, {
+      'public': null,
+    });
     expect(tester.takeException(), isNull);
   });
 }

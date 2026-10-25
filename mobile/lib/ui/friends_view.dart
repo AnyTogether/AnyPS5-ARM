@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../discover_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
 import '../together/people.dart';
@@ -239,6 +240,9 @@ class _FriendsPaneState extends State<FriendsPane> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (friend.presence.game case final game?
+                        when game.joinable)
+                      JoinablePill(game: game),
                     if (widget.onCall case final call?)
                       IconButton(
                         tooltip: texts.callFriend(friend.person.displayName),
@@ -370,4 +374,51 @@ class _PersonRow extends StatelessWidget {
       ],
     ),
   );
+}
+
+/// A friend's game session with room: joined from the Mac's launcher, which a tap says.
+class JoinablePill extends StatelessWidget {
+  const JoinablePill({super.key, required this.game});
+
+  final GamePresence game;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    return Tooltip(
+      message: texts.joinableHint,
+      child: Material(
+        color: const Color(0x1F4CD964),
+        shape: const StadiumBorder(),
+        child: InkWell(
+          customBorder: const StadiumBorder(),
+          onTap: () =>
+              ScaffoldMessenger.maybeOf(context)
+                  ?.showSnackBar(SnackBar(content: Text(texts.joinableHint))),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(
+                  Icons.sports_esports_rounded,
+                  size: 15,
+                  color: togetherPlaying,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  texts.joinableCount(game.players, game.capacity),
+                  style: const TextStyle(
+                    color: togetherPlaying,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

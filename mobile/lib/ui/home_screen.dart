@@ -7,6 +7,7 @@ import '../protocol/messages.dart';
 import '../strings.dart';
 import '../together/together_hub.dart';
 import 'about_sheet.dart';
+import 'broadcast_button.dart';
 import 'notifications_view.dart';
 import 'together_screen.dart';
 import 'together_sheet.dart';
@@ -244,6 +245,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _details(Strings texts, RemoteGame game, Library library) {
     final playing = library.running == game.id;
     final otherPlaying = library.running != null && !playing;
+    final ambient = Theme.of(context).textTheme.labelLarge;
+    final font = TextStyle(
+      fontFamily: ambient?.fontFamily,
+      fontFamilyFallback: ambient?.fontFamilyFallback,
+    );
     final (label, enabled) = switch (game.state) {
       GameState.running => (texts.resume, true),
       GameState.starting => (texts.starting, false),
@@ -300,7 +306,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   horizontal: 34,
                   vertical: 15,
                 ),
-                textStyle: const TextStyle(
+                textStyle: font.copyWith(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -317,12 +323,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     horizontal: 22,
                     vertical: 15,
                   ),
-                  textStyle: const TextStyle(
+                  textStyle: font.copyWith(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
                 child: Text(texts.closeGame),
+              ),
+            if (playing)
+              BroadcastButton(
+                broadcasting: widget.session.broadcasting,
+                font: font,
+                onPressed: (start) => widget.session.send(
+                  Command(start ? 'broadcastStart' : 'broadcastStop'),
+                ),
               ),
           ],
         ),

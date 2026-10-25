@@ -15,10 +15,11 @@ struct TrophyList: View {
         VStack(alignment: .leading, spacing: 28 * scale) {
             header
             if previewRender {
-                Color.clear.overlay(alignment: .top) { rows }.clipped()
+                // Offscreen there is no scrolling: the list begins a little above the focused row.
+                Color.clear.overlay(alignment: .top) { rows(from: max(0, model.trophyIndex - 2)) }.clipped()
             } else {
                 ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) { rows }
+                    ScrollView(.vertical, showsIndicators: false) { rows() }
                         .onChange(of: model.trophyIndex) { _, index in
                             guard set.trophies.indices.contains(index) else { return }
                             withAnimation(Motion.focus) { proxy.scrollTo(set.trophies[index].id, anchor: .center) }
@@ -69,15 +70,22 @@ struct TrophyList: View {
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 18 * scale) {
-                HintBar(options: false)
+                HStack(spacing: 22 * scale) {
+                    // △ shows the focused hidden trophy, or hides it again.
+                    if set.trophies.indices.contains(model.trophyIndex), model.hiddenTrophyState.canToggle(set.trophies[model.trophyIndex]) {
+                        let shown = !model.hiddenTrophyState.secret(set.trophies[model.trophyIndex], game: game.id)
+                        Hint(keys: "O / △", label: T.text(shown ? .trophyHide : .trophyShow))
+                    }
+                    HintBar(options: false)
+                }
                 if model.togetherUser != nil { LeaderboardChip(game: game) }
             }
         }
     }
 
-    private var rows: some View {
+    private func rows(from first: Int = 0) -> some View {
         LazyVStack(spacing: 10 * scale) {
-            ForEach(Array(set.trophies.enumerated()), id: \.element.id) { index, trophy in
+            ForEach(Array(set.trophies.enumerated()).dropFirst(first), id: \.element.id) { index, trophy in
                 TrophyRow(game: game, trophy: trophy, focused: index == model.trophyIndex)
                     .id(trophy.id)
                     .onTapGesture { model.trophyIndex = index }
@@ -96,7 +104,8 @@ struct TrophyRow: View {
 
     var body: some View {
         let earned = trophy.unlocked != nil
-        let secret = trophy.hidden && !earned
+        let hidden = model.hiddenTrophyState
+        let secret = hidden.secret(trophy, game: game.id)
         HStack(spacing: 20 * scale) {
             if secret {
                 Image(systemName: "lock.fill")
@@ -128,6 +137,18 @@ struct TrophyRow: View {
                 }
             }
             Spacer(minLength: 12 * scale)
+            if hidden.canToggle(trophy) {
+                Button { model.toggleHiddenTrophy(game, trophy) } label: {
+                    Label(T.text(secret ? .trophyShow : .trophyHide), systemImage: secret ? "eye" : "eye.slash")
+                        .font(.display(13 * scale, .semibold))
+                        .foregroundStyle(.white.opacity(focused ? 0.95 : 0.7))
+                        .padding(.horizontal, 12 * scale)
+                        .padding(.vertical, 7 * scale)
+                        .background(Capsule().fill(Color.white.opacity(focused ? 0.16 : 0.08)))
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.plain)
+            }
             VStack(alignment: .trailing, spacing: 6 * scale) {
                 Label(trophy.grade.title, systemImage: "trophy.fill")
                     .font(.display(14 * scale, .semibold))
@@ -210,6 +231,28 @@ extension TrophySet.Grade {
 }
 
 extension AppModel {
+    /// Which hidden trophies the list shows: the setting, and those shown this time.
+    var hiddenTrophyState: HiddenTrophies {
+        HiddenTrophies(always: preferences.alwaysShowHiddenTrophies == true, shown: revealedTrophies)
+    }
+
+    /// Shows a hidden trophy in the list, or hides it again (Show, △, or a click on it).
+    @discardableResult
+    func toggleHiddenTrophy(_ game: Game, _ trophy: TrophySet.Trophy) -> Bool {
+        var state = hiddenTrophyState
+        guard state.toggle(trophy, game: game.id) else { return false }
+        withAnimation(Motion.focus) { revealedTrophies = state.shown }
+        Sounds.shared.play(.select)
+        if let index = trophies[game.id]?.trophies.firstIndex(where: { $0.id == trophy.id }) { trophyIndex = index }
+        return true
+    }
+
+    /// △ in the list: the focused trophy, when it is a hidden one.
+    func toggleFocusedHiddenTrophy() -> Bool {
+        guard let game = selectedGame, let set = trophies[game.id], set.trophies.indices.contains(trophyIndex) else { return false }
+        return toggleHiddenTrophy(game, set.trophies[trophyIndex])
+    }
+
     func moveTrophy(_ delta: Int) {
         guard let game = selectedGame, let set = trophies[game.id] else { return }
         let next = min(set.trophies.count - 1, max(0, trophyIndex + delta))

@@ -3,7 +3,9 @@ import Foundation
 import WebRTC
 
 /// A viewer's side of share play: answers the host's offer, shows the game's video track
-/// through `renderer`, hands on the sound packets from the "audio" channel, and sends pad
+/// through `renderer`, asks for the game's sound as an Opus track (it plays through
+/// ShareWebRTC.audioDevice, which SharePlaySpeaker pulls) and meanwhile hands on the PCM packets
+/// from the "audio" channel (from hosts that send nothing else), and sends pad
 /// packets on the "pad" channel while the host lets this viewer play. Asks the host for an offer
 /// when it starts and again when its link breaks.
 @MainActor
@@ -46,7 +48,10 @@ public final class SharePlayWatcher: NSObject {
             Task { @MainActor [weak self] in self?.watcher?.opened(dataChannel) }
         }
 
-        func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {}
+        func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
+            guard dataChannel.readyState == .open else { return }
+            Task { @MainActor [weak self] in self?.watcher?.opened(dataChannel) }
+        }
 
         func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
             guard buffer.isBinary, let watcher else { return }
@@ -70,12 +75,16 @@ public final class SharePlayWatcher: NSObject {
     private var queued: [RTCIceCandidate] = []
     private var pad: RTCDataChannel?
     private var video: RTCVideoTrack?
+    /// What this viewer tells the host it plays, best first; empty sends no hello (PCM only).
+    private let codecs: [ShareAudioCodec]
+    private weak var greeted: RTCDataChannel?
     public private(set) var state: RTCPeerConnectionState = .new
 
     public init(hostId: String, hostDevice: String, iceServers: [TogetherIceServer], renderer: RTCVideoRenderer,
                 send: @escaping (_ to: String, _ device: String, _ signal: ShareSignal) -> Void,
                 onSound: @escaping @Sendable (Data) -> Void = { _ in }, onPadOutput: @escaping @Sendable (Data) -> Void = { _ in },
-                changed: @escaping (RTCPeerConnectionState) -> Void = { _ in }) {
+                changed: @escaping (RTCPeerConnectionState) -> Void = { _ in }, audio codecs: [ShareAudioCodec] = [.opus, .pcm]) {
+        self.codecs = codecs
         self.hostId = hostId
         self.hostDevice = hostDevice
         self.renderer = renderer
@@ -131,9 +140,11 @@ public final class SharePlayWatcher: NSObject {
                 let queued = self.queued
                 self.queued = []
                 for candidate in queued { try? await connection.add(candidate) }
-                let answer = try await connection.answer(for: ShareWebRTC.noConstraints)
-                try await connection.setLocalDescription(answer)
-                toHost(.answer(sdp: answer.sdp))
+                let made = try await connection.answer(for: ShareWebRTC.noConstraints)
+                // Stereo asked for, or WebRTC decodes the game's sound as mono.
+                let answer = RTCSessionDescription(type: .answer, sdp: ShareAudioSDP.stereoOpus(made.sdp))
+                do { try await connection.setLocalDescription(answer) } catch { try await connection.setLocalDescription(made) }
+                toHost(.answer(sdp: connection.localDescription?.sdp ?? made.sdp))
             } catch {}
         case .candidate(let sdp, let mid, let index):
             let candidate = RTCIceCandidate(sdp: sdp, sdpMLineIndex: index, sdpMid: mid)
@@ -164,7 +175,50 @@ public final class SharePlayWatcher: NSObject {
 
     fileprivate func opened(_ channel: RTCDataChannel) {
         if channel.label == ShareWebRTC.padLabel { pad = channel }
+        // Once per channel, as soon as it is open.
+        if channel.label == ShareWebRTC.audioLabel, !codecs.isEmpty, channel.readyState == .open, channel !== greeted {
+            let hello = ShareAudioHello(codecs: codecs).text
+            if channel.sendData(RTCDataBuffer(data: Data(hello.utf8), isBinary: false)) { greeted = channel }
+        }
     }
+
+    /// What the game's sound arrives as, from the statistics; nil without an audio track.
+    public struct AudioStatistics: Sendable, Equatable {
+        /// "audio/opus".
+        public var codec: String?
+        public var channels: Int?
+        /// When measured, seconds.
+        public var time: Double
+        public var bytes: Double
+        public var packets: Double
+        /// Seconds the jitter buffer held the samples it gave out, summed, and how many.
+        public var bufferDelay: Double
+        public var bufferEmitted: Double
+        public var concealed: Double
+        public var samples: Double
+
+        /// The average hold since `earlier` (or since the start), milliseconds.
+        public func bufferMs(since earlier: AudioStatistics? = nil) -> Double? {
+            let emitted = bufferEmitted - (earlier?.bufferEmitted ?? 0)
+            return emitted > 0 ? (bufferDelay - (earlier?.bufferDelay ?? 0)) / emitted * 1000 : nil
+        }
+    }
+
+    public func audioStatistics(_ done: @escaping @Sendable (AudioStatistics?) -> Void) {
+        guard let connection else { return done(nil) }
+        connection.statistics { report in
+            guard let inbound = report.statistics.values.first(where: { $0.type == "inbound-rtp" && ($0.values["kind"] as? String) == "audio" }) else {
+                return done(nil)
+            }
+            func number(_ key: String) -> Double { (inbound.values[key] as? NSNumber)?.doubleValue ?? 0 }
+            let codec = (inbound.values["codecId"] as? String).flatMap { report.statistics[$0] }
+            done(AudioStatistics(codec: codec?.values["mimeType"] as? String, channels: (codec?.values["channels"] as? NSNumber)?.intValue,
+                                 time: inbound.timestamp_us / 1_000_000, bytes: number("bytesReceived"), packets: number("packetsReceived"), bufferDelay: number("jitterBufferDelay"),
+                                 bufferEmitted: number("jitterBufferEmittedCount"), concealed: number("concealedSamples"),
+                                 samples: number("totalSamplesReceived")))
+        }
+    }
+
 
     fileprivate func stateChanged(_ newState: RTCPeerConnectionState, of peerConnection: RTCPeerConnection) {
         guard peerConnection === connection else { return }

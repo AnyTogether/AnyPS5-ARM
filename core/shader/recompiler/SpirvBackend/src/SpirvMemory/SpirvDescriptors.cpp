@@ -133,7 +133,7 @@ std::uint32_t ImageType(SpirvEmitterState& state, const ImageResource& image) {
         FailEmit("invalid image resource class");
     }
     const auto& info = RdnaImageDimensionInfoFor(image.dimension);
-    const auto multisampled = state.singleSampleImages ? 0u : info.multisampled;
+    const auto multisampled = state.singleSampleImages && !image.targetMerge ? 0u : info.multisampled;
     if (multisampled != 0u) {
         if (sampled == 2u) {
             if (std::ranges::find(state.supportedCapabilities, spv::CapabilityStorageImageMultisample) == state.supportedCapabilities.end()) FailEmit("storage image multisampling is unavailable on the target device");
@@ -232,6 +232,27 @@ std::uint32_t StorageImageDescriptorPointer(SpirvEmitterState& state, std::uint3
     const auto arrayIndex = ResourceForDescriptor(state, kind, resource);
     const auto variable = state.imageVariables.at(ImageBindingIndex(kind));
     return DescriptorElementPointer(state, pointerType, variable, arrayIndex, kind, resource, "storage image descriptor array was not emitted");
+}
+
+std::uint32_t EmitStorageImageRead(SpirvEmitterState& state, std::uint32_t resource, std::uint32_t coord, std::uint32_t sample) {
+    const auto& image = state.program.Info().images.at(resource);
+    if (image.resourceClass != ImageResourceClass::Storage || image.table != NoTable || image.mipMode == ImageMipMode::DynamicStorage || image.atomic) {
+        FailEmit("storage image read requested for an image that is not one plain storage descriptor");
+    }
+    if (std::ranges::find(state.supportedCapabilities, spv::CapabilityStorageImageReadWithoutFormat) == state.supportedCapabilities.end()) FailEmit("storage image reads without a format are unavailable on the target device");
+    state.module.EmitCapability(spv::CapabilityStorageImageReadWithoutFormat);
+    const auto imageType = ImageType(state, image);
+    const auto descriptor = state.module.AllocateId();
+    state.module.AddFunction(spv::OpLoad, imageType, descriptor, StorageImageDescriptorPointer(state, resource));
+    const auto texel = state.module.AllocateId();
+    const auto texelType = ImageVectorType(state, image.numericClass, 4u);
+    if (RdnaImageDimensionInfoFor(image.dimension).multisampled != 0u) {
+        if (sample == 0u) FailEmit("multisampled storage image read requires a sample");
+        state.module.AddFunction(spv::OpImageRead, texelType, texel, descriptor, coord, spv::ImageOperandsSampleMask, sample);
+    } else {
+        state.module.AddFunction(spv::OpImageRead, texelType, texel, descriptor, coord);
+    }
+    return texel;
 }
 
 void EmitStorageImageWrite(SpirvEmitterState& state, std::uint32_t resource, std::uint32_t mipLod, std::uint32_t coord, std::uint32_t texel, std::uint32_t sample) {

@@ -90,6 +90,8 @@ extension AppModel {
         switch note.kind {
         case .friendRequest, .friendAccepted, .gameInvite, .missedCall: open(.friends)
         case .partyInvite: open(.party)
+        case .lfgRequest: openFindPlayers(category: 1)
+        case .lfgAccepted: followInvite(note.data.invite)
         case .message: openMessages()
         case .warning, .other: break
         }
@@ -107,6 +109,8 @@ extension AppModel {
     /// The gateway's notification events: the list and badge follow; a new one the launcher does
     /// not announce otherwise gets a toast while it is in front.
     func notificationEvent(_ event: TogetherNotificationEvent) {
+        // A parent answered or changed something: the limits are read again.
+        if case .new(let note, _) = event, note.kindName.hasPrefix("family_") { refreshFamily() }
         withAnimation(Motion.overlay) { social.notifications.apply(event) }
         guard case .new(let note, _) = event, !note.read, note.kind.toastsOnItsOwn, NSApp.isActive, overlay != .notifications else { return }
         show([notificationText(note), notificationDetail(note)].compactMap { $0 }.joined(separator: " · "), symbol: Self.notificationSymbol(note.kind))
@@ -125,9 +129,17 @@ extension AppModel {
         case .partyInvite: return TS.format(.notifPartyInvite, name)
         case .gameInvite: return TS.format(.notifGameInvite, name, note.data.titleId.map(gameName) ?? "")
         case .missedCall: return TS.format(.notifMissedCall, name)
+        case .lfgRequest: return FP.format(.notifLfgRequest, name, notificationGame(note))
+        case .lfgAccepted: return FP.format(.notifLfgAccepted, name, notificationGame(note))
         case .warning: return TS.text(.notifWarning)
-        case .other: return TS.text(.notifOther)
+        case .other: return familyNotificationText(note) ?? TS.text(.notifOther)
         }
+    }
+
+    /// The game a looking-for-group notification is about, as this Mac or the server names it.
+    func notificationGame(_ note: TogetherNotification) -> String {
+        guard let titleId = note.data.titleId else { return "" }
+        return games.first { $0.titleID == titleId }?.name ?? note.data.gameNames.flatMap { TogetherGameNames(names: $0).name(in: T.language.rawValue) } ?? titleId
     }
 
     /// The message's words (and its group), or the warning's reason.
@@ -149,6 +161,8 @@ extension AppModel {
         case .partyInvite: return "person.3.fill"
         case .gameInvite: return "gamecontroller.fill"
         case .missedCall: return "phone.arrow.down.left"
+        case .lfgRequest: return "hand.raised.fill"
+        case .lfgAccepted: return "checkmark.circle.fill"
         case .warning: return "exclamationmark.shield.fill"
         case .other: return "bell.fill"
         }

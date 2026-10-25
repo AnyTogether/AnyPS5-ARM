@@ -352,6 +352,23 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets(
+      'opening on the feed marks it seen after the frame, not in it',
+      (tester) async {
+        sideways(tester);
+        hub.feed.unseen = 3;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: TogetherScreen(hub: hub, tab: TogetherTab.feed),
+          ),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pump();
+        expect(hub.feed.unseen, 0);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets('every part of the rail stays on the screen', (tester) async {
       sideways(tester);
       await tester.pumpWidget(MaterialApp(home: TogetherScreen(hub: hub)));
@@ -362,6 +379,7 @@ void main() {
         'Activity',
         'Messages',
         'Party',
+        'Find players',
         'Leaderboards',
       ]) {
         final box = tester.getRect(find.text(text).first);

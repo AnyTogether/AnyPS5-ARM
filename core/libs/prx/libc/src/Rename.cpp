@@ -70,8 +70,10 @@ static int RenamePath_nid_no_patch(const std::filesystem::path& source, const st
     if (destinationExists) {
         error.clear();
         sameFile = fs::equivalent(source, destination, error);
-        // libc++ reports not_supported for a dangling destination where libstdc++ reports ENOENT.
-        if (error == std::errc::no_such_file_or_directory || error == std::errc::not_supported) error.clear();
+        if (error == std::errc::no_such_file_or_directory) error.clear();
+#ifdef __APPLE__
+        if (error == std::errc::not_supported) error.clear();
+#endif
         if (error) return FilesystemError(error);
         if (!sameFile && sourceIsDirectory && !destinationIsDirectory) return GuestEnotdir;
         if (!sameFile && !sourceIsDirectory && destinationIsDirectory) return GuestEisdir;

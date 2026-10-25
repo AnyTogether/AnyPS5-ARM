@@ -333,6 +333,7 @@ class _NoticeRow extends StatelessWidget {
     final extra = switch (notice.kind) {
       NoticeKind.message => notice.data['text'] as String?,
       NoticeKind.gameInvite => texts.gameInviteHint,
+      NoticeKind.lfgAccepted => texts.lfgAcceptedHint(notice),
       NoticeKind.warning when notice.data['reason'] != null =>
         texts.warningReason('${notice.data['reason']}'),
       _ => null,
@@ -344,6 +345,8 @@ class _NoticeRow extends StatelessWidget {
       NoticeKind.partyInvite => Icons.celebration_rounded,
       NoticeKind.gameInvite => Icons.sports_esports_rounded,
       NoticeKind.missedCall => Icons.phone_missed_rounded,
+      NoticeKind.lfgRequest => Icons.travel_explore_rounded,
+      NoticeKind.lfgAccepted => Icons.how_to_reg_rounded,
       NoticeKind.warning => Icons.gpp_maybe_rounded,
     };
     return Padding(

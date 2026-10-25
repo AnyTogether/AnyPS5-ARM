@@ -36,6 +36,8 @@ struct PanelPerson {
 
     let name: String
     let avatar: String?
+    /// A picture on this Mac in place of the avatar (the user's own profile picture).
+    var picture: NSImage?
     var status: Status?
     /// Speaking in the party's voice: a ring in the accent.
     var speaking = false
@@ -63,7 +65,12 @@ extension AppModel {
         case .friends: return [PanelCategory(id: "friends", title: T.text(.friendsTitle), symbol: "person.2", rows: friendRows())]
         case .party: return [PanelCategory(id: "party", title: T.text(.partyTitle), symbol: "person.3", rows: partyRows())]
         case .notifications: return [PanelCategory(id: "notifications", title: TS.text(.notifTitle), symbol: "bell", rows: notificationRows())]
+        case .cloudStorage: return [PanelCategory(id: "cloud", title: TCloud.text(.storageTitle), symbol: "externaldrive.badge.icloud", rows: cloudStorageRows())]
         case .compat: return [PanelCategory(id: "compat", title: compatTitle, symbol: "person.3.sequence", rows: compatRows())]
+        case .crashReport: return [PanelCategory(id: "report", title: TC.text(.reportKicker), symbol: "stethoscope", rows: crashReportRows())]
+        case .findPlayers: return findPlayersCategories()
+        case .gameHub: return hubCategories()
+        case .lfgPost: return [PanelCategory(id: "post", title: FP.text(.findPlayers), symbol: "plus.bubble", rows: lfgPostRows())]
         case .confirmUninstall:
             guard let game = selectedGame else { return [] }
             return [PanelCategory(id: "confirm", title: T.text(.uninstall), symbol: "trash", rows: [
@@ -152,6 +159,7 @@ extension AppModel {
 
         var behaviour: [PanelRow] = [
             PanelRow(id: "name", title: T.text(.profileName), symbol: "person.crop.circle", kind: .text(preferences.profileName) { [weak self] value in self?.preferences.profileName = value }),
+        ] + profilePictureRows() + [
             PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2",
                      kind: .stepper(value: preferences.sounds ? preferences.soundVolume ?? 100 : 0, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
                          self?.preferences.sounds = value > 0
@@ -162,10 +170,17 @@ extension AppModel {
                          self?.preferences.musicVolume = value
                      }),
             PanelRow(id: "hide", title: T.text(.hideWhilePlaying), symbol: "eye.slash", kind: .toggle(preferences.hideWhilePlaying) { [weak self] value in self?.preferences.hideWhilePlaying = value }),
+            PanelRow(id: "hiddenTrophies", title: T.text(.alwaysShowHiddenTrophies), detail: T.text(.alwaysShowHiddenTrophiesDetail), symbol: "trophy",
+                     kind: .toggle(preferences.alwaysShowHiddenTrophies == true) { [weak self] value in self?.preferences.alwaysShowHiddenTrophies = value ? true : nil }),
             PanelRow(id: "discord", title: T.text(.discordPresence), detail: T.text(.discordPresenceDetail), symbol: "person.2.wave.2", kind: .toggle(preferences.discordPresence ?? true) { [weak self] value in
                 self?.preferences.discordPresence = value
                 if value { self?.discordOn() } else { self?.discordOff() }
             }),
+            PanelRow(id: "discordJoin", title: JS.text(.discordJoin), detail: JS.text(.discordJoinDetail), symbol: "person.badge.plus",
+                     kind: .toggle(preferences.discordJoin ?? true) { [weak self] value in
+                         self?.preferences.discordJoin = value ? nil : false
+                         self?.updateDiscord()
+                     }),
             PanelRow(id: "clips", title: T.text(.clips), detail: T.format(.clipsDetail, clipSeconds), symbol: "record.circle", kind: .toggle(preferences.clips == true) { [weak self] value in
                 self?.clipsChanged(value)
             }),
@@ -173,14 +188,7 @@ extension AppModel {
                      kind: .stepper(value: clipSeconds, range: 15...120, step: 15, format: { T.format(.seconds, $0) }) { [weak self] value in
                          self?.preferences.clipLength = value
                      }),
-            PanelRow(id: "saveSync", title: T.text(.saveSync), detail: syncRoot.map { T.format(.saveSyncDetail, $0.abbreviatedPath) } ?? T.text(.saveSyncNoFolder), symbol: "arrow.triangle.2.circlepath.icloud",
-                     kind: .toggle(preferences.saveSync == true && syncRoot != nil) { [weak self] value in
-                         guard let self else { return }
-                         if value && self.syncRoot == nil { return self.chooseSyncFolder() }
-                         self.preferences.saveSync = value
-                     }),
-            PanelRow(id: "syncFolder", title: T.text(.syncFolder), detail: preferences.syncFolder.map { URL(fileURLWithPath: $0).abbreviatedPath } ?? T.text(SaveSync.iCloudDrive != nil ? .syncFolderICloud : .syncFolderNone),
-                     symbol: "folder.badge.gearshape", kind: .action(destructive: false) { [weak self] in self?.chooseSyncFolder() }),
+        ] + saveSyncRows() + [
             PanelRow(id: "checkUpdates", title: T.text(.checkUpdates), detail: T.text(.checkUpdatesDetail), symbol: "arrow.down.circle", kind: .toggle(preferences.checkUpdates ?? true) { [weak self] value in
                 self?.preferences.checkUpdates = value
                 if value { self?.checkForUpdate() }
@@ -195,7 +203,12 @@ extension AppModel {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         var about: [PanelRow] = [
             PanelRow(id: "text", title: T.text(.aboutText), kind: .info("")),
-            PanelRow(id: "version", title: T.text(.version), kind: .info(version)),
+            PanelRow(id: "version", title: T.text(.version), kind: .info(version + (updateChannel == .nightly ? " · " + T.text(.channelNightlyShort) : ""))),
+            PanelRow(id: "channel", title: T.text(.updateChannel), detail: T.text(updateChannel == .nightly ? .updateChannelNightlyDetail : .updateChannelStableDetail),
+                     symbol: "point.3.connected.trianglepath.dotted",
+                     kind: .choice(options: [T.text(.channelStable), T.text(.channelNightly)], selected: updateChannel == .nightly ? 1 : 0) { [weak self] index in
+                         self?.setUpdateChannel(index == 1 ? .nightly : .stable)
+                     }),
         ]
         if let update = availableUpdate {
             let detail = updateProgress.map { T.format(.updateDownloading, Int($0 * 100)) } ?? T.text(.updateDetail)
@@ -227,12 +240,8 @@ extension AppModel {
         var advanced: [PanelRow] = [
             PanelRow(id: "screenshots", title: T.text(.screenshotsFolder), detail: screenshotsFolder.abbreviatedPath, symbol: "camera", kind: .action(destructive: false) { [weak self] in self?.chooseScreenshotsFolder() }),
             PanelRow(id: "showScreenshots", title: T.text(.showScreenshots), symbol: "photo.on.rectangle.angled", kind: .action(destructive: false) { [weak self] in self?.showScreenshots() }),
-            PanelRow(id: "fonts", title: T.text(.fontsFolder), detail: fontsFolder?.abbreviatedPath ?? T.text(.fontsNone), symbol: "textformat", kind: .action(destructive: false) { [weak self] in self?.chooseFontsFolder() }),
+            PanelRow(id: "screenshotsHint", title: T.text(.screenshotsHint), kind: .info("")),
         ]
-        if preferences.fontsFolder != nil {
-            advanced.append(PanelRow(id: "fontsReset", title: T.text(.fontsReset), symbol: "xmark.circle", kind: .action(destructive: false) { [weak self] in self?.preferences.fontsFolder = nil }))
-        }
-        advanced.append(PanelRow(id: "fontsHint", title: T.text(.fontsHint), kind: .info("")))
         advanced.append(PanelRow(id: "phones", title: T.text(.phones), kind: .info(phones.isEmpty ? T.text(.phonesNone)
             : connectedPhones.isEmpty ? "" : T.format(.phonesConnectedCount, connectedPhones.count))))
         for device in phones {
@@ -249,7 +258,9 @@ extension AppModel {
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
+            PanelCategory(id: "broadcast", title: TB.text(.title), symbol: "dot.radiowaves.left.and.right", rows: broadcastSettingsRows()),
             PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
+            PanelCategory(id: "fonts", title: TF.text(.title), symbol: "textformat", rows: fontRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]
@@ -257,7 +268,8 @@ extension AppModel {
 
     private func gameRows(_ game: Game) -> [PanelRow] {
         let settings = settings(for: game)
-        var rows: [PanelRow] = []
+        // The game playing can be broadcast from here (BroadcastPanel.swift).
+        var rows: [PanelRow] = broadcastGameRows(game)
         let choices = resolutionChoices(for: game)
         if !choices.isEmpty {
             let options = [T.text(.resolutionDefault)] + choices
@@ -318,7 +330,17 @@ extension AppModel {
         rows.append(PanelRow(id: "finder", title: T.text(.showInFinder), symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.showInFinder(game) }))
         rows.append(PanelRow(id: "link", title: T.text(.copyLink), detail: DeepLink.game(game.titleID).url.absoluteString, symbol: "link", kind: .action(destructive: false) { [weak self] in self?.copyLink(game) }))
         rows.append(PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }))
-        rows.append(PanelRow(id: "report", title: T.text(.makeReport), detail: T.text(.makeReportDetail), symbol: "stethoscope", kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
+        rows.append(PanelRow(id: "report", title: TC.text(.lastSessionReport), detail: diagnoses[game.id]?.summary ?? TC.text(.lastSessionReportDetail), symbol: "stethoscope",
+                             kind: .action(destructive: false) { [weak self] in self?.makeReport(game) }))
+        rows.append(PanelRow(id: "trace", title: TC.text(.traceTitle), detail: TC.text(.traceDetail), symbol: "text.magnifyingglass",
+                             kind: .toggle(settings.trace == true) { [weak self] value in self?.update(game) { $0.trace = value ? true : nil } }))
+        if case .installed = state {
+            rows.append(PanelRow(id: "playTraced", title: TC.text(.reportPlayTraced), detail: TC.text(.reportPlayTracedDetail), symbol: "play.circle",
+                                 kind: .action(destructive: false) { [weak self] in
+                self?.closeOverlay()
+                self?.play(game, trace: true)
+            }))
+        }
         rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))
         if case .installed = state {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
@@ -426,6 +448,9 @@ extension AppModel {
     // MARK: Panel input
 
     /// Moves through the open panel; returns whether the command was used.
+    /// Panels with categories on the left (Settings, Find players, a game's hub).
+    var overlayHasCategories: Bool { overlay == .settings || overlay == .findPlayers || overlay == .gameHub }
+
     func panelCommand(_ command: Command) -> Bool {
         let categories = panelCategories()
         guard !categories.isEmpty else { return false }
@@ -446,8 +471,8 @@ extension AppModel {
             if command == .back || command == .left { leaveRows(single) }
             return true
         }
-        panelRow = min(panelRow, rows.count - 1)
-        if !rows[panelRow].focusable, let first = rows.firstIndex(where: \.focusable) { panelRow = first }
+        focusRow(focusedRow(in: rows), in: rows)
+        if !rows[panelRow].focusable, let first = rows.firstIndex(where: \.focusable) { focusRow(first, in: rows) }
         let row = rows[panelRow]
         switch command {
         case .up: movePanelRow(-1, rows)
@@ -478,7 +503,7 @@ extension AppModel {
 
     private func enterRows(_ rows: [PanelRow]) {
         guard let first = rows.firstIndex(where: \.focusable) else { return }
-        panelRow = first
+        focusRow(first, in: rows)
         panelInRows = true
         Sounds.shared.play(.move)
     }
@@ -493,7 +518,7 @@ extension AppModel {
         var next = panelRow + delta
         while rows.indices.contains(next) && !rows[next].focusable { next += delta }
         guard rows.indices.contains(next) else { return }
-        panelRow = next
+        focusRow(next, in: rows)
         Sounds.shared.play(.move)
     }
 
@@ -540,6 +565,8 @@ extension AppModel {
 
 /// The settings screen: categories on the left, their rows on the right.
 struct SettingsPanel: View {
+    var title = T.text(.settings)
+    var subtitle: String?
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
@@ -548,7 +575,11 @@ struct SettingsPanel: View {
         let current = categories.indices.contains(model.panelCategory) ? categories[model.panelCategory] : nil
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 6 * scale) {
-                Text(T.text(.settings)).font(.display(40 * scale, .light)).foregroundStyle(.white).padding(.bottom, 26 * scale)
+                Text(title).font(.display(40 * scale, .light)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.6)
+                    .padding(.bottom, subtitle == nil ? 26 * scale : 0)
+                if let subtitle {
+                    Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)).padding(.bottom, 26 * scale)
+                }
                 ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
                     let selected = index == model.panelCategory
                     let focused = selected && !model.panelInRows
@@ -574,7 +605,7 @@ struct SettingsPanel: View {
             .frame(width: 330 * scale)
             .padding(.trailing, 36 * scale)
             if let current {
-                RowList(rows: current.rows, focusedRow: model.panelInRows ? model.panelRow : nil)
+                RowList(rows: current.rows, focusedRow: model.panelInRows ? model.focusedRow(in: current.rows) : nil)
                     .id(current.id)
                     .transition(.opacity.combined(with: .offset(x: 18 * scale)))
             }
@@ -602,7 +633,7 @@ struct SidePanel: View {
             VStack(alignment: .leading, spacing: 8 * scale) {
                 Text(title).font(.display(30 * scale, .light)).foregroundStyle(.white).lineLimit(2)
                 if let subtitle { Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)) }
-                RowList(rows: rows, focusedRow: model.panelRow)
+                RowList(rows: rows, focusedRow: model.focusedRow(in: rows))
                     .padding(.top, 18 * scale)
             }
             .padding(36 * scale)
@@ -640,8 +671,8 @@ struct RowList: View {
                 RowView(row: row, focused: focusedRow == index)
                     .id(row.id)
                     .onTapGesture {
-                        if model.overlay == .settings { model.panelInRows = true }
-                        model.panelRow = index
+                        if model.overlayHasCategories { model.panelInRows = true }
+                        model.focusRow(index, in: rows)
                         model.activate(row)
                     }
             }
@@ -682,7 +713,7 @@ struct RowView: View {
         let foreground: Color = focused ? .black : .white
         HStack(spacing: 14 * scale) {
             if let person = row.person {
-                ProfileAvatar(url: person.avatar, name: person.name, size: 30 * scale, glow: false)
+                ProfileAvatar(url: person.avatar, name: person.name, size: 30 * scale, glow: false, picture: person.picture)
                     .overlay(Circle().strokeBorder(model.accent, lineWidth: 2.5 * scale).padding(-3 * scale).opacity(person.speaking ? 1 : 0))
                     .animation(.easeOut(duration: 0.15), value: person.speaking)
                     .overlay(alignment: .bottomTrailing) {
@@ -704,6 +735,7 @@ struct RowView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail = row.detail {
                     Text(detail).font(.display(13 * scale)).foregroundStyle(foreground.opacity(0.55)).lineLimit(2).truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 12 * scale)
@@ -869,6 +901,8 @@ extension Diagnosis {
         case .outOfMemory: return T.text(.diagnosisOutOfMemory)
         case .engineError(let message): return T.format(.diagnosisEngineError, message)
         case .crashed(let exception): return T.format(.diagnosisCrashed, exception)
+        case .aborted: return TC.text(.diagnosisAborted)
+        case .exited(let code): return TC.format(.diagnosisExited, code)
         }
     }
 }

@@ -97,6 +97,12 @@ extension AppModel {
             }),
             PanelRow(id: "compat", title: TS.text(.compatReportRow), detail: compatSummary(game.titleID).map { TS.text(.compatCommunity) + ": " + compatText($0) } ?? TS.text(.compatNone),
                      symbol: "person.3.sequence", kind: .action(destructive: false) { [weak self] in self?.openCompat(game) }),
+            PanelRow(id: "find-players", title: FP.format(.findFor, game.name), detail: FP.text(.findForDetail), symbol: "plus.bubble", kind: .action(destructive: false) { [weak self] in
+                self?.openLfgPost(titleId: game.titleID, name: game.name)
+            }),
+            PanelRow(id: "game-hub", title: FP.format(.hubOf, game.name), detail: FP.text(.hubDetail), symbol: "square.grid.3x1.below.line.grid.1x2", kind: .action(destructive: false) { [weak self] in
+                self?.openHub(titleId: game.titleID, name: game.name)
+            }),
         ]
     }
 }

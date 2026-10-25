@@ -125,7 +125,7 @@ struct TopBar: View {
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
                 let name = model.togetherUser?.displayName ?? model.preferences.profileName
-                ProfileAvatar(url: model.togetherUser?.avatar, name: name, size: 36 * scale, glow: false)
+                ProfileAvatar(url: model.togetherUser?.avatar, name: name, size: 36 * scale, glow: false, picture: model.profilePicture)
                 Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9))
             }
             Clock()
@@ -262,7 +262,7 @@ struct GameTile: View {
                 Circle().fill(model.accent).frame(width: size * 0.09, height: size * 0.09).padding(size * 0.07).shadow(color: model.accent, radius: 6)
             }
         case .installed:
-            EmptyView()
+            FamilyTileBadge(game: game, size: size)
         }
     }
 }
@@ -308,7 +308,8 @@ struct HeroInfo: View {
                 .minimumScaleFactor(0.6)
                 .shadow(color: .black.opacity(0.35), radius: 12)
             HStack(spacing: 16 * scale) {
-                ConsoleButton(title: primaryTitle(state), symbol: primarySymbol(state), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210) {
+                let family = model.familyPrimary(game, state)
+                ConsoleButton(title: family?.title ?? primaryTitle(state), symbol: family?.symbol ?? primarySymbol(state), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210) {
                     model.focus = .actions(0)
                     model.primaryAction(game)
                 }
@@ -575,6 +576,10 @@ extension AppModel {
             if command == .back { cancelStart() }
             return true
         }
+        if fontWait != nil {
+            if command == .back { cancelFontWait() }
+            return true
+        }
         if command == .home {
             togglePlaying()
             return true
@@ -611,6 +616,9 @@ extension AppModel {
         case .profile:
             profileCommand(command)
             return true
+        case .cropPicture:
+            cropCommand(command)
+            return true
         case .messages:
             messagesCommand(command)
             return true
@@ -620,15 +628,46 @@ extension AppModel {
         case .leaderboard:
             leaderboardCommand(command)
             return true
+        case .findPlayers:
+            return panelCommand(command)
+        case .gameHub:
+            if command == .options || (command == .back && !panelInRows) {
+                backFromDiscover()
+                return true
+            }
+            return panelCommand(command)
+        case .lfgPost:
+            if command == .back || command == .options {
+                backFromDiscover()
+                return true
+            }
+            return panelCommand(command)
         case .notifications, .compat:
             if command == .back {
                 closeOverlay()
                 return true
             }
             return panelCommand(command)
+        case .cloudStorage:
+            if command == .back || command == .options {
+                if cloud.armed != nil || cloud.expanded != nil {
+                    withAnimation(Motion.focus) {
+                        cloud.armed = nil
+                        cloud.expanded = nil
+                    }
+                    Sounds.shared.play(.back)
+                } else {
+                    backFromCloudStorage()
+                }
+                return true
+            }
+            if command == .up || command == .down { cloud.armed = nil }
+            return panelCommand(command)
         case .log:
             if command == .back || command == .select { closeOverlay() }
             return true
+        case .crashReport:
+            return crashReportCommand(command)
         case .gallery:
             galleryCommand(command)
             return true
@@ -637,7 +676,9 @@ extension AppModel {
             case .up: moveTrophy(-1)
             case .down: moveTrophy(1)
             case .select: if togetherUser != nil { openLeaderboard(selectedGame) }
-            case .back, .options: closeOverlay()
+            // △ shows (or hides again) the focused hidden trophy; on any other it closes the list.
+            case .options: if !toggleFocusedHiddenTrophy() { closeOverlay() }
+            case .back: closeOverlay()
             default: break
             }
             return true
@@ -685,6 +726,7 @@ extension AppModel {
     }
 
     private func galleryCommand(_ command: Command) {
+        if cloud.sharing { return shareCommand(command) }
         let count = galleryShots.count
         func move(_ delta: Int) {
             let next = min(count - 1, max(0, galleryIndex + delta))
@@ -709,7 +751,8 @@ extension AppModel {
                 closeOverlay()
             }
         case .options:
-            if galleryShots.indices.contains(galleryIndex) { NSWorkspace.shared.activateFileViewerSelecting([galleryShots[galleryIndex]]) }
+            // Share (a chat, the user's gallery, Finder) where AnyTogether keeps files; else Finder.
+            openShareMenu()
         case .previousGame, .nextGame, .home, .capture:
             break
         }
@@ -728,6 +771,7 @@ extension AppModel {
         guard selected != before else { return }
         if overlay == .gallery { loadGallery() }
         if overlay == .trophies {
+            revealedTrophies = []
             if let game = selectedGame, trophies[game.id] != nil {
                 trophyIndex = 0
             } else {

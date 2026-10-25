@@ -6,7 +6,8 @@ import XCTest
 
 /// The launcher's host against a real AnyTogether (API and gateway behind one address) and a real
 /// viewer, such as the website in a browser: it signs in, starts share play, writes the share
-/// play's ID for the viewer's side, sends a synthetic 60 fps picture and a tone, hands the first
+/// play's ID for the viewer's side, sends a synthetic 60 fps picture and a stereo tone (as the Opus
+/// track once the viewer says hello, else as PCM; audio.json says which and at what rate), hands the first
 /// viewer pad 2 once their link is up, keeps the pad packets that reach the game's bridge, takes
 /// the pad back, and stops. Runs only when SHAREPLAY_INTEROP_BASE is set:
 ///   SHAREPLAY_INTEROP_BASE=http://127.0.0.1:8090 SHAREPLAY_INTEROP_EMAIL=utku@example.com
@@ -72,7 +73,10 @@ final class SharePlayInteropTests: XCTestCase {
         let host = SharePlayHost(iceServers: joined.iceServers, send: { to, device, signal in
             note("→ \(signal.kind.rawValue) to \(to.prefix(8))")
             socket.signal(to: to, device: device, share: id, kind: signal.kind, data: signal.data)
-        }, onPad: { userId, packet in router.receive(packet, from: userId) })
+        }, onPad: { userId, packet in router.receive(packet, from: userId) },
+           // SHAREPLAY_INTEROP_AUDIO=pcm: a host from before the Opus track, which the viewer must still
+           // hear; with SHAREPLAY_INTEROP_HOST_OPUS=1 a host with it and a viewer from before it.
+           opus: environment["SHAREPLAY_INTEROP_AUDIO"] != "pcm" || environment["SHAREPLAY_INTEROP_HOST_OPUS"] == "1")
         defer { host.close() }
 
         // The game: a moving picture at 60 fps and a 440 Hz tone in 5 ms packets.
@@ -89,23 +93,10 @@ final class SharePlayInteropTests: XCTestCase {
         }
         pump.resume()
         defer { pump.cancel() }
-        var chunker = SoundChunker()
-        var phase = 0.0
-        let tone = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "tone", qos: .userInteractive))
-        tone.schedule(deadline: .now(), repeating: .milliseconds(10))
-        let started = Date()
-        tone.setEventHandler {
-            var samples = [Int16](repeating: 0, count: 480 * 2)
-            for frame in 0 ..< 480 {
-                let value = Int16(sin(phase) * 8000)
-                samples[frame * 2] = value
-                samples[frame * 2 + 1] = value
-                phase += 2 * .pi * 440 / 48000
-            }
-            for packet in chunker.add(samples, at: Date().timeIntervalSince(started)) { host.push(sound: packet) }
-        }
-        tone.resume()
-        defer { tone.cancel() }
+        // The sound: 440 Hz left, 1 kHz right, from a real-time thread as a capture's would come.
+        let tone = SoundLoop()
+        tone.run(push: { host.push(sound: $0) }, pull: nil)
+        defer { tone.stop() }
 
         // Viewers as the server says: called when they come; signals handed to the host.
         var viewers: [TogetherSharePlay.Viewer] = []
@@ -142,7 +133,29 @@ final class SharePlayInteropTests: XCTestCase {
         }
         let viewer = try XCTUnwrap(host.links.first { $0.value.state == .connected }?.key)
         note("viewer \(viewer.prefix(8)) connected")
+        // A viewer that says hello gets the Opus track; one that does not stays on PCM.
+        let wantOpus = environment["SHAREPLAY_INTEROP_AUDIO"] != "pcm"
+        if wantOpus {
+            try await waitUntil("the viewer takes the Opus track", 20) {
+                drain()
+                return host.links[viewer]?.audio == .opus
+            }
+        }
         try await Task.sleep(for: .seconds(3))
+        if wantOpus {
+            // The rate needs two of the host's measurements (every 2 s) after the track started.
+            try await waitUntil("the Opus track's rate", 10) {
+                drain()
+                return host.links[viewer]?.audioRate != nil
+            }
+        }
+        drain()
+        let audio = host.links[viewer]
+        note("sound to the viewer: \(audio?.audio.rawValue ?? "-"), \(Int((audio?.audioRate ?? 0) / 1000)) kbit/s")
+        XCTAssertEqual(audio?.audio, wantOpus ? .opus : .pcm)
+        if wantOpus { XCTAssertEqual((audio?.audioRate ?? 0) / 1000, 128, accuracy: 30) }
+        try JSONSerialization.data(withJSONObject: ["codec": audio?.audio.rawValue ?? "", "kbps": (audio?.audioRate ?? 0) / 1000])
+            .write(to: out.appendingPathComponent("audio.json"))
         drain()
         XCTAssertTrue(bridges.sent.value.isEmpty, "no pad reaches the game before the host hands one over")
         _ = try await client.setSharePad(viewer, slot: 2, in: id)

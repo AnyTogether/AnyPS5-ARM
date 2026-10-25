@@ -51,6 +51,9 @@ extension AppModel {
             self.remote?.togetherServer = url.absoluteString
             self.togetherSync = TogetherSync(client: self.together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
             self.serverDraft = ""
+            self.cloud.info = nil
+            self.cloud.overview = nil
+            self.refreshStorageInfo()
             self.show(T.format(.togetherServerNow, url.host() ?? url.absoluteString), symbol: "server.rack")
         }
         if togetherUser != nil { togetherSignOut(then: switchOver) } else { switchOver() }
@@ -68,16 +71,17 @@ extension AppModel {
                 }),
                 PanelRow(id: "together-online", title: T.text(.togetherOnline), detail: togetherConnected ? T.text(.togetherConnected) : T.text(.togetherConnecting),
                          symbol: togetherConnected ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark", kind: .info("")),
-            ]
+            ] + familyRows()
+            if cloudAvailable { rows.append(cloudStorageRow()) }
             rows.append(PanelRow(id: "together-join", title: T.text(.togetherFriendsJoin), detail: T.text(.togetherFriendsJoinDetail), symbol: "person.2.wave.2",
                                  kind: .toggle(preferences.friendsJoin ?? true) { [weak self] value in self?.friendsJoinChanged(value) }))
-            rows += profileEditRows() + privacyRows() + serverRows()
+            rows += profileEditRows() + privacyRows() + (familyAllows(.discovery) ? discoveryRows() : []) + serverRows()
             rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
                 self?.togetherSignOut()
             }))
             return rows
         }
-        var rows = [PanelRow(id: "together-intro", title: T.text(.togetherIntro), detail: T.text(.togetherIntroDetail), symbol: "person.2.circle", kind: .info(""))]
+        var rows = [PanelRow(id: "together-intro", title: T.text(.togetherIntro), detail: T.text(.togetherIntroDetail), symbol: "person.2.circle", kind: .info(""))] + familyRows()
         switch togetherStep {
         case .idle, .busy:
             if let phone = connectedPhoneName {
@@ -152,11 +156,14 @@ extension AppModel {
 
     private func privacyRows() -> [PanelRow] {
         guard let privacy = togetherProfile?.privacy else { return [] }
-        let sections: [(TogetherPrivacy.Section, T.Key, String)] = [
+        let known: [(TogetherPrivacy.Section, T.Key, String)] = [
             (.library, .privacyLibrary, "gamecontroller"), (.trophies, .privacyTrophies, "trophy"), (.friends, .privacyFriends, "person.2"),
             (.presence, .privacyPresence, "dot.radiowaves.left.and.right"), (.search, .privacySearch, "magnifyingglass"),
         ]
-        return [PanelRow(id: "together-privacy", title: T.text(.togetherPrivacyTitle), symbol: "lock", kind: .info(""))] + sections.map { section, key, symbol in
+        var sections = known.map { ($0.0, T.text($0.1), $0.2) }
+        // The gallery's own setting, where the server keeps files.
+        if cloud.enabled { sections.append((.gallery, TCloud.text(.privacyGallery), "photo.stack")) }
+        return [PanelRow(id: "together-privacy", title: T.text(.togetherPrivacyTitle), symbol: "lock", kind: .info(""))] + sections.map { section, title, symbol in
             let names = TogetherVisibility.allCases.map { visibility -> String in
                 switch visibility {
                 case .everyone: return T.text(.visibilityEveryone)
@@ -164,7 +171,7 @@ extension AppModel {
                 case .nobody: return T.text(section == .search ? .visibilityNoOne : .visibilityNobody)
                 }
             }
-            return PanelRow(id: "privacy-\(section.rawValue)", title: T.text(key), symbol: symbol,
+            return PanelRow(id: "privacy-\(section.rawValue)", title: title, symbol: symbol,
                             kind: .choice(options: names, selected: TogetherVisibility.allCases.firstIndex(of: privacy[section]) ?? 1) { [weak self] index in
                                 self?.setPrivacy(section, TogetherVisibility.allCases[index])
                             })
@@ -382,6 +389,7 @@ extension AppModel {
             gameInvites = []
             togetherFriends = []
             togetherRequests = TogetherRequests(incoming: [], outgoing: [])
+            discover = DiscoverState()
         }
         Task {
             await client.signOut()
@@ -392,6 +400,7 @@ extension AppModel {
     /// Keeps the session live: friends see the launcher online, and a sign-out elsewhere ends it here.
     func startTogetherSocket() {
         guard togetherUser != nil, togetherSocket == nil else { return }
+        refreshStorageInfo()
         let socket = TogetherSocket(client: together, onEvent: { event in
             Task { @MainActor [weak self] in
                 self?.togetherConnected = true
@@ -421,7 +430,9 @@ extension AppModel {
         loadGameInvites()
         loadNotifications()
         loadShareInvites()
+        loadDiscovery()
         flushTogether()
+        refreshFamily()
     }
 
     /// In a game or online, as friends will see it.
@@ -447,8 +458,9 @@ extension AppModel {
 
     /// A game played for a while: the session goes to AnyTogether (or waits until it can).
     func recordPlay(_ game: Game, from start: Date) {
+        let session = togetherUser == nil ? nil : togetherSync.recordSession(titleId: game.titleID, gameName: game.name, ageLevels: game.ageLevels, startedAt: start, endedAt: Date(), exit: "normal")
+        familyPlayed(game, from: start, session: session)
         guard togetherUser != nil else { return }
-        togetherSync.recordSession(titleId: game.titleID, gameName: game.name, startedAt: start, endedAt: Date(), exit: "normal")
         flushTogether()
         askHowItRan(game, played: Date().timeIntervalSince(start))
     }
@@ -476,6 +488,7 @@ extension AppModel {
     }
 
     func togetherMessage(_ error: Error) -> String {
+        if let family = familyMessage(error) { return family }
         if let problem = error as? TogetherProblem {
             switch problem.code {
             case "handle_taken": return T.text(.togetherHandleTaken)

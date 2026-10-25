@@ -13,7 +13,7 @@ extern "C" {
 int APS5_VABI sceNpGetState(int userId, std::uint32_t* state);
 int APS5_VABI sceNpSetNpTitleId(const NpTitleId* titleId, const NpTitleSecret* titleSecret);
 int APS5_VABI sceNpWebApi2SendRequest(std::int64_t requestId, const void* data, std::size_t size, NpWebApi2ResponseInformationOption* option);
-int APS5_VABI sceNpMatching2Initialize();
+int APS5_VABI sceNpMatching2JoinRoom();
 }
 
 namespace {
@@ -56,7 +56,7 @@ int main() {
         sceNpWebApi2SendRequest(5, body, std::strlen(body), nullptr);
         bool threw = false;
         try {
-            sceNpMatching2Initialize();
+            sceNpMatching2JoinRoom();
         } catch (const std::runtime_error&) {
             threw = true;
         }
@@ -71,7 +71,7 @@ int main() {
         require(any(all, {"sceNpSetNpTitleId", "\"title_id\":\"PPSA00000_00\""}), "the title ID is written");
         for (const auto& line : all) require(line.find("abab") == std::string::npos && line.find("\xAB") == std::string::npos, "the title secret is never written");
         require(any(all, {"sceNpWebApi2SendRequest", "\"data\":\"{\\\"hello\\\":1}\""}), "a request body is written as text");
-        require(any(all, {"\"fn\":\"sceNpMatching2Initialize\"", "\"not_implemented\":true"}), "an unimplemented export is written before it stops");
+        require(any(all, {"\"fn\":\"sceNpMatching2JoinRoom\"", "\"not_implemented\":true"}), "an unimplemented export is written before it stops");
         std::remove(path);
     } catch (const std::exception& error) {
         std::cerr << "online observation: " << error.what() << '\n';

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../discover_strings.dart';
 import '../strings.dart';
 import '../together/parties.dart';
 import '../together/people.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
 import '../together/voice.dart';
+import 'find_players_view.dart';
 import 'together_widgets.dart';
 
 /// The party: without one, a way to start one and the invites and friends' open parties to
@@ -269,6 +271,45 @@ class _PartyPaneState extends State<PartyPane> {
                   ],
                 ),
               ],
+              if (party.requests.isNotEmpty) ...[
+                SectionLabel(texts.askingToJoin),
+                for (final person in party.requests)
+                  _Row(
+                    person: person,
+                    title: person.displayName,
+                    subtitle: '@${person.handle}',
+                    trailing: leader
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              TextButton(
+                                onPressed: () => _try(
+                                  () => parties.answerRequest(
+                                    person.id,
+                                    accept: false,
+                                  ),
+                                ),
+                                child: Text(
+                                  texts.decline,
+                                  style: const TextStyle(color: Colors.white60),
+                                ),
+                              ),
+                              FilledButton(
+                                onPressed: party.full
+                                    ? null
+                                    : () => _try(
+                                        () => parties.answerRequest(
+                                          person.id,
+                                          accept: true,
+                                        ),
+                                      ),
+                                child: Text(texts.accept),
+                              ),
+                            ],
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+              ],
               if (_error != null) _errorText,
             ],
           ),
@@ -315,6 +356,7 @@ class _PartyPaneState extends State<PartyPane> {
                   value: party.open,
                   onChanged: (open) => _try(() => parties.setOpen(open)),
                 ),
+                _publicListing(texts, party),
               ],
               const SizedBox(height: 10),
               OutlinedButton.icon(
@@ -328,6 +370,110 @@ class _PartyPaneState extends State<PartyPane> {
               ),
             ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+extension on _PartyPaneState {
+  /// Leader only: the party in the public list or not, how people get in, and its language.
+  Widget _publicListing(Strings texts, Party party) {
+    final listing = party.listing;
+    final parties = widget.hub.parties;
+    void list(PublicJoin? join, {String? Function()? language}) => _try(
+      () => parties.setPublic(
+        join == null
+            ? null
+            : PartyListing(
+                join: join,
+                titleId: listing?.titleId,
+                language: language == null ? listing?.language : language(),
+              ),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 6),
+        Text(
+          texts.partyPublic,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+        ),
+        const SizedBox(height: 6),
+        ChoiceRow(
+          children: [
+            ChoicePill(
+              label: texts.publicOff,
+              selected: listing == null,
+              onTap: listing == null ? null : () => list(null),
+            ),
+            for (final (join, label) in [
+              (PublicJoin.request, texts.joinModeRequest),
+              (PublicJoin.open, texts.joinModeOpen),
+            ])
+              ChoicePill(
+                label: label,
+                selected: listing?.join == join,
+                onTap: listing?.join == join ? null : () => list(join),
+              ),
+          ],
+        ),
+        if (listing != null) ...[
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text(
+                texts.listLanguage,
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              ),
+              const SizedBox(width: 8),
+              PopupMenuButton<int>(
+                color: const Color(0xFF1A1D27),
+                tooltip: texts.listLanguage,
+                onSelected: (index) => list(
+                  listing.join,
+                  language: () =>
+                      index == 0 ? null : offeredLanguages[index - 1],
+                ),
+                itemBuilder: (context) => [
+                  PopupMenuItem(value: 0, child: Text(texts.noLanguage)),
+                  for (final (index, code) in offeredLanguages.indexed)
+                    PopupMenuItem(
+                      value: index + 1,
+                      child: Text(texts.languageName(code)),
+                    ),
+                ],
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        listing.language == null
+                            ? texts.noLanguage
+                            : texts.languageName(listing.language!),
+                        style: const TextStyle(
+                          color: togetherAccent,
+                          fontSize: 13.5,
+                        ),
+                      ),
+                      const Icon(
+                        Icons.arrow_drop_down_rounded,
+                        color: togetherAccent,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+        const SizedBox(height: 4),
+        Text(
+          texts.partyPublicHint,
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
         ),
       ],
     );

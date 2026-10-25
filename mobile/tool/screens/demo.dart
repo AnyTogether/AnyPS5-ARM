@@ -28,12 +28,12 @@ class DemoGame {
 }
 
 const silksong = DemoGame('PPSA90001', 'Hollow Knight: Silksong', 'silksong');
-const stray = DemoGame('PPSA90002', 'Stray', 'stray');
+const catQuest = DemoGame('PPSA90002', 'Cat Quest III', 'catquest');
 const astroBot = DemoGame('PPSA90003', 'Astro Bot', null);
 const sarah = DemoGame('PPSA90004', 'Dreaming Sarah', 'sarah');
 const doom = DemoGame('PPSA90005', 'DOOM', 'doom');
 
-const games = [silksong, stray, astroBot, sarah, doom];
+const games = [silksong, catQuest, astroBot, sarah, doom];
 
 String? gameName(String titleId) =>
     games.where((g) => g.titleId == titleId).firstOrNull?.name;
@@ -100,7 +100,7 @@ Map<String, dynamic> get _friends => {
     }),
     _friend(theo, {
       'state': 'in_game',
-      'titleId': stray.titleId,
+      'titleId': catQuest.titleId,
       'since': _at(const Duration(hours: 1)),
     }),
     _friend(sol, {'state': 'online'}),
@@ -195,7 +195,7 @@ Map<String, dynamic> get _conversations => {
         'c-theo',
         12,
         'theo',
-        'the cat in Stray knocks EVERYTHING off',
+        'the pirate cat stole my loot AGAIN',
         const Duration(hours: 2),
       ),
     ),
@@ -303,18 +303,12 @@ Map<String, dynamic> get _feed => {
       'trophy',
       kenji,
       const Duration(minutes: 40),
-      game: stray,
+      game: catQuest,
       highlight: 'rare',
       trophies: [
-        _trophy(14, 'gold', 'I Am Speed', rarity: 0.064, label: 'very_rare'),
-        _trophy(9, 'silver', 'Boom', rarity: 0.31, label: 'common'),
-        _trophy(
-          5,
-          'bronze',
-          'A Little Bit Of Help',
-          rarity: 0.58,
-          label: 'common',
-        ),
+        _trophy(14, 'gold', 'Full Sail', rarity: 0.064, label: 'very_rare'),
+        _trophy(9, 'silver', 'Cannonball', rarity: 0.31, label: 'common'),
+        _trophy(5, 'bronze', 'Treasure Hunter', rarity: 0.58, label: 'common'),
       ],
       trophyCount: 5,
       counts: {'wow': 2},
@@ -396,7 +390,7 @@ Map<String, dynamic> get _notifications => {
       'game_invite',
       theo,
       const Duration(hours: 1),
-      data: {'sessionId': 'g-1', 'titleId': stray.titleId},
+      data: {'sessionId': 'g-1', 'titleId': catQuest.titleId},
       read: true,
     ),
     _notice(
@@ -526,7 +520,7 @@ Map<String, dynamic> answer(
     ('GET', 'users/ines/library') => {
       'games': [
         _library(silksong, 41, 12, 38, 52, 2140, const Duration(hours: 3)),
-        _library(stray, 14, 47, 25, 25, 1630, const Duration(days: 4)),
+        _library(catQuest, 14, 47, 25, 25, 1630, const Duration(days: 4)),
         _library(sarah, 6, 5, 9, 14, 380, const Duration(days: 9)),
         _library(doom, 2, 38, 4, 31, 120, const Duration(days: 1)),
       ],
@@ -534,8 +528,14 @@ Map<String, dynamic> answer(
     ('GET', 'users/ines/trophies') => {
       'trophies': [
         _earned(
-          stray,
-          _trophy(1, 'platinum', 'Stray', rarity: 0.08, label: 'very_rare'),
+          catQuest,
+          _trophy(
+            1,
+            'platinum',
+            'Purrate King',
+            rarity: 0.08,
+            label: 'very_rare',
+          ),
           const Duration(days: 4),
         ),
         _earned(

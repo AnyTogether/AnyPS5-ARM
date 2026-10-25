@@ -8,20 +8,30 @@ public enum TogetherVisibility: String, Codable, CaseIterable, Sendable {
 /// The user's privacy settings, one visibility per section.
 public struct TogetherPrivacy: Decodable, Equatable, Sendable {
     /// library: games and play time; friends: the friends list; presence: online and what is
-    /// being played; search: who finds the account by name.
+    /// being played; search: who finds the account by name; gallery: the pinned photos and
+    /// clips (only where the server keeps files).
     public enum Section: String, CaseIterable, Sendable {
-        case library, trophies, friends, presence, search
+        case library, trophies, friends, presence, search, gallery
     }
 
     private var values: [Section: TogetherVisibility]
 
     /// The server's defaults.
-    public static let standard = TogetherPrivacy(values: [.library: .friends, .trophies: .friends, .friends: .friends, .presence: .friends, .search: .everyone])
+    public static let standard = TogetherPrivacy(values: [.library: .friends, .trophies: .friends, .friends: .friends, .presence: .friends, .search: .everyone, .gallery: .friends])
 
     init(values: [Section: TogetherVisibility]) { self.values = values }
 
     public init(from decoder: Decoder) throws {
-        let raw = try decoder.singleValueContainer().decode([String: String].self)
+        // Only the sections known here, whatever else a newer server adds (and of any type).
+        struct AnyKey: CodingKey {
+            let stringValue: String
+            init?(stringValue: String) { self.stringValue = stringValue }
+            var intValue: Int? { nil }
+            init?(intValue: Int) { nil }
+        }
+        let container = try decoder.container(keyedBy: AnyKey.self)
+        var raw: [String: String] = [:]
+        for key in container.allKeys { raw[key.stringValue] = try? container.decode(String.self, forKey: key) }
         values = TogetherPrivacy.standard.values
         for section in Section.allCases {
             if let value = raw[section.rawValue].flatMap(TogetherVisibility.init(rawValue:)) { values[section] = value }
@@ -93,6 +103,18 @@ extension TogetherClient {
 
     public func updatePrivacy(_ section: TogetherPrivacy.Section, to visibility: TogetherVisibility) async throws -> TogetherPrivacy {
         try JSONDecoder.together.decode(TogetherPrivacy.self, from: try await authorized("PATCH", "me/privacy", [section.rawValue: visibility.rawValue]))
+    }
+
+    /// A new avatar (PUT /me/avatar): a PNG or JPEG, at most 5 MB, that the server makes a
+    /// square JPEG; returns its address, which the session's user keeps.
+    public func uploadAvatar(_ picture: Data) async throws -> String {
+        struct Answer: Decodable { let avatar: String }
+        let body = TogetherRawBody(data: picture, contentType: ProfilePicture.contentType(picture))
+        let answer = try JSONDecoder.together.decode(Answer.self, from: try await authorized("PUT", "me/avatar", body))
+        store.update { user in
+            user = TogetherUser(id: user.id, handle: user.handle, displayName: user.displayName, avatar: answer.avatar)
+        }
+        return answer.avatar
     }
 
     /// The session's user follows the profile: its handle, name and avatar.

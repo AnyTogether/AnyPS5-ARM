@@ -4,12 +4,21 @@
 //
 // It runs this under flutter test (`flutter test tool/screens/render_test.dart`), which writes
 // PNGs to build/screens, then makes the JPEGs in docs/screenshots. Nothing reaches a server.
+// With ANYPS5_SCREENS_GAMES=<games folder> it also draws the launcher on the phone, an update
+// over it and the pad, with the games' own pictures from that folder.
 // ignore_for_file: invalid_use_of_visible_for_testing_member
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:anyps5_remote/connection/session.dart';
 import 'package:anyps5_remote/feedback/haptics.dart';
+import 'package:anyps5_remote/protocol/messages.dart';
+import 'package:anyps5_remote/ui/activity_card.dart';
+import 'package:anyps5_remote/ui/home_screen.dart';
+import 'package:anyps5_remote/ui/pad_screen.dart';
+import 'package:anyps5_remote/ui/setup_screen.dart' show StatusDot;
 import 'package:anyps5_remote/together/together_hub.dart';
 import 'package:anyps5_remote/ui/share_watch_screen.dart';
 import 'package:anyps5_remote/ui/together_screen.dart';
@@ -23,10 +32,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'demo.dart';
 
 const _size = Size(2400, 1648);
+const _phone = Size(2340, 1080);
 const _ratio = 3.0;
 final _shot = GlobalKey();
 final _images = <String, ui.Image>{};
 late ui.Image _gameplay;
+final _dumps =
+    <({String id, String name, Uint8List icon, Uint8List? background})>[];
 
 class _QuietHaptics implements HapticsOutput {
   @override
@@ -63,11 +75,16 @@ Future<String> _fonts() async {
   await _font('Apple Color Emoji', [
     '/System/Library/Fonts/Apple Color Emoji.ttc',
   ]);
+  await _font('Apple Symbols', ['/System/Library/Fonts/Apple Symbols.ttf']);
+  await _font('Arial Unicode', [
+    '/System/Library/Fonts/Supplemental/Arial Unicode.ttf',
+  ]);
   const sf = '/Library/Fonts/SF-Pro-Text';
   if (File('$sf-Regular.otf').existsSync()) {
-    await _font('SF Pro Text', [
+    final faces = [
       for (final w in ['Regular', 'Medium', 'Semibold', 'Bold']) '$sf-$w.otf',
-    ]);
+    ];
+    await _font('SF Pro Text', faces);
     return 'SF Pro Text';
   }
   await _font('Roboto', [
@@ -142,28 +159,20 @@ Future<ui.Image> _avatar(String seed) {
 }
 
 Future<void> _art() async {
-  final launcher = await _decode('../docs/screenshots/phone-launcher.jpg');
+  final library = await _decode('../docs/screenshots/launcher-library.jpg');
   const icon = Size(256, 256);
-  _images['$iconBase/silksong.png'] = await _crop(
-    launcher,
-    const Rect.fromLTWH(494, 87, 150, 150),
-    icon,
-  );
-  _images['$iconBase/stray.png'] = await _crop(
-    launcher,
-    const Rect.fromLTWH(1066, 96, 130, 130),
-    icon,
-  );
-  _images['$iconBase/sarah.png'] = await _crop(
-    launcher,
-    const Rect.fromLTWH(316, 96, 130, 130),
-    icon,
-  );
-  _images['$iconBase/doom.png'] = await _crop(
-    launcher,
-    const Rect.fromLTWH(128, 96, 130, 130),
-    icon,
-  );
+  for (final (name, column) in [
+    ('silksong', 0),
+    ('sarah', 1),
+    ('doom', 2),
+    ('catquest', 5),
+  ]) {
+    _images['$iconBase/$name.png'] = await _crop(
+      library,
+      Rect.fromLTWH(106 + 222.0 * column, 159, 172, 172),
+      icon,
+    );
+  }
   for (final person in pictured) {
     _images['$avatarBase/${person.id}.png'] = await _avatar(person.id);
   }
@@ -175,6 +184,58 @@ Future<void> _art() async {
     const Rect.fromLTWH(430, 110, 1170, 790),
     const Size(1170, 790),
   );
+}
+
+Future<Uint8List> _png(String path, int width) async {
+  final codec = await ui.instantiateImageCodec(
+    File(path).readAsBytesSync(),
+    targetWidth: width,
+  );
+  final image = (await codec.getNextFrame()).image;
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  return data!.buffer.asUint8List();
+}
+
+Future<void> _games() async {
+  final root = Platform.environment['ANYPS5_SCREENS_GAMES'];
+  if (root == null || root.isEmpty) return;
+  final folders = <Directory>[];
+  void visit(Directory folder, int depth) {
+    if (File('${folder.path}/sce_sys/param.json').existsSync()) {
+      folders.add(folder);
+      return;
+    }
+    if (depth == 2) return;
+    for (final entry in folder.listSync(followLinks: false)) {
+      final name = entry.uri.pathSegments.where((s) => s.isNotEmpty).last;
+      if (entry is Directory && !name.startsWith('.')) visit(entry, depth + 1);
+    }
+  }
+
+  visit(Directory(root), 0);
+  for (final folder in folders) {
+    final system = '${folder.path}/sce_sys';
+    final param = jsonDecode(
+      File('$system/param.json').readAsStringSync(),
+    ) as Map<String, dynamic>;
+    final localized =
+        param['localizedParameters'] as Map<String, dynamic>? ?? {};
+    final language = localized['defaultLanguage'] as String? ?? 'en-US';
+    final names =
+        (localized[language] ?? localized['en-US']) as Map<String, dynamic>? ??
+        {};
+    final id = param['titleId'] as String;
+    if (!File('$system/icon0.png').existsSync()) continue;
+    _dumps.add((
+      id: id,
+      name: names['titleName'] as String? ?? id,
+      icon: await _png('$system/icon0.png', 256),
+      background: File('$system/pic0.png').existsSync()
+          ? await _png('$system/pic0.png', 1600)
+          : null,
+    ));
+  }
+  _dumps.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 }
 
 void _cacheArt() {
@@ -206,6 +267,7 @@ void main() {
   setUpAll(() async {
     family = await _fonts();
     await _art();
+    await _games();
   });
 
   Future<TogetherHub> hub(
@@ -245,7 +307,11 @@ void main() {
         brightness: Brightness.dark,
         useMaterial3: true,
         fontFamily: family,
-        fontFamilyFallback: const ['Apple Color Emoji'],
+        fontFamilyFallback: const [
+          'Apple Color Emoji',
+          'Apple Symbols',
+          'Arial Unicode',
+        ],
       ),
       home: home,
     ),
@@ -263,8 +329,9 @@ void main() {
     TogetherHub hub,
     Widget home, {
     Future<void> Function()? then,
+    Size size = _size,
   }) async {
-    tester.view.physicalSize = _size;
+    tester.view.physicalSize = size;
     tester.view.devicePixelRatio = _ratio;
     debugDisableShadows = false;
     _cacheArt();
@@ -358,4 +425,165 @@ void main() {
       ShareWatchScreen(plays: h.sharePlays, haptics: _QuietHaptics()),
     );
   });
+
+  Session launcher(TogetherHub hub, String selected) {
+    final session = Session(
+      preferences: hub.account.preferences,
+      deviceName: 'Pixel 8',
+      together: hub.account,
+    );
+    session.status = ConnectionStatus.connected;
+    session.macName = 'Robin';
+    session.latencyMs = 9;
+    session.library = Library(
+      games: [
+        for (final game in _dumps)
+          RemoteGame(
+            id: game.id,
+            name: game.name,
+            state: game.id == 'PPSA99303'
+                ? GameState.locked
+                : GameState.installed,
+            trophies: game.id == selected ? '8/34' : null,
+            art: game.id,
+          ),
+      ],
+      selected: selected,
+      running: null,
+      language: 'en',
+    );
+    for (final game in _dumps) {
+      session.art[game.id] = GameArt(game.id)
+        ..icon = game.icon
+        ..background = game.background
+        ..arrived = true;
+    }
+    return session;
+  }
+
+  Widget status(Session session) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const StatusDot(color: Color(0xFF4CD964)),
+      const SizedBox(width: 8),
+      Text(
+        '${session.macName} · ${session.latencyMs!.round()} ms',
+        style: const TextStyle(
+          color: Colors.white70,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    ],
+  );
+
+  const silksongId = 'PPSA12544';
+  final drawGames = Platform.environment['ANYPS5_SCREENS_GAMES'] != null;
+
+  Future<void> pictures(WidgetTester tester) =>
+      tester.runAsync(() => Future<void>.delayed(const Duration(seconds: 1)));
+
+  testWidgets('launcher', (tester) async {
+    final h = await hub(tester);
+    final session = launcher(h, silksongId);
+    await shoot(
+      tester,
+      'phone-launcher',
+      h,
+      HomeScreen(
+        session: session,
+        onResume: () {},
+        status: status(session),
+        together: h,
+      ),
+      then: () => pictures(tester),
+    );
+  }, skip: !drawGames);
+
+  testWidgets('update', (tester) async {
+    final h = await hub(tester);
+    final session = launcher(h, silksongId);
+    session.activity.value = (
+      activity: const Activity(
+        id: silksongId,
+        phase: ActivityPhase.relink,
+        updating: true,
+        fraction: 0.34,
+        elapsed: Duration(seconds: 2),
+      ),
+      since: DateTime.now(),
+    );
+    await shoot(
+      tester,
+      'phone-activity',
+      h,
+      Stack(
+        children: [
+          HomeScreen(
+            session: session,
+            onResume: () {},
+            status: status(session),
+            together: h,
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: SafeArea(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: ActivityCard(
+                    activity: session.activity,
+                    game: (id) {
+                      final game = _dumps.where((g) => g.id == id).firstOrNull;
+                      return game == null
+                          ? null
+                          : (name: game.name, icon: game.icon);
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      then: () => pictures(tester),
+    );
+  }, skip: !drawGames);
+
+  testWidgets('pad', (tester) async {
+    final h = await hub(tester);
+    final session = launcher(h, silksongId);
+    await shoot(
+      tester,
+      'phone-pad',
+      h,
+      PadScreen(onState: (_) {}, status: status(session)),
+    );
+  }, skip: !drawGames);
+
+  // The phone's own screen, as the corner of the README's photos of a game played with it.
+  testWidgets('phone screen', (tester) async {
+    for (final pad in [false, true]) {
+      final h = await hub(tester);
+      final session = launcher(h, silksongId);
+      await shoot(
+        tester,
+        pad ? 'live/pad' : 'live/launcher',
+        h,
+        pad
+            ? PadScreen(onState: (_) {}, status: status(session))
+            : HomeScreen(
+                session: session,
+                onResume: () {},
+                status: status(session),
+                together: h,
+              ),
+        then: () => pictures(tester),
+        size: _phone,
+      );
+    }
+  }, skip: !drawGames);
 }

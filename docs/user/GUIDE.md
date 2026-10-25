@@ -41,7 +41,7 @@ It runs with the default settings now. A few letters of its font are missing (gl
 
 ### Compatibility
 
-The [compatibility list](COMPATIBILITY.md) has every game tested on macOS, its status and its frame rate.
+The [compatibility list](COMPATIBILITY.md) has every game tested on macOS, its status and its frame rate. Players' own reports, for macOS, Windows and Linux, are on the [community compatibility list](https://anytogether.kodla.agency/compatibility) (see [How did it run?](#anytogether)).
 
 ### Status
 
@@ -97,9 +97,13 @@ The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls
 
 **Advanced.** **⋯ → Advanced** holds each game's finer settings: a deadzone for each controller stick; the mouse as the camera (sensitivity, vertical speed, response curve, minimum tilt, maximum speed, smoothing, how soon the camera stops); the keyboard (the tilt while **Slow Movement** is held, how long a key takes to tilt a stick or press a trigger fully); the shader cache; and **Export Settings** / **Import Settings**, which save the game's keys and settings as one file to share. Settings → Advanced picks where F12 screenshots go (`~/Pictures/AnyPS5` by default) and a folder of console system fonts.
 
-**When a game stops.** A game that ends on an error gets the reason in plain words on the home screen and in the log: a missing module, an unsupported system function, the GPU stopping or running out of memory, an engine error or a crash. **⋯ → Make a Report** saves a text file with the Mac, the versions, the game's settings, the reason and the log of its last start, to attach on Discord or GitHub.
+**Broadcasting.** The launcher streams the game playing live to Twitch, YouTube or any RTMP / RTMPS server, like the console's Broadcast. Set it up once in **Settings → Broadcasting**: the service (or a custom `rtmp://` / `rtmps://` address), the stream key (typed in a hidden field or pasted from the clipboard), the quality (720p60 at 3 Mbit/s, 1080p30 at 4.5 or 1080p60 at 6), the microphone with its own level, the LIVE badge over the game and the link viewers watch on. While the game plays, **Broadcast <game>** at the top of its **⋯** panel goes live (the phone has **Go Live** too); the panel then shows the time on air, the bit rate, dropped frames, **Copy viewer link** and **Stop broadcast**. Video is H.264 High with a key frame every two seconds, sound AAC 48 kHz stereo at 160 kbit/s; a slow upload drops frames rather than falling behind, and a dropped connection is retried by itself. The key is kept in `~/Library/Application Support/AnyPS5/Broadcast/keys.json` (readable by your user only) instead of the Keychain, which would ask again after every update of the ad hoc signed app.
 
-**Personalizing.** Settings change the theme, the accent color, the background (the theme animation, your own picture or a looping video), the selected game's artwork behind the home screen, animations, interface sounds and the profile name.
+**When a game stops.** A game that ends on an error gets the reason in plain words on the home screen and in the log: a missing module, an unsupported system function, the GPU stopping or running out of memory, an engine error or a crash. The crash report panel opens by itself, with the reason, the Mac, the engine and the end of the log: **Export Report** saves everything in one file and **Open Issue** opens a pre-filled GitHub issue; your name, email and sign-in tokens are taken out first. **Detailed Logging (Trace)** in the game's options records more for a hard bug. [Troubleshooting](#troubleshooting) has the details.
+
+**Engine versions.** **Settings → Engine** lists the engine builds published with this project's releases, with their date and notes. Select one to download it (it is checked against its checksum, and again before each use), then choose it as the **Default Engine** for every game, or pick an engine for one game in its options; the row also says which engine unlocked the game. **Engine Folder** uses an engine you built yourself. A game unlocked with another engine than the one chosen for it offers **Update and Play**, which unlocks it again with the chosen engine and keeps its saves and trophies. **Delete Unused Engines** removes downloads no game uses.
+
+**Personalizing.** Settings change the theme, the accent color, the background (the theme animation, your own picture or a looping video), the selected game's artwork behind the home screen, animations, interface sounds and the profile name. **Settings → Appearance → Themes** also lists the themes people share on the Theme Hub (see [AnyTogether](#anytogether)).
 
 The launcher is driven with the arrow keys, Return and Esc, a game controller (D-pad, ✕, ○, △) or the mouse and trackpad.
 
@@ -108,6 +112,22 @@ The launcher is driven with the arrow keys, Return and Esc, a game controller (D
 | ![Home screen](../screenshots/launcher-home.jpg) | ![Game settings](../screenshots/launcher-game-settings.jpg) | ![Unlocking](../screenshots/launcher-unlocking.jpg) | ![Game library](../screenshots/launcher-library.jpg) |
 
 [▶ Watch the launcher in action](../videos/launcher.mp4) (1:39)
+
+### AnyTogether
+
+[AnyTogether](https://anytogether.kodla.agency) is the launcher's online home: friends, profiles, messages, parties with voice, share play, activity, leaderboards, notifications, the Theme Hub and the community compatibility list. It is optional; signed out, the launcher works exactly as before. The server is open source ([AnyTogether](https://github.com/utkuhalis/AnyTogether), MIT), and **Settings → AnyTogether → Server** points the launcher at one you run yourself.
+
+**Signing in.** **Settings → AnyTogether**: type your email and the code it sends you, approve the launcher on the website (where passkeys work too), or tap once on your phone if the AnyPS5 Remote app is paired and signed in. There is no password and no sign-up form; the first sign-in makes the account.
+
+**Friends, activity, leaderboards and notifications.** The **Friends** panel in the top bar lists your friends with what they are playing, requests, and adding someone by their handle. From it, **Activity** shows what friends unlock and play (trophies, platinums, first plays, long sessions, milestones); react to an item with 🔥 👏 😮 or ❤️. **Leaderboard** ranks trophy points among friends or everyone; a game's options have its own board for points, play time and completion. The bell in the top bar counts unread **notifications** (friend requests, invites, missed calls, messages while you were away) and opens the list; a new one also shows as a small card. You only appear on a global board while your trophies (and, for a game, your library) are public; the board says where you would be otherwise.
+
+**Share play: hosting.** While a game runs, open the **Friends** panel and choose **Share play**. Friends see that you are sharing and can watch: in their browser, on the phone or in their own launcher. Invite friends from the panel, or leave **Friends can walk in** on; **Viewers at most** sets how many can watch (up to 4; from 3 on each gets 540p, since your Mac sends each one a stream). For each viewer choose **Let … play as player 2, 3 or 4**: they play the game with their own pad, as in local co-op. Your own controller stays player 1; a viewer can never take it. You can take a pad back (every button is let go first) or take someone out at any time, and **Stop share play** ends it. Each viewer's line shows whether the connection is direct or through the relay, its round trip and the picture size. macOS asks once for the screen recording permission. Only the game is sent, not the rest of your screen.
+
+**Share play: watching.** In the launcher, **Watch** a friend from the Friends panel or from their invite: their game fills the screen with its sound, and once they let you play, your controller is their player 2, 3 or 4; the PS button leaves. On the phone (AnyPS5 Remote 1.11 or newer), **Watch** is in Friends; when the host hands you a pad, the on-screen pad lies over the picture, with the game's rumble and light bar. In a browser, open the link from the invite or the friend's profile on the website: a controller works (press a button once so the browser sees it), and so does the keyboard (WASD the left stick, the arrow keys the D-pad, I J K L the face buttons, Q / E L1 / R1, Z / C L2 / R2, Return Options).
+
+**Theme Hub.** **Settings → Appearance → Themes** lists the themes people share on AnyTogether's Theme Hub, installed with one press; the website's [Theme Hub](https://anytogether.kodla.agency/themes) has the same themes, with likes. Signed in, **Share on the Hub** uploads the theme you use (made in the Theme Studio, at most 50 MB); sharing it again sends a new version. `anyps5://theme/<id>` links open a Hub theme in the launcher.
+
+**How did it run?** After you play a game, the launcher may ask **How did *game* run?**: Nothing, Boots, Menus, In game or Playable. One tap sends a report with the launcher and engine versions, the Mac model, macOS and the average frame rate (it shows what goes with it). **Don't ask after games** stops the question; a game's options still have **How does it run?**, with the community's verdict for that game. All reports make the [community compatibility list](https://anytogether.kodla.agency/compatibility).
 
 ### About the project
 
@@ -203,6 +223,8 @@ Controllers that SDL recognizes, such as DualSense, DualShock and Xbox pads, wor
 #### Troubleshooting
 
 - **Log:** `~/Library/Logs/AnyPS5/<TITLE ID>.log`. When a game stops, the reason is at the end of this file. Unsupported states always end the program with an error message rather than continuing silently.
+- **Crash report:** when a game stops on an error or a crash, the launcher offers its report at once; it is also in the game's options under **Last Session's Report**. **Export Report** saves `AnyPS5-<TITLE ID>-<date>.zip` (or `.txt`) with the log, macOS's crash report, the last unlock's output, the Mac, the versions and the game's settings. **Open Issue** shows what will be shared, then opens a filled-in GitHub issue; attach the exported file to it. Your home folder, names, e-mail addresses and AnyTogether tokens are taken out of both.
+- **Detailed logging:** the game's options have **Detailed Logging (Trace)** and **Play with Detailed Logging** (once). They start the game with `APS5_LOG_SYNC`, `APS5_LOG_TIMESTAMPS`, `APS5_TRACE_EXIT`, `APS5_TRACE_UNREADABLE`, `APS5_TRACE_MEMORY`, `APS5_SAVEDATA_TRACE`, `APS5_PROFILE_PRESENT` and `MVK_CONFIG_LOG_LEVEL=3`. The game runs slower; a log past 256 MB starts again with the earlier part kept as `<TITLE ID>.trace-1.log`.
 - **Shader cache:** `~/Library/Caches/org.anyps5.<title id>/shader_cache`. The first run compiles shaders, so it can stutter; later runs load them from the cache.
 - **Performance profile:** start the executable from a terminal with `APS5_PROFILE_DRAW=1`. Every 10 seconds the log gets a `[present]` line with the number of frames drawn and the GPU time per frame.
 
@@ -267,7 +289,7 @@ Artık varsayılan ayarlarla çalışıyor. Yazı tipinin bazı harfleri eksik (
 
 ### Uyumluluk
 
-[Uyumluluk listesi](COMPATIBILITY.md#türkçe), macOS'ta test edilen her oyunu, durumunu ve FPS'ini gösterir.
+[Uyumluluk listesi](COMPATIBILITY.md#türkçe), macOS'ta test edilen her oyunu, durumunu ve FPS'ini gösterir. Oyuncuların macOS, Windows ve Linux için gönderdiği raporlar [topluluk uyumluluk listesinde](https://anytogether.kodla.agency/compatibility) toplanır (bkz. [Nasıl çalıştı?](#anytogether-1)).
 
 ### Durum
 
@@ -308,9 +330,13 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 
 **Gelişmiş.** **⋯ → Gelişmiş** her oyunun ince ayarlarını tutar: iki kumanda çubuğu için ölü bölge; fareyle kamera (hassasiyet, dikey hız, tepki eğrisi, en küçük eğim, en yüksek hız, yumuşatma, kameranın durma süresi); klavye (**Yavaş Hareket** basılıyken eğim, bir tuşun çubuğu ya da tetiği sonuna kadar götürme süresi); shader önbelleği; ve oyunun tuşlarını ve ayarlarını paylaşmak için tek bir dosyaya kaydeden **Ayarları Dışa Aktar** / **Ayarları İçe Aktar**. Ayarlar → Gelişmiş, F12 ekran görüntülerinin nereye kaydedileceğini (varsayılan `~/Pictures/AnyPS5`) ve konsolun sistem fontlarının klasörünü seçer.
 
-**Oyun kapanınca.** Hatayla kapanan bir oyunun nedeni ana ekranda ve günlükte düz bir dille yazılır: eksik modül, desteklenmeyen sistem fonksiyonu, GPU'nun durması ya da belleğin yetmemesi, motor hatası ya da çökme. **⋯ → Tanı Raporu Oluştur**, Discord'a ya da GitHub'a eklemek için Mac'i, sürümleri, oyunun ayarlarını, nedeni ve son açılışın günlüğünü içeren bir metin dosyası kaydeder.
+**Yayın.** Launcher, oynanan oyunu konsoldaki Yayınla gibi Twitch'e, YouTube'a ya da herhangi bir RTMP / RTMPS sunucusuna canlı yayınlar. **Ayarlar → Yayın**'dan bir kez ayarla: servis (ya da özel bir `rtmp://` / `rtmps://` adresi), yayın anahtarı (gizli bir alana yazılır ya da panodan yapıştırılır), kalite (3 Mbit/s'de 720p60, 4,5'te 1080p30 ya da 6'da 1080p60), kendi seviyesiyle mikrofon, oyunun üstündeki CANLI rozeti ve izleyicilerin izlediği bağlantı. Oyun açıkken **⋯** panelinin en üstündeki **<oyun> yayınla** yayını başlatır (telefonda da **Yayına Başla** var); panel sonra yayın süresini, giden bit hızını, düşen kareleri, **İzleyici bağlantısını kopyala**'yı ve **Yayını durdur**'u gösterir. Görüntü her iki saniyede bir ana kareyle H.264 High, ses 160 kbit/s'de AAC 48 kHz stereo; yavaş bir bağlantıda yayın geride kalmak yerine kare düşürür, kopan bağlantı kendiliğinden yeniden kurulur. Anahtar Anahtar Zinciri'nde değil, `~/Library/Application Support/AnyPS5/Broadcast/keys.json` dosyasında (yalnızca kullanıcın okuyabilir) tutulur: uygulama ad hoc imzalı olduğundan Anahtar Zinciri her güncellemeden sonra yeniden sorardı.
 
-**Kişiselleştirme.** Ayarlar'dan tema, vurgu rengi, arka plan (tema animasyonu, kendi resmin ya da döngüdeki bir video), seçili oyunun ana ekrandaki görseli, animasyonlar, arayüz sesleri ve profil adı değiştirilir.
+**Oyun kapanınca.** Hatayla kapanan bir oyunun nedeni ana ekranda ve günlükte düz bir dille yazılır: eksik modül, desteklenmeyen sistem fonksiyonu, GPU'nun durması ya da belleğin yetmemesi, motor hatası ya da çökme. Çökme raporu paneli kendiliğinden açılır; nedeni, Mac'i, motoru ve günlüğün sonunu gösterir: **Raporu Dışa Aktar** hepsini tek dosyaya kaydeder, **Sorun Bildir** doldurulmuş bir GitHub bildirimi açar; adın, e-postan ve giriş anahtarların önce çıkarılır. Oyunun seçeneklerindeki **Ayrıntılı Günlük (İz)** zor bir hata için daha fazlasını kaydeder. Ayrıntılar [Sorun giderme](#sorun-giderme) bölümünde.
+
+**Motor sürümleri.** **Ayarlar → Motor**, bu projenin sürümleriyle yayımlanan motor derlemelerini tarihleri ve notlarıyla listeler. Birini seçince indirilir (sağlama toplamıyla, her kullanımdan önce de yeniden denetlenir); sonra onu her oyun için **Varsayılan Motor** yap ya da bir oyunun seçeneklerinden yalnızca o oyuna motor seç; aynı satır oyunun kilidini hangi motorun açtığını da söyler. **Motor Klasörü** kendi derlediğin bir motoru kullanır. Kendisi için seçilenden başka bir motorla açılmış oyun **Güncelle ve Oyna**'yı önerir: kilidi seçilen motorla yeniden açılır, kayıtları ve kupaları korunur. **Kullanılmayan Motorları Sil**, hiçbir oyunun kullanmadığı indirmeleri siler.
+
+**Kişiselleştirme.** Ayarlar'dan tema, vurgu rengi, arka plan (tema animasyonu, kendi resmin ya da döngüdeki bir video), seçili oyunun ana ekrandaki görseli, animasyonlar, arayüz sesleri ve profil adı değiştirilir. **Ayarlar → Görünüm → Temalar**, insanların Tema Hub'da paylaştığı temaları da listeler (bkz. [AnyTogether](#anytogether-1)).
 
 Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, ✕, ○, △) ya da fare ve trackpad ile kullanılır.
 
@@ -319,6 +345,22 @@ Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, �
 | ![Ana ekran](../screenshots/launcher-home.jpg) | ![Oyun ayarları](../screenshots/launcher-game-settings.jpg) | ![Kilit açılıyor](../screenshots/launcher-unlocking.jpg) | ![Oyun kütüphanesi](../screenshots/launcher-library.jpg) |
 
 [▶ Launcher'ın videosunu izle](../videos/launcher.mp4) (1:39)
+
+### AnyTogether
+
+[AnyTogether](https://anytogether.kodla.agency), launcher'ın online evi: arkadaşlar, profiller, mesajlar, sesli partiler, birlikte oynama, etkinlikler, sıralamalar, bildirimler, Tema Hub ve topluluk uyumluluk listesi. İsteğe bağlıdır; giriş yapmadan launcher eskisi gibi çalışır. Sunucu açık kaynaktır ([AnyTogether](https://github.com/utkuhalis/AnyTogether), MIT); **Ayarlar → AnyTogether → Sunucu** launcher'ı kendi kurduğun bir sunucuya bağlar.
+
+**Giriş.** **Ayarlar → AnyTogether**: e-postanı ve gelen kodu yaz, launcher'ı web sitesinde onayla (orada passkey de çalışır) ya da AnyPS5 Remote uygulaması eşli ve giriş yapmışsa telefonda bir kez dokun. Şifre ve kayıt formu yok; ilk giriş hesabı açar.
+
+**Arkadaşlar, etkinlikler, sıralamalar ve bildirimler.** Üst çubuktaki **Arkadaşlar** paneli arkadaşlarını ve ne oynadıklarını, istekleri ve kullanıcı adıyla birini eklemeyi gösterir. Oradan **Etkinlikler**, arkadaşlarının neler açıp oynadığını gösterir (kupalar, platinler, ilk oyunlar, uzun oturumlar, dönüm noktaları); bir öğeye 🔥 👏 😮 ya da ❤️ ile tepki ver. **Sıralama**, kupa puanlarını arkadaşlar ya da herkes arasında sıralar; bir oyunun seçeneklerinde puan, oynama süresi ve tamamlama için kendi tablosu var. Üst çubuktaki zil okunmamış **bildirimleri** sayar (arkadaşlık istekleri, davetler, cevapsız aramalar, yokken gelen mesajlar) ve listeyi açar; yenisi küçük bir kartla da görünür. Genel sıralamada yalnızca kupaların (bir oyun için kütüphanen de) herkese açıkken görünürsün; değilse tablo nerede olacağını söyler.
+
+**Birlikte oyna: paylaşan.** Bir oyun açıkken **Arkadaşlar** panelini aç ve **Birlikte oyna**'yı seç. Arkadaşların paylaştığını görür ve izleyebilir: tarayıcıda, telefonda ya da kendi launcher'ında. Panelden arkadaşlarını davet et ya da **Arkadaşlar davetsiz girebilir**'i açık bırak; **En çok izleyici** kaç kişinin izleyebileceğini belirler (en çok 4; Mac her birine ayrı yayın gönderdiği için 3 ve üstünde her biri 540p alır). Her izleyici için **…, 2. (3., 4.) oyuncu olsun**'u seç: yerel co-op'taki gibi oyunu kendi koluyla oynar. Senin kolun 1. oyuncu kalır; izleyici onu asla alamaz. Kolu istediğin an geri alabilir (önce bütün tuşlar bırakılır) ya da birini çıkarabilirsin; **Birlikte oynamayı durdur** paylaşımı bitirir. Her izleyicinin satırı bağlantının doğrudan mı aktarıcı üzerinden mi olduğunu, gidiş-dönüş süresini ve görüntü boyutunu gösterir. macOS ekran kaydı iznini bir kez sorar. Yalnızca oyun gönderilir, ekranının geri kalanı gitmez.
+
+**Birlikte oyna: izleyen.** Launcher'da bir arkadaşı Arkadaşlar panelinden ya da davetinden **İzle**: oyunu sesiyle tam ekran açılır; izin verdiğinde kolun onun 2., 3. ya da 4. oyuncusu olur; PS tuşu çıkarır. Telefonda (AnyPS5 Remote 1.11 ve üstü) **İzle** Arkadaşlar'dadır; paylaşan sana kol verince ekrandaki kol görüntünün üstüne gelir, oyunun titreşimi ve ışık çubuğu da gelir. Tarayıcıda davetteki bağlantıyı ya da web sitesinde arkadaşın profilini aç: kol çalışır (tarayıcının görmesi için bir tuşa bir kez bas), klavye de çalışır (WASD sol analog, ok tuşları yön tuşları, I J K L şekil tuşları, Q / E L1 / R1, Z / C L2 / R2, Return Options).
+
+**Tema Hub.** **Ayarlar → Görünüm → Temalar**, insanların AnyTogether'ın Tema Hub'ında paylaştığı temaları listeler; tek basışla kurulur. Web sitesindeki [Tema Hub](https://anytogether.kodla.agency/themes) aynı temaları beğenileriyle gösterir. Giriş yapmışken **Hub'da paylaş**, kullandığın temayı yükler (Tema Stüdyosu'nda yapılmış, en çok 50 MB); yeniden paylaşmak yeni bir sürüm gönderir. `anyps5://theme/<id>` bağlantıları bir Hub temasını launcher'da açar.
+
+**Nasıl çalıştı?** Bir oyunu oynadıktan sonra launcher **… nasıl çalıştı?** diye sorabilir: Hiç, Açılıyor, Menüler, Oyun içi ya da Oynanabilir. Tek dokunuş launcher ve motor sürümlerini, Mac modelini, macOS'u ve ortalama FPS'i içeren bir rapor gönderir (neyin gittiğini gösterir). **Oyunlardan sonra sorma** soruyu kapatır; oyunun seçeneklerinde **Nasıl çalışıyor?** satırı topluluğun o oyun için kararıyla durur. Bütün raporlar [topluluk uyumluluk listesini](https://anytogether.kodla.agency/compatibility) oluşturur.
 
 ### Proje hakkında
 
@@ -414,6 +456,8 @@ SDL'in tanıdığı kollar (DualSense, DualShock, Xbox kolları gibi) kendiliği
 #### Sorun giderme
 
 - **Log:** `~/Library/Logs/AnyPS5/<TITLE ID>.log`. Oyun kapanırsa sebebi bu dosyanın sonunda yazar. Desteklenmeyen bir durumda program sessizce devam etmez, her zaman bir hata mesajıyla kapanır.
+- **Çökme raporu:** Bir oyun hatayla ya da çökerek kapanınca launcher raporunu hemen sunar; oyunun seçeneklerinde **Son Oturumun Raporu** altında da durur. **Raporu Dışa Aktar**, günlüğü, macOS'un çökme raporunu, son kilit açmanın çıktısını, Mac'i, sürümleri ve oyunun ayarlarını `AnyPS5-<TITLE ID>-<tarih>.zip` (ya da `.txt`) olarak kaydeder. **Sorun Bildir** önce neyin paylaşılacağını gösterir, sonra doldurulmuş bir GitHub bildirimi açar; dışa aktarılan dosyayı ona ekle. Ana klasörün, adların, e-posta adreslerin ve AnyTogether anahtarların ikisinden de çıkarılır.
+- **Ayrıntılı günlük:** Oyunun seçeneklerinde **Ayrıntılı Günlük (İz)** ve (bir kerelik) **Ayrıntılı Günlükle Oyna** var. Oyunu `APS5_LOG_SYNC`, `APS5_LOG_TIMESTAMPS`, `APS5_TRACE_EXIT`, `APS5_TRACE_UNREADABLE`, `APS5_TRACE_MEMORY`, `APS5_SAVEDATA_TRACE`, `APS5_PROFILE_PRESENT` ve `MVK_CONFIG_LOG_LEVEL=3` ile başlatır. Oyun yavaşlar; 256 MB'ı geçen günlük baştan başlar, önceki kısmı `<TITLE ID>.trace-1.log` olarak kalır.
 - **Shader önbelleği:** `~/Library/Caches/org.anyps5.<title id>/shader_cache`. İlk açılışta shader'lar derlendiği için takılmalar olabilir; sonraki açılışlarda önbellekten yüklenir.
 - **Performans ölçümü:** Çalıştırılabilir dosyayı terminalden `APS5_PROFILE_DRAW=1` ile başlat. Log dosyasına her 10 saniyede bir `[present]` satırı düşer; bu satırda çizilen kare sayısı ve kare başına GPU süresi yazar.
 

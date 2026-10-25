@@ -47,6 +47,7 @@ sealed class Message {
           icon: json['icon'] as String?,
         ),
         'streaming' => Streaming(json['state'] as String),
+        'broadcast' => Broadcasting(json['on'] as bool),
         'activity' => ActivityUpdate(
           json['activity'] == null
               ? null
@@ -323,6 +324,17 @@ class Streaming extends Message {
 
   @override
   String toJson() => jsonEncode({'type': 'streaming', 'state': state});
+}
+
+/// Whether the Mac is broadcasting the game (Twitch, YouTube, RTMP); the phone starts and stops it
+/// with the commands broadcastStart and broadcastStop.
+class Broadcasting extends Message {
+  const Broadcasting(this.on);
+
+  final bool on;
+
+  @override
+  String toJson() => jsonEncode({'type': 'broadcast', 'on': on});
 }
 
 class Home extends Message {

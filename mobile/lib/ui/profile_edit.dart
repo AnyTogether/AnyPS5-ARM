@@ -38,6 +38,7 @@ Future<void> openProfileEdit(
     builder: (_) => ProfileEditScreen(
       profiles: profiles ?? Profiles(account),
       pickPhoto: pickPhoto ?? pickFromLibrary,
+      storage: account.storageEnabled(),
     ),
   ),
 );
@@ -47,10 +48,14 @@ class ProfileEditScreen extends StatefulWidget {
     super.key,
     required this.profiles,
     required this.pickPhoto,
+    this.storage,
   });
 
   final Profiles profiles;
   final Future<Uint8List?> Function() pickPhoto;
+
+  /// Whether the server keeps files: the gallery's privacy is offered when it does.
+  final Future<bool>? storage;
 
   @override
   State<ProfileEditScreen> createState() => _ProfileEditScreenState();
@@ -72,10 +77,17 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
   Profiles get _profiles => widget.profiles;
 
+  /// The server keeps files, so the gallery's privacy is offered.
+  bool _storage = false;
+
   @override
   void initState() {
     super.initState();
+    _storage = _profiles.account.storage?.enabled ?? false;
     _load();
+    widget.storage?.then((on) {
+      if (mounted && on != _storage) setState(() => _storage = on);
+    });
   }
 
   @override
@@ -471,32 +483,37 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       ),
       const SizedBox(height: 8),
       for (final section in PrivacySection.values)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                texts.privacySection(section),
-                style: const TextStyle(color: Colors.white70, fontSize: 13.5),
-              ),
-              const SizedBox(height: 6),
-              _AudiencePicker(
-                value: _privacy[section]!,
-                search: section == PrivacySection.search,
-                onChanged: (audience) => _setPrivacy(section, audience),
-              ),
-              if (section == PrivacySection.search)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(
-                    texts.searchHint,
-                    style: const TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
+        // The gallery only where the server keeps photos and clips.
+        if (section != PrivacySection.gallery || _storage)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  texts.privacySection(section),
+                  style: const TextStyle(color: Colors.white70, fontSize: 13.5),
                 ),
-            ],
+                const SizedBox(height: 6),
+                _AudiencePicker(
+                  value: _privacy[section]!,
+                  search: section == PrivacySection.search,
+                  onChanged: (audience) => _setPrivacy(section, audience),
+                ),
+                if (section == PrivacySection.search)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      texts.searchHint,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
-        ),
     ],
   );
 }

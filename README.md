@@ -133,6 +133,10 @@ The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls
 - **Sharing:** **Export Settings** saves the game's keys and every setting as one file, and **Import Settings** applies a file someone shared. Post a setup that works for a game, or take one from a friend.
 - **Reset Advanced Settings** brings back the engine's defaults.
 
+**Engine versions:** **Settings → Engine** lists the engine builds published with this project's releases. Download one (it is checked before use) and choose it for every game or for one game only; a game unlocked with another engine offers **Update and Play**. **Engine Folder** uses an engine you built yourself. A game's options show which engine unlocked it.
+
+**Crash reports:** when a game stops on an error, **Export Report** saves the log, macOS's crash report and the game's settings in one file, and **Open Issue** opens a pre-filled GitHub issue (your name, email and sign-in tokens are removed first). **Detailed logging (trace)** in a game's settings records more for a hard bug.
+
 ### Trophies
 
 ![The trophy list of Hollow Knight: Silksong](docs/screenshots/launcher-trophies.jpg)
@@ -149,7 +153,7 @@ Every trophy is kept and listed as on the console:
 
 - The **percentage**, weighted by grade as on the PS5, and the count of **platinum, gold, silver and bronze** trophies earned.
 - Every trophy with its **icon, name, description, grade** and the **day and time you earned it**. Trophies you have not earned yet are greyed out.
-- **Hidden** trophies stay hidden until you earn them.
+- **Hidden** trophies stay hidden until you earn them. **Show** (△, or a click on the row) reveals the focused one for this look at the list; **Settings → Behaviour → Always Show Hidden Trophies** reveals them all.
 - Trophies that count something (*Acquire all Tools*, *Bind all Silk Skills*) show **how far you are**, such as 23/51.
 
 The list, the texts and the icons come from the game's own trophy package (`sce_sys/trophy2`), in the game's language when it has one. The engine records each unlock in the installed game, and the list updates when the game closes. Unlocking a game again keeps them.
@@ -167,12 +171,22 @@ The **library** button shows every game as a grid. **Settings** hold:
   - **Themes:** the built-in themes, yours, and the ones people share on the **AnyPS5 Hub** ([`hub/`](hub/README.md)), installed with one press. **Share on the Hub** saves your theme and opens the page to send it. The phone wears the launcher's theme too.
 - **Library:** the games folder and scanning it again.
 - **Language:** Türkçe or English.
-- **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, Discord, update checks, and installing Rosetta if it is missing. Also:
+- **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, always showing hidden trophies, Discord, update checks, and installing Rosetta if it is missing. Also:
   - **Clips:** the launcher keeps the last 15 to 120 seconds of the game playing, picture and sound; **Create** on a DualSense (Share on a DualShock 4), **⌥F12** or Create on the phone saves them as an MP4 beside the screenshots. macOS asks once for the screen recording permission.
   - **Save Sync:** each game's saves and trophies stay the same on your other Macs through iCloud Drive or any folder you choose (Dropbox, a shared or USB folder). Newer saves from another Mac come down before a game starts, and the Mac's go up when it ends; whatever is replaced is backed up first.
-- **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder), and a folder of console system fonts for games that ask for them.
+- **Fonts:** games that ask for the console's system fonts get them without any setup; some (Astro's Playroom) stop at start without them. The app carries the Noto substitutes for Latin, italics, typewriter, Thai and Arabic (5.5 MB, SIL Open Font License 1.1). Japanese, Chinese and Korean (Noto Sans CJK, 105 MB once) download from Noto's own release the first time a game needs them, checked against their SHA-256 before use: a game started in one of those languages waits for them on its start screen, and any other game that asks for them while it runs (the engine logs every font set it opens) gets them for its next start. The page shows which font games get for each script and where it comes from, and holds **Your Fonts Folder**: the console's own fonts, if you have them, which come before the launcher's.
+- **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder).
 - **Links:** `anyps5://game/<title ID>` selects a game and `anyps5://play/<title ID>` starts it (Copy Link in a game's settings); a folder opened with AnyPS5 from Finder can become the games folder.
 - **About:** the app and toolkit versions, **Check for Updates**, and **Update to …** when a newer AnyPS5 is out: the launcher downloads it, takes its place and opens again.
+
+### Broadcasting
+
+Like the console's **Broadcast**, the launcher streams the game playing live to **Twitch**, **YouTube** or any **RTMP / RTMPS** server (another service's ingest address, or your own nginx-rtmp or MediaMTX).
+
+- **Set it up once** in **Settings → Broadcasting:** the service, the stream key (typed in a hidden field or pasted from the clipboard; **Get your key** opens the service's page for it), the quality (**720p60 · 3 Mbit/s**, **1080p30 · 4.5 Mbit/s** or **1080p60 · 6 Mbit/s**), the microphone for commentary with its own level, the **LIVE** badge and the link viewers watch on.
+- **Go live** from the game's panel while it plays (PS, then **⋯** / △ on the running game), or **Go Live** on the phone's launcher screen. The panel then shows how long you have been on air, the bit rate going out, dropped frames, **Copy viewer link**, the microphone and **Stop broadcast**; the broadcast also ends with the game.
+- The game's window and sound are captured as for clips (macOS asks once for the screen recording permission) and encoded on the Mac's media engine: H.264 High with a key frame every two seconds and no B-frames, AAC at 48 kHz stereo 160 kbit/s, as Twitch and YouTube ask. When the upload cannot keep up, frames are dropped instead of the stream falling behind, and a lost connection is made again by itself.
+- The stream key is kept in `~/Library/Application Support/AnyPS5/Broadcast/keys.json`, readable by your user only, rather than the Keychain: the app is signed ad hoc, so the Keychain would ask for it again after every update. The launcher never shows the key in full. The LIVE badge is drawn over the game for you and is not part of the broadcast.
 
 ### Getting around
 
@@ -192,6 +206,7 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - **Trophies:** a trophy earned in the game drops in at the top of the phone too, and the phone buzzes.
 - **PS** takes the phone back to the launcher and brings the launcher in front of the game on the Mac.
 - **Create** (◉, left of the touchpad) saves the last seconds of the game as a clip, as on the DualSense.
+- **Go Live / End Broadcast** beside **Back to Game** starts and stops the launcher's [broadcast](#broadcasting) of the game playing.
 - **Rumble, trigger effects and light:** the game's vibration on the phone, a pulse on L2/R2 where the trigger would push back, and the pad glowing with the game's light bar colour.
 - **Motion:** the phone's accelerometer and gyroscope are the DualSense's motion sensors, for games that tilt or aim with them.
 - **Your own layout, per game:** the lock on the pad opens an editor to move, size, fade or hide any control, or make it a toggle or turbo button; the Mac keeps it with the game's settings.
@@ -220,12 +235,16 @@ Games unlocked before phone support need **Update and Play** once, so they carry
 - **Sign-in:** Settings → AnyTogether, with a code sent to your email, or with one tap on your phone if it is already signed in (and the other way round). No password, no sign-up form. On the website you can also add a passkey.
 - **Friends:** add someone by their handle and see who is online and what they are playing.
 - **Play time and trophies:** each session and trophy goes to your account, so friends see them on your profile and hear of a new trophy as you earn it.
-- **Profiles** *(in the next release)*: yours and your friends': games, hours, trophies and points, and the latest trophies with how rare they are. Change your name, bio, country and handle, and who sees your games, trophies, friends and online status.
-- **Messages** *(in the next release)*: chats with a friend and group chats, also on the phone and the website.
-- **Parties and voice** *(in the next release)*: up to eight friends together, with voice that goes straight between you; push-to-talk on ⌥V works over a game, and a ring shows who is speaking. The leader invites, removes and hands the lead over.
-- **Join a friend's game** *(in the next release)*: friends see the game you play as joinable and can start the same one, checked against your game's version first.
-- **Another server** *(in the next release)*: Settings → AnyTogether → Server, for a self-hosted AnyTogether.
+- **Profiles**: yours and your friends': games, hours, trophies and points, and the latest trophies with how rare they are. Change your name, bio, country and handle, and who sees your games, trophies, friends and online status.
+- **Messages**: chats with a friend and group chats, also on the phone and the website.
+- **Parties and voice**: up to eight friends together, with voice that goes straight between you; push-to-talk on ⌥V works over a game, and a ring shows who is speaking. The leader invites, removes and hands the lead over.
+- **Join a friend's game**: friends see the game you play as joinable and can start the same one, checked against your game's version first.
+- **Another server**: Settings → AnyTogether → Server, for a self-hosted AnyTogether.
 - **Discord status:** the game you play shows on Discord (Settings → Behaviour), with or without AnyTogether.
+- **Share play:** while you play, start Share play from the Friends panel. Friends watch in their browser, on the phone or in their launcher, and you can let one play as player 2, 3 or 4: local co-op together from anywhere. Your controller stays player 1.
+- **Activity, leaderboards and notifications:** what friends unlock and play with reactions, boards per game and overall, and a bell in the top bar.
+- **Theme Hub:** Settings → Appearance → Themes lists the themes people share on AnyTogether; Share on the Hub uploads yours.
+- **How did it run?** After a session, one tap sends a compatibility report for the [compatibility list](https://anytogether.kodla.agency/compatibility).
 
 | A friend's profile | Friends |
 |---|---|
@@ -268,7 +287,7 @@ The [shader recompiler](core/shader/recompiler/Recompiler.cpp) successfully prod
 
 [Tested games and their frame rates](docs/user/COMPATIBILITY.md)
 
-Per-game progress (stage reached, open blockers, libraries and GPU coverage) is tracked on the [blocker map](https://alxcbtw.github.io/anyps5-roadmap/), a community project built from public GitHub data ([source](https://github.com/AlxcBTW/anyps5-roadmap)). Test reports go in the [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussions, one thread per title.
+Per-game status and test reports live in the [Game bring-up](https://github.com/boykopovar/AnyPS5/discussions/categories/game-bring-up) discussions, one thread per title.
 
 ## About
 

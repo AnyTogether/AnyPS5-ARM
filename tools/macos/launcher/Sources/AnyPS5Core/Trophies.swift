@@ -194,3 +194,37 @@ public enum Trophies {
         unsigned(value).flatMap { $0 <= UInt64(Int32.max) ? Int($0) : nil }
     }
 }
+
+/// Which hidden trophies a list shows as they are: all of them with the setting on, else the ones
+/// the user chose to show this time (Show, △). An earned trophy is never hidden.
+public struct HiddenTrophies: Equatable, Sendable {
+    public var always: Bool
+    /// The trophies shown this time, by `key`.
+    public private(set) var shown: Set<String> = []
+
+    public init(always: Bool, shown: Set<String> = []) {
+        self.always = always
+        self.shown = shown
+    }
+
+    public static func key(game: String, trophy: TrophySet.Trophy) -> String { game + "/" + trophy.id }
+
+    /// The trophy's name, description and icon stay hidden.
+    public func secret(_ trophy: TrophySet.Trophy, game: String) -> Bool {
+        trophy.hidden && trophy.unlocked == nil && !always && !shown.contains(HiddenTrophies.key(game: game, trophy: trophy))
+    }
+
+    /// Show and Hide apply: a hidden trophy not earned yet, with the setting off.
+    public func canToggle(_ trophy: TrophySet.Trophy) -> Bool {
+        trophy.hidden && trophy.unlocked == nil && !always
+    }
+
+    /// Shows the trophy, or hides it again; false when it is not one that can be.
+    @discardableResult
+    public mutating func toggle(_ trophy: TrophySet.Trophy, game: String) -> Bool {
+        guard canToggle(trophy) else { return false }
+        let key = HiddenTrophies.key(game: game, trophy: trophy)
+        if shown.contains(key) { shown.remove(key) } else { shown.insert(key) }
+        return true
+    }
+}

@@ -16,6 +16,7 @@ final class RemotePlay {
 
     private var stream: SCStream?
     private var output: Output?
+    private var watch: Task<Void, Never>?
     private(set) var pid: pid_t?
     private(set) var size: (width: Int, height: Int)?
 
@@ -36,21 +37,11 @@ final class RemotePlay {
         guard let app = content.applications.first(where: { $0.processID == pid }), let window = ClipRecorder.mainWindow(of: pid, in: content),
               let display = content.displays.first(where: { $0.frame.intersects(window.frame) }) ?? content.displays.first else { throw Failure.noWindow }
         let filter = SCContentFilter(display: display, including: [app], exceptingWindows: [])
-        let configuration = SCStreamConfiguration()
-        let area = ClipRecorder.area(of: window, on: display)
-        configuration.sourceRect = area
-        // The game's shape at the phone's height or less, even sizes for the encoder.
-        let scale = min(1, Double(height) / area.height, Double(width) / area.width)
-        configuration.width = max(160, Int(area.width * scale) & ~1)
-        configuration.height = max(90, Int(area.height * scale) & ~1)
-        configuration.minimumFrameInterval = CMTime(value: 1, timescale: 60)
-        configuration.pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange
-        configuration.queueDepth = 3
-        configuration.showsCursor = false
-        configuration.capturesAudio = true
-        configuration.sampleRate = 48000
-        configuration.channelCount = 2
-        configuration.excludesCurrentProcessAudio = true
+        // The game's pixels within what the phone asked for, following the window while it changes.
+        let configure = { (window: SCWindow, display: SCDisplay, scale: CGFloat) in
+            ClipRecorder.configuration(window: window, display: display, scale: scale, maxWidth: width, maxHeight: height, queueDepth: 3)
+        }
+        let configuration = configure(window, display, CGFloat(filter.pointPixelScale))
         // About 0.2 bit a pixel at 60 fps: 11 Mbit/s for 1280 x 720.
         let bitRate = max(2_000_000, Int(Double(configuration.width * configuration.height) * 60 * 0.2))
         let output = Output(bitRate: bitRate, send: send)
@@ -62,9 +53,12 @@ final class RemotePlay {
         self.output = output
         self.pid = pid
         self.size = (width, height)
+        watch = ClipRecorder.follow(stream, pid: pid, app: app, window: window, display: display, configure: configure)
     }
 
     func stop() {
+        watch?.cancel()
+        watch = nil
         if let stream { Task { try? await stream.stopCapture() } }
         stream = nil
         output = nil

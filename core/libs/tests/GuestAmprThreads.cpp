@@ -40,6 +40,7 @@ struct GuestTypeInfo {
 struct GuestSystemError {
     const void* vtable;
     const char* message;
+    int reserved;
     int code;
     const void* category;
 };

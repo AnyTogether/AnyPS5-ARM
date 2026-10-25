@@ -750,8 +750,8 @@ int APS5_VABI sceNpManagerIntLoginGetAccessToken(void) {
 int APS5_VABI sceNpAbortRequest(int req_id) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("req_id", static_cast<std::int64_t>(req_id)); });
-    (void)req_id;
-    return call.Return(0);
+    std::lock_guard lock(requestMutex);
+    return call.Return(liveRequests.count(req_id) ? 0 : SCE_NP_ERROR_REQUEST_NOT_FOUND);
 }
 
 int APS5_VABI sceNpCheckCallback(void) {
@@ -828,6 +828,7 @@ int APS5_VABI sceNpDeleteRequest(int req_id) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("req_id", static_cast<std::int64_t>(req_id)); });
     std::lock_guard lock(requestMutex);
+    if (!liveRequests.count(req_id)) return call.Return(SCE_NP_ERROR_REQUEST_NOT_FOUND);
     liveRequests.erase(req_id);
     requestResults.erase(req_id);
     return call.Return(0);
@@ -998,13 +999,15 @@ int APS5_VABI sceNpHasSignedUp(int user_id, bool* has_signed_up) {
 int APS5_VABI sceNpPollAsync(int req_id, int* result) {
     Online::Call call("libSceNpManager", __func__);
     call.Args([&](Online::Fields& in) { in.Int("req_id", static_cast<std::int64_t>(req_id)).Ptr("result", result); });
+    if (!result) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
     int value = SCE_NP_ERROR_SIGNED_OUT;
     {
         std::lock_guard lock(requestMutex);
+        if (!liveRequests.count(req_id)) return call.Return(SCE_NP_ERROR_REQUEST_NOT_FOUND);
         const auto found = requestResults.find(req_id);
         if (found != requestResults.end()) value = found->second;
     }
-    if (result) *result = value;
+    *result = value;
     return call.Return(NP_POLL_ASYNC_FINISHED, [&](Online::Fields& out) { out.Int("result", value); });
 }
 

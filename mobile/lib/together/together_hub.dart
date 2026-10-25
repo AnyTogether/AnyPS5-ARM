@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import 'calls.dart';
+import 'discover.dart';
 import 'feed.dart';
 import 'friends.dart';
 import 'messages.dart';
@@ -54,6 +55,12 @@ class TogetherHub extends ChangeNotifier {
       engine: shareEngine ?? WebRtcShareEngine.new,
       sound: shareSound ?? PlatformShareSound.new,
     )..addListener(notifyListeners);
+    discover = Discover(
+      account: account,
+      socket: this.socket,
+      parties: parties,
+      sharePlays: sharePlays,
+    )..addListener(notifyListeners);
     account.addListener(_accountChanged);
     _lifecycle = AppLifecycleListener(onResume: this.socket.wake);
     _accountChanged();
@@ -76,18 +83,26 @@ class TogetherHub extends ChangeNotifier {
 
   /// Watching friends' share plays.
   late final SharePlays sharePlays;
+
+  /// Finding players beyond friends: the board, public parties and share plays, discovery.
+  late final Discover discover;
   late final AppLifecycleListener _lifecycle;
   String? _user;
 
   /// Who is signed in, by id.
   String? get me => account.user?.id;
 
-  /// What waits for an answer: friend requests, unread messages, party and share play invites.
+  /// What waits for an answer: friend requests, unread messages, party and share play invites,
+  /// people asking into the party this phone leads, and "I'm in"s on its open posts.
   int get badge =>
       friends.incoming.length +
       messages.unread +
       parties.invites.length +
-      sharePlays.invites.length;
+      sharePlays.invites.length +
+      (parties.party?.leaderId == me && me != null
+          ? parties.party!.requests.length
+          : 0) +
+      discover.waiting;
 
   void _accountChanged() {
     final user = account.user?.id;
@@ -103,6 +118,7 @@ class TogetherHub extends ChangeNotifier {
     feed.clear();
     notifications.clear();
     sharePlays.clear();
+    discover.clear();
     if (user != null) socket.start();
     notifyListeners();
   }
@@ -117,6 +133,7 @@ class TogetherHub extends ChangeNotifier {
     typing.dispose();
     voice.dispose();
     sharePlays.dispose();
+    discover.dispose();
     parties.dispose();
     feed.dispose();
     notifications.dispose();

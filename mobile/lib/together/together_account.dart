@@ -5,6 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'storage.dart';
+
 /// AnyTogether's own server. AnyTogether can be hosted by anyone: the phone may be pointed at
 /// another one, and `--dart-define=ANYTOGETHER_URL=…` overrides both.
 final standardServer = Uri.parse('https://anytogether.kodla.agency');
@@ -156,6 +158,7 @@ class TogetherAccount extends ChangeNotifier {
     if (serverFixed || server == base) return;
     if (user != null) await signOut();
     base = server;
+    storage = null;
     if (server == standardServer) {
       await preferences.remove(_serverKey);
     } else {
@@ -325,14 +328,15 @@ class TogetherAccount extends ChangeNotifier {
     Map<String, dynamic>? body,
   ]) => _authorized(method, path, body);
 
-  /// A signed-in upload of raw bytes (a picture), JSON back.
+  /// A signed-in upload of raw bytes (a picture), JSON back; PUT unless [method] says.
   Future<Map<String, dynamic>> upload(
     String path,
     List<int> bytes,
-    String contentType,
-  ) async {
+    String contentType, {
+    String method = 'PUT',
+  }) async {
     Future<Map<String, dynamic>> send() async => _send(
-      'PUT',
+      method,
       path,
       null,
       token: await _accessToken(),
@@ -346,6 +350,60 @@ class TogetherAccount extends ChangeNotifier {
       _accessExpiry = DateTime.fromMillisecondsSinceEpoch(0);
       return send();
     }
+  }
+
+  // Cloud storage
+
+  /// Whether this server keeps files, once asked; null before. Reset with the server.
+  StorageInfo? storage;
+  Future<StorageInfo>? _storageAsking;
+
+  /// Whether the server keeps files (photos in messages, cloud saves): asked once without a
+  /// token, kept after. A server that cannot be asked counts as off for now and is asked again;
+  /// nobody signed in has none of it, so nothing is asked then.
+  Future<bool> storageEnabled() async {
+    final known = storage;
+    if (known != null) return known.enabled;
+    if (user == null) return false;
+    final base = this.base;
+    try {
+      final info = await (_storageAsking ??= _send(
+        'GET',
+        'storage',
+        null,
+      ).then(StorageInfo.fromJson));
+      if (base == this.base) {
+        storage = info;
+        notifyListeners();
+      }
+      return info.enabled;
+    } on Object {
+      return false;
+    } finally {
+      _storageAsking = null;
+    }
+  }
+
+  /// How much of the account's quota saves and media use.
+  Future<StorageUsage> storageUsage() async {
+    final json = await call('GET', 'me/storage');
+    if (json['enabled'] == false) {
+      throw const TogetherProblem(503, 'storage_disabled', 'Storage is off');
+    }
+    return StorageUsage.fromJson(
+      json['usage'] as Map<String, dynamic>? ?? const {},
+    );
+  }
+
+  /// A picture kept as media, to send in a message: what the server made of it.
+  Future<Attachment> uploadImage(List<int> bytes) async {
+    final json = await upload(
+      'me/media?kind=image',
+      bytes,
+      imageContentType(bytes),
+      method: 'POST',
+    );
+    return Attachment.fromJson(json['media'] as Map<String, dynamic>);
   }
 
   /// The profile's name or handle changed: the account shows the new one, and keeps it.
@@ -449,7 +507,10 @@ class TogetherAccount extends ChangeNotifier {
       request.headers.contentType = ContentType.json;
       request.write(jsonEncode(body));
     }
-    final response = await request.close().timeout(const Duration(seconds: 20));
+    // A file going up gets time to get there.
+    final response = await request.close().timeout(
+      Duration(seconds: bytes != null ? 120 : 20),
+    );
     final text = await utf8.decodeStream(response);
     Object? json;
     try {

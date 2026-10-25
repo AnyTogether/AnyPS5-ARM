@@ -14,6 +14,8 @@ enum NoticeKind {
   partyInvite('party_invite'),
   gameInvite('game_invite'),
   missedCall('missed_call'),
+  lfgRequest('lfg_request'),
+  lfgAccepted('lfg_accepted'),
   warning('warning');
 
   const NoticeKind(this.wire);
@@ -33,6 +35,8 @@ const optionalNoticeKinds = [
   NoticeKind.partyInvite,
   NoticeKind.gameInvite,
   NoticeKind.missedCall,
+  NoticeKind.lfgRequest,
+  NoticeKind.lfgAccepted,
 ];
 
 /// One notification under the bell.
@@ -82,7 +86,9 @@ class Notice {
   final String? subjectId;
 
   /// message: conversationId, title, group, count, text; party_invite: partyId, size;
-  /// game_invite: sessionId, titleId; missed_call: callId; warning: reason.
+  /// game_invite: sessionId, titleId; missed_call: callId; warning: reason; lfg_request:
+  /// postId, titleId, gameNames, purpose, count; lfg_accepted: postId, titleId, gameNames,
+  /// purpose, invite {kind, id}.
   final Map<String, dynamic> data;
   final bool read;
   final DateTime createdAt;

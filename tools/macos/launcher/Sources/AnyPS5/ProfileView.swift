@@ -34,6 +34,7 @@ extension AppModel {
         Sounds.shared.play(.select)
         profileTask?.cancel()
         loadProfileActivity(handle)
+        loadProfileGallery(handle)
         profileTask = Task {
             do {
                 let page = try await together.profilePage(handle, card: card)
@@ -75,6 +76,10 @@ extension AppModel {
 
     /// Up and down in a column, left and right between the games and the trophies.
     func profileCommand(_ command: Command) {
+        if cloud.viewing != nil {
+            if command == .back || command == .select || command == .options { closeViewer() }
+            return
+        }
         let counts = [profileGames.count, profileTrophies.count, social.profileActivity?.count ?? 0]
         switch command {
         case .up, .down:
@@ -119,6 +124,9 @@ struct ProfileView: View {
         let page = model.profilePage
         VStack(alignment: .leading, spacing: 30 * scale) {
             header(page)
+            if page != nil, let gallery = model.cloud.profileGallery {
+                ProfileGalleryStrip(gallery: gallery, mine: page?.profile.isMe == true).transition(.opacity)
+            }
             if let page {
                 HStack(alignment: .top, spacing: 28 * scale) {
                     gamesColumn(page)
@@ -145,6 +153,9 @@ struct ProfileView: View {
         .padding(.vertical, 56 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .overlay {
+            if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
+        }
         // Capitals in the launcher's language: "PROFİLİM", not "PROFILIM".
         .environment(\.locale, Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US"))
     }
@@ -526,13 +537,17 @@ struct ProfileAvatar: View {
     let name: String
     let size: CGFloat
     var glow = true
+    /// A picture on this Mac, before the avatar's address and the initial.
+    var picture: NSImage? = nil
     @EnvironmentObject private var model: AppModel
 
     var body: some View {
         ZStack {
             Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
             Text(String(name.prefix(1)).uppercased()).font(.display(size * 0.42, .semibold)).foregroundStyle(.white)
-            if let remote = url.flatMap(URL.init(string:)) {
+            if let picture {
+                Image(nsImage: picture).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+            } else if let remote = url.flatMap(URL.init(string:)) {
                 AsyncImage(url: remote) { image in image.resizable().aspectRatio(contentMode: .fill) } placeholder: { Color.clear }
             }
         }

@@ -14,6 +14,7 @@ Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/
 - **The pad.** Both sticks, ✕ ○ □ △, L1 R1, L2 R2, the D-pad, Options and the touchpad, any number of them held at once. Sliding a finger on the touchpad moves the touch, a tap is a click and a finger held still clicks until it lifts; two fingers are two touches. A double tap on a stick holds L3 or R3. The latency from the touch to the game is shown on the phone and in the launcher. The pad takes over by itself when a game starts and gives the phone back to the launcher when it ends.
 - **PS** takes the phone to the launcher and brings the launcher in front of the game on the Mac; the game gets nothing from the phone meanwhile.
 - **Create** (◉, left of the touchpad) has the Mac save the last seconds of the game as a clip, with Clips on in the launcher.
+- **Go Live / End Broadcast** on the launcher screen starts and stops the Mac's broadcast of the game playing (Twitch, YouTube or RTMP, set up in the launcher's Settings → Broadcasting).
 - **Rumble, trigger effects and light.** The game's two motors are felt on the phone, the large one dull and the small one crisp (amplitude-controlled vibration on Android, Core Haptics on iPhone). While L2 or R2 is held, the phone pulses where the DualSense trigger would push back, and the pad glows with the game's light bar colour. About turns the vibration off.
 - **Motion.** The phone's accelerometer and gyroscope are the DualSense's motion sensors while a game plays, turned to match whichever way the phone is held: tilt it to steer or turn it to aim in games that use them. About turns it off.
 - **Your own layout, per game.** The lock at the pad's bottom left opens the editor: drag a control to move it, tap it to size it, fade it, hide it, or make it a toggle (one tap presses it, the next lets go) or a turbo button. Reset and Reset All go back to the default. The layout is kept on the Mac with the game's settings and comes back whenever that game plays.
@@ -22,17 +23,19 @@ Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/
 - **Language.** The phone uses the launcher's language: English by default, or Turkish.
 - The version is shown faintly in the bottom right corner.
 
-It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), the launcher for Windows and Linux (in development), speaks the same phone protocol.
+It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), the launcher for Windows and Linux (early preview), pairs with it too.
 
 ## AnyTogether
 
 The phone signs in to [AnyTogether](https://anytogether.kodla.agency), the launchers' online home ([open source](https://github.com/utkuhalis/AnyTogether), MIT). Signed out, the phone is the controller as always.
 
 - **Sign-in:** with a code sent to your email, or with one tap using the account the Mac is signed in with; a signed-in phone also signs the Mac in. No password, no sign-up form.
-- **Friends** *(in the next release)*: from the people button on the home screen: who is online and what they play, requests, adding by handle.
-- **Messages** *(in the next release)*: your conversations, the same ones as on the Mac and the website, with unread counts; write to a friend from their entry.
-- **Parties and voice** *(in the next release)*: start a party, invite friends or join theirs, and talk with its members, voice going straight between you.
-- **Another server** *(in the next release)*: for a self-hosted AnyTogether; when the Mac uses another server, the phone offers it.
+- **Friends**: from the people button on the home screen: who is online and what they play, requests, adding by handle.
+- **Messages**: your conversations, the same ones as on the Mac and the website, with unread counts; write to a friend from their entry.
+- **Parties and voice**: start a party, invite friends or join theirs, and talk with its members, voice going straight between you.
+- **Calls, profiles, activity**: call a friend 1:1 (an incoming call shows over any screen, the pad too), edit your profile and picture, the activity feed, leaderboards and notifications.
+- **Share play**: watch a friend's game and, when they let you, play as player 2–4 with the phone's pad.
+- **Another server**: for a self-hosted AnyTogether; when the Mac uses another server, the phone offers it.
 
 | Friends | Messages |
 |---|---|

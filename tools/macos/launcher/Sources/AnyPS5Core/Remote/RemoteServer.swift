@@ -284,7 +284,7 @@ public final class RemoteServer: @unchecked Sendable {
             guard phones.contains(where: { $0 === client }) else { return }
             client.streamSize = on ? (max(160, width), max(90, height)) : nil
             events.streamWishes()
-        case .pairing, .welcome, .rejected, .library, .art, .trophy, .activity, .look, .streaming:
+        case .pairing, .welcome, .rejected, .library, .art, .trophy, .activity, .look, .streaming, .broadcast:
             break
         }
     }

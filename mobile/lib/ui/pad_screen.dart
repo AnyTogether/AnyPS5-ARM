@@ -159,6 +159,7 @@ class _PadScreenState extends State<PadScreen> {
                         editing: _editing,
                         selected: _selected,
                         clear: widget.video != null,
+                        font: DefaultTextStyle.of(context).style,
                       ),
                     ),
                   ),
@@ -572,6 +573,7 @@ class _PadPainter extends CustomPainter {
     required this.editing,
     required this.selected,
     this.clear = false,
+    this.font = const TextStyle(),
   });
 
   final PadLayout layout;
@@ -583,6 +585,9 @@ class _PadPainter extends CustomPainter {
 
   /// The game shows behind: no background of its own.
   final bool clear;
+
+  /// The app's text style, whose font the labels are drawn in.
+  final TextStyle font;
 
   static const base = Color(0xFF16181F);
   static const glass = Color(0x1AFFFFFF);
@@ -689,6 +694,8 @@ class _PadPainter extends CustomPainter {
       text: TextSpan(
         text: control.label,
         style: TextStyle(
+          fontFamily: font.fontFamily,
+          fontFamilyFallback: font.fontFamilyFallback,
           color: _fade(
             down ? Colors.black : Colors.white.withValues(alpha: 0.9),
             fade,
@@ -748,5 +755,6 @@ class _PadPainter extends CustomPainter {
       old.glow != glow ||
       old.editing != editing ||
       old.selected != selected ||
-      old.clear != clear;
+      old.clear != clear ||
+      old.font != font;
 }

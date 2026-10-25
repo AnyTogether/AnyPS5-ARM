@@ -123,6 +123,9 @@ class Session extends ChangeNotifier {
   /// How Remote Play is going, as the launcher last said; null before it said anything.
   final streaming = ValueNotifier<String?>(null);
 
+  /// Whether the Mac is broadcasting the game, as it last said.
+  final broadcasting = ValueNotifier<bool>(false);
+
   /// The picture size asked for, while Remote Play is wanted.
   (int, int)? _streamSize;
   FrameAssembler? _assembler;
@@ -304,6 +307,8 @@ class Session extends ChangeNotifier {
         notifyListeners();
       case Streaming(:final state):
         streaming.value = state;
+      case Broadcasting(:final on):
+        broadcasting.value = on;
       case final TogetherHandoff ask:
         if (together.user == null) {
           // Nothing to sign the Mac in with: it says so and offers the other ways.
@@ -528,6 +533,7 @@ class Session extends ChangeNotifier {
     _socket = null;
     _stopPad();
     activity.value = null;
+    broadcasting.value = false;
     if (_closed || status == ConnectionStatus.rejected) return;
     _scheduleRetry(generation);
   }

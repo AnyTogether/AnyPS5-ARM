@@ -31,7 +31,10 @@ class _FeedPaneState extends State<FeedPane> {
   @override
   void initState() {
     super.initState();
-    _feed.watch(true);
+    // Marking it seen tells the screen around it, which may be building this very frame.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _feed.watch(true);
+    });
     _load();
   }
 

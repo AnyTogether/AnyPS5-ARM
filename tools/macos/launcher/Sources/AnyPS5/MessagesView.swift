@@ -78,6 +78,10 @@ extension AppModel {
     }
 
     func messagesCommand(_ command: Command) {
+        if cloud.viewing != nil {
+            if command == .back || command == .select || command == .options { closeViewer() }
+            return
+        }
         if composing {
             if command == .back { composing = false }
             return
@@ -184,6 +188,7 @@ extension AppModel {
 
     /// The group with the friends picked, opened to write in.
     func startGroup() {
+        guard familyPermits(.messages) else { return }
         let members = togetherFriends.map(\.userId).filter(groupPicked.contains)
         guard !members.isEmpty else { return show(T.text(.messagesGroupPick), symbol: "person.2.badge.plus") }
         let title = groupName
@@ -272,7 +277,7 @@ extension AppModel {
                 let client = together
                 Task { try? await client.markRead(message.conversationId, upTo: message.seq) }
             }
-            guard event.type == "message.created", message.authorId != togetherUser?.id, !viewing, let text = message.text else { return }
+            guard event.type == "message.created", message.authorId != togetherUser?.id, !viewing, let text = messageWords(message) else { return }
             let author = inbox?.conversations.first { $0.id == message.conversationId }?.members.first { $0.userId == message.authorId }?.displayName ?? ""
             Sounds.shared.play(.move)
             show(T.format(.messagesFrom, author, text), symbol: "bubble.left.fill")
@@ -326,6 +331,9 @@ struct MessagesView: View {
         .padding(.vertical, 52 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.black.opacity(0.74).background(.ultraThinMaterial))
+        .overlay {
+            if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
+        }
     }
 
     // MARK: List
@@ -684,7 +692,7 @@ struct ConversationRow: View {
 
     private func preview(_ conversation: TogetherConversation, me: String) -> String {
         guard let last = conversation.lastMessage else { return T.text(.messagesSayHello) }
-        let text = last.text ?? T.text(.messagesDeleted)
+        let text = model.messageWords(last) ?? T.text(.messagesDeleted)
         return last.authorId == me ? T.format(.messagesYou, text) : text
     }
 }
@@ -726,14 +734,12 @@ struct MessageList: View {
                             Text(conversation.members.first { $0.userId == message.authorId }?.displayName ?? "")
                                 .font(.display(12 * scale, .semibold)).foregroundStyle(.white.opacity(0.55))
                         }
-                        Text(message.text ?? T.text(.messagesDeleted))
-                            .font(.display(16 * scale))
-                            .italic(message.text == nil)
-                            .foregroundStyle(.white.opacity(message.text == nil ? 0.5 : 1))
-                            .padding(.horizontal, 14 * scale)
-                            .padding(.vertical, 9 * scale)
-                            .background(RoundedRectangle(cornerRadius: 18 * scale, style: .continuous).fill(mine ? model.accent.opacity(0.85) : Color.white.opacity(0.1)))
-                            .textSelection(.enabled)
+                        if let attachment = message.attachment {
+                            AttachmentBubble(attachment: attachment, mine: mine)
+                            if let caption = message.words { bubble(caption, mine: mine) }
+                        } else {
+                            bubble(message.deletedAt == nil ? message.text : nil, mine: mine)
+                        }
                         if index == messages.count - 1 || messages[index + 1].authorId != message.authorId {
                             Text(MessageList.time(message.createdAt) + (message.editedAt != nil ? " · " + T.text(.messagesEdited) : ""))
                                 .font(.display(11 * scale, .medium)).foregroundStyle(.white.opacity(0.4))
@@ -746,6 +752,17 @@ struct MessageList: View {
             }
         }
         .padding(.vertical, 6 * scale)
+    }
+
+    private func bubble(_ text: String?, mine: Bool) -> some View {
+        Text(text ?? T.text(.messagesDeleted))
+            .font(.display(16 * scale))
+            .italic(text == nil)
+            .foregroundStyle(.white.opacity(text == nil ? 0.5 : 1))
+            .padding(.horizontal, 14 * scale)
+            .padding(.vertical, 9 * scale)
+            .background(RoundedRectangle(cornerRadius: 18 * scale, style: .continuous).fill(mine ? model.accent.opacity(0.85) : Color.white.opacity(0.1)))
+            .textSelection(.enabled)
     }
 
     /// "14:05" today, "Mon" this week, "Oct 3" before.

@@ -12,10 +12,10 @@
 #include <codegen/x86/Sha1Lowering.hpp>
 #include <codegen/x86/Sha1Operands.hpp>
 #include <codegen/x86/StubBodyBuilder.hpp>
-#include <codegen/x86/MaskedStoreLowering.hpp>
 #include <codegen/x86/ScalarCompareOperands.hpp>
 #include <codegen/x86/WideStoreLowering.hpp>
 #include <codegen/x86/WideStoreOperands.hpp>
+#include <codegen/x86/MaskedStoreLowering.hpp>
 #include <codegen/x86/AndnLowering.hpp>
 #include <codegen/x86/X64InstructionDecoder.hpp>
 #include <codegen/x86/X64OpcodeConstants.hpp>
@@ -175,7 +175,8 @@ public:
 
     void EmitOutOfLine(
         StubBodyBuilder& body,
-        std::span<const std::uint8_t> instruction
+        std::span<const std::uint8_t> instruction,
+        bool allowInPlace = false
     ) const override;
 
 private:
@@ -186,7 +187,6 @@ private:
     ClzeroLowering _clzeroLowering;
     ReciprocalLowering _reciprocalLowering;
     WideStoreLowering _wideStoreLowering;
-    MaskedStoreLowering _maskedStoreLowering;
 
     [[nodiscard]] Amd64OnlyMatch _matchMovnts(const DecodedInstruction& instr, const Entry& entry) const;
     [[nodiscard]] Amd64OnlyMatch _matchSse4a(const DecodedInstruction& instr, const Entry& entry, const Entry& registerFormEntry, std::span<const std::uint8_t> trailing) const;
@@ -265,16 +265,21 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::_matchRosetta(const D
     if (instr.IsClwb())
         return _inPlace(kClwb, instr.Length, {});
     // Optional: code that checks CPUID never reaches it under Rosetta, which reports no RDPID.
+    if (instr.IsXsaveopt()) {
+        std::vector<std::uint8_t> replacement(instr.Data, instr.Data + instr.Length);
+        replacement[instr.OpcodeOffset() + 2] &= static_cast<std::uint8_t>(~(2u << X64OpcodeConstants::ModRmRegShift));
+        return Amd64OnlyMatch{kXsaveopt.Name, instr.Length, Amd64OnlyLowering::InPlace, std::move(replacement), {}, 0};
+    }
     if (instr.IsRdpid())
         return _trampoline(kRdpid.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { body.Raw(_rdpidReplacement(instr)); }), true);
     if (instr.IsRdtscp())
         return _trampoline(kRdtscp.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { body.Raw(_rdtscpReplacement(instr)); }), true);
     if (const auto wide = DecodeVexWideStore(instr.Data, instr.Length))
         return _trampoline(kWideStore.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { _wideStoreLowering.EmitOutOfLine(body, *wide); }), false, true);
-    if (const auto masked = DecodeVexMaskedStore(instr.Data, instr.Length))
-        return _trampoline(kMaskedStore.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { _maskedStoreLowering.EmitOutOfLine(body, *masked); }), false, true);
     if (const auto compare = DecodeScalarCompare(instr.Data, instr.Length))
         return _trampoline(kScalarCompare.Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { _emitScalarCompare(body, instr, *compare); }), true);
+    if (const auto masked = DecodeMaskedStore(instr.Data, instr.Length))
+        return _trampoline(masked->Name, instr.Length, _outOfLine(instr.Length, trailing, [&](StubBodyBuilder& body) { EmitMaskedStore(body, *masked); }));
     return std::nullopt;
 }
 
@@ -330,13 +335,13 @@ const char* Amd64OnlyInstructionMatcher::_emitOutOfLine(StubBodyBuilder& body, c
         _wideStoreLowering.EmitOutOfLine(body, *wide);
         return kWideStore.Name;
     }
-    if (const auto masked = _target == Amd64OnlyTarget::Rosetta ? DecodeVexMaskedStore(instr.Data, instr.Length) : std::nullopt) {
-        _maskedStoreLowering.EmitOutOfLine(body, *masked);
-        return kMaskedStore.Name;
-    }
     if (const auto compare = _target == Amd64OnlyTarget::Rosetta ? DecodeScalarCompare(instr.Data, instr.Length) : std::nullopt) {
         _emitScalarCompare(body, instr, *compare);
         return kScalarCompare.Name;
+    }
+    if (const auto masked = _target == Amd64OnlyTarget::Rosetta ? DecodeMaskedStore(instr.Data, instr.Length) : std::nullopt) {
+        EmitMaskedStore(body, *masked);
+        return masked->Name;
     }
     return nullptr;
 }
@@ -368,8 +373,12 @@ const char* Amd64OnlyInstructionMatcher::_emitInPlace(StubBodyBuilder& body, con
     return nullptr;
 }
 
-void Amd64OnlyInstructionMatcher::EmitOutOfLine(StubBodyBuilder& body, const std::span<const std::uint8_t> instruction) const {
-    if (_emitOutOfLine(body, DecodedInstruction{instruction.data(), instruction.size()}) == nullptr)
+void Amd64OnlyInstructionMatcher::EmitOutOfLine(StubBodyBuilder& body, const std::span<const std::uint8_t> instruction, const bool allowInPlace) const {
+    const DecodedInstruction instr{instruction.data(), instruction.size()};
+    const auto* emitted = _emitOutOfLine(body, instr);
+    if (emitted == nullptr && allowInPlace)
+        emitted = _emitInPlace(body, instr);
+    if (emitted == nullptr)
         throw CodegenException("AMD-only instruction has no out-of-line lowering");
     body.Advance(instruction.size());
 }

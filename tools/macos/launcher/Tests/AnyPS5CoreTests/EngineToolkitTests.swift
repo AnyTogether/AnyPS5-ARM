@@ -299,7 +299,8 @@ final class EngineToolkitTests: XCTestCase {
                                           digest: try FakeToolkit.sha256(zip), prerelease: false)
         let store = ToolkitStore(folder: scratch.appendingPathComponent("Toolkits"))
         let seen = Locked<[Double]>([])
-        let installed = try await store.download(entry, launcherVersion: "0.2.16-arm") { seen.value.append($0) }
+        // 0.2.16 came out before releases were signed: downloaded on the user's OK, checked with GitHub's sha256.
+        let installed = try await store.download(entry, launcherVersion: "0.2.16-arm", allowUnsigned: true) { seen.value.append($0) }
         XCTAssertEqual(installed.version, "0.2.16-arm-0123456789ab")
         XCTAssertEqual(seen.value.last, 1)
         XCTAssertEqual(store.installed(release: "0.2.16-arm")?.version, "0.2.16-arm-0123456789ab")
