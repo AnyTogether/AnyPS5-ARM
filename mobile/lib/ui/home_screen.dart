@@ -244,6 +244,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _details(Strings texts, RemoteGame game, Library library) {
     final playing = library.running == game.id;
     final otherPlaying = library.running != null && !playing;
+    final ambient = Theme.of(context).textTheme.labelLarge;
+    final font = TextStyle(
+      fontFamily: ambient?.fontFamily,
+      fontFamilyFallback: ambient?.fontFamilyFallback,
+    );
     final (label, enabled) = switch (game.state) {
       GameState.running => (texts.resume, true),
       GameState.starting => (texts.starting, false),
@@ -300,7 +305,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   horizontal: 34,
                   vertical: 15,
                 ),
-                textStyle: const TextStyle(
+                textStyle: font.copyWith(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -317,7 +322,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     horizontal: 22,
                     vertical: 15,
                   ),
-                  textStyle: const TextStyle(
+                  textStyle: font.copyWith(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
                   ),
