@@ -184,6 +184,7 @@ extension AppModel {
 
     /// The group with the friends picked, opened to write in.
     func startGroup() {
+        guard familyPermits(.messages) else { return }
         let members = togetherFriends.map(\.userId).filter(groupPicked.contains)
         guard !members.isEmpty else { return show(T.text(.messagesGroupPick), symbol: "person.2.badge.plus") }
         let title = groupName

@@ -40,8 +40,10 @@ extension AppModel {
                                      person: PanelPerson(name: friend.displayName, avatar: friend.avatar, status: .online)))
             }
             if rows.count == 2 { rows.append(PanelRow(id: "party-none", title: T.text(.partyNone), symbol: "person.3", kind: .info(""))) }
-            rows.append(PanelRow(id: "party-find", title: FP.text(.findParty), detail: FP.text(.findPartyDetail), symbol: "person.3.sequence",
-                                 kind: .action(destructive: false) { [weak self] in self?.openFindPlayers(category: 2) }))
+            if familyAllows(.publicMatchmaking) {
+                rows.append(PanelRow(id: "party-find", title: FP.text(.findParty), detail: FP.text(.findPartyDetail), symbol: "person.3.sequence",
+                                     kind: .action(destructive: false) { [weak self] in self?.openFindPlayers(category: 2) }))
+            }
             return rows
         }
         let leader = party.isLeader(me.id)
@@ -116,6 +118,7 @@ extension AppModel {
 
     /// Listing the party in public: off, anyone may ask, anyone may walk in; its game and language.
     func partyListingRows(_ party: TogetherParty) -> [PanelRow] {
+        guard familyAllows(.publicMatchmaking) else { return [] }
         let joins: [TogetherPublicJoin?] = [nil, .request, .open]
         let listing = party.listing
         var rows = [
@@ -316,6 +319,7 @@ extension AppModel {
 /// hot key, so it works with a game in front), and who is speaking.
 extension AppModel {
     func voiceRows(_ party: TogetherParty) -> [PanelRow] {
+        guard familyAllows(.voiceChat) else { return [] }
         guard voiceCall != nil, callFriend == nil else {
             let others = party.call?.in.filter { $0 != togetherUser?.id }.count ?? 0
             return [PanelRow(id: "voice-join", title: T.text(.voiceJoin), detail: others > 0 ? T.format(.voiceInCall, others) : T.text(.voiceJoinDetail), symbol: "waveform",
@@ -343,7 +347,7 @@ extension AppModel {
     var micSending: Bool { voiceCall != nil && ((preferences.pushToTalk ?? false) ? talkHeld : micOn) }
 
     func joinVoice() {
-        guard let party, togetherUser != nil else { return }
+        guard let party, togetherUser != nil, familyPermits(.voiceChat) else { return }
         if callFriend != nil { leaveVoice() }
         guard voiceCall == nil else { return }
         Task {

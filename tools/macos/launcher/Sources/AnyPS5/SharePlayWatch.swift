@@ -98,6 +98,7 @@ final class ShareWatchSession {
 extension AppModel {
     /// Watch a friend's share play here; signed out, the website's page opens instead.
     func watchShare(_ id: String) {
+        guard familyPermits(.sharePlay) else { return }
         guard togetherUser != nil, let me = togetherUser?.id else {
             NSWorkspace.shared.open(together.base.appendingPathComponent("watch").appendingPathComponent(id))
             return

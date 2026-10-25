@@ -286,6 +286,7 @@ final class AppModel: ObservableObject {
         designs = themes.all
         if persists {
             togetherUser = together.user
+            DispatchQueue.main.async { [weak self] in self?.startFamily() }
             if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
         }
         apply()
@@ -490,6 +491,10 @@ final class AppModel: ObservableObject {
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?
+    /// Family limits on this Mac, and the watch over play time (FamilyGate.swift).
+    @Published var family = FamilyStanding.free
+    lazy var familyCache = persists ? FamilyCache() : FamilyCache(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-family"), defaults: UserDefaults(suiteName: "AnyPS5-preview-family") ?? .standard)
+    let familyWatch = FamilyWatch()
     @Published var togetherFriends: [TogetherFriend] = []
     @Published var togetherRequests = TogetherRequests(incoming: [], outgoing: [])
     var friendHandle = ""
@@ -820,6 +825,7 @@ final class AppModel: ObservableObject {
     // MARK: Playing
 
     func primaryAction(_ game: Game) {
+        if familyPrimaryAction(game) { return }
         switch state(of: game) {
         case .installed(let outdated): outdated ? open(.updateChoice) : play(game)
         case .locked, .failed: unlock(game)
@@ -834,7 +840,7 @@ final class AppModel: ObservableObject {
     /// detailed logging on for this start only.
     func play(_ game: Game, trace: Bool = false) {
         guard root != nil, starting == nil, running == nil, syncing == nil else { return }
-        syncSaves(game) { self.start(game, trace: trace) }
+        familyGate(game) { self.syncSaves(game) { self.start(game, trace: trace) } }
     }
 
     private func start(_ game: Game, trace: Bool = false) {
@@ -869,6 +875,7 @@ final class AppModel: ObservableObject {
                     self.running = (game, app)
                     self.lastSessions[game.id]?.pid = app.processIdentifier
                     self.sessionStart = Date()
+                    self.familyGameStarted()
                     self.watchTrophies(game)
                     self.watchForExit(of: app.processIdentifier)
                     self.watchForWindow(of: app)
@@ -1059,6 +1066,7 @@ final class AppModel: ObservableObject {
     /// Create, ⌥F12 or the phone: the last seconds of the game playing go to the gallery.
     func saveClip() {
         guard let game = running?.game else { return }
+        guard familyAllows(.mediaSharing) else { return TrophyBanner.shared.notice(FS.refusal(.mediaSharing), detail: "", symbol: "hand.raised.fill", sounds: preferences.sounds) }
         guard preferences.clips == true else {
             return TrophyBanner.shared.notice(T.text(.clipsOff), detail: T.text(.clipsOffDetail), symbol: "record.circle", sounds: preferences.sounds)
         }
@@ -1163,6 +1171,7 @@ final class AppModel: ObservableObject {
         self.running = nil
         if let start = sessionStart { recordPlay(running.game, from: start) }
         sessionStart = nil
+        familyGameEnded()
         clipRecorder.stop()
         gameWindowShown = false
         updateRemotePlay()

@@ -68,16 +68,16 @@ extension AppModel {
                 }),
                 PanelRow(id: "together-online", title: T.text(.togetherOnline), detail: togetherConnected ? T.text(.togetherConnected) : T.text(.togetherConnecting),
                          symbol: togetherConnected ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark", kind: .info("")),
-            ]
+            ] + familyRows()
             rows.append(PanelRow(id: "together-join", title: T.text(.togetherFriendsJoin), detail: T.text(.togetherFriendsJoinDetail), symbol: "person.2.wave.2",
                                  kind: .toggle(preferences.friendsJoin ?? true) { [weak self] value in self?.friendsJoinChanged(value) }))
-            rows += profileEditRows() + privacyRows() + discoveryRows() + serverRows()
+            rows += profileEditRows() + privacyRows() + (familyAllows(.discovery) ? discoveryRows() : []) + serverRows()
             rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
                 self?.togetherSignOut()
             }))
             return rows
         }
-        var rows = [PanelRow(id: "together-intro", title: T.text(.togetherIntro), detail: T.text(.togetherIntroDetail), symbol: "person.2.circle", kind: .info(""))]
+        var rows = [PanelRow(id: "together-intro", title: T.text(.togetherIntro), detail: T.text(.togetherIntroDetail), symbol: "person.2.circle", kind: .info(""))] + familyRows()
         switch togetherStep {
         case .idle, .busy:
             if let phone = connectedPhoneName {
@@ -424,6 +424,7 @@ extension AppModel {
         loadShareInvites()
         loadDiscovery()
         flushTogether()
+        refreshFamily()
     }
 
     /// In a game or online, as friends will see it.
@@ -449,8 +450,9 @@ extension AppModel {
 
     /// A game played for a while: the session goes to AnyTogether (or waits until it can).
     func recordPlay(_ game: Game, from start: Date) {
+        let session = togetherUser == nil ? nil : togetherSync.recordSession(titleId: game.titleID, gameName: game.name, ageLevels: game.ageLevels, startedAt: start, endedAt: Date(), exit: "normal")
+        familyPlayed(game, from: start, session: session)
         guard togetherUser != nil else { return }
-        togetherSync.recordSession(titleId: game.titleID, gameName: game.name, startedAt: start, endedAt: Date(), exit: "normal")
         flushTogether()
         askHowItRan(game, played: Date().timeIntervalSince(start))
     }
@@ -478,6 +480,7 @@ extension AppModel {
     }
 
     func togetherMessage(_ error: Error) -> String {
+        if let family = familyMessage(error) { return family }
         if let problem = error as? TogetherProblem {
             switch problem.code {
             case "handle_taken": return T.text(.togetherHandleTaken)

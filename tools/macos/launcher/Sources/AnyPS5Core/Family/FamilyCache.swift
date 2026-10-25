@@ -137,6 +137,11 @@ public final class FamilyCache: @unchecked Sendable {
         defaults.data(forKey: Self.sealKey).flatMap { try? JSONDecoder().decode(Seal.self, from: $0) }
     }
 
+    /// The server whose limits apply here, while they are limits: only it can change them.
+    public var limitsServer: String? {
+        lock.withLock { seal.flatMap { $0.restricted ? $0.server : nil } }
+    }
+
     /// Checks a status the server just signed and keeps it; the status comes back.
     @discardableResult
     public func accept(signed: String, keys: [FamilyKey], server: URL, now: Date = Date()) throws -> FamilyStatus {

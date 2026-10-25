@@ -73,7 +73,7 @@ extension AppModel {
     // MARK: Hosting
 
     func startSharePlay() {
-        guard let running, togetherUser != nil, shareSession == nil, !share.starting else { return }
+        guard let running, togetherUser != nil, shareSession == nil, !share.starting, familyPermits(.sharePlay) else { return }
         let game = running.game
         let pid = running.app.processIdentifier
         share.starting = true
@@ -354,6 +354,7 @@ extension AppModel {
     }
 
     func shareListingRows(_ hosting: TogetherSharePlay) -> [PanelRow] {
+        guard familyAllows(.publicMatchmaking) else { return [] }
         let joins: [TogetherPublicJoin?] = [nil, .request, .open]
         let listing = hosting.listing
         var rows = [

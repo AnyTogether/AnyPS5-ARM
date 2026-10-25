@@ -42,6 +42,7 @@ extension AppModel {
 
     /// Rings until answered, declined, or long enough to count as not answered.
     func ring(_ call: TogetherRinging) {
+        guard familyAllows(.voiceChat) else { return }
         stopRinging()
         withAnimation(Motion.overlay) { ringing = call }
         if !NSApp.isActive { RingBanner.shared.show(call) }
@@ -112,7 +113,7 @@ extension AppModel {
 
     /// Rings the friend; the call is joined here already and waits for them to answer.
     func startCall(with friend: TogetherPerson) {
-        guard togetherUser != nil else { return }
+        guard togetherUser != nil, familyPermits(.voiceChat) else { return }
         Task {
             guard await PartyVoice.microphoneAllowed() else {
                 return show(T.text(.voiceNoMic), symbol: "mic.slash.fill")

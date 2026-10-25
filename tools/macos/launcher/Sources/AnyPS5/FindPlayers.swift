@@ -47,6 +47,7 @@ extension AppModel {
 
     func openFindPlayers(category: Int = 0) {
         guard togetherUser != nil else { return openTogetherSettings() }
+        guard familyPermits(.publicMatchmaking) else { return }
         open(.findPlayers)
         panelCategory = category
         panelInRows = true
@@ -56,6 +57,7 @@ extension AppModel {
     /// "Find players for <game>": the form, back to where it was opened.
     func openLfgPost(titleId: String, name: String) {
         guard togetherUser != nil else { return openTogetherSettings() }
+        guard familyPermits(.publicMatchmaking) else { return }
         let languages = discover.discovery?.languages.isEmpty == false ? Array(discover.discovery!.languages.prefix(2)) : [lang]
         discover.returnTo = overlay
         discover.returnCategory = panelCategory
@@ -67,6 +69,7 @@ extension AppModel {
 
     func openHub(titleId: String, name: String) {
         guard togetherUser != nil else { return openTogetherSettings() }
+        guard familyPermits(.discovery) else { return }
         if overlay != .gameHub {
             discover.returnTo = overlay
             discover.returnCategory = panelCategory
