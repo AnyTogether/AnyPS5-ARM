@@ -106,6 +106,42 @@ final class BackgroundView: MTKView, MTKViewDelegate {
         commands.commit()
     }
 
+    /// The GPU time of one frame of a theme at a drawable size, averaged over `frames` (the
+    /// preview renderer's bench).
+    static func gpuMilliseconds(theme: Theme, width: Int, height: Int, frames: Int) -> Double? {
+        guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),
+              let library = try? device.makeLibrary(source: shader, options: nil) else { return nil }
+        let descriptor = MTLRenderPipelineDescriptor()
+        descriptor.vertexFunction = library.makeFunction(name: "background_vertex")
+        descriptor.fragmentFunction = library.makeFunction(name: "background_fragment")
+        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+        guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+        let textureDescriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .bgra8Unorm, width: width, height: height, mipmapped: false)
+        textureDescriptor.usage = [.renderTarget]
+        textureDescriptor.storageMode = .private
+        guard let texture = device.makeTexture(descriptor: textureDescriptor) else { return nil }
+        var total = 0.0
+        for frame in 0..<(frames + 3) {
+            guard let commands = queue.makeCommandBuffer() else { return nil }
+            let pass = MTLRenderPassDescriptor()
+            pass.colorAttachments[0].texture = texture
+            pass.colorAttachments[0].loadAction = .dontCare
+            pass.colorAttachments[0].storeAction = .store
+            guard let encoder = commands.makeRenderCommandEncoder(descriptor: pass) else { return nil }
+            let palette = theme.palette
+            var uniforms = Uniforms(deep: SIMD4(palette.0, 1), middle: SIMD4(palette.1, 1), bright: SIMD4(palette.2, 1), size: SIMD2(Float(width), Float(height)), time: 200 + Float(frame) / 60, theme: Int32(theme.rawValue))
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 0)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
+            encoder.endEncoding()
+            commands.commit()
+            commands.waitUntilCompleted()
+            // The first frames warm the GPU up.
+            if frame >= 3 { total += commands.gpuEndTime - commands.gpuStartTime }
+        }
+        return total * 1000 / Double(frames)
+    }
+
     /// One frame of a theme, drawn offscreen.
     static func still(theme: Theme, palette custom: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)? = nil, width: Int, height: Int, time: Float) -> NSImage? {
         guard let device = MTLCreateSystemDefaultDevice(), let queue = device.makeCommandQueue(),

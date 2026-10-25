@@ -15,8 +15,12 @@ struct Look: Equatable {
     var liquid: Bool { glass && rendering == .liquid }
     var solid: Bool { glass && rendering == .solid }
 
+    /// The previews' stand-in for Reduce Transparency (ANYPS5_PREVIEW_REDUCE_TRANSPARENCY=1).
+    static var forceSolid = false
+
     static func make(style: Theme, reduceTransparency: Bool, offscreen: Bool, reduceMotion: Bool) -> Look {
         guard style.isGlass else { return Look(reduceMotion: reduceMotion) }
+        let reduceTransparency = reduceTransparency || forceSolid
         var liquidAvailable = false
         if #available(macOS 26, *) { liquidAvailable = true }
         return Look(glass: true, rendering: .choose(reduceTransparency: reduceTransparency, liquidAvailable: liquidAvailable, offscreen: offscreen), reduceMotion: reduceMotion)

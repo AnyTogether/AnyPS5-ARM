@@ -34,6 +34,7 @@ enum PreviewRenderer {
             Artwork.shared.prepare(game.background, maxPixels: Int(max(size.width, size.height) * 1.6))
             if theme.isGlass { Artwork.shared.prepareFrosted(game.background) }
         }
+        Look.forceSolid = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_REDUCE_TRANSPARENCY"] == "1"
         // Cards drawn outside the window (the trophy banner) read the look from here.
         Look.current = Look.make(style: theme, reduceTransparency: false, offscreen: true, reduceMotion: false)
         var preferences = Preferences()
@@ -46,6 +47,11 @@ enum PreviewRenderer {
         // ANYPS5_PREVIEW_SCREENSHOTS=<folder> is where the gallery looks.
         if let shots = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_SCREENSHOTS"] { preferences.screenshotsFolder = shots }
 
+        // ANYPS5_PREVIEW_BENCH=<count> times the home screen's frame in every theme instead: the
+        // background shader at a Retina window's drawable size and the interface over it.
+        if let count = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_BENCH"].flatMap(Int.init) {
+            return bench(count, preferences, found, root)
+        }
         for theme in Theme.allCases {
             stills[theme] = BackgroundView.still(theme: theme, width: 660, height: 372, time: 200)
         }
@@ -82,7 +88,7 @@ enum PreviewRenderer {
         }
         let neon = ThemeDesign(id: "neon", name: "Neon Nights", author: "Ada", style: 0, deep: "#0A0014", middle: "#4A0E6B", bright: "#FF5EDB", accent: "#FF4FD8")
         let forest = ThemeDesign(id: "forest", name: "Forest", author: "Robin", style: 1, deep: "#02100A", middle: "#0E4A2C", bright: "#9BFFC4", accent: "#5CEB9F")
-        for (name, overlay, row) in [("themes", Overlay.themes, 4), ("studio", Overlay.studio, 3)] {
+        for (name, overlay, row) in [("themes", Overlay.themes, 5), ("studio", Overlay.studio, 3)] {
             let palette = overlay == .studio ? neon.palette : forest.palette
             let tinted = BackgroundView.still(theme: overlay == .studio ? .cosmic : .aurora, palette: palette, width: Int(size.width), height: Int(size.height), time: 260)
             var plain = preferences
@@ -103,7 +109,7 @@ enum PreviewRenderer {
             let tinted = BackgroundView.still(theme: .cosmic, palette: neon.palette, width: Int(size.width), height: Int(size.height), time: 260)
             render(plain, found, root, tinted, output.appendingPathComponent("themes-hub.png")) { model in
                 model.previewThemes([neon], active: neon, hub: hub)
-                model.overlay = .themes; model.panelInRows = true; model.panelRow = 10
+                model.overlay = .themes; model.panelInRows = true; model.panelRow = 11
             }
         }
         render(preferences, found, root, still, output.appendingPathComponent("together.png")) { model in
@@ -604,6 +610,35 @@ enum PreviewRenderer {
                                  lastMessage: TogetherMessage(id: "k3", conversationId: "c2", seq: 3, authorId: "f2", text: "Party tonight?", createdAt: Date()), updatedAt: Date()),
         ])
         model.social.notifications.load(TogetherNotificationPage(notifications: [], unread: 3, more: false))
+    }
+
+    static func bench(_ count: Int, _ preferences: Preferences, _ games: [Game], _ root: URL) {
+        func milliseconds(_ work: () -> Void) -> Double {
+            let start = CACurrentMediaTime()
+            for _ in 0..<count { work() }
+            return (CACurrentMediaTime() - start) * 1000 / Double(count)
+        }
+        for theme in Theme.allCases {
+            var preferences = preferences
+            preferences.theme = theme
+            preferences.gameArtwork = true
+            Look.current = Look.make(style: theme, reduceTransparency: false, offscreen: true, reduceMotion: false)
+            if theme.isGlass { for game in games { Artwork.shared.prepareFrosted(game.background) } }
+            // The live view draws at half the window's pixels: 1600x900 for a 1600x900 window at 2x.
+            let shader = BackgroundView.gpuMilliseconds(theme: theme, width: 1600, height: 900, frames: count) ?? -1
+            let still = BackgroundView.still(theme: theme, width: Int(size.width), height: Int(size.height), time: 260)
+            let model = AppModel(preferences: preferences)
+            model.preview(games: games, root: root)
+            model.selected = selectedTitle.flatMap { id in games.firstIndex { $0.titleID == id } } ?? 0
+            model.focus = .actions(0)
+            let view = RootView().environmentObject(model).environment(\.stillBackground, still).frame(width: size.width, height: size.height)
+            let interface = milliseconds {
+                let renderer = ImageRenderer(content: view)
+                renderer.scale = 2
+                _ = renderer.cgImage
+            }
+            print(String(format: "%@: background shader %.3f ms GPU a frame at 1600x900, home screen offscreen at 2x %.1f ms CPU", theme.title, shader, interface))
+        }
     }
 
     static func render(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ file: URL, configure: (AppModel) -> Void = { _ in }) {
