@@ -69,6 +69,12 @@ struct Preferences: Codable, Equatable {
     /// Soft pulses in the controller for select, back, errors, trophies, calls and the end of a
     /// row; nil means on.
     var controllerVibration: Bool?
+    /// Settings → Steam: the account the shortcuts go to ("<Steam folder>|<account ID>"; nil for
+    /// the one signed in last), each unlocked game its own shortcut too (nil: off), the launcher
+    /// full screen when Steam starts it (nil: on).
+    var steamUser: String?
+    var steamGames: Bool?
+    var steamFullscreen: Bool?
     /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
     /// the built-in one, "custom" the folder below, else a downloaded version).
     var engine: String?
@@ -281,6 +287,13 @@ final class AppModel: ObservableObject {
     /// The phones allowed so far, for the settings.
     @Published private(set) var phones: [PairedDevice] = []
     @Published var toast: Toast?
+    /// Settings → Steam (SteamPanel.swift).
+    @Published var steam = SteamState()
+    /// How this launch came from Steam (set before the app starts, from the arguments).
+    static var steamLaunch = SteamLaunch()
+    var steamLaunch: SteamLaunch { Self.steamLaunch }
+    /// The game a Steam shortcut started: the launcher quits when it ends well, so Steam sees it end.
+    var steamQuitAfter: String?
     @Published var active = true
     @Published private(set) var rosettaMissing = false
     @Published private(set) var logText = ""
@@ -1207,7 +1220,11 @@ final class AppModel: ObservableObject {
             }
             if overlay != nil { closeOverlay() }
             withAnimation(Motion.focus) { selected = index }
-            if case .play = link { primaryAction(games[index]) }
+            if case .play = link {
+                // A game's Steam shortcut: the launcher goes with the game.
+                if steamLaunch.fromSteam, steamLaunch.play == id, steamQuitAfter == nil { steamQuitAfter = games[index].id }
+                primaryAction(games[index])
+            }
         }
     }
 
@@ -1983,6 +2000,12 @@ final class AppModel: ObservableObject {
             await MainActor.run {
                 self.diagnoses[game.id] = found
                 if found != nil || withoutWindow { self.offerReport(game) }
+                // Started from the game's Steam shortcut: the launcher goes when it ended well, so
+                // Steam sees the game end; a crash keeps it open on the report.
+                if self.steamQuitAfter == game.id {
+                    self.steamQuitAfter = nil
+                    if found == nil && !withoutWindow { NSApp.terminate(nil) }
+                }
             }
         }
     }

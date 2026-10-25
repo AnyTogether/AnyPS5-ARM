@@ -381,6 +381,17 @@ enum PreviewRenderer {
             // Appearance's Glass Transparency row.
             render(preferences, found, root, still, output.appendingPathComponent("settings-glass.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 5 }
         }
+        // Settings → Steam over a made-up Steam folder (the Mac's own is never read here): AnyPS5
+        // added, the Add row focused.
+        render(preferences, found, root, still, output.appendingPathComponent("settings-steam.png")) { model in
+            let install = SteamInstall(root: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Steam"))
+            model.steam = SteamState(installs: [install], accounts: [(install, SteamUser(id: "52079950", persona: "Utku", mostRecent: true)),
+                                                                     (install, SteamUser(id: "22202", persona: "Siler"))], inSteam: 1)
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "steam" } ?? 0
+            model.panelInRows = true
+            model.panelRow = 5
+        }
         for category in 1..<6 {
             render(preferences, found, root, still, output.appendingPathComponent("settings\(category).png")) { model in model.overlay = .settings; model.panelCategory = category }
         }

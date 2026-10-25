@@ -300,6 +300,7 @@ extension AppModel {
             PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
             PanelCategory(id: "fonts", title: TF.text(.title), symbol: "textformat", rows: fontRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
+            PanelCategory(id: "steam", title: TSteam.text(.title), symbol: "gamecontroller.fill", rows: steamRows()),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]
     }

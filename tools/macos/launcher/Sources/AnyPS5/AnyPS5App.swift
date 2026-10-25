@@ -16,6 +16,29 @@ enum Entry {
         if arguments.contains("--glass-selftest") {
             exit(MainActor.assumeIsolated { GlassSelfTest.run() })
         }
+        // `AnyPS5 --steam-art <output folder> [<a dump's sce_sys>]` draws the Steam pictures.
+        if let index = arguments.firstIndex(of: "--steam-art"), arguments.count > index + 1 {
+            MainActor.assumeIsolated { SteamArtPreview.run(output: URL(fileURLWithPath: arguments[index + 1]), sceSys: arguments.count > index + 2 ? URL(fileURLWithPath: arguments[index + 2]) : nil) }
+            return
+        }
+        // Started by one of AnyPS5's Steam shortcuts (--steam, --play <title ID>, --fullscreen).
+        let launch = SteamLaunch(arguments: arguments, environment: ProcessInfo.processInfo.environment)
+        if launch.fromSteam || launch.play != nil {
+            // Steam starts the executable itself: a launcher already open takes the request.
+            if let identifier = Bundle.main.bundleIdentifier,
+               let other = NSRunningApplication.runningApplications(withBundleIdentifier: identifier).first(where: { $0 != NSRunningApplication.current }) {
+                if let play = launch.play, let url = DeepLink.play(play).url as URL? {
+                    NSWorkspace.shared.open(url)
+                } else {
+                    other.activate()
+                }
+                return
+            }
+            MainActor.assumeIsolated {
+                AppModel.steamLaunch = launch
+                if let play = launch.play { AppModel.received([DeepLink.play(play).url]) }
+            }
+        }
         AnyPS5App.main()
     }
 }
@@ -52,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.collectionBehavior.insert(.fullScreenPrimary)
             if let screen = window.screen ?? NSScreen.main {
                 window.setFrame(screen.visibleFrame, display: true)
+            }
+            // A Steam shortcut's --fullscreen (Big Picture): the whole screen from the start.
+            if MainActor.assumeIsolated({ AppModel.steamLaunch.fullscreen }), !window.styleMask.contains(.fullScreen) {
+                window.toggleFullScreen(nil)
             }
         }
     }
