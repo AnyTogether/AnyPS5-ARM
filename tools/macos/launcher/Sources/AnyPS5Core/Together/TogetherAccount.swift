@@ -59,9 +59,12 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
     /// Friends see the user offline (the socket and everything else keep working). False from an
     /// older server.
     public var appearOffline: Bool
+    /// Others see when the user has read their messages, and the user sees theirs. True from an
+    /// older server.
+    public var readReceipts: Bool
 
     public init(handle: String, displayName: String, bio: String?, avatar: String?, country: String?, handleChangeAt: Date?, privacy: TogetherPrivacy,
-                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false) {
+                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, readReceipts: Bool = true) {
         self.handle = handle
         self.displayName = displayName
         self.bio = bio
@@ -71,9 +74,10 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         self.privacy = privacy
         self.trophyLevel = trophyLevel
         self.appearOffline = appearOffline
+        self.readReceipts = readReceipts
     }
 
-    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline }
+    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, readReceipts }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -86,6 +90,7 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         privacy = try container.decodeIfPresent(TogetherPrivacy.self, forKey: .privacy) ?? .standard
         trophyLevel = container.lenient(TogetherTrophyLevel.self, .trophyLevel)
         appearOffline = container.lenient(Bool.self, .appearOffline) ?? false
+        readReceipts = container.lenient(Bool.self, .readReceipts) ?? true
     }
 }
 
