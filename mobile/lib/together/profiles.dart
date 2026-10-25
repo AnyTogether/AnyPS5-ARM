@@ -138,6 +138,7 @@ class OwnProfile {
     this.privacy = defaultPrivacy,
     this.appearOffline = false,
     this.trophyLevel,
+    this.readReceipts = true,
   });
 
   factory OwnProfile.fromJson(Map<String, dynamic> json) => OwnProfile(
@@ -150,6 +151,8 @@ class OwnProfile {
     privacy: privacyFrom(json['privacy']),
     appearOffline: json['appearOffline'] == true,
     trophyLevel: TrophyLevel.fromJson(json['trophyLevel']),
+    // On unless the profile says off (older answers lack it).
+    readReceipts: json['readReceipts'] != false,
   );
 
   final String handle;
@@ -166,6 +169,9 @@ class OwnProfile {
   final bool appearOffline;
   final TrophyLevel? trophyLevel;
 
+  /// Others see when this person read their messages (and they see others').
+  final bool readReceipts;
+
   OwnProfile copyWith({
     String? avatar,
     bool clearAvatar = false,
@@ -181,6 +187,7 @@ class OwnProfile {
     privacy: privacy ?? this.privacy,
     appearOffline: appearOffline ?? this.appearOffline,
     trophyLevel: trophyLevel,
+    readReceipts: readReceipts,
   );
 }
 
@@ -479,6 +486,13 @@ class Profiles {
         'appearOffline': appearOffline,
       }))['appearOffline'] ==
       true;
+
+  /// Read receipts sent (and seen) or not; what the server kept comes back.
+  Future<bool> setReadReceipts(bool readReceipts) async =>
+      (await account.call('PATCH', 'me/read-receipts', {
+        'readReceipts': readReceipts,
+      }))['readReceipts'] !=
+      false;
 
   /// A square picture (PNG or JPEG) as the new avatar; its address comes back.
   Future<String> uploadAvatar(Uint8List bytes) async {

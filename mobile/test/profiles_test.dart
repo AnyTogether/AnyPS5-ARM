@@ -217,6 +217,12 @@ class FakeProfiles extends Profiles {
     if (presenceError != null) throw presenceError!;
     return appearOffline;
   }
+
+  @override
+  Future<bool> setReadReceipts(bool readReceipts) async {
+    calls.add('read receipts $readReceipts');
+    return readReceipts;
+  }
 }
 
 Map<String, dynamic> trophyLevel({int level = 12, int progress = 40}) => {
@@ -357,6 +363,23 @@ void main() {
         expect(server.requests.last.$1, 'PATCH');
         expect(server.requests.last.$2, '/api/v1/me/presence');
         expect(server.requests.last.$3, {'appearOffline': true});
+      },
+    );
+
+    test(
+      'read receipts go to me/read-receipts; on unless the profile says off',
+      () async {
+        server.answer = (method, path, body) => (200, {'readReceipts': false});
+        expect(await Profiles(account).setReadReceipts(false), isFalse);
+        expect(server.requests.last.$1, 'PATCH');
+        expect(server.requests.last.$2, '/api/v1/me/read-receipts');
+        expect(server.requests.last.$3, {'readReceipts': false});
+        expect(OwnProfile.fromJson(ownProfile()).readReceipts, isTrue);
+        expect(
+          OwnProfile.fromJson({...ownProfile(), 'readReceipts': false})
+              .readReceipts,
+          isFalse,
+        );
       },
     );
 
@@ -684,6 +707,43 @@ void main() {
         expect(find.text('Appearing offline'), findsOneWidget);
       },
     );
+
+    testWidgets('editing: read receipts turn off as picked, and say so', (
+      tester,
+    ) async {
+      sideways(tester);
+      final profiles = FakeProfiles(
+        hub.account,
+        own: OwnProfile.fromJson(ownProfile()),
+      );
+      bool? told;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ProfileEditScreen(
+            profiles: profiles,
+            pickPhoto: () async => null,
+            onReadReceipts: (on) => told = on,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.dragUntilVisible(
+        find.text('Off'),
+        find.byType(ListView).last,
+        const Offset(0, -80),
+      );
+      expect(find.text('SEND READ RECEIPTS'), findsOneWidget);
+      expect(
+        find.text(
+          "When off, people don't see when you've read their messages, and you don't see theirs. Delivered still shows.",
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Off'));
+      await tester.pumpAndSettle();
+      expect(profiles.calls, ['read receipts false']);
+      expect(told, isFalse);
+    });
 
     testWidgets('someone not a friend can be added from their profile', (
       tester,

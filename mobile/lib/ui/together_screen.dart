@@ -215,6 +215,8 @@ class _TogetherScreenState extends State<TogetherScreen> {
                             onEdit: () => openProfileEdit(
                               context,
                               account: widget.hub.account,
+                              onReadReceipts:
+                                  widget.hub.messages.receiptsChanged,
                             ),
                           ),
                         },

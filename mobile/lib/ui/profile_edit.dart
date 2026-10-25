@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../chat_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
 import '../together/people.dart';
@@ -33,12 +34,14 @@ Future<void> openProfileEdit(
   required TogetherAccount account,
   Profiles? profiles,
   Future<Uint8List?> Function()? pickPhoto,
+  ValueChanged<bool>? onReadReceipts,
 }) => Navigator.of(context).push(
   MaterialPageRoute<void>(
     builder: (_) => ProfileEditScreen(
       profiles: profiles ?? Profiles(account),
       pickPhoto: pickPhoto ?? pickFromLibrary,
       storage: account.storageEnabled(),
+      onReadReceipts: onReadReceipts,
     ),
   ),
 );
@@ -49,6 +52,7 @@ class ProfileEditScreen extends StatefulWidget {
     required this.profiles,
     required this.pickPhoto,
     this.storage,
+    this.onReadReceipts,
   });
 
   final Profiles profiles;
@@ -56,6 +60,9 @@ class ProfileEditScreen extends StatefulWidget {
 
   /// Whether the server keeps files: the gallery's privacy is offered when it does.
   final Future<bool>? storage;
+
+  /// Told once the server kept a new read receipts setting.
+  final ValueChanged<bool>? onReadReceipts;
 
   @override
   State<ProfileEditScreen> createState() => _ProfileEditScreenState();
@@ -69,6 +76,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   String? _country;
   Privacy _privacy = defaultPrivacy;
   bool _appearOffline = false;
+  bool _readReceipts = true;
   bool _saving = false;
   bool _picture = false;
   Object? _loadError;
@@ -112,6 +120,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _country = profile.country;
         _privacy = profile.privacy;
         _appearOffline = profile.appearOffline;
+        _readReceipts = profile.readReceipts;
       });
     } on Object catch (error) {
       if (mounted) setState(() => _loadError = error);
@@ -182,6 +191,28 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         setState(() {
           _privacy = before;
           _error = _problem(Texts.of(context), error);
+        });
+      }
+    }
+  }
+
+  /// Saved as it is picked; back as it was when the server did not take it.
+  Future<void> _setReadReceipts(bool on) async {
+    final texts = Texts.of(context);
+    setState(() {
+      _readReceipts = on;
+      _error = null;
+    });
+    try {
+      final saved = await _profiles.setReadReceipts(on);
+      if (!mounted) return;
+      setState(() => _readReceipts = saved);
+      widget.onReadReceipts?.call(saved);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _readReceipts = !on;
+          _error = _problem(texts, error);
         });
       }
     }
@@ -570,6 +601,20 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
               ),
             ),
           ],
+        ),
+      ),
+      SectionLabel(texts.readReceipts),
+      _TwoWayPicker(
+        labels: [texts.readReceiptsOn, texts.readReceiptsOff],
+        dots: const [togetherAccent, null],
+        value: _readReceipts ? 0 : 1,
+        onChanged: (index) => _setReadReceipts(index == 0),
+      ),
+      Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text(
+          texts.readReceiptsHint,
+          style: const TextStyle(color: Colors.white38, fontSize: 12),
         ),
       ),
     ],
