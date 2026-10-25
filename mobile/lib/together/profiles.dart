@@ -8,8 +8,9 @@ import 'together_account.dart';
 enum Audience { everyone, friends, nobody }
 
 /// The parts of a profile privacy settings cover: games and play time, trophies, the friends
-/// list, online and what is played, and being found by name.
-enum PrivacySection { library, trophies, friends, presence, search }
+/// list, online and what is played, being found by name, and the pinned photos and clips (the
+/// gallery, shown only where the server keeps files).
+enum PrivacySection { library, trophies, friends, presence, search, gallery }
 
 typedef Privacy = Map<PrivacySection, Audience>;
 
@@ -19,6 +20,7 @@ const defaultPrivacy = <PrivacySection, Audience>{
   PrivacySection.friends: Audience.friends,
   PrivacySection.presence: Audience.friends,
   PrivacySection.search: Audience.everyone,
+  PrivacySection.gallery: Audience.friends,
 };
 
 Privacy privacyFrom(Object? json) => {
