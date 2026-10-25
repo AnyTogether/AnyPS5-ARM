@@ -759,6 +759,7 @@ void VideoOutDriver::presentLoop(std::stop_token token, std::promise<void>& star
                 return false;
             });
             if (quit) {
+                LibcLogExit_nid_no_patch("the game window was closed or the launcher asked the game to quit", 0, nullptr);
                 LibcRequestExit_nid_postfix(0);
                 throw ProcessShutdown{};
             }

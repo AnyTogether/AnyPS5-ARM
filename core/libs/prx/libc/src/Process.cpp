@@ -1,4 +1,7 @@
 #include <csignal>
+#ifndef _WIN32
+#include <dlfcn.h>
+#endif
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +54,23 @@ extern "C" std::stop_token LibcShutdownToken_nid_postfix() {
 
 extern "C" void LibcRequestShutdown_nid_postfix() {
     shutdownSource.request_stop();
+}
+
+// One line in the game log says how the game ended: the title's exit, the window closing, or
+// (FatalLine) a host signal. Without it a log that stops reads the same as a crash.
+extern "C" void LibcLogExit_nid_no_patch(const char* how, int code, void* caller) {
+#ifndef _WIN32
+    Dl_info image{};
+    if (caller != nullptr && dladdr(caller, &image) != 0 && image.dli_fname != nullptr) {
+        const char* name = std::strrchr(image.dli_fname, '/');
+        std::fprintf(stderr, "[exit] %s (code %d) from %s+0x%llx\n", how, code, name != nullptr ? name + 1 : image.dli_fname,
+            static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(caller) - reinterpret_cast<std::uintptr_t>(image.dli_fbase)));
+        std::fflush(stderr);
+        return;
+    }
+#endif
+    std::fprintf(stderr, "[exit] %s (code %d)\n", how, code);
+    std::fflush(stderr);
 }
 
 extern "C" void LibcRequestExit_nid_postfix(int code) {
@@ -155,6 +175,7 @@ void StartExit() {
 extern "C" {
 
 [[noreturn]] void APS5_VABI _Exit_nid_postfix(int code) {
+    LibcLogExit_nid_no_patch("the title called _Exit", code, __builtin_return_address(0));
     static const bool trace = std::getenv("APS5_TRACE_EXIT") != nullptr;
     if (trace) {
         std::fprintf(stderr, "[libc] _Exit(%d) called from %p\n", code, __builtin_return_address(0));
@@ -219,6 +240,7 @@ void LibcStartExit_nid_postfix() {
 }
 
 void APS5_VABI exit_nid_postfix(int code) {
+    LibcLogExit_nid_no_patch("the title called exit", code, __builtin_return_address(0));
     static const bool trace = std::getenv("APS5_TRACE_EXIT") != nullptr;
     if (trace) {
         std::fprintf(stderr, "[libc] exit(%d) called from %p\n", code, __builtin_return_address(0));
@@ -228,6 +250,7 @@ void APS5_VABI exit_nid_postfix(int code) {
 }
 
 [[noreturn]] void APS5_VABI catchReturnFromMain_nid_postfix(int status) {
+    LibcLogExit_nid_no_patch("the title returned from main", status, nullptr);
     LibcExit_nid_no_patch(status);
 }
 

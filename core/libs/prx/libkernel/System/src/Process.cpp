@@ -454,10 +454,12 @@ int APS5_VABI getresgid_nid_postfix(std::uint32_t* rgid, std::uint32_t* egid, st
 }
 
 void APS5_VABI exit_nid_postfix(int code) {
+    LibcLogExit_nid_no_patch("the title called exit", code, __builtin_return_address(0));
     LibcExit_nid_no_patch(code);
 }
 
 [[noreturn]] void APS5_VABI _exit_nid_postfix(int status) {
+    LibcLogExit_nid_no_patch("the title called _exit", status, __builtin_return_address(0));
     LibcTerminate_nid_no_patch(status);
 }
 

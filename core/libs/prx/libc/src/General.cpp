@@ -31,6 +31,7 @@
 #include <unistd.h>
 #endif
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/FatalLine.hpp"
 #include "prx/libc/include/FilesystemError.hpp"
 #include "prx/libc/include/AppArchive.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
@@ -516,6 +517,7 @@ extern "C" int KeepHostStandardError_nid_no_patch() {
     // The old stream keeps descriptor 2, which the title is about to point elsewhere; the kept one is the log.
     LogRepeatFilterUnhookStream_nid_no_patch(stderr);
     LogRepeatFilterHookStream_nid_no_patch(stream, 2);
+    FatalLine::logDescriptor.store(kept);
     stderr = stream;
     g_hostStandardError.store(kept);
     return kept;

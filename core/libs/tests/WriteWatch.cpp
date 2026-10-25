@@ -16,6 +16,7 @@
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #if !defined(__APPLE__)
@@ -346,11 +347,39 @@ void CheckChain() {
     Require(g_chainCalls == 1 && foreign.base[0] == 1, "a fault outside the watch did not reach the chained handler");
 }
 
+// A fault outside the watch that no handler takes ends the process with one [fatal] line on stderr.
+void CheckFatal() {
+    int pipe[2];
+    Require(::pipe(pipe) == 0, "cannot make a pipe");
+    const pid_t child = ::fork();
+    Require(child >= 0, "cannot fork");
+    if (child == 0) {
+        ::dup2(pipe[1], STDERR_FILENO);
+        Region region(1);
+        GuestWriteWatchRegister_nid_postfix(region.base, region.bytes);
+        Region foreign(1);
+        ::mprotect(foreign.base, foreign.bytes, PROT_READ);
+        foreign.base[0] = 1;
+        ::_exit(0);
+    }
+    ::close(pipe[1]);
+    std::string output;
+    char buffer[512];
+    for (ssize_t count; (count = ::read(pipe[0], buffer, sizeof(buffer))) > 0;) output.append(buffer, static_cast<std::size_t>(count));
+    ::close(pipe[0]);
+    int status = 0;
+    Require(::waitpid(child, &status, 0) == child, "cannot wait for the child");
+    Require(WIFSIGNALED(status) && (WTERMSIG(status) == SIGBUS || WTERMSIG(status) == SIGSEGV), "the fault did not end the child");
+    Require(output.find("[fatal] host signal ") == 0 && output.find(" that no handler takes ends the game: address 0x") != std::string::npos &&
+        output.find("write_watch_tests+0x") != std::string::npos && output.back() == '\n', "the fatal line is missing or incomplete");
+    std::printf("%s", output.c_str());
+}
+
 }
 
 int main(int argc, char** argv) {
     try {
-        Require(argc == 2, "expected collect, fresh, armed, register, mapped, host, empty, protection, overlaps, threads, hot or chain");
+        Require(argc == 2, "expected collect, fresh, armed, register, mapped, host, empty, protection, overlaps, threads, hot, chain or fatal");
         const std::string_view mode(argv[1]);
         if (mode == "collect") CheckCollect();
         else if (mode == "fresh") CheckFresh();
@@ -364,6 +393,7 @@ int main(int argc, char** argv) {
         else if (mode == "threads") CheckThreads();
         else if (mode == "hot") CheckHot();
         else if (mode == "chain") CheckChain();
+        else if (mode == "fatal") CheckFatal();
         else throw std::runtime_error("unknown write watch test");
         std::printf("write watch %s passed\n", argv[1]);
         return 0;

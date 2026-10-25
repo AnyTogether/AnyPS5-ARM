@@ -1,4 +1,5 @@
 #include "prx/libc/include/GuestWriteWatch.hpp"
+#include "prx/libc/include/FatalLine.hpp"
 #include <algorithm>
 #include <array>
 #include <string>
@@ -731,6 +732,7 @@ private:
             previous.sa_handler(signal);
             return;
         }
+        FatalLine::Write(signal, info, context);
         ::signal(signal, SIG_DFL);
     }
 
