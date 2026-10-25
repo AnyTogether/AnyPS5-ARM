@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../strings.dart';
 import '../together/together_account.dart';
+import 'storage_card.dart';
 import 'together_screen.dart';
 
 /// AnyTogether on the phone: who is signed in, or the ways in. With a Mac connected
@@ -162,6 +163,7 @@ class _TogetherState extends State<_Together> {
                 ],
               ),
             ],
+            StorageCard(account: widget.account),
           ],
         ),
       ),
