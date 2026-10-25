@@ -170,6 +170,8 @@ extension AppModel {
                          self?.preferences.musicVolume = value
                      }),
             PanelRow(id: "hide", title: T.text(.hideWhilePlaying), symbol: "eye.slash", kind: .toggle(preferences.hideWhilePlaying) { [weak self] value in self?.preferences.hideWhilePlaying = value }),
+            PanelRow(id: "hiddenTrophies", title: T.text(.alwaysShowHiddenTrophies), detail: T.text(.alwaysShowHiddenTrophiesDetail), symbol: "trophy",
+                     kind: .toggle(preferences.alwaysShowHiddenTrophies == true) { [weak self] value in self?.preferences.alwaysShowHiddenTrophies = value ? true : nil }),
             PanelRow(id: "discord", title: T.text(.discordPresence), detail: T.text(.discordPresenceDetail), symbol: "person.2.wave.2", kind: .toggle(preferences.discordPresence ?? true) { [weak self] value in
                 self?.preferences.discordPresence = value
                 if value { self?.discordOn() } else { self?.discordOff() }
@@ -233,12 +235,8 @@ extension AppModel {
         var advanced: [PanelRow] = [
             PanelRow(id: "screenshots", title: T.text(.screenshotsFolder), detail: screenshotsFolder.abbreviatedPath, symbol: "camera", kind: .action(destructive: false) { [weak self] in self?.chooseScreenshotsFolder() }),
             PanelRow(id: "showScreenshots", title: T.text(.showScreenshots), symbol: "photo.on.rectangle.angled", kind: .action(destructive: false) { [weak self] in self?.showScreenshots() }),
-            PanelRow(id: "fonts", title: T.text(.fontsFolder), detail: fontsFolder?.abbreviatedPath ?? T.text(.fontsNone), symbol: "textformat", kind: .action(destructive: false) { [weak self] in self?.chooseFontsFolder() }),
+            PanelRow(id: "screenshotsHint", title: T.text(.screenshotsHint), kind: .info("")),
         ]
-        if preferences.fontsFolder != nil {
-            advanced.append(PanelRow(id: "fontsReset", title: T.text(.fontsReset), symbol: "xmark.circle", kind: .action(destructive: false) { [weak self] in self?.preferences.fontsFolder = nil }))
-        }
-        advanced.append(PanelRow(id: "fontsHint", title: T.text(.fontsHint), kind: .info("")))
         advanced.append(PanelRow(id: "phones", title: T.text(.phones), kind: .info(phones.isEmpty ? T.text(.phonesNone)
             : connectedPhones.isEmpty ? "" : T.format(.phonesConnectedCount, connectedPhones.count))))
         for device in phones {
@@ -257,6 +255,7 @@ extension AppModel {
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
             PanelCategory(id: "broadcast", title: TB.text(.title), symbol: "dot.radiowaves.left.and.right", rows: broadcastSettingsRows()),
             PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
+            PanelCategory(id: "fonts", title: TF.text(.title), symbol: "textformat", rows: fontRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]

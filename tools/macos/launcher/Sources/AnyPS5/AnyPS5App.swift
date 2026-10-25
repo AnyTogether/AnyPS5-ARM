@@ -91,7 +91,7 @@ struct RootView: View {
                 if model.share.watching != nil {
                     ShareWatchView().transition(.opacity)
                 }
-                if let game = model.starting {
+                if let game = model.starting ?? model.fontWait {
                     LaunchSplash(game: game)
                         .transition(.opacity.combined(with: .scale(scale: 1.04)))
                 }
@@ -229,18 +229,28 @@ struct LaunchSplash: View {
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .multilineTextAlignment(.center)
+                // A game that needs the Japanese, Chinese and Korean fonts waits for their download.
+                let fonts = model.starting == nil && model.fontWait?.id == game.id
                 VStack(spacing: 14 * scale) {
                     HStack {
-                        Text(T.text(.starting)).font(.display(16 * scale, .medium))
+                        Text(fonts ? TF.text(.getting) : T.text(.starting)).font(.display(16 * scale, .medium))
                         Spacer()
-                        TimelineView(.periodic(from: since, by: 1)) { context in
-                            let seconds = max(0, Int(context.date.timeIntervalSince(since)))
-                            Text(String(format: "%d:%02d", seconds / 60, seconds % 60)).font(.display(16 * scale, .semibold)).monospacedDigit()
+                        if fonts {
+                            Text(TF.format(.gettingProgress, Int((model.cjkProgress ?? 0) * 100))).font(.display(16 * scale, .semibold)).monospacedDigit()
+                        } else {
+                            TimelineView(.periodic(from: since, by: 1)) { context in
+                                let seconds = max(0, Int(context.date.timeIntervalSince(since)))
+                                Text(String(format: "%d:%02d", seconds / 60, seconds % 60)).font(.display(16 * scale, .semibold)).monospacedDigit()
+                            }
                         }
                     }
                     .foregroundStyle(.white.opacity(0.88))
-                    IndeterminateLine(color: model.accent)
-                    Text(T.text(.startingText))
+                    if fonts {
+                        ProgressLine(fraction: model.cjkProgress ?? 0, color: model.accent)
+                    } else {
+                        IndeterminateLine(color: model.accent)
+                    }
+                    Text(fonts ? TF.format(.gettingText, game.name, model.cjkDownloadSize) : T.text(.startingText))
                         .font(.display(14 * scale))
                         .foregroundStyle(.white.opacity(0.6))
                         .multilineTextAlignment(.center)

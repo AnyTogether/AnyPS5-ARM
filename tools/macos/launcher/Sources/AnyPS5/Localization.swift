@@ -73,12 +73,12 @@ enum T {
         case controls, controlsHint, controlsFromGame, pressKey, resetControls, noKey, dpad, leftStick, rightStick, touchpadLeft, touchpadRight
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
-        case trophies, trophyHidden, trophyHiddenDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
+        case trophies, trophyHidden, trophyHiddenDetail, trophyShow, trophyHide, alwaysShowHiddenTrophies, alwaysShowHiddenTrophiesDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
         case phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail, phoneOnline, phonesConnectedCount, phonePlayer, phoneWaiting
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
         case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail, checkUpdates, checkUpdatesDetail, screenshots, screenshotsNone, backUpSaves, backUpSavesDetail, lastBackup, restoreSaves, restoreSavesDetail, savesBackedUp, savesRestored, backupFailed, closeGameFirst, launcherUpdateAvailable, launcherUpToDate, updateCheckFailed, checkForUpdatesNow, checkForUpdatesDetail, checkingUpdates, lastChecked, updateTo, updateDetail, updateDownloading, whatsNew, updateFailed, updateCloseGame, updateNotWritable
-        case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, fontsFolder, fontsNone, fontsReset, fontsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
+        case advanced, advancedDetail, advancedTitle, makeReport, makeReportDetail, screenshotsFolder, showScreenshots, screenshotsHint, sectionSticks, leftDeadzone, rightDeadzone, deadzoneDetail, sectionMouse, mouseSensitivity, mouseSensitivityDetail, mouseVertical, mouseVerticalDetail, mouseCurve, mouseCurveDetail, mouseMinimum, mouseMinimumDetail, mouseMaxSpeed, mouseMaxSpeedDetail, mouseSmoothing, mouseSmoothingDetail, mouseDecay, mouseDecayDetail, sectionKeyboard, stickModifierScale, stickModifierScaleDetail, keyboardRamp, keyboardRampDetail, triggerRamp, triggerRampDetail, sectionGraphics, shaderCache, shaderCacheDetail, sectionShare, exportSettings, exportSettingsDetail, importSettings, importSettingsDetail, resetAdvanced, reportSaved, reportFailed, settingsExported, settingsImported, settingsImportedOther, settingsFileFailed, stickModifier, diagnosisMissingModule, diagnosisUnsupported, diagnosisGpuLost, diagnosisOutOfMemory, diagnosisEngineError, diagnosisCrashed, trophyEarned
         case updateChannel, channelStable, channelNightly, channelNightlyShort, updateChannelStableDetail, updateChannelNightlyDetail, updateChannelStays
         case profilePicture, profilePictureDetail, profilePictureNone, profilePictureRemove, profilePictureUpload, profilePictureUploadDetail, profilePictureFromTogether, profilePictureFromTogetherDetail
         case profilePictureUploaded, profilePictureUploadFailed, profilePictureSaved, profilePictureUnreadable, profilePictureTooSmall, profilePictureDownloadFailed, profilePictureRemoved
@@ -580,10 +580,7 @@ enum T {
         .makeReportDetail: "Discord'a ya da GitHub'a eklemek için",
         .screenshotsFolder: "Ekran Görüntüleri Klasörü",
         .showScreenshots: "Ekran Görüntülerini Göster",
-        .fontsFolder: "Sistem Fontları Klasörü",
-        .fontsNone: "Seçilmedi",
-        .fontsReset: "Font Klasörünü Kaldır",
-        .fontsHint: "Oyunda F12 bir ekran görüntüsü kaydeder. Konsolun sistem fontlarını isteyen oyunlar, font klasöründeki dosyaları kullanır.",
+        .screenshotsHint: "Oyunda F12 bir ekran görüntüsü kaydeder. Oyunların aldığı sistem fontları Ayarlar → Fontlar'da.",
         .sectionSticks: "Kumanda çubukları",
         .leftDeadzone: "Sol Çubuk Ölü Bölge",
         .rightDeadzone: "Sağ Çubuk Ölü Bölge",
@@ -635,6 +632,10 @@ enum T {
         .trophyEarned: "Kupa kazandın",
         .trophyHidden: "Gizli Kupa",
         .trophyHiddenDetail: "Kazandığında ne olduğu görünür.",
+        .trophyShow: "Göster",
+        .trophyHide: "Gizle",
+        .alwaysShowHiddenTrophies: "Gizli Kupaları Her Zaman Göster",
+        .alwaysShowHiddenTrophiesDetail: "Gizli kupaların adı ve açıklaması kazanmadan önce de görünür",
         .trophyLocked: "Kazanılmadı",
         .gradePlatinum: "Platin",
         .gradeGold: "Altın",
@@ -1161,10 +1162,7 @@ enum T {
         .makeReportDetail: "To attach on Discord or GitHub",
         .screenshotsFolder: "Screenshots Folder",
         .showScreenshots: "Show Screenshots",
-        .fontsFolder: "System Fonts Folder",
-        .fontsNone: "None",
-        .fontsReset: "Remove the Fonts Folder",
-        .fontsHint: "F12 in a game saves a screenshot. Games that ask for the console's system fonts use the files in the fonts folder.",
+        .screenshotsHint: "F12 in a game saves a screenshot. The system fonts games get are in Settings → Fonts.",
         .sectionSticks: "Controller sticks",
         .leftDeadzone: "Left Stick Deadzone",
         .rightDeadzone: "Right Stick Deadzone",
@@ -1216,6 +1214,10 @@ enum T {
         .trophyEarned: "Trophy earned",
         .trophyHidden: "Hidden Trophy",
         .trophyHiddenDetail: "Shows what it is once you earn it.",
+        .trophyShow: "Show",
+        .trophyHide: "Hide",
+        .alwaysShowHiddenTrophies: "Always Show Hidden Trophies",
+        .alwaysShowHiddenTrophiesDetail: "Hidden trophies show their name and description before you earn them",
         .trophyLocked: "Not earned",
         .gradePlatinum: "Platinum",
         .gradeGold: "Gold",

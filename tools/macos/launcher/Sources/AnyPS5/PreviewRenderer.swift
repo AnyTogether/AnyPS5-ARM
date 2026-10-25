@@ -298,6 +298,48 @@ enum PreviewRenderer {
         render(preferences, found, root, still, output.appendingPathComponent("home-trophies.png")) { model in signedIn(model); model.focus = .actions(1) }
         render(preferences, found, root, still, output.appendingPathComponent("trophies.png")) { model in model.overlay = .trophies; model.trophyIndex = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("trophies-r1.png")) { model in model.overlay = .trophies; model.trophyIndex = 5; model.switchGame(1) }
+        // A hidden trophy: still hidden and focused (△ Show), shown with Show, and every one shown by the setting.
+        func firstHidden(_ model: AppModel) -> (Game, TrophySet.Trophy, Int)? {
+            guard let game = model.selectedGame, let set = model.trophies[game.id],
+                  let index = set.trophies.firstIndex(where: { $0.hidden && $0.unlocked == nil }) else { return nil }
+            return (game, set.trophies[index], index)
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("trophies-hidden.png")) { model in
+            model.overlay = .trophies
+            if let (_, _, index) = firstHidden(model) { model.trophyIndex = index }
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("trophies-hidden-shown.png")) { model in
+            model.overlay = .trophies
+            if let (game, trophy, _) = firstHidden(model) { model.toggleHiddenTrophy(game, trophy) }
+        }
+        do {
+            var always = preferences
+            always.alwaysShowHiddenTrophies = true
+            render(always, found, root, still, output.appendingPathComponent("trophies-hidden-always.png")) { model in
+                model.overlay = .trophies
+                if let (_, _, index) = firstHidden(model) { model.trophyIndex = index }
+            }
+        }
+        // Settings → Fonts (the app's fonts from ANYPS5_LAUNCHER_FONTS): as it comes, while the
+        // Japanese, Chinese and Korean fonts download, with a folder of console fonts, and a start
+        // waiting for the download.
+        func fonts(_ model: AppModel, row: Int) {
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "fonts" } ?? 0
+            model.panelInRows = true
+            model.panelRow = row
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("fonts.png")) { model in fonts(model, row: 7) }
+        render(preferences, found, root, still, output.appendingPathComponent("fonts-downloading.png")) { model in model.cjkProgress = 0.42; fonts(model, row: 6) }
+        if let console = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_USER_FONTS"] {
+            var own = preferences
+            own.fontsFolder = console
+            render(own, found, root, still, output.appendingPathComponent("fonts-own.png")) { model in fonts(model, row: 8) }
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("fonts-wait.png")) { model in
+            model.cjkProgress = 0.37
+            model.fontWait = model.selectedGame
+        }
         render(preferences, found, root, still, output.appendingPathComponent("game-settings-r1.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1; model.switchGame(1) }
         render(preferences, found, root, still, output.appendingPathComponent("settings.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 0 }
         for category in 1..<6 {

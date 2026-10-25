@@ -61,7 +61,7 @@ public enum GameLog {
         return String(decoding: handle.readDataToEndOfFile(), as: UTF8.self)
     }
 
-    static func size(of file: URL) -> Int64 {
+    public static func size(of file: URL) -> Int64 {
         ((try? FileManager.default.attributesOfItem(atPath: file.path))?[.size] as? NSNumber)?.int64Value ?? 0
     }
 }

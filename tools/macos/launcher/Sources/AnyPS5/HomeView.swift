@@ -576,6 +576,10 @@ extension AppModel {
             if command == .back { cancelStart() }
             return true
         }
+        if fontWait != nil {
+            if command == .back { cancelFontWait() }
+            return true
+        }
         if command == .home {
             togglePlaying()
             return true
@@ -672,7 +676,9 @@ extension AppModel {
             case .up: moveTrophy(-1)
             case .down: moveTrophy(1)
             case .select: if togetherUser != nil { openLeaderboard(selectedGame) }
-            case .back, .options: closeOverlay()
+            // △ shows (or hides again) the focused hidden trophy; on any other it closes the list.
+            case .options: if !toggleFocusedHiddenTrophy() { closeOverlay() }
+            case .back: closeOverlay()
             default: break
             }
             return true
@@ -765,6 +771,7 @@ extension AppModel {
         guard selected != before else { return }
         if overlay == .gallery { loadGallery() }
         if overlay == .trophies {
+            revealedTrophies = []
             if let game = selectedGame, trophies[game.id] != nil {
                 trophyIndex = 0
             } else {

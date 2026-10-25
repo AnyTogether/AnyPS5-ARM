@@ -49,8 +49,14 @@ struct Preferences: Codable, Equatable {
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
     var screenshotsFolder: String?
-    /// Console system font files for the games (ANYPS5_SYSTEM_FONTS), nil for none.
+    /// The user's own system font files for the games, before the launcher's (SystemFonts); nil
+    /// for none.
     var fontsFolder: String?
+    /// The games (title IDs) that opened a font set with Japanese, Chinese or Korean in it: their
+    /// start waits for those fonts to be downloaded.
+    var cjkGames: [String]?
+    /// Hidden trophies show what they are before they are earned; nil means off.
+    var alwaysShowHiddenTrophies: Bool?
     /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
     /// the built-in one, "custom" the folder below, else a downloaded version).
     var engine: String?
@@ -184,6 +190,9 @@ final class AppModel: ObservableObject {
     @Published var libraryIndex = 0
     /// The focused row of the trophy list.
     @Published var trophyIndex = 0
+    /// The hidden trophies shown in the list this time (Show), by game and trophy; forgotten
+    /// when the list closes.
+    @Published var revealedTrophies: Set<String> = []
     @Published var galleryIndex = 0
     /// One screenshot over the whole screen, instead of the grid.
     @Published var galleryViewing = false
@@ -253,6 +262,21 @@ final class AppModel: ObservableObject {
     @Published var engineDownloads: [String: Double] = [:]
     /// The custom toolkit folder, when it holds a toolkit.
     @Published var customToolkit: Toolkit?
+    /// The Noto fonts inside the app (SystemFontsPanel.swift).
+    let builtInFonts = SystemFonts.locateBuiltIn()
+    /// The Japanese, Chinese and Korean fonts, downloaded the first time a game needs them.
+    let fontDownloads: FontDownloads
+    /// The folder of links to the fonts a game gets (ANYPS5_SYSTEM_FONTS).
+    let gameFonts: URL
+    /// How far the Japanese, Chinese and Korean fonts' download is, while it runs.
+    @Published var cjkProgress: Double?
+    @Published var cjkInstalled = false
+    /// The game waiting for those fonts before it starts.
+    @Published var fontWait: Game?
+    var cjkWaiters: [@MainActor (Bool) -> Void] = []
+    /// Where each start's lines begin in the game's log, until the fonts it opened are known.
+    var fontLogOffsets: [String: UInt64] = [:]
+    var fontWatch: Task<Void, Never>?
     private var installer: Installer?
     private var installLog: [String: [String]] = [:]
     private var watcher: DispatchSourceFileSystemObject?
@@ -287,6 +311,10 @@ final class AppModel: ObservableObject {
         self.preferences = preferences ?? Preferences.load()
         toolkitStore = preferences == nil ? ToolkitStore() : ToolkitStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-toolkits-\(UUID().uuidString)"))
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
+        let fonts = preferences == nil ? FontDownloads.root : FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-fonts-\(UUID().uuidString)")
+        fontDownloads = FontDownloads(folder: fonts.appendingPathComponent("CJK"))
+        gameFonts = fonts.appendingPathComponent("Games")
+        cjkInstalled = fontDownloads.installed
         designs = themes.all
         if persists {
             togetherUser = together.user
@@ -845,8 +873,8 @@ final class AppModel: ObservableObject {
     /// Plays the game, its saves brought in step first where save sync is on; `trace` turns
     /// detailed logging on for this start only.
     func play(_ game: Game, trace: Bool = false) {
-        guard root != nil, starting == nil, running == nil, syncing == nil else { return }
-        familyGate(game) { self.syncSaves(game) { self.start(game, trace: trace) } }
+        guard root != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
+        familyGate(game) { self.syncSaves(game) { self.ensureFonts(game) { self.start(game, trace: trace) } } }
     }
 
     private func start(_ game: Game, trace: Bool = false) {
@@ -861,7 +889,7 @@ final class AppModel: ObservableObject {
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
-        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: fontsFolder, trace: trace)
+        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: gameFontsFolder(), trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
@@ -883,6 +911,7 @@ final class AppModel: ObservableObject {
                     self.sessionStart = Date()
                     self.familyGameStarted()
                     self.watchTrophies(game)
+                    self.watchFonts(game)
                     self.watchForExit(of: app.processIdentifier)
                     self.watchForWindow(of: app)
                 } else {
@@ -1202,6 +1231,7 @@ final class AppModel: ObservableObject {
         traceTrim?.cancel()
         traceTrim = nil
         diagnose(running.game, pid: running.app.processIdentifier)
+        checkFontsAfterEnd(running.game)
         trophyWatch?.cancel()
         trophyWatch = nil
         exitWatch?.cancel()
@@ -1584,6 +1614,7 @@ final class AppModel: ObservableObject {
         } else {
             try? Data(line.utf8).write(to: file)
         }
+        markFontLog(of: game, at: UInt64(max(0, GameLog.size(of: file))))
     }
 
     /// The log of the game's last start, read from the end of its log file.
@@ -1786,7 +1817,10 @@ final class AppModel: ObservableObject {
             panelRow = 1
             if let game = selectedGame { readControls(game) }
         }
-        if next == .trophies { trophyIndex = 0 }
+        if next == .trophies {
+            trophyIndex = 0
+            revealedTrophies = []
+        }
         if next == .gallery { loadGallery() }
         if next == .advanced { panelRow = 1 }
         panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends || next == .party
