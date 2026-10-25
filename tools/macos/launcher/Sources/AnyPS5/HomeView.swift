@@ -126,7 +126,12 @@ struct TopBar: View {
                 // Signed in to AnyTogether: the avatar and name others see.
                 let name = model.togetherUser?.displayName ?? model.preferences.profileName
                 ProfileAvatar(url: model.togetherUser?.avatar, name: name, size: 36 * scale, glow: false, picture: model.profilePicture)
+                    .overlay(alignment: .bottomTrailing) {
+                        // Appearing offline: a moon where friends would see a dot.
+                        if model.togetherUser != nil, model.appearingOffline { AppearingOfflineDot(size: 15 * scale).offset(x: 3 * scale, y: 3 * scale) }
+                    }
                 Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9))
+                if let level = model.myLevel { LevelBadgeView(badge: level.badge, size: 30 * scale) }
             }
             Clock()
         }
@@ -615,6 +620,9 @@ extension AppModel {
             return panelCommand(command)
         case .profile:
             profileCommand(command)
+            return true
+        case .compare:
+            compareCommand(command)
             return true
         case .cropPicture:
             cropCommand(command)

@@ -45,7 +45,7 @@ extension AppModel {
                                      self?.openProfile(friend.handle, card: TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar))
                                  },
                                  person: PanelPerson(name: friend.displayName, avatar: friend.avatar,
-                                                     status: friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline)))
+                                                     status: friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline, level: friend.level)))
             // Online friends can be called, unless the user is in a call with them already.
             if friend.presence?.online == true, callFriend?.userId != friend.userId, familyAllows(.voiceChat) {
                 let person = TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar)
@@ -140,6 +140,10 @@ extension AppModel {
             refreshFriends()
         case "friend.removed", "presence.updated":
             refreshFriends()
+        case "level.up":
+            if let up = TogetherLevelUp(event) { levelUp(up) }
+        case "presence.mode":
+            if let mode = TogetherPresenceMode(event) { withAnimation(Motion.overlay) { togetherProfile?.appearOffline = mode.appearOffline } }
         case let type where type.hasPrefix("message.") || type.hasPrefix("conversation.") || type == "typing":
             messageEvent(event)
         case let type where type.hasPrefix("lfg.") || type == "discover.changed":

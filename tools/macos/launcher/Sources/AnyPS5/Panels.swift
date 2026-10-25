@@ -41,6 +41,10 @@ struct PanelPerson {
     var status: Status?
     /// Speaking in the party's voice: a ring in the accent.
     var speaking = false
+    /// Their trophy level, beside the row's words.
+    var level: TogetherLevelBadge?
+    /// The user's own row while they appear offline: a moon on the avatar.
+    var appearingOffline = false
 }
 
 struct PanelCategory: Identifiable {
@@ -717,7 +721,9 @@ struct RowView: View {
                     .overlay(Circle().strokeBorder(model.accent, lineWidth: 2.5 * scale).padding(-3 * scale).opacity(person.speaking ? 1 : 0))
                     .animation(.easeOut(duration: 0.15), value: person.speaking)
                     .overlay(alignment: .bottomTrailing) {
-                        if let status = person.status, status != .offline {
+                        if person.appearingOffline {
+                            AppearingOfflineDot(size: 14 * scale).offset(x: 3 * scale, y: 3 * scale)
+                        } else if let status = person.status, status != .offline {
                             Circle().fill(status == .playing ? model.accent : Color(red: 0.3, green: 0.85, blue: 0.45))
                                 .frame(width: 10 * scale, height: 10 * scale)
                                 .overlay(Circle().strokeBorder(focused ? Color.white : Color(white: 0.1), lineWidth: 2 * scale))
@@ -739,6 +745,7 @@ struct RowView: View {
                 }
             }
             Spacer(minLength: 12 * scale)
+            if let level = row.person?.level { LevelBadgeView(badge: level, size: 30 * scale) }
             value.foregroundStyle(foreground)
         }
         .padding(.horizontal, 18 * scale)

@@ -13,6 +13,7 @@ final class TrophyBanner {
     enum Item {
         case trophy(TrophySet.Trophy)
         case notice(title: String, detail: String, symbol: String)
+        case level(TogetherLevelBadge)
     }
 
     private var queue: [Item] = []
@@ -33,6 +34,13 @@ final class TrophyBanner {
         next()
     }
 
+    /// A new trophy level of the user's own, in its tier's metal, with the trophy sound.
+    func levelUp(_ badge: TogetherLevelBadge, sounds: Bool) {
+        self.sounds = sounds
+        queue.append(.level(badge))
+        next()
+    }
+
     private func next() {
         guard !showing, !queue.isEmpty, let screen = NSScreen.main ?? NSScreen.screens.first else { return }
         showing = true
@@ -47,6 +55,7 @@ final class TrophyBanner {
         switch item {
         case .trophy(let trophy): panel.contentView = NSHostingView(rootView: TrophyToast(trophy: trophy, done: done))
         case .notice(let title, let detail, let symbol): panel.contentView = NSHostingView(rootView: NoticeToast(title: title, detail: detail, symbol: symbol, done: done))
+        case .level(let badge): panel.contentView = NSHostingView(rootView: LevelUpToast(badge: badge, done: done))
         }
         panel.orderFrontRegardless()
         if sounds { Sounds.shared.play(.unlocked) }

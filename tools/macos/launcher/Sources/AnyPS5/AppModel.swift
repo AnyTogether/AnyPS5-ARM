@@ -143,6 +143,8 @@ enum Overlay: Equatable {
     case cropPicture
     /// Settings → Cloud Storage: the usage, the cloud saves and the media on AnyTogether.
     case cloudStorage
+    /// Trophies compared with someone: the games, then one game's trophies side by side.
+    case compare
 }
 
 struct Toast: Identifiable, Equatable {

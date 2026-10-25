@@ -64,14 +64,15 @@ extension AppModel {
     func togetherRows() -> [PanelRow] {
         if let user = togetherUser {
             var rows = [
-                PanelRow(id: "together-user", title: "@\(user.handle)", detail: user.displayName, symbol: "person.crop.circle.badge.checkmark", kind: .info(""),
-                         person: PanelPerson(name: user.displayName, avatar: user.avatar)),
+                PanelRow(id: "together-user", title: "@\(user.handle)", detail: appearingOffline ? user.displayName + " · " + TL.text(.appearingOffline) : user.displayName,
+                         symbol: "person.crop.circle.badge.checkmark", kind: .info(""),
+                         person: PanelPerson(name: user.displayName, avatar: user.avatar, level: togetherProfile?.trophyLevel?.badge, appearingOffline: appearingOffline)),
                 PanelRow(id: "together-profile", title: T.text(.profileMine), detail: T.text(.profileMineDetail), symbol: "person.text.rectangle", kind: .action(destructive: false) { [weak self] in
                     self?.openMyProfile()
                 }),
                 PanelRow(id: "together-online", title: T.text(.togetherOnline), detail: togetherConnected ? T.text(.togetherConnected) : T.text(.togetherConnecting),
                          symbol: togetherConnected ? "dot.radiowaves.left.and.right" : "wifi.exclamationmark", kind: .info("")),
-            ] + familyRows()
+            ] + presenceRows() + familyRows()
             if cloudAvailable { rows.append(cloudStorageRow()) }
             rows.append(PanelRow(id: "together-join", title: T.text(.togetherFriendsJoin), detail: T.text(.togetherFriendsJoinDetail), symbol: "person.2.wave.2",
                                  kind: .toggle(preferences.friendsJoin ?? true) { [weak self] value in self?.friendsJoinChanged(value) }))
@@ -416,6 +417,7 @@ extension AppModel {
                 guard let self else { return }
                 self.togetherSocket = nil
                 self.endShareSession()
+                if self.overlay == .compare { self.overlay = .profile }
                 if self.overlay == .profile { self.closeProfile() }
                 withAnimation(Motion.overlay) {
                     self.togetherUser = nil

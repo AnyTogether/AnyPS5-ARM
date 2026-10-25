@@ -71,7 +71,7 @@ extension AppModel {
             let detail = (note.read ? "" : "● ") + [notificationDetail(note), ProfileView.relative(note.updatedAt)].compactMap { $0 }.joined(separator: " · ")
             rows.append(PanelRow(id: "note-\(note.id)", title: notificationText(note), detail: detail, symbol: Self.notificationSymbol(note.kind),
                                  kind: .action(destructive: false) { [weak self] in self?.openNotification(note) },
-                                 person: note.actor.map { PanelPerson(name: $0.displayName, avatar: $0.avatar) }))
+                                 person: note.actor.map { PanelPerson(name: $0.displayName, avatar: $0.avatar, level: note.kind == .levelUp ? note.data.levelBadge : nil) }))
         }
         if center.more {
             rows.append(PanelRow(id: "notes-more", title: TS.text(.notifMore), symbol: "chevron.down.circle", kind: .action(destructive: false) { [weak self] in self?.loadOlderNotifications() }))
@@ -92,6 +92,7 @@ extension AppModel {
         case .partyInvite: open(.party)
         case .lfgRequest: openFindPlayers(category: 1)
         case .lfgAccepted: followInvite(note.data.invite)
+        case .levelUp: openMyProfile()
         case .message: openMessages()
         case .warning, .other: break
         }
@@ -131,6 +132,7 @@ extension AppModel {
         case .missedCall: return TS.format(.notifMissedCall, name)
         case .lfgRequest: return FP.format(.notifLfgRequest, name, notificationGame(note))
         case .lfgAccepted: return FP.format(.notifLfgAccepted, name, notificationGame(note))
+        case .levelUp: return TL.format(.notifLevelUp, note.data.level ?? togetherProfile?.trophyLevel?.level ?? 0)
         case .warning: return TS.text(.notifWarning)
         case .other: return familyNotificationText(note) ?? TS.text(.notifOther)
         }
@@ -163,6 +165,7 @@ extension AppModel {
         case .missedCall: return "phone.arrow.down.left"
         case .lfgRequest: return "hand.raised.fill"
         case .lfgAccepted: return "checkmark.circle.fill"
+        case .levelUp: return "arrow.up.circle.fill"
         case .warning: return "exclamationmark.shield.fill"
         case .other: return "bell.fill"
         }

@@ -23,6 +23,25 @@ final class SocialState: ObservableObject {
     @Published var profileActivityFailed = false
     var profileActivityTask: Task<Void, Never>?
 
+    /// What the profile on screen pinned; nil while it is read or when it could not be.
+    @Published var profileShowcase: TogetherShowcase?
+    var profileShowcaseTask: Task<Void, Never>?
+
+    // Comparing trophies
+    enum CompareLoad: Equatable { case loading, shown, hidden, failed, unknown }
+    /// Whom the trophies are compared with.
+    @Published var compareWith: TogetherPerson?
+    @Published var compareGames: [TogetherCompareGame] = []
+    @Published var compareGamesLoad = CompareLoad.loading
+    @Published var compareIndex = 0
+    /// The game whose trophies are side by side; nil on the list of games.
+    @Published var compareTitle: String?
+    @Published var compareView: TogetherCompareView?
+    @Published var compareViewLoad = CompareLoad.loading
+    @Published var compareTrophyIndex = 0
+    var compareTask: Task<Void, Never>?
+    var compareGameTask: Task<Void, Never>?
+
     // Leaderboards
     /// The game whose board is open; nil for overall trophy points.
     @Published var boardGame: TogetherActivity.Game?
@@ -68,6 +87,11 @@ final class SocialState: ObservableObject {
         leaderboard = nil
         boardGame = nil
         notificationsTask?.cancel()
+        compareTask?.cancel()
+        compareGameTask?.cancel()
+        compareWith = nil
+        compareGames = []
+        compareView = nil
         notifications = TogetherNotifications()
         notificationsFailed = false
     }
