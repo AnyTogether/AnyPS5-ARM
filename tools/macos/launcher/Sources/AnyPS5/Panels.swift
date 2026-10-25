@@ -727,6 +727,7 @@ struct RowView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail = row.detail {
                     Text(detail).font(.display(13 * scale)).foregroundStyle(foreground.opacity(0.55)).lineLimit(2).truncationMode(.middle)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: 12 * scale)
