@@ -3,11 +3,15 @@ import 'dart:io';
 import 'package:anyps5_remote/chat_strings.dart';
 import 'package:anyps5_remote/strings.dart';
 import 'package:anyps5_remote/together/messages.dart';
+import 'package:anyps5_remote/together/storage.dart';
 import 'package:anyps5_remote/together/together_account.dart';
 import 'package:anyps5_remote/together/together_hub.dart';
+import 'package:anyps5_remote/ui/messages_view.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'support/fake_server.dart';
+import 'support/scripted_hub.dart';
 
 /// A message as the API sends it now: its edits, reactions and the one it answers.
 Map<String, dynamic> message(
@@ -742,6 +746,326 @@ void main() {
       expect(messages().readReceipts, isNull);
       server.push('messages.settings', {'readReceipts': false});
       await until(() => messages().readReceipts == false);
+    });
+  });
+
+  group('the pane', () {
+    late TogetherHub hub;
+    late ScriptedAccount account;
+
+    final direct = conversation(
+      'c1',
+      ['ece'],
+      lastSeq: 4,
+      readSeq: 4,
+      receipts: [receipt('ece', read: 3, delivered: 4)],
+    );
+    final squad = conversation(
+      'g1',
+      ['ali', 'ece'],
+      group: true,
+      lastSeq: 2,
+      readSeq: 2,
+      receipts: [receipt('ali', read: 2), receipt('ece', read: 1)],
+    );
+
+    setUp(() async {
+      (hub, account) = await scriptedHub();
+      hub.account.storage = StorageInfo.off;
+      account.answer = (method, path, body) => switch ((method, path)) {
+        ('PUT', 'conversations/c1/messages/2/reactions/like') => {
+          'conversationId': 'c1',
+          'seq': 2,
+          'reactions': [
+            tally('like', ['me']),
+          ],
+        },
+        ('DELETE', 'conversations/c1/messages/2/reactions/like') => {
+          'conversationId': 'c1',
+          'seq': 2,
+          'reactions': <Object>[],
+        },
+        ('POST', 'conversations/c1/messages') => message(
+          'c1',
+          5,
+          author: 'me',
+          id: body!['clientId'] as String,
+          text: body['text'] as String?,
+          replyTo: body['replyTo'] as int?,
+        ),
+        ('PATCH', 'conversations/c1/messages/4') => message(
+          'c1',
+          4,
+          author: 'me',
+          text: body!['text'] as String,
+          editCount: 1,
+          createdAt: DateTime.now().toUtc(),
+        ),
+        ('PUT', 'conversations/c1/mute') => conversation(
+          'c1',
+          ['ece'],
+          lastSeq: 4,
+          readSeq: 4,
+          muted: true,
+        ),
+        _ => <String, dynamic>{},
+      };
+    });
+
+    tearDown(() => hub.dispose());
+
+    void sideways(WidgetTester tester) {
+      tester.view.physicalSize = const Size(2556, 1179);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+    }
+
+    Future<void> open(
+      WidgetTester tester, {
+      String id = 'c1',
+      List<ChatMessage>? thread,
+      Strings strings = Strings.english,
+    }) async {
+      sideways(tester);
+      hub.messages
+        ..conversations = [
+          Conversation.fromJson(direct),
+          Conversation.fromJson(squad),
+        ]
+        ..loaded = true
+        ..openId = id
+        ..thread =
+            thread ??
+            [
+              ChatMessage.fromJson(message('c1', 1, text: 'first')),
+              ChatMessage.fromJson(message('c1', 2, text: 'naber')),
+              ChatMessage.fromJson(message('c1', 3, author: 'me', text: 'iyi')),
+              ChatMessage.fromJson(
+                message(
+                  'c1',
+                  4,
+                  author: 'me',
+                  text: 'sen',
+                  createdAt: DateTime.now().toUtc(),
+                ),
+              ),
+            ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Texts(
+            strings: strings,
+            child: Scaffold(body: MessagesPane(hub: hub)),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('a long press reacts; the chip shows and takes it back', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.longPress(find.text('naber'));
+      await tester.pumpAndSettle();
+      for (final name in MessageReaction.values) {
+        expect(
+          find.byTooltip(Strings.english.reactionLabel(name)),
+          findsOneWidget,
+        );
+      }
+      expect(find.text('Reply'), findsOneWidget);
+      // Not mine: no edit, no unsend.
+      expect(find.text('Edit'), findsNothing);
+      expect(find.text('Unsend'), findsNothing);
+      await tester.tap(find.byTooltip('Like'));
+      await tester.pumpAndSettle();
+      expect(account.calls.last.$1, 'PUT');
+      expect(
+        account.calls.last.$2,
+        'conversations/c1/messages/2/reactions/like',
+      );
+      final chip = find.byKey(const ValueKey('reaction-2-like'));
+      expect(chip, findsOneWidget);
+      await tester.tap(chip);
+      await tester.pumpAndSettle();
+      expect(account.calls.last.$1, 'DELETE');
+      expect(find.byKey(const ValueKey('reaction-2-like')), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the visible button opens the same actions', (tester) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Message actions').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Reply'), findsOneWidget);
+    });
+
+    testWidgets('a reply shows the bar, goes with its seq and quotes it', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.longPress(find.text('naber'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Reply'));
+      await tester.pumpAndSettle();
+      expect(find.text('Replying to ECE'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'iyidir');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pumpAndSettle();
+      final sent = account.calls.lastWhere((c) => c.$1 == 'POST').$3!;
+      expect(sent['replyTo'], 2);
+      expect(find.text('Replying to ECE'), findsNothing);
+      // The sent message quotes the one it answers.
+      expect(find.byKey(const ValueKey('quote-5')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('quote-5')),
+          matching: find.text('naber'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('a quote of a message not loaded or removed', (tester) async {
+      await open(
+        tester,
+        thread: [
+          ChatMessage.fromJson(message('c1', 8, deleted: true)),
+          ChatMessage.fromJson(message('c1', 9, text: 'a', replyTo: 2)),
+          ChatMessage.fromJson(message('c1', 10, text: 'b', replyTo: 8)),
+        ],
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('quote-9')),
+          matching: find.text('An earlier message'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('quote-10')),
+          matching: find.text('Message removed'),
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('my own message is edited and unsent', (tester) async {
+      await open(tester);
+      await tester.longPress(find.text('sen'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Edit'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField).last, 'sen?');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(account.calls.last.$1, 'PATCH');
+      expect(account.calls.last.$3, {'text': 'sen?'});
+      expect(find.text('sen?'), findsOneWidget);
+      await tester.longPress(find.text('sen?'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Unsend'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text("Unsend this message for everyone? It can't be undone."),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Unsend'));
+      await tester.pumpAndSettle();
+      expect(account.calls.last.$1, 'DELETE');
+      expect(account.calls.last.$2, 'conversations/c1/messages/4');
+      expect(find.text('Message removed'), findsWidgets);
+    });
+
+    testWidgets('an old message of mine cannot be edited, but can be unsent', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.longPress(find.text('iyi'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit'), findsNothing);
+      expect(find.text('Unsend'), findsOneWidget);
+    });
+
+    testWidgets('the receipt shows under my newest message only', (
+      tester,
+    ) async {
+      await open(tester);
+      expect(find.text('Delivered'), findsOneWidget);
+      expect(find.text('Read'), findsNothing);
+      hub.messages
+        ..conversations = [
+          Conversation.fromJson({
+            ...direct,
+            'receipts': [receipt('ece', read: 4, delivered: 4)],
+          }),
+        ]
+        ..notifyListeners();
+      await tester.pump();
+      expect(find.text('Read'), findsOneWidget);
+    });
+
+    testWidgets('a group says how many saw it, in Turkish too', (tester) async {
+      await open(
+        tester,
+        id: 'g1',
+        thread: [
+          ChatMessage.fromJson(message('g1', 1, author: 'ali')),
+          ChatMessage.fromJson(message('g1', 2, author: 'me', text: 'gg')),
+        ],
+        strings: Strings.turkish,
+      );
+      expect(find.text('1 kişi gördü'), findsOneWidget);
+    });
+
+    testWidgets('a conversation is pinned and muted from its row', (
+      tester,
+    ) async {
+      await open(tester);
+      account.answer = (method, path, body) => switch ((method, path)) {
+        ('PUT', 'conversations/g1/pin') => throw const TogetherProblem(
+          409,
+          'full',
+          'full',
+        ),
+        ('PUT', 'conversations/c1/mute') => conversation(
+          'c1',
+          ['ece'],
+          lastSeq: 4,
+          readSeq: 4,
+          muted: true,
+          pinned: true,
+        ),
+        _ => null,
+      };
+      await tester.longPress(find.text('Squad'));
+      await tester.pumpAndSettle();
+      expect(find.text('Pin to top'), findsOneWidget);
+      expect(find.text('Mute notifications'), findsOneWidget);
+      await tester.tap(find.text('Pin to top'));
+      await tester.pumpAndSettle();
+      expect(account.calls.last.$3, {'pinned': true});
+      expect(find.text('You can pin up to 5 conversations.'), findsOneWidget);
+      await tester.longPress(find.text('ECE').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Mute notifications'));
+      await tester.pumpAndSettle();
+      expect(account.calls.last.$2, 'conversations/c1/mute');
+      expect(account.calls.last.$3, {'muted': true});
+      expect(find.byTooltip('Muted'), findsOneWidget);
+      expect(find.byTooltip('Pinned'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('the thread header offers the same conversation actions', (
+      tester,
+    ) async {
+      await open(tester);
+      await tester.tap(find.byTooltip('Conversation options'));
+      await tester.pumpAndSettle();
+      expect(find.text('Pin to top'), findsOneWidget);
+      expect(find.text('Mute notifications'), findsOneWidget);
     });
   });
 }

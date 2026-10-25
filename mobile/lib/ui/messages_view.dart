@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../chat_strings.dart';
 import '../media_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
@@ -9,6 +10,7 @@ import '../together/groups.dart';
 import '../together/messages.dart';
 import '../together/people.dart';
 import '../together/storage.dart';
+import '../together/together_account.dart';
 import '../together/together_hub.dart';
 import 'message_media.dart';
 import 'profile_edit.dart' show pickFromLibrary;
@@ -33,7 +35,14 @@ class MessagesPane extends StatefulWidget {
 class _MessagesPaneState extends State<MessagesPane> {
   final _text = TextEditingController();
   final _scroll = ScrollController();
+  final _focus = FocusNode();
   late final Messages _messages = widget.hub.messages;
+
+  /// The message the next one answers; dropped when another conversation opens.
+  ChatMessage? _reply;
+
+  ChatMessage? get _replyTo =>
+      _reply?.conversationId == _messages.openId ? _reply : null;
 
   /// The server keeps photos: the composer can attach one.
   late bool _storage = widget.hub.account.storage?.enabled ?? false;
@@ -75,6 +84,7 @@ class _MessagesPaneState extends State<MessagesPane> {
     _messages.hide();
     _text.dispose();
     _scroll.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -88,8 +98,163 @@ class _MessagesPaneState extends State<MessagesPane> {
   void _send() {
     final text = _text.text;
     if (text.trim().isEmpty) return;
+    final reply = _replyTo;
     _text.clear();
-    _messages.send(text);
+    setState(() => _reply = null);
+    _messages.send(text, replyTo: reply);
+  }
+
+  void _say(String text) =>
+      ScaffoldMessenger.maybeOf(context)
+          ?.showSnackBar(SnackBar(content: Text(text)));
+
+  /// React, reply, edit or unsend: what can be done with a message, picked from a sheet.
+  Future<void> _actions(ChatMessage message) async {
+    final me = widget.hub.me;
+    final mine = message.authorId == me;
+    final picked = await showModalBottomSheet<Object>(
+      context: context,
+      backgroundColor: const Color(0xFF151821),
+      showDragHandle: false,
+      builder: (context) => _MessageSheet(
+        message: message,
+        me: me,
+        canEdit: message.canEdit(me),
+        canUnsend: mine,
+      ),
+    );
+    if (!mounted || picked == null) return;
+    switch (picked) {
+      case MessageReaction reaction:
+        await _react(message, reaction);
+      case _MessageAction.reply:
+        setState(() => _reply = message);
+        _focus.requestFocus();
+      case _MessageAction.edit:
+        await _edit(message);
+      case _MessageAction.unsend:
+        await _unsend(message);
+    }
+  }
+
+  Future<void> _react(ChatMessage message, MessageReaction reaction) async {
+    final texts = Texts.of(context);
+    try {
+      await _messages.react(message, reaction);
+    } on Object catch (error) {
+      if (mounted) _say(togetherFailure(texts, error));
+    }
+  }
+
+  Future<void> _edit(ChatMessage message) async {
+    final texts = Texts.of(context);
+    final text = await showDialog<String>(
+      context: context,
+      builder: (_) => _EditDialog(text: message.words ?? ''),
+    );
+    if (text == null || text.trim().isEmpty || !mounted) return;
+    if (text.trim() == message.words?.trim()) return;
+    try {
+      await _messages.edit(message, text);
+    } on Object catch (error) {
+      if (!mounted) return;
+      _say(switch (error) {
+        // Past the edit window (403) or the edit limit (409).
+        TogetherProblem(code: 'edit_limit') ||
+        TogetherProblem(status: 403) => texts.editLimit,
+        _ => togetherFailure(texts, error),
+      });
+    }
+  }
+
+  Future<void> _unsend(ChatMessage message) async {
+    final texts = Texts.of(context);
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF151821),
+        content: Text(
+          texts.confirmUnsend,
+          style: const TextStyle(color: Colors.white70, fontSize: 14.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(
+              texts.cancel,
+              style: const TextStyle(color: Colors.white60),
+            ),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: togetherError,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(texts.unsend),
+          ),
+        ],
+      ),
+    );
+    if (sure != true || !mounted) return;
+    try {
+      await _messages.unsend(message);
+      if (_reply?.id == message.id) setState(() => _reply = null);
+    } on Object catch (error) {
+      if (mounted) _say(togetherFailure(texts, error));
+    }
+  }
+
+  /// Pin or unpin, mute or unmute a conversation.
+  Future<void> _conversationActions(Conversation conversation) async {
+    final texts = Texts.of(context);
+    final picked = await showModalBottomSheet<_ConversationAction>(
+      context: context,
+      backgroundColor: const Color(0xFF151821),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _SheetRow(
+                icon: conversation.pinned
+                    ? Icons.push_pin_rounded
+                    : Icons.push_pin_outlined,
+                label: conversation.pinned
+                    ? texts.unpinConversation
+                    : texts.pinConversation,
+                onTap: () => Navigator.of(context).pop(_ConversationAction.pin),
+              ),
+              _SheetRow(
+                icon: conversation.muted
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+                label: conversation.muted
+                    ? texts.unmuteConversation
+                    : texts.muteConversation,
+                onTap: () =>
+                    Navigator.of(context).pop(_ConversationAction.mute),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      if (picked == _ConversationAction.pin) {
+        await _messages.pin(conversation.id, !conversation.pinned);
+      } else {
+        await _messages.mute(conversation.id, !conversation.muted);
+      }
+    } on Object catch (error) {
+      if (!mounted) return;
+      _say(switch (error) {
+        TogetherProblem(code: 'full') => texts.pinFull(maxPinned),
+        _ => togetherFailure(texts, error),
+      });
+    }
   }
 
   @override
@@ -154,6 +319,7 @@ class _MessagesPaneState extends State<MessagesPane> {
             me: me,
             selected: conversation.id == _messages.openId,
             onTap: () => _messages.show(conversation.id).catchError((_) {}),
+            onLongPress: () => _conversationActions(conversation),
           ),
       ],
     );
@@ -176,6 +342,10 @@ class _MessagesPaneState extends State<MessagesPane> {
     final me = widget.hub.me;
     final others = conversation.others(me);
     final thread = _messages.thread.reversed.toList();
+    // The receipt goes under my newest message on the server, and nowhere else.
+    final newestMine = thread
+        .where((m) => m.authorId == me && m.seq > 0)
+        .firstOrNull;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -211,6 +381,15 @@ class _MessagesPaneState extends State<MessagesPane> {
                     size: 20,
                   ),
                 ),
+              IconButton(
+                tooltip: texts.conversationActions,
+                onPressed: () => _conversationActions(conversation),
+                icon: const Icon(
+                  Icons.more_horiz_rounded,
+                  color: Colors.white54,
+                  size: 20,
+                ),
+              ),
             ],
           ),
         ),
@@ -243,7 +422,25 @@ class _MessagesPaneState extends State<MessagesPane> {
                         : null;
                     return _Bubble(
                       message: message,
+                      me: me,
                       mine: message.authorId == me,
+                      quote: message.replyTo == null || message.deleted
+                          ? null
+                          : _Quote(
+                              key: ValueKey('quote-${message.seq}'),
+                              target: _messages.thread
+                                  .where((m) => m.seq == message.replyTo)
+                                  .firstOrNull,
+                              conversation: conversation,
+                              me: me,
+                            ),
+                      receipt: identical(message, newestMine)
+                          ? receiptOf(conversation, message, me)
+                          : null,
+                      onActions: message.deleted || message.seq == 0
+                          ? null
+                          : () => _actions(message),
+                      onReact: (reaction) => _react(message, reaction),
                       // A group names who wrote, once for messages in a row.
                       author:
                           conversation.group &&
@@ -257,6 +454,7 @@ class _MessagesPaneState extends State<MessagesPane> {
                 ),
         ),
         _typing(texts, conversation),
+        if (_replyTo case final reply?) _replying(texts, conversation, reply),
         _composer(texts),
       ],
     );
@@ -288,6 +486,65 @@ class _MessagesPaneState extends State<MessagesPane> {
       );
     },
   );
+
+  /// "Replying to Ece" and what she wrote, above the composer, with a way out.
+  Widget _replying(
+    Strings texts,
+    Conversation conversation,
+    ChatMessage reply,
+  ) {
+    final me = widget.hub.me;
+    final name = reply.authorId == me
+        ? texts.messagesYou
+        : conversation.author(reply.authorId)?.displayName ?? '…';
+    return Container(
+      margin: const EdgeInsets.fromLTRB(14, 6, 14, 0),
+      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+      decoration: BoxDecoration(
+        color: const Color(0x0FFFFFFF),
+        borderRadius: BorderRadius.circular(12),
+        border: const Border(left: BorderSide(color: togetherAccent, width: 3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.reply_rounded, size: 16, color: togetherAccent),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  texts.replyingTo(name),
+                  style: const TextStyle(
+                    color: togetherAccent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  texts.messagePreview(reply),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white54, fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: texts.cancel,
+            visualDensity: VisualDensity.compact,
+            onPressed: () => setState(() => _reply = null),
+            icon: const Icon(
+              Icons.close_rounded,
+              size: 18,
+              color: Colors.white54,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   /// A group with the friends picked, and a name if one is given.
   Future<void> _newGroup() async {
@@ -330,6 +587,7 @@ class _MessagesPaneState extends State<MessagesPane> {
         Expanded(
           child: TextField(
             controller: _text,
+            focusNode: _focus,
             minLines: 1,
             maxLines: 3,
             maxLength: 4000,
@@ -382,12 +640,14 @@ class _ConversationRow extends StatelessWidget {
     required this.me,
     required this.selected,
     required this.onTap,
+    required this.onLongPress,
   });
 
   final Conversation conversation;
   final String? me;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -407,6 +667,7 @@ class _ConversationRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
           onTap: onTap,
+          onLongPress: onLongPress,
           borderRadius: BorderRadius.circular(14),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -439,6 +700,16 @@ class _ConversationRow extends StatelessWidget {
                               ),
                             ),
                           ),
+                          if (conversation.muted)
+                            _Mark(
+                              icon: Icons.notifications_off_rounded,
+                              label: texts.mutedMark,
+                            ),
+                          if (conversation.pinned)
+                            _Mark(
+                              icon: Icons.push_pin_rounded,
+                              label: texts.pinnedMark,
+                            ),
                           Text(
                             _when(conversation.updatedAt),
                             style: const TextStyle(
@@ -471,13 +742,18 @@ class _ConversationRow extends StatelessWidget {
                                 vertical: 1,
                               ),
                               decoration: BoxDecoration(
-                                color: togetherAccent,
+                                // Muted: still counted, without the call to look.
+                                color: conversation.muted
+                                    ? Colors.white24
+                                    : togetherAccent,
                                 borderRadius: BorderRadius.circular(999),
                               ),
                               child: Text(
                                 unread > 99 ? '99+' : '$unread',
-                                style: const TextStyle(
-                                  color: togetherInk,
+                                style: TextStyle(
+                                  color: conversation.muted
+                                      ? Colors.white
+                                      : togetherInk,
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -513,26 +789,38 @@ String _when(DateTime time) {
 class _Bubble extends StatelessWidget {
   const _Bubble({
     required this.message,
+    required this.me,
     required this.mine,
     required this.author,
     required this.onRetry,
+    this.quote,
+    this.receipt,
+    this.onActions,
+    this.onReact,
   });
 
   final ChatMessage message;
+  final String? me;
   final bool mine;
   final Person? author;
   final VoidCallback onRetry;
 
-  /// The words under media are the caption alone, never the stand-in ("[photo]").
-  String? get _shownText => message.kind == MediaKind.text
-      ? message.text ?? ''
-      : (message.caption?.isEmpty ?? true)
-      ? null
-      : message.caption;
+  /// The message this one answers, drawn above its words.
+  final Widget? quote;
+
+  /// Where my newest message has got; null under every other one.
+  final Receipt? receipt;
+
+  /// Opens what can be done with it; null for one removed or still on its way.
+  final VoidCallback? onActions;
+
+  /// A reaction chip tapped: mine goes, another's is added.
+  final ValueChanged<MessageReaction>? onReact;
 
   @override
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
+    final shown = message.words ?? (message.kind == MediaKind.text ? '' : null);
     final bubble = Container(
       constraints: const BoxConstraints(maxWidth: 380),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
@@ -552,14 +840,15 @@ class _Bubble extends StatelessWidget {
             : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
+          ?quote,
           if (!message.deleted && message.attachments.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2, bottom: 4),
               child: MessageMedia(message: message, mine: mine),
             ),
-          if (message.deleted || _shownText != null)
+          if (message.deleted || shown != null)
             Text(
-              message.deleted ? texts.messagesDeleted : _shownText ?? '',
+              message.deleted ? texts.messagesDeleted : shown ?? '',
               style: TextStyle(
                 color: message.deleted ? Colors.white38 : Colors.white,
                 fontSize: 14.5,
@@ -594,6 +883,27 @@ class _Bubble extends StatelessWidget {
         ],
       ),
     );
+    final retry = message.failed && !message.refused;
+    final touchable = GestureDetector(
+      onTap: retry ? onRetry : null,
+      onLongPress: onActions,
+      child: bubble,
+    );
+    // A quiet button beside the bubble says a long press is not the only way in.
+    final more = onActions == null
+        ? const SizedBox(width: 28)
+        : IconButton(
+            tooltip: texts.messageActions,
+            onPressed: onActions,
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+            icon: const Icon(
+              Icons.more_horiz_rounded,
+              size: 16,
+              color: Colors.white24,
+            ),
+          );
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Column(
@@ -613,15 +923,471 @@ class _Bubble extends StatelessWidget {
                 ),
               ),
             ),
-          AnimatedOpacity(
-            duration: const Duration(milliseconds: 160),
-            opacity: message.pending ? 0.55 : 1,
-            child: message.failed && !message.refused
-                ? GestureDetector(onTap: onRetry, child: bubble)
-                : bubble,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (mine) more,
+              Flexible(
+                child: AnimatedOpacity(
+                  duration: const Duration(milliseconds: 160),
+                  opacity: message.pending ? 0.55 : 1,
+                  child: touchable,
+                ),
+              ),
+              if (!mine) more,
+            ],
+          ),
+          if (message.reactions.isNotEmpty && !message.deleted)
+            Padding(
+              padding: EdgeInsets.only(
+                top: 3,
+                left: mine ? 0 : 4,
+                right: mine ? 4 : 0,
+              ),
+              child: Wrap(
+                spacing: 4,
+                runSpacing: 4,
+                children: [
+                  for (final count in message.reactions)
+                    _ReactionChip(
+                      key: ValueKey(
+                        'reaction-${message.seq}-${count.reaction.name}',
+                      ),
+                      count: count,
+                      mine: me != null && count.userIds.contains(me),
+                      label: texts.reactionLabel(count.reaction),
+                      onTap: onReact == null
+                          ? null
+                          : () => onReact!(count.reaction),
+                    ),
+                ],
+              ),
+            ),
+          if (receipt case final receipt?)
+            Padding(
+              padding: const EdgeInsets.only(top: 3, right: 4),
+              child: Text(
+                texts.receipt(receipt),
+                style: TextStyle(
+                  color: receipt.kind == ReceiptKind.read || receipt.everyone
+                      ? togetherAccent
+                      : Colors.white38,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A reaction under a bubble: its glyph, how many when more than one, lit when it is mine.
+class _ReactionChip extends StatelessWidget {
+  const _ReactionChip({
+    super.key,
+    required this.count,
+    required this.mine,
+    required this.label,
+    required this.onTap,
+  });
+
+  final ReactionCount count;
+  final bool mine;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: mine,
+    label: count.count > 1 ? '$label ${count.count}' : label,
+    excludeSemantics: true,
+    child: Material(
+      color: mine ? const Color(0x2E8AB4FF) : const Color(0x14FFFFFF),
+      shape: StadiumBorder(
+        side: BorderSide(
+          color: mine ? const Color(0x998AB4FF) : Colors.transparent,
+        ),
+      ),
+      child: InkWell(
+        customBorder: const StadiumBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _Glyph(count.reaction, size: 13),
+              if (count.count > 1) ...[
+                const SizedBox(width: 4),
+                Text(
+                  '${count.count}',
+                  style: TextStyle(
+                    color: mine ? togetherAccent : Colors.white70,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// A reaction drawn: an emoji, or "GG" set as a small badge.
+class _Glyph extends StatelessWidget {
+  const _Glyph(this.reaction, {required this.size});
+
+  final MessageReaction reaction;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => reaction == MessageReaction.gg
+      ? Text(
+          reaction.glyph,
+          style: TextStyle(
+            color: togetherAccent,
+            fontSize: size * 0.82,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+            height: 1.25,
+          ),
+        )
+      : Text(reaction.glyph, style: TextStyle(fontSize: size, height: 1.2));
+}
+
+/// The message a reply answers, above its words: who wrote it and what, as far as the loaded
+/// thread knows it.
+class _Quote extends StatelessWidget {
+  const _Quote({
+    super.key,
+    required this.target,
+    required this.conversation,
+    required this.me,
+  });
+
+  final ChatMessage? target;
+  final Conversation conversation;
+  final String? me;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    final target = this.target;
+    final name = target == null
+        ? null
+        : target.authorId == me
+        ? texts.messagesYou
+        : conversation.author(target.authorId)?.displayName;
+    final text = target == null
+        ? texts.earlierMessage
+        : target.deleted
+        ? texts.messagesDeleted
+        : texts.messagePreview(target);
+    return Container(
+      margin: const EdgeInsets.only(top: 2, bottom: 6),
+      padding: const EdgeInsets.fromLTRB(9, 4, 10, 5),
+      decoration: const BoxDecoration(
+        color: Color(0x14000000),
+        borderRadius: BorderRadius.all(Radius.circular(8)),
+        border: Border(left: BorderSide(color: togetherAccent, width: 2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (name != null)
+            Text(
+              name,
+              style: const TextStyle(
+                color: togetherAccent,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          Text(
+            text,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white60,
+              fontSize: 12.5,
+              fontStyle: target == null || target.deleted
+                  ? FontStyle.italic
+                  : FontStyle.normal,
+            ),
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A small mark in a conversation's row: pinned, muted.
+class _Mark extends StatelessWidget {
+  const _Mark({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: label,
+    child: Padding(
+      padding: const EdgeInsets.only(right: 5),
+      child: Icon(icon, size: 12.5, color: Colors.white38),
+    ),
+  );
+}
+
+enum _MessageAction { reply, edit, unsend }
+
+enum _ConversationAction { pin, mute }
+
+/// What can be done with a message: the seven reactions on top, then reply, and on one's
+/// own, edit and unsend. Pops a [MessageReaction] or a [_MessageAction].
+class _MessageSheet extends StatelessWidget {
+  const _MessageSheet({
+    required this.message,
+    required this.me,
+    required this.canEdit,
+    required this.canUnsend,
+  });
+
+  final ChatMessage message;
+  final String? me;
+  final bool canEdit;
+  final bool canUnsend;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 14, 12, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Semantics(
+              header: true,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 8, bottom: 8),
+                child: Text(
+                  texts.react,
+                  style: const TextStyle(
+                    color: Colors.white38,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                for (final reaction in MessageReaction.values)
+                  _ReactionButton(
+                    reaction: reaction,
+                    label: texts.reactionLabel(reaction),
+                    picked: message.reacted(reaction, me),
+                    onTap: () => Navigator.of(context).pop(reaction),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Divider(height: 1, color: Color(0x14FFFFFF)),
+            const SizedBox(height: 4),
+            _SheetRow(
+              icon: Icons.reply_rounded,
+              label: texts.reply,
+              onTap: () => Navigator.of(context).pop(_MessageAction.reply),
+            ),
+            if (canEdit)
+              _SheetRow(
+                icon: Icons.edit_outlined,
+                label: texts.editMessage,
+                onTap: () => Navigator.of(context).pop(_MessageAction.edit),
+              ),
+            if (canUnsend)
+              _SheetRow(
+                icon: Icons.undo_rounded,
+                label: texts.unsend,
+                color: togetherError,
+                onTap: () => Navigator.of(context).pop(_MessageAction.unsend),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One reaction to pick in the sheet: lit when it is mine already (picking it takes it back).
+class _ReactionButton extends StatefulWidget {
+  const _ReactionButton({
+    required this.reaction,
+    required this.label,
+    required this.picked,
+    required this.onTap,
+  });
+
+  final MessageReaction reaction;
+  final String label;
+  final bool picked;
+  final VoidCallback onTap;
+
+  @override
+  State<_ReactionButton> createState() => _ReactionButtonState();
+}
+
+class _ReactionButtonState extends State<_ReactionButton> {
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: widget.label,
+    child: Semantics(
+      button: true,
+      selected: widget.picked,
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _down = true),
+        onTapCancel: () => setState(() => _down = false),
+        onTapUp: (_) => setState(() => _down = false),
+        onTap: widget.onTap,
+        child: AnimatedScale(
+          scale: _down ? 0.88 : 1,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+          child: Container(
+            width: 46,
+            height: 46,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: widget.picked
+                  ? const Color(0x2E8AB4FF)
+                  : const Color(0x0DFFFFFF),
+              border: Border.all(
+                color: widget.picked
+                    ? const Color(0x998AB4FF)
+                    : Colors.transparent,
+              ),
+            ),
+            child: _Glyph(widget.reaction, size: 22),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _SheetRow extends StatelessWidget {
+  const _SheetRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.color = Colors.white,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(10),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+      child: Row(
+        children: [
+          Icon(icon, size: 19, color: color.withValues(alpha: 0.8)),
+          const SizedBox(width: 14),
+          Text(label, style: TextStyle(color: color, fontSize: 14.5)),
+        ],
+      ),
+    ),
+  );
+}
+
+/// New words for one's own message, in place of the old.
+class _EditDialog extends StatefulWidget {
+  const _EditDialog({required this.text});
+
+  final String text;
+
+  @override
+  State<_EditDialog> createState() => _EditDialogState();
+}
+
+class _EditDialogState extends State<_EditDialog> {
+  late final _text = TextEditingController(text: widget.text);
+
+  @override
+  void dispose() {
+    _text.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    return AlertDialog(
+      backgroundColor: const Color(0xFF151821),
+      title: Text(
+        texts.editMessage,
+        style: const TextStyle(color: Colors.white, fontSize: 17),
+      ),
+      content: SizedBox(
+        width: 420,
+        child: TextField(
+          controller: _text,
+          autofocus: true,
+          minLines: 1,
+          maxLines: 4,
+          maxLength: 4000,
+          textCapitalization: TextCapitalization.sentences,
+          style: const TextStyle(color: Colors.white, fontSize: 15),
+          decoration: InputDecoration(
+            isDense: true,
+            counterText: '',
+            filled: true,
+            fillColor: const Color(0x14FFFFFF),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide.none,
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            texts.cancel,
+            style: const TextStyle(color: Colors.white60),
+          ),
+        ),
+        ListenableBuilder(
+          listenable: _text,
+          builder: (context, _) => FilledButton(
+            onPressed: _text.text.trim().isEmpty
+                ? null
+                : () => Navigator.of(context).pop(_text.text),
+            child: Text(texts.save),
+          ),
+        ),
+      ],
     );
   }
 }
