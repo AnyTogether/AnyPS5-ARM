@@ -74,13 +74,71 @@ with `libSceNpCppWebApi.prx`):
 | `userProfile GET /v1/users/<me>/friends` | AnyTogether friends (`{"friends":[],"totalItemCount":0}` when there are none) |
 | `userProfile GET /v1/users/me/blocks?offset=0&limit=0` | `{"blocks":[],"totalItemCount":0}` (496f10910; was 404) |
 | `communicationRestrictionStatus GET /v3/users/<me>/communication/restriction/status` | `{"restricted":false}` (496f10910; was "not offered", 0x80553406) |
-| Push event filter on `sessionManager` (17 filter parameters) | the filter is made; no events come |
+| Push event filter on `sessionManager` (17 filter parameters) | the filter is made with its data types (now in the log as `data_types`) |
+| Host: push context (`CreatePushContext`) with a `sessionManager` filter of 20 data types | made locally (397786071 and earlier answered "not offered", `0x80553406`) |
+| `sessionManager` Player Sessions (`/v1/playerSessions…`) | answered by the launcher, kept for the game run (see below) |
 
-The `sessionManager` push filter and the `PlayerSession` / `sessionManager` strings show that the game
-uses platform Player Sessions, probably for invitations and "join a friend" from the system UI. No
-`sessionManager` web request has been seen yet. If Host turns out to make one (for example
-`POST /v1/playerSessions`), the launcher would need to answer it locally from the AnyTogether session,
-the same way it answers `userProfile`. It must never be passed on to Sony.
+## Host Public: "Failed to Start a Server" (2026-10-25)
+
+With the first nightly (v0.2.20-arm-nightly.20261025.1, main 397786071) and Online play on, Join
+worked (a real public lobby, through Photon) and Host Public failed with "Failed to Start a Server".
+
+What the observation log of that run showed (`~/Library/Logs/AnyPS5/Online/PPSA02429.jsonl`, the run
+with build `397786071a5f`), three times, once per Host press:
+
+```
+sceNpWebApi2PushEventCreateHandle                      -> handle
+sceNpWebApi2PushEventCreateFilter("sessionManager", 20 filter parameters)
+sceNpWebApi2PushEventRegisterPushContextCallback       -> callback
+sceNpWebApi2PushEventCreatePushContext(userContextId 2) -> 0x80553406
+sceNpWebApi2PushEventUnregisterCallback(that callback)
+sessionManager DELETE /v1/playerSessions/cb8a5af3-…/members/<own account> -> 0x80553406
+```
+
+Cause: the engine's `sceNpWebApi2PushEventCreatePushContext` always failed with "not offered", so
+the game's PSN plugin stopped before it made its Player Session (no `POST /v1/playerSessions` ever
+appears) and the game showed the server error. Photon itself reported nothing wrong. The `DELETE`
+is the plugin leaving the last session it knew (from the lobby joined earlier), and it failed with
+"not offered" too.
+
+The first runs in the same log (build `6d9e9ff6b1ff`, release 0.2.19) show `communicationRestrictionStatus`
+failing and the block list 404. That is not a start-up race: 0.2.19 was built before 496f10910,
+which answers both. Every request of that kind in the nightly run got 200, the first one included.
+
+What changed:
+
+- **Engine (NpWebApi2):** push contexts are made locally (a version 4 UUID) while the launcher is
+  there; `RegisterPushContextCallback`, `StartPushContextCallback`, `DeletePushContext`,
+  `RegisterCallback` and both unregisters keep real state. Filters keep their service and data
+  types. Push events from the launcher (a new bridge frame, `PushEvent`) go to the matching
+  callbacks on the game's thread from `sceNpCheckCallback`. Offline, `CreatePushContext` still
+  fails as before.
+- **Launcher (`OnlinePlayerSessions`):** the `sessionManager` group answers Player Sessions in memory
+  for the game run: create, get, patch, delete, join and leave members, leader, invitations,
+  joinable specified users, session messages and the user's own sessions. Leaving a session the
+  player is not in (the `DELETE` above) answers 204. Nothing goes to Sony or AnyTogether.
+- **Observation log:** each push filter's data types (`data_types`), the push context made, every
+  request body up to 64 KiB (the Player Session the game creates) and every push event delivered
+  (`PushEventDelivered`).
+
+The data types the game knows for Player Sessions (from its metadata):
+`psn:sessionManager:playerSession:created`, `…:playerSession:deleted`, and under
+`psn:sessionManager:ps:` `customData1:updated`, `customData2:updated`, `exclusiveLeaderPrivileges:updated`,
+`invitableUserType:updated`, `invitations:created`, `joinDisabled:updated`, `joinableSpecifiedUsers:created`,
+`joinableSpecifiedUsers:deleted`, `joinableUserType:updated`, `leader:updated`, `leaderPrivileges:updated`,
+`localizedSessionNames:updated`, `m:p:customData1:updated`, `m:players:created`, `m:players:deleted`,
+`m:players:swapped`, `m:s:customData1:updated`, `m:spectators:created`, `m:spectators:deleted`,
+`m:spectators:swapped`, `maxPlayers:updated`, `maxSpectators:updated`, `sessionMessage:created`,
+`swapSupported:updated`.
+
+Not built: the Player Session is not mirrored to AnyTogether, so friends do not see a joinable
+session from it. Players find the room through Photon's public list, as they did with Join.
+
+Tests: `online_web_api2` (push contexts and delivery through the real exports and a fake launcher),
+`online_bridge` ("push events", the frame byte for byte), `guest_np_web_api2` (offline answer),
+`OnlinePlayerSessionsTests`, `OnlineBridgeTests.testWireMatchesTheEngineByteForByte` and
+`OnlineEngineInteropTests.testAGameHostsAPlayerSessionWithAPushContext` (`online_probe host` plays this
+flow through the real engine libraries against the launcher's service).
 
 ## Imports
 
@@ -104,15 +162,13 @@ From `relinker --registry` on the unwrapped eboot and every bundled module, clas
 
 ## What to try next
 
-1. Update to a build with c6d921416 and later (the next release after 0.2.19, or a local
-   `taskpolicy -b ninja -C build-mac all libs`), then reinstall or re-convert the game so the bundle
-   picks up the new libraries.
-2. Turn on Settings → AnyTogether → Online play (experimental) and sign in.
-3. Start the game, press Online, then Host Public, and try Join on a public lobby.
-4. Send `~/Library/Logs/AnyPS5/PPSA02429.log` (and `PPSA02429.previous.log` if the game was started
-   again since) and `~/Library/Logs/AnyPS5/Online/PPSA02429.jsonl`. The jsonl shows any
-   `sessionManager` request the game makes on Host. Repeated error lines are now cut after 50
-   copies every 10 s, so the log stays small.
+1. Update to the nightly after 2026-10-25 that carries the Player Sessions (or build main), then
+   reinstall or re-convert the game so its bundle gets the new libraries.
+2. Settings → AnyTogether → Online play (experimental) on, signed in.
+3. Start the game, Online, Host Public.
+4. If it still fails, send `~/Library/Logs/AnyPS5/Online/PPSA02429.jsonl` and
+   `~/Library/Logs/AnyPS5/PPSA02429.log`. The jsonl now shows the push filter's data types, the
+   push context, the `POST /v1/playerSessions` body and every answer.
 
-Open: whether Host makes a `sessionManager` request that needs a local answer, and why the joined
-level ran at about 1.5 fps. Check the second one again once the poll loop stops failing.
+Open: whether the game wants push events after it creates its session (none are sent for its own
+changes), and why the joined level ran at about 1.5 fps.
