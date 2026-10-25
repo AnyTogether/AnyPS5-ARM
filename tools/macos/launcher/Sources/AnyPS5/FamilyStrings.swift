@@ -7,12 +7,14 @@ enum FS {
     enum Key {
         case family, leftToday, noLimitToday, timeUp, outsideHours, playedToday, limitToday
         case stale, staleDetail, locked, lockedDetail, signInToAsk
-        case askParent, askMoreTime, askMinutes, askMinutesDetail, asked, askedAlready, askedGame, askedFriend, askFriend, askFailed
+        case askParent, askedTooMany, askMoreTime, askMinutes, askMinutesDetail, asked, askedAlready, askedGame, askedFriend, askFriend, askFailed
         case ratedAbove, ratedUnknown, startLimit, startWindow
         case warnMinutes, warnOne, warnDetail, noticeTitle, noticeCloses, noticeClosing, noticeNotify, noticeAsk, moreTime
         case hoursMinutes, minutes
         case refusedVoice, refusedShare, refusedPublic, refusedMessages, refusedFriends, refusedDiscovery, refusedMedia, refusedProfile, refusedCommunities, refusedAge, refusedFamily
-        case otherServer
+        case refusedOther, otherServer
+        case notifAsksTime, notifAsksGame, notifAsksFriend, notifSaidNo, notifGaveTime, notifGameYes, notifFriendYes
+        case notifReachedLimit, notifJoinedFamily, notifDeclinedFamily, notifFamilyInvite, notifSummary
     }
 
     static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
@@ -60,6 +62,7 @@ enum FS {
         .askMinutesDetail: "A parent answers on the AnyTogether website",
         .asked: "Asked. A parent can answer on the AnyTogether website",
         .askedAlready: "Already asked: waiting for a parent",
+        .askedTooMany: "That's a lot of asks today: try again tomorrow",
         .askedGame: "Asked a parent to let you play %@",
         .askedFriend: "Asked a parent to add @%@",
         .askFriend: "Ask a parent to add them",
@@ -90,6 +93,19 @@ enum FS {
         .refusedCommunities: "Communities are turned off by your family",
         .refusedAge: "This game's age rating is above what your family allows",
         .refusedFamily: "Your family's settings don't allow this",
+        .refusedOther: "This person's family settings don't allow it",
+        .notifAsksTime: "%@ asks for %d more minutes",
+        .notifAsksGame: "%@ asks to play %@",
+        .notifAsksFriend: "%@ asks to add a friend",
+        .notifSaidNo: "A parent said no this time",
+        .notifGaveTime: "A parent gave you %d more minutes",
+        .notifGameYes: "A parent said yes: the game is open",
+        .notifFriendYes: "A parent said yes to your new friend",
+        .notifReachedLimit: "%@ reached today's play time",
+        .notifJoinedFamily: "%@ joined your family",
+        .notifDeclinedFamily: "%@ did not join your family",
+        .notifFamilyInvite: "%@ invites you to the family %@",
+        .notifSummary: "Your family's week in games",
         .otherServer: "Your family's limits come from %@: a parent signs in there to change them",
     ]
 
@@ -112,6 +128,7 @@ enum FS {
         .askMinutesDetail: "Ebeveynin AnyTogether sitesinden yanıtlar",
         .asked: "Soruldu. Ebeveynin AnyTogether sitesinden yanıtlayabilir",
         .askedAlready: "Zaten soruldu: ebeveynin bekleniyor",
+        .askedTooMany: "Bugün çok fazla soru soruldu: yarın yeniden dene",
         .askedGame: "%@ oynamak için ebeveynine soruldu",
         .askedFriend: "@%@ kişisini eklemek için ebeveynine soruldu",
         .askFriend: "Eklemek için ebeveynine sor",
@@ -142,6 +159,19 @@ enum FS {
         .refusedCommunities: "Topluluklar ailen tarafından kapatıldı",
         .refusedAge: "Bu oyunun yaş sınırı ailenin izin verdiğinin üstünde",
         .refusedFamily: "Ailenin ayarları buna izin vermiyor",
+        .refusedOther: "Bu kişinin aile ayarları buna izin vermiyor",
+        .notifAsksTime: "%@ %d dakika daha istiyor",
+        .notifAsksGame: "%@, %@ oynamak istiyor",
+        .notifAsksFriend: "%@ bir arkadaş eklemek istiyor",
+        .notifSaidNo: "Ebeveynin bu sefer hayır dedi",
+        .notifGaveTime: "Ebeveynin sana %d dakika daha verdi",
+        .notifGameYes: "Ebeveynin evet dedi: oyun açıldı",
+        .notifFriendYes: "Ebeveynin yeni arkadaşına evet dedi",
+        .notifReachedLimit: "%@ bugünkü oyun süresini doldurdu",
+        .notifJoinedFamily: "%@ ailene katıldı",
+        .notifDeclinedFamily: "%@ ailene katılmadı",
+        .notifFamilyInvite: "%@ seni %@ ailesine davet ediyor",
+        .notifSummary: "Ailenin oyun haftası",
         .otherServer: "Ailenin sınırları %@ sunucusundan geliyor: değiştirmek için bir ebeveyn orada giriş yapar",
     ]
 }

@@ -169,12 +169,13 @@ extension AppModel {
         }
         Task {
             do {
-                try await together.askFamily(ask)
+                let new = try await together.askFamily(ask)
                 familyWatch.asked[key] = Date()
+                guard new else { return show(FS.text(.askedAlready), symbol: "hourglass") }
                 Sounds.shared.play(.select)
                 show(told ?? FS.text(.asked), symbol: "hand.raised.fill")
-            } catch let problem as TogetherProblem where problem.status == 409 || problem.code == "rate_limited" {
-                show(FS.text(.askedAlready), symbol: "hourglass")
+            } catch let problem as TogetherProblem where problem.code == "rate_limited" {
+                show(FS.text(.askedTooMany), symbol: "hourglass")
             } catch {
                 show(FS.text(.askFailed), symbol: "exclamationmark.triangle.fill")
             }
@@ -289,6 +290,7 @@ extension AppModel {
     /// A refusal from the server, in words, when a parent's settings were the reason.
     func familyMessage(_ error: Error) -> String? {
         guard let problem = error as? TogetherProblem, let feature = problem.familyFeature else { return nil }
+        if problem.byOthersFamily { return FS.text(.refusedOther) }
         // The server may know a newer status than the one kept here.
         refreshFamily()
         return FS.refusal(feature)
@@ -297,6 +299,39 @@ extension AppModel {
     /// Adding a friend the rules keep for a parent to approve: the parent is asked instead.
     func askParentToAdd(_ handle: String) {
         askFamily(.addFriend(handle: handle), key: "friend-\(handle.lowercased())", told: FS.format(.askedFriend, handle))
+    }
+
+    // MARK: Notifications
+
+    /// A family notification in words: a child's ask and a parent's answer, an alert, an invite,
+    /// the weekly summary. nil for any other kind.
+    func familyNotificationText(_ note: TogetherNotification) -> String? {
+        let name = note.actor?.displayName ?? ""
+        let data = note.data
+        switch note.kindName {
+        case "family_request":
+            switch data.kind {
+            case "more_time": return FS.format(.notifAsksTime, name, data.minutes ?? 0)
+            case "play_game": return FS.format(.notifAsksGame, name, data.gameName ?? data.titleId.map { gameName($0) } ?? "")
+            default: return FS.format(.notifAsksFriend, name)
+            }
+        case "family_answer":
+            guard data.approved == true else { return FS.text(.notifSaidNo) }
+            switch data.kind {
+            case "more_time": return FS.format(.notifGaveTime, data.minutes ?? 0)
+            case "play_game": return FS.text(.notifGameYes)
+            default: return FS.text(.notifFriendYes)
+            }
+        case "family_alert":
+            switch data.event {
+            case "limit_reached": return FS.format(.notifReachedLimit, name)
+            case "child_declined": return FS.format(.notifDeclinedFamily, name)
+            default: return FS.format(.notifJoinedFamily, name)
+            }
+        case "family_invite": return FS.format(.notifFamilyInvite, name, data.familyName ?? "")
+        case "family_summary": return FS.text(.notifSummary)
+        default: return nil
+        }
     }
 
     // MARK: Rows

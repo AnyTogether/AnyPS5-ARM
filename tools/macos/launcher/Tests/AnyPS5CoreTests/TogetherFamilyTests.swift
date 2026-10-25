@@ -64,7 +64,8 @@ final class TogetherFamilyTests: TogetherSignedInCase {
 
     func testAChildAsks() async throws {
         FakeTogether.handler = { _, _ in (201, ["id": "r1", "kind": "more_time", "status": "pending"]) }
-        try await client.askFamily(.moreTime(minutes: 30, titleId: "PPSA01234"))
+        let asked = try await client.askFamily(.moreTime(minutes: 30, titleId: "PPSA01234"))
+        XCTAssertTrue(asked, "a new ask")
         XCTAssertEqual(last(), "POST /api/v1/me/family/requests")
         XCTAssertEqual(body() as NSDictionary?, ["kind": "more_time", "minutes": 30, "titleId": "PPSA01234"])
         try await client.askFamily(.playGame(titleId: "PPSA05678", name: "Stray"))
@@ -73,6 +74,9 @@ final class TogetherFamilyTests: TogetherSignedInCase {
         XCTAssertEqual(body() as NSDictionary?, ["kind": "add_friend", "handle": "deniz"])
         try await client.askFamily(.moreTime(minutes: 1000, titleId: nil))
         XCTAssertEqual(body()?["minutes"] as? Int, 240, "within what the server takes")
+        FakeTogether.handler = { _, _ in (200, ["id": "r1", "kind": "more_time", "status": "pending"]) }
+        let again = try await client.askFamily(.moreTime(minutes: 30, titleId: nil))
+        XCTAssertFalse(again, "the same one waits already")
     }
 
     func testTheLimitReachedIsTold() async throws {
@@ -93,6 +97,21 @@ final class TogetherFamilyTests: TogetherSignedInCase {
             XCTAssertEqual(problem.code, "restricted_by_family")
             XCTAssertEqual(problem.feature, "voice_chat")
             XCTAssertEqual(problem.familyFeature, .voiceChat)
+            XCTAssertFalse(problem.byOthersFamily, "no side: the asker's own")
+        } catch {
+            XCTFail("\(error)")
+        }
+    }
+
+    func testARefusalSaysWhoseFamily() async {
+        FakeTogether.handler = { _, _ in (403, ["type": "x", "title": "Not allowed", "status": 403, "code": "restricted_by_family", "feature": "friend_requests", "side": "other"]) }
+        do {
+            _ = try await client.askFriend("deniz")
+            XCTFail("no error")
+        } catch let problem as TogetherProblem {
+            XCTAssertEqual(problem.side, "other")
+            XCTAssertTrue(problem.byOthersFamily)
+            XCTAssertEqual(problem.familyFeature, .friendRequests)
         } catch {
             XCTFail("\(error)")
         }

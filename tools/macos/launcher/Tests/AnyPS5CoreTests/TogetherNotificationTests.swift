@@ -58,6 +58,27 @@ final class TogetherNotificationTests: TogetherSignedInCase {
         XCTAssertFalse(TogetherNotification.Kind.lfgRequest.toastsOnItsOwn)
     }
 
+    func testFamilyKinds() throws {
+        let person: [String: Any] = ["userId": "u2", "handle": "deniz", "displayName": "Deniz", "avatar": NSNull()]
+        let json: [String: Any] = ["notifications": [
+            Self.note("0012", kind: "family_request", subject: "r1", data: ["requestId": "r1", "kind": "play_game", "minutes": NSNull(), "titleId": "PPSA01234", "gameName": "Stray", "person": NSNull()]),
+            Self.note("0011", kind: "family_answer", subject: "r2", data: ["requestId": "r2", "kind": "more_time", "approved": true, "minutes": 30]),
+            Self.note("0010", kind: "family_request", subject: "r3", data: ["requestId": "r3", "kind": "add_friend", "minutes": NSNull(), "titleId": NSNull(), "gameName": NSNull(), "person": person]),
+            Self.note("0009", kind: "family_alert", subject: "f1", data: ["event": "limit_reached", "childId": "u3", "date": "2026-10-26", "titleId": NSNull()]),
+            Self.note("0008", kind: "family_invite", subject: "i1", data: ["inviteId": "i1", "familyId": "f1", "familyName": "Halis", "role": "parent"]),
+        ], "unread": 5, "more": false]
+        let page = try JSONDecoder.together.decode(TogetherNotificationPage.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(page.notifications.map(\.kind), [.other, .other, .other, .other, .other], "kinds this launcher words by name")
+        XCTAssertEqual(page.notifications[0].data.kind, "play_game")
+        XCTAssertEqual(page.notifications[0].data.gameName, "Stray")
+        XCTAssertEqual(page.notifications[1].data.approved, true)
+        XCTAssertEqual(page.notifications[1].data.minutes, 30)
+        XCTAssertEqual(page.notifications[2].data.kind, "add_friend", "the person object does not stop the rest")
+        XCTAssertEqual(page.notifications[3].data.event, "limit_reached")
+        XCTAssertEqual(page.notifications[4].data.familyName, "Halis")
+        XCTAssertEqual(page.notifications[4].data.role, "parent")
+    }
+
     func testMarkingRead() async throws {
         FakeTogether.handler = { _, _ in (200, ["unread": 4]) }
         let left = try await client.readNotification("0007")

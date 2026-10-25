@@ -98,7 +98,7 @@ extension AppModel {
                 friendHandle = ""
                 show(T.format(state == "accepted" ? .friendsNowFriends : .friendsRequestSent, handle), symbol: "person.badge.plus")
                 refreshFriends()
-            } catch let problem as TogetherProblem where problem.familyFeature == .friendRequests {
+            } catch let problem as TogetherProblem where problem.familyFeature == .friendRequests && !problem.byOthersFamily {
                 // Not someone the child may add: a parent is asked instead.
                 friendHandle = ""
                 askParentToAdd(handle)
@@ -152,6 +152,9 @@ extension AppModel {
             sharePlayEvent(event)
         case let type where type == "signal" || type.hasPrefix("call."):
             callEvent(event)
+        case "family.updated":
+            // A parent changed the limits or gave extra time: read them again now.
+            refreshFamily()
         default:
             socialEvent(event)
         }

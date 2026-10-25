@@ -48,6 +48,16 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         public var gameNames: [String: String]?
         public var purpose: String?
         public var invite: TogetherLfgInvite?
+        /// Families: family_request {requestId, kind, minutes, titleId, gameName, person},
+        /// family_answer {requestId, kind, approved, minutes}, family_alert {event, …},
+        /// family_invite {familyName, role}.
+        public var kind: String?
+        public var approved: Bool?
+        public var minutes: Int?
+        public var gameName: String?
+        public var familyName: String?
+        public var role: String?
+        public var event: String?
 
         public init() {}
     }

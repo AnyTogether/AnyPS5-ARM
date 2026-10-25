@@ -28,6 +28,8 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var themeId: String? = nil
     /// What a parent's family settings refused, with "restricted_by_family" ("voice_chat", …).
     public var feature: String? = nil
+    /// Whose family limit it was, with "restricted_by_family": "self" (the asker's) or "other".
+    public var side: String? = nil
     public var description: String { title }
 }
 
@@ -199,13 +201,18 @@ public final class TogetherClient: @unchecked Sendable {
 
     /// A call with the access token; a 401 refreshes it once and calls again.
     func authorized(_ method: String, _ path: String, _ body: Any?) async throws -> Data {
+        try await authorizedResponse(method, path, body).data
+    }
+
+    /// The same, with the status it answered (200 or 201, say).
+    func authorizedResponse(_ method: String, _ path: String, _ body: Any?) async throws -> (data: Data, status: Int) {
         let token = try await accessToken()
         do {
-            return try await send(method, path, body, token: token)
+            return try await sendResponse(method, path, body, token: token)
         } catch let problem as TogetherProblem where problem.status == 401 {
             guard let saved = store.load() else { throw problem }
             let fresh = try await refresh(from: saved.refreshToken)
-            return try await send(method, path, body, token: fresh)
+            return try await sendResponse(method, path, body, token: fresh)
         }
     }
 
@@ -237,6 +244,10 @@ public final class TogetherClient: @unchecked Sendable {
     }
 
     func send(_ method: String, _ path: String, _ body: Any?, token: String? = nil) async throws -> Data {
+        try await sendResponse(method, path, body, token: token).data
+    }
+
+    func sendResponse(_ method: String, _ path: String, _ body: Any?, token: String? = nil) async throws -> (data: Data, status: Int) {
         // A path may carry a query ("users/search?q=…"), which appendingPathComponent would escape.
         var request = URLRequest(url: URL(string: base.appendingPathComponent("api/v1").absoluteString + "/" + path)!)
         request.httpMethod = method
@@ -258,7 +269,7 @@ public final class TogetherClient: @unchecked Sendable {
         guard (200 ..< 300).contains(status) else {
             throw (try? JSONDecoder.together.decode(TogetherProblem.self, from: data)) ?? TogetherProblem(status: status, code: "internal", title: "AnyTogether answered \(status)")
         }
-        return data
+        return (data, status)
     }
 }
 

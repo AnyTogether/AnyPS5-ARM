@@ -132,7 +132,7 @@ extension AppModel {
         case .lfgRequest: return FP.format(.notifLfgRequest, name, notificationGame(note))
         case .lfgAccepted: return FP.format(.notifLfgAccepted, name, notificationGame(note))
         case .warning: return TS.text(.notifWarning)
-        case .other: return TS.text(.notifOther)
+        case .other: return familyNotificationText(note) ?? TS.text(.notifOther)
         }
     }
 

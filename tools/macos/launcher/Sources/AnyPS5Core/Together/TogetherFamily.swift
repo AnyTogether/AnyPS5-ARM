@@ -51,6 +51,10 @@ extension TogetherProblem {
         guard code == "restricted_by_family" else { return nil }
         return feature.flatMap(FamilyFeature.init(rawValue:)) ?? .family
     }
+
+    /// The other person's family limit refused it (a friend request to a restricted child), not
+    /// the asker's own.
+    public var byOthersFamily: Bool { code == "restricted_by_family" && side == "other" }
 }
 
 extension TogetherClient {
@@ -67,8 +71,11 @@ extension TogetherClient {
         return try JSONDecoder.together.decode(Keys.self, from: try await send("GET", ".well-known/jwks.json", nil)).keys
     }
 
-    public func askFamily(_ ask: FamilyAsk) async throws {
-        _ = try await authorized("POST", "me/family/requests", ask.body)
+    /// True for a new ask; false when the same one already waits for a parent (the server
+    /// answers it with 200 and the waiting request).
+    @discardableResult
+    public func askFamily(_ ask: FamilyAsk) async throws -> Bool {
+        try await authorizedResponse("POST", "me/family/requests", ask.body).status == 201
     }
 
     /// Tells the parents the child reached today's limit; the server tells them once a day.
