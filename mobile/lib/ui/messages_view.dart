@@ -1,19 +1,30 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
+import '../media_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
 import '../together/groups.dart';
 import '../together/messages.dart';
 import '../together/people.dart';
+import '../together/storage.dart';
 import '../together/together_hub.dart';
+import 'message_media.dart';
+import 'profile_edit.dart' show pickFromLibrary;
 import 'together_widgets.dart';
+
+export 'message_media.dart' show MessageMedia;
 
 /// Messages: the conversations on the left, the open one on the right with its composer at the
 /// bottom, the way a phone held sideways has room for both.
 class MessagesPane extends StatefulWidget {
-  const MessagesPane({super.key, required this.hub});
+  const MessagesPane({super.key, required this.hub, this.pickPhoto});
 
   final TogetherHub hub;
+
+  /// Picks a photo to send; the phone's library unless a test says otherwise.
+  final Future<Uint8List?> Function()? pickPhoto;
 
   @override
   State<MessagesPane> createState() => _MessagesPaneState();
@@ -24,11 +35,38 @@ class _MessagesPaneState extends State<MessagesPane> {
   final _scroll = ScrollController();
   late final Messages _messages = widget.hub.messages;
 
+  /// The server keeps photos: the composer can attach one.
+  late bool _storage = widget.hub.account.storage?.enabled ?? false;
+
   @override
   void initState() {
     super.initState();
     if (!_messages.loaded) _messages.refresh().catchError((_) {});
     _scroll.addListener(_nearTop);
+    widget.hub.account.storageEnabled().then((on) {
+      if (mounted && on != _storage) setState(() => _storage = on);
+    });
+  }
+
+  /// A photo from the library to the open conversation, with what is typed as its caption.
+  Future<void> _attach() async {
+    final texts = Texts.of(context);
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final Uint8List? bytes;
+    try {
+      bytes = await (widget.pickPhoto ?? pickFromLibrary)();
+    } on Object {
+      return;
+    }
+    if (bytes == null || bytes.isEmpty || !mounted) return;
+    final most = widget.hub.account.storage?.imageMax ?? 10 * 1024 * 1024;
+    if (bytes.length > most) {
+      messenger?.showSnackBar(SnackBar(content: Text(texts.photoTooBig)));
+      return;
+    }
+    final caption = _text.text;
+    _text.clear();
+    await _messages.sendPhoto(bytes, caption: caption);
   }
 
   @override
@@ -279,6 +317,16 @@ class _MessagesPaneState extends State<MessagesPane> {
     padding: const EdgeInsets.fromLTRB(14, 6, 10, 10),
     child: Row(
       children: [
+        if (_storage)
+          IconButton(
+            tooltip: texts.sendPhoto,
+            onPressed: _messages.openId == null ? null : _attach,
+            icon: const Icon(
+              Icons.add_photo_alternate_outlined,
+              color: togetherAccent,
+              size: 22,
+            ),
+          ),
         Expanded(
           child: TextField(
             controller: _text,
@@ -351,7 +399,7 @@ class _ConversationRow extends StatelessWidget {
         ? ''
         : last.deleted
         ? texts.messagesDeleted
-        : '${last.authorId == me ? '${texts.messagesYou}: ' : ''}${last.text ?? ''}';
+        : '${last.authorId == me ? '${texts.messagesYou}: ' : ''}${texts.messagePreview(last)}';
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
@@ -475,6 +523,13 @@ class _Bubble extends StatelessWidget {
   final Person? author;
   final VoidCallback onRetry;
 
+  /// The words under media are the caption alone, never the stand-in ("[photo]").
+  String? get _shownText => message.kind == MediaKind.text
+      ? message.text ?? ''
+      : (message.caption?.isEmpty ?? true)
+      ? null
+      : message.caption;
+
   @override
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
@@ -497,14 +552,22 @@ class _Bubble extends StatelessWidget {
             : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            message.deleted ? texts.messagesDeleted : message.text ?? '',
-            style: TextStyle(
-              color: message.deleted ? Colors.white38 : Colors.white,
-              fontSize: 14.5,
-              fontStyle: message.deleted ? FontStyle.italic : FontStyle.normal,
+          if (!message.deleted && message.attachments.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 4),
+              child: MessageMedia(message: message, mine: mine),
             ),
-          ),
+          if (message.deleted || _shownText != null)
+            Text(
+              message.deleted ? texts.messagesDeleted : _shownText ?? '',
+              style: TextStyle(
+                color: message.deleted ? Colors.white38 : Colors.white,
+                fontSize: 14.5,
+                fontStyle: message.deleted
+                    ? FontStyle.italic
+                    : FontStyle.normal,
+              ),
+            ),
           const SizedBox(height: 2),
           Text(
             message.failed
@@ -513,6 +576,9 @@ class _Bubble extends StatelessWidget {
                       message.problem?.extra?['domain'] as String?,
                     ),
                     'forbidden' => texts.cannotMessage,
+                    _ when message.problem != null => texts.mediaProblem(
+                      message.problem!,
+                    ),
                     _ => texts.messagesFailed,
                   }
                 : [

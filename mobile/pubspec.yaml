@@ -41,6 +41,7 @@ dependencies:
   sensors_plus: ^7.1.1
   flutter_webrtc: ^1.6.2
   image_picker: ^1.2.4
+  video_player: ^2.10.0
 
 dev_dependencies:
   flutter_test:

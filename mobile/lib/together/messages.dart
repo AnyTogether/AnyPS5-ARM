@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 
 import 'people.dart';
+import 'storage.dart';
 import 'together_account.dart';
 import 'together_socket.dart';
 
@@ -24,7 +25,9 @@ String uuidv7([Random? random]) {
 }
 
 /// One message in a conversation; a deleted one keeps its place with no text. [pending] while
-/// it is on its way, [failed] when it did not get there.
+/// it is on its way, [failed] when it did not get there. A message with media has its [kind]
+/// and [attachments]; its [text] is then the caption or a stand-in such as "[photo]" for
+/// clients that know no media, and [caption] the caption alone.
 class ChatMessage {
   const ChatMessage({
     required this.id,
@@ -38,6 +41,10 @@ class ChatMessage {
     this.pending = false,
     this.failed = false,
     this.problem,
+    this.kind = MediaKind.text,
+    this.caption,
+    this.attachments = const [],
+    this.mediaId,
   });
 
   factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
@@ -50,6 +57,12 @@ class ChatMessage {
         DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
     edited: json['editedAt'] != null,
     deleted: json['deletedAt'] != null,
+    kind: MediaKind.parse(json['kind']),
+    caption: json['caption'] as String?,
+    attachments: [
+      for (final attachment in (json['attachments'] as List? ?? const []))
+        if (attachment is Map<String, dynamic>) Attachment.fromJson(attachment),
+    ],
   );
 
   final String id;
@@ -69,9 +82,48 @@ class ChatMessage {
   /// forbidden (not friends any more); null when it may simply be sent again.
   final TogetherProblem? problem;
 
+  final MediaKind kind;
+  final String? caption;
+  final List<Attachment> attachments;
+
+  /// A photo from this phone already kept on the server, so sending again does not upload it
+  /// twice.
+  final String? mediaId;
+
   /// Sending it again would only be refused again.
-  bool get refused =>
-      problem?.code == 'link_blocked' || problem?.code == 'forbidden';
+  bool get refused => switch (problem?.code) {
+    'link_blocked' ||
+    'forbidden' ||
+    'quota_exceeded' ||
+    'payload_too_large' ||
+    'unsupported_media_type' ||
+    'bad_image' ||
+    'restricted_by_family' ||
+    'storage_disabled' => true,
+    _ => false,
+  };
+
+  /// The same message on its way again, or failed with [problem].
+  ChatMessage settling({
+    bool pending = false,
+    bool failed = false,
+    TogetherProblem? problem,
+    String? mediaId,
+  }) => ChatMessage(
+    id: id,
+    conversationId: conversationId,
+    seq: 0,
+    authorId: authorId,
+    text: text,
+    createdAt: createdAt,
+    pending: pending,
+    failed: failed,
+    problem: problem,
+    kind: kind,
+    caption: caption,
+    attachments: attachments,
+    mediaId: mediaId ?? this.mediaId,
+  );
 }
 
 /// A direct conversation with a friend or a group.
@@ -281,41 +333,63 @@ class Messages extends ChangeNotifier {
     await _deliver(message);
   }
 
-  /// Sends again a message that did not get there, with the same id.
-  Future<void> retry(ChatMessage message) async {
-    _replace(
-      ChatMessage(
-        id: message.id,
-        conversationId: message.conversationId,
-        seq: 0,
-        authorId: message.authorId,
-        text: message.text,
-        createdAt: message.createdAt,
-        pending: true,
-      ),
+  /// Sends a photo (PNG, JPEG or WebP bytes) with an optional caption to the open
+  /// conversation: it shows at once from the phone's own bytes, goes up as media, then in a
+  /// message.
+  Future<void> sendPhoto(Uint8List bytes, {String? caption}) async {
+    final id = openId;
+    if (id == null || bytes.isEmpty) return;
+    final trimmed = caption?.trim();
+    final message = ChatMessage(
+      id: uuidv7(),
+      conversationId: id,
+      seq: 0,
+      authorId: _me,
+      text: trimmed == null || trimmed.isEmpty ? null : trimmed,
+      caption: trimmed == null || trimmed.isEmpty ? null : trimmed,
+      createdAt: DateTime.now(),
+      pending: true,
+      kind: MediaKind.image,
+      attachments: [Attachment(id: '', kind: MediaKind.image, local: bytes)],
     );
+    thread = [...thread, message];
+    notifyListeners();
     await _deliver(message);
   }
 
+  /// Sends again a message that did not get there, with the same id.
+  Future<void> retry(ChatMessage message) async {
+    final again = message.settling(pending: true);
+    _replace(again);
+    await _deliver(again);
+  }
+
   Future<void> _deliver(ChatMessage message) async {
+    var mediaId = message.mediaId;
     try {
+      final local = message.attachments.firstOrNull?.local;
+      if (mediaId == null && local != null) {
+        mediaId = (await account.uploadImage(local)).id;
+      }
       final json = await account.call(
         'POST',
         'conversations/${message.conversationId}/messages',
-        {'clientId': message.id, 'text': message.text},
+        {
+          'clientId': message.id,
+          if (message.text != null) 'text': message.text,
+          if (mediaId != null)
+            'attachments': [
+              {'mediaId': mediaId},
+            ],
+        },
       );
       _arrived(ChatMessage.fromJson(json));
     } on Object catch (error) {
       _replace(
-        ChatMessage(
-          id: message.id,
-          conversationId: message.conversationId,
-          seq: 0,
-          authorId: message.authorId,
-          text: message.text,
-          createdAt: message.createdAt,
+        message.settling(
           failed: true,
           problem: error is TogetherProblem ? error : null,
+          mediaId: mediaId,
         ),
       );
     }

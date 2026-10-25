@@ -11,6 +11,10 @@ class FakeServer {
   late HttpServer http;
   final requests = <(String method, String path, Map<String, dynamic>? body)>[];
   final sockets = <WebSocket>[];
+
+  /// Raw bodies that were not JSON (pictures, files), with their content type.
+  final uploads =
+      <(String method, String path, List<int> bytes, String? contentType)>[];
   final frames = <Map<String, dynamic>>[];
   final _connected = StreamController<WebSocket>.broadcast();
   int _ids = 0;
@@ -53,13 +57,27 @@ class FakeServer {
         _connected.add(socket);
         return;
       }
-      final text = await utf8.decodeStream(request);
-      final body = text.isEmpty
-          ? null
-          : jsonDecode(text) as Map<String, dynamic>;
+      final bytes = await request.fold<List<int>>(
+        <int>[],
+        (all, chunk) => all..addAll(chunk),
+      );
       final path = request.uri.hasQuery
           ? '${request.uri.path}?${request.uri.query}'
           : request.uri.path;
+      // JSON as JSON; anything else (a picture going up) is kept as its bytes.
+      Map<String, dynamic>? body;
+      if (bytes.isNotEmpty) {
+        if (request.headers.contentType?.mimeType == 'application/json') {
+          body = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+        } else {
+          uploads.add((
+            request.method,
+            path,
+            bytes,
+            request.headers.contentType?.mimeType,
+          ));
+        }
+      }
       requests.add((request.method, path, body));
       final (status, json) = answer(request.method, path, body);
       request.response.statusCode = status;

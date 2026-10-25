@@ -1,3 +1,4 @@
+import 'package:anyps5_remote/together/storage.dart';
 import 'package:anyps5_remote/together/together_account.dart';
 import 'package:anyps5_remote/together/together_hub.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,5 +17,7 @@ Future<TogetherHub> quietHub() async {
     ),
   );
   hub.socket.stop();
+  // Known already: no screen asks the missing server whether it keeps files.
+  hub.account.storage = StorageInfo.off;
   return hub;
 }
