@@ -36,6 +36,17 @@ public enum OnlineWire {
     public enum Side: Sendable { case launcher, engine }
 
     public static func isVirtual(_ address: UInt32) -> Bool { address & virtualMask == virtualNetwork }
+    /// The virtual network's broadcast address.
+    public static let virtualBroadcast: UInt32 = virtualNetwork | ~virtualMask
+    /// A game datagram to the limited broadcast, the virtual network's broadcast or a multicast
+    /// group goes to every other player in the session (LAN-style discovery).
+    public static func isGroup(_ address: UInt32) -> Bool {
+        address == 0xFFFF_FFFF || address == virtualBroadcast || address & 0xF000_0000 == 0xE000_0000
+    }
+    /// The largest game datagram online play carries: the largest UDP payload over IPv4 less the
+    /// 12-byte header of the receiving engine's loopback hop (engine `MaxGameDatagram`). The engine
+    /// refuses bigger ones with EMSGSIZE; a transport drops (and counts) any that still come.
+    public static let maxGameDatagram = 65507 - 12
 
 
     public struct Header: Equatable, Sendable {
@@ -323,7 +334,7 @@ public enum OnlineWire {
             guard let kind = DatagramKind(rawValue: reader.u8()) else { return nil }
             self.kind = kind
             data = reader.bytes()
-            guard reader.ok, OnlineWire.isVirtual(peer), data.count <= OnlineWire.maxDatagram else { return nil }
+            guard reader.ok, OnlineWire.isVirtual(peer) || OnlineWire.isGroup(peer), data.count <= OnlineWire.maxDatagram else { return nil }
         }
     }
 

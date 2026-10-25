@@ -880,7 +880,7 @@ bool route_virtual(int s, Sock& socket) {
 }
 
 std::int64_t send_virtual(int s, Sock& socket, const void* buf, std::size_t len, std::uint32_t peer, std::uint16_t peerPort, std::uint16_t peerVport) {
-    if (len > Online::Wire::MaxDatagram) return fail(NET_EMSGSIZE);
+    if (len > Online::Wire::MaxGameDatagram) return fail(NET_EMSGSIZE);
     if (!socket.p2p && !route_virtual(s, socket)) return fail(NET_EADDRINUSE);
     Online::Wire::Datagram datagram;
     datagram.peer = peer;

@@ -79,9 +79,23 @@ public final class OnlinePeerLink: @unchecked Sendable {
         if fd >= 0 { close(fd) }
     }
 
-    /// Sends a packet the engine gave the launcher; false when its peer has no endpoint.
+    /// Sends a packet the engine gave the launcher, a broadcast or multicast one to every peer;
+    /// false when no peer has an endpoint or the packet is larger than a UDP datagram can be.
     @discardableResult
     public func send(_ datagram: OnlineWire.Datagram) -> Bool {
+        guard datagram.data.count <= OnlineWire.maxGameDatagram else { return false }
+        guard OnlineWire.isGroup(datagram.peer) else { return sendOne(datagram) }
+        let addresses = lock.withLock { Array(peers.keys) }
+        var sent = false
+        for address in addresses {
+            var copy = datagram
+            copy.peer = address
+            if sendOne(copy) { sent = true }
+        }
+        return sent
+    }
+
+    private func sendOne(_ datagram: OnlineWire.Datagram) -> Bool {
         let (fd, own, endpoint) = lock.withLock { (socket, ownAddress, peers[datagram.peer]) }
         guard fd >= 0, let endpoint, own != 0 else { return false }
         let packet = seal(source: own, datagram: datagram)

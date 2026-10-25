@@ -1,6 +1,9 @@
 #include "prx/libSceNet/include/VirtualNet.hpp"
 #include "prx/libSceNetCtl/include/Online.hpp"
 #include <algorithm>
+#include <atomic>
+#include <cerrno>
+#include <cstdio>
 #include <arpa/inet.h>
 #include <cstring>
 #include <map>
@@ -26,6 +29,14 @@ std::mutex routesMutex;
 std::map<Key, Route> routes;
 int relay = -1;
 std::uint16_t relayPort = 0;
+std::atomic<std::uint64_t> undelivered{0};
+
+// A datagram the game's socket could not be given (no socket on its port, or the loopback hop
+// refused it) is dropped and counted, never fatal; the count is logged at powers of two.
+void dropped(const char* why) {
+    const auto count = ++undelivered;
+    if ((count & (count - 1)) == 0) std::fprintf(stderr, "[online] dropped %llu incoming game datagram(s) so far (last: %s)\n", static_cast<unsigned long long>(count), why);
+}
 
 void deliver(const Online::Wire::Datagram& datagram) {
     std::uint16_t nativePort = 0;
@@ -33,7 +44,10 @@ void deliver(const Online::Wire::Datagram& datagram) {
     {
         std::lock_guard lock(routesMutex);
         const auto found = routes.find({static_cast<std::uint8_t>(datagram.kind), datagram.localPort, datagram.localVport});
-        if (found == routes.end() || relay < 0) return;
+        if (found == routes.end() || relay < 0) {
+            dropped("no socket on its port");
+            return;
+        }
         nativePort = found->second.nativePort;
         socket = relay;
     }
@@ -51,7 +65,7 @@ void deliver(const Online::Wire::Datagram& datagram) {
     target.sin_family = AF_INET;
     target.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     target.sin_port = htons(nativePort);
-    ::sendto(socket, packet.data(), packet.size(), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target));
+    if (::sendto(socket, packet.data(), packet.size(), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target)) < 0) dropped(std::strerror(errno));
 }
 
 bool openRelay() {
@@ -62,6 +76,10 @@ bool openRelay() {
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     socklen_t length = sizeof(address);
+    // macOS caps a UDP send at the socket's send buffer (9216 bytes by default), and the hop to the
+    // game's socket carries datagrams up to 65535 bytes plus the header.
+    const int sendBuffer = static_cast<int>(Online::Wire::MaxDatagram + HeaderSize) * 4;
+    ::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, &sendBuffer, sizeof(sendBuffer));
     if (::bind(socket, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
         ::getsockname(socket, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
         ::close(socket);
@@ -86,7 +104,7 @@ std::optional<std::uint32_t> VirtualDestination(const void* guestAddress, std::u
     std::uint32_t address = 0;
     std::memcpy(&address, bytes + 4, 4);
     address = ntohl(address);
-    if (!Online::Wire::IsVirtual(address)) return std::nullopt;
+    if (!Online::Wire::IsVirtual(address) && !Online::Wire::IsGroup(address)) return std::nullopt;
     return address;
 }
 

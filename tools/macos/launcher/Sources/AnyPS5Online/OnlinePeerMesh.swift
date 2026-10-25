@@ -94,6 +94,7 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
     private var iceServers: (session: String, servers: [TogetherIceServer])?
     private var stopped = false
     private var counters = (sent: 0, received: 0, dropped: 0)
+    private var tooLarge = 0
 
     /// `iceServers` replaces asking AnyTogether for them (tests pass [] for host candidates only).
     public init(context: OnlinePeerContext, iceServers: [TogetherIceServer]? = nil) {
@@ -106,8 +107,12 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
     /// Each player's connection, by user ID.
     public var states: [String: PeerState] { lock.withLock { peers.mapValues(\.state) } }
 
-    /// Datagrams sent, received and dropped (no open channel to their player) so far.
+    /// Datagrams sent, received and dropped (no open channel to their player, or too large) so
+    /// far. A broadcast counts once for each player it goes to.
     public var traffic: (sent: Int, received: Int, dropped: Int) { lock.withLock { counters } }
+
+    /// Datagrams dropped because they were larger than a UDP datagram can be.
+    public var droppedTooLarge: Int { lock.withLock { tooLarge } }
 
     // MARK: OnlinePeerTransport
 
@@ -153,18 +158,33 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
         }
     }
 
+    /// Sends a datagram to its player, or a broadcast or multicast one to every other player; true
+    /// when it went to at least one.
     @discardableResult
     public func send(_ datagram: OnlineWire.Datagram) -> Bool {
-        let channel = lock.withLock { byAddress[datagram.peer]?.channel }
-        guard let channel, channel.readyState == .open else {
-            lock.withLock { counters.dropped += 1 }
+        guard datagram.data.count <= OnlineWire.maxGameDatagram else {
+            lock.withLock {
+                tooLarge += 1
+                counters.dropped += 1
+            }
             return false
+        }
+        let channels: [RTCDataChannel?] = lock.withLock {
+            OnlineWire.isGroup(datagram.peer) ? byAddress.values.map(\.channel) : [byAddress[datagram.peer]?.channel]
         }
         let writer = OnlineWire.Writer()
         writer.u16(datagram.localPort).u16(datagram.localVport).u16(datagram.peerPort).u16(datagram.peerVport).u8(datagram.kind.rawValue).raw(datagram.data)
-        let sent = channel.sendData(RTCDataBuffer(data: writer.data, isBinary: true))
-        lock.withLock { if sent { counters.sent += 1 } else { counters.dropped += 1 } }
-        return sent
+        let buffer = RTCDataBuffer(data: writer.data, isBinary: true)
+        var sent = 0
+        var dropped = channels.isEmpty ? 1 : 0
+        for channel in channels {
+            if let channel, channel.readyState == .open, channel.sendData(buffer) { sent += 1 } else { dropped += 1 }
+        }
+        lock.withLock {
+            counters.sent += sent
+            counters.dropped += dropped
+        }
+        return sent > 0
     }
 
     public func receive(_ signal: OnlinePeerSignal) {

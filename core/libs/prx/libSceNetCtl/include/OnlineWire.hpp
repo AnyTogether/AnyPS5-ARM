@@ -39,7 +39,17 @@ enum class DatagramKind : std::uint8_t {
 constexpr std::uint32_t VirtualNetwork = 0xC6120000u;
 constexpr std::uint32_t VirtualMask = 0xFFFE0000u;
 constexpr bool IsVirtual(std::uint32_t address) { return (address & VirtualMask) == VirtualNetwork; }
+// A datagram to the limited broadcast, the virtual network's broadcast or a multicast group goes to
+// every other player of the session, and arrives from the sender's virtual address.
+constexpr std::uint32_t VirtualBroadcast = VirtualNetwork | ~VirtualMask;
+constexpr bool IsGroup(std::uint32_t address) {
+    return address == 0xFFFFFFFFu || address == VirtualBroadcast || (address & 0xF0000000u) == 0xE0000000u;
+}
 constexpr std::size_t MaxDatagram = 65535;
+// The largest game datagram online play carries: the largest UDP payload over IPv4 (65507 bytes)
+// less the 12-byte header the receiving engine puts in front of it on its loopback hop to the
+// game's socket. A bigger one fails with EMSGSIZE in the sending game, as on a network.
+constexpr std::size_t MaxGameDatagram = 65507 - 12;
 
 enum Flags : std::uint16_t {
     FlagReply = 0x0001,

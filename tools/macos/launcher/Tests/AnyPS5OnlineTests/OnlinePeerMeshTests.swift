@@ -196,6 +196,20 @@ final class OnlinePeerMeshTests: XCTestCase {
         let stranger = OnlineWire.Datagram(peer: OnlineWire.virtualNetwork | 0x1234, peerPort: 1, peerVport: 0, localPort: 1, localVport: 0, kind: .udp, data: Data([1]))
         XCTAssertFalse(aliceMesh.send(stranger), "a packet for someone outside the session goes nowhere")
 
+        // A game's broadcast (LAN-style discovery) reaches every other player, from the sender.
+        for group: UInt32 in [0xFFFF_FFFF, OnlineWire.virtualBroadcast, 0xE000_00FB] {
+            aliceEngine.send(.init(peer: group, peerPort: 3659, peerVport: 0, localPort: 3660, localVport: 0, kind: .udp, data: Data("who is there".utf8)))
+            let heard = try XCTUnwrap(bobEngine.nextDatagram())
+            XCTAssertEqual(heard, OnlineWire.Datagram(peer: a, peerPort: 3660, peerVport: 0, localPort: 3659, localVport: 0, kind: .udp, data: Data("who is there".utf8)),
+                           "a datagram to \(String(group, radix: 16)) arrives at the other game from the sender's virtual address")
+        }
+        // The largest UDP datagram crosses; a bigger one is dropped and counted, never fatal.
+        aliceEngine.send(.init(peer: b, peerPort: 9000, peerVport: 0, localPort: 9001, localVport: 0, kind: .udp, data: Data(repeating: 7, count: OnlineWire.maxGameDatagram)))
+        XCTAssertEqual(try XCTUnwrap(bobEngine.nextDatagram()).data.count, OnlineWire.maxGameDatagram)
+        let tooBig = OnlineWire.Datagram(peer: b, peerPort: 9000, peerVport: 0, localPort: 9001, localVport: 0, kind: .udp, data: Data(count: OnlineWire.maxGameDatagram + 1))
+        XCTAssertFalse(aliceMesh.send(tooBig))
+        XCTAssertEqual(aliceMesh.droppedTooLarge, 1)
+
         // Bob leaves: Alice's connection to him closes and the game's packets to him are dropped.
         await bobPlay.follow(sessionId: nil)
         XCTAssertTrue(waitUntil { aliceMesh.states[bob] == nil || aliceMesh.states[bob] == .closed }, "a goodbye closes the other side: \(together.signals)")
@@ -272,5 +286,43 @@ final class OnlineEngineP2pTests: XCTestCase {
         XCTAssertEqual(pinged["from"], "\(OnlineEngineP2pTests.dotted(b)):3658/1", "the answer comes from the other game's virtual address, port and virtual port")
         XCTAssertEqual(ponged["got"], "ping", "\(ponged)")
         XCTAssertEqual(ponged["from"], "\(OnlineEngineP2pTests.dotted(a)):3658/1")
+    }
+
+    /// LAN-style discovery: a game broadcasts on its UDP socket, the other game hears it from the
+    /// sender's virtual address and answers directly; the largest UDP datagram crosses, and a
+    /// bigger one fails with EMSGSIZE in the sending game.
+    func testAGamesBroadcastReachesTheOtherGame() async throws {
+        guard let probe = OnlineEngineP2pTests.probe else { throw XCTSkip("online_probe is not built") }
+        let together = OneSession()
+        let users = ["0190a0b1-0000-7000-8000-00000000000a", "0190a0b1-0000-7000-8000-00000000000b"]
+        together.add(users[0], device: "dev-a")
+        together.add(users[1], device: "dev-b")
+        let game = OnlineWebRouter.Game(titleId: "PPSA00000", gameVersion: "01.000", engineBuild: "mesh-test")
+        let plays = users.enumerated().map { index, userId in
+            let device = index == 0 ? "dev-a" : "dev-b"
+            let play = OnlinePlay(service: together, user: TogetherUser(id: userId, handle: index == 0 ? "alice" : "bob", displayName: userId, avatar: nil), game: game,
+                                  signal: together.relay(from: userId, fromDevice: device), transport: { OnlinePeerMesh(context: $0, iceServers: []) })
+            together.attach(play, as: userId)
+            return play
+        }
+        let environments = try plays.map { try $0.start() }
+        defer { plays.forEach { $0.stop() } }
+        for play in plays { await play.follow(sessionId: together.id) }
+        let addresses = OnlineIdentity.addresses(for: users)
+        let (a, b) = (try XCTUnwrap(addresses[users[0]]), try XCTUnwrap(addresses[users[1]]))
+
+        for (destination, size) in [("255.255.255.255", OnlineWire.maxGameDatagram), (OnlineEngineP2pTests.dotted(OnlineWire.virtualBroadcast), 4)] {
+            let pong = try start(probe, environment: environments[1], arguments: ["udp", OnlineEngineP2pTests.dotted(a), "pong"])
+            let ping = try start(probe, environment: environments[0], arguments: ["udp", destination, "ping", String(size)])
+            let pinged = finish(ping)
+            let ponged = finish(pong)
+            XCTAssertEqual(pinged["oversize"], "0x80410128", "a datagram larger than UDP allows fails with EMSGSIZE: \(pinged)")
+            XCTAssertEqual(ponged["got"], "ping", "\(destination): \(ponged)")
+            XCTAssertEqual(ponged["from"], "\(OnlineEngineP2pTests.dotted(a)):3660", "the broadcast comes from the sender's virtual address")
+            XCTAssertEqual(ponged["size"], String(size))
+            XCTAssertEqual(pinged["got"], "pong", "\(destination): \(pinged) \(together.signals)")
+            XCTAssertEqual(pinged["from"], "\(OnlineEngineP2pTests.dotted(b)):3659")
+            XCTAssertEqual(pinged["size"], String(size))
+        }
     }
 }
