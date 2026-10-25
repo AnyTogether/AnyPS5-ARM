@@ -28,6 +28,7 @@ enum class Type : std::uint16_t {
     Account = 0x0101,
     Observation = 0x0102,
     WebRequest = 0x0201,
+    PushEvent = 0x0204,
     Datagram = 0x0310,
 };
 
@@ -46,6 +47,11 @@ constexpr bool IsGroup(std::uint32_t address) {
     return address == 0xFFFFFFFFu || address == VirtualBroadcast || (address & 0xF0000000u) == 0xE0000000u;
 }
 constexpr std::size_t MaxDatagram = 65535;
+// A push event's data type and extended data keys, as the platform's structures hold them
+// (64 and 32 letters plus the terminator).
+constexpr std::size_t MaxPushDataType = 64;
+constexpr std::size_t MaxPushExtendedKey = 32;
+constexpr std::size_t MaxPushContextId = 36;
 // The largest game datagram online play carries: the largest UDP payload over IPv4 (65507 bytes)
 // less the 12-byte header the receiving engine puts in front of it on its loopback hop to the
 // game's socket. A bigger one fails with EMSGSIZE in the sending game, as on a network.
@@ -174,6 +180,20 @@ struct Datagram {
     std::vector<std::uint8_t> data;
 };
 
+// Session and invitation news from the launcher (launcher -> engine, event): what the platform's
+// push events carry. An empty push context goes to the plain callbacks and every push context.
+struct PushEvent {
+    std::string service;
+    std::uint32_t label = 0;
+    std::string pushContextId;
+    std::string dataType;
+    std::vector<std::uint8_t> data;
+    Pairs extended;
+    std::uint64_t to = 0;
+    std::uint64_t from = 0;
+    std::string fromOnlineId;
+};
+
 std::vector<std::uint8_t> Encode(const Hello& message);
 std::vector<std::uint8_t> Encode(const Welcome& message);
 std::vector<std::uint8_t> Encode(const ProofBytes& proof);
@@ -182,6 +202,7 @@ std::vector<std::uint8_t> Encode(const Account& message);
 std::vector<std::uint8_t> Encode(const WebRequest& message);
 std::vector<std::uint8_t> Encode(const WebReply& message);
 std::vector<std::uint8_t> Encode(const Datagram& message);
+std::vector<std::uint8_t> Encode(const PushEvent& message);
 
 std::optional<Hello> DecodeHello(std::span<const std::uint8_t> payload);
 std::optional<Welcome> DecodeWelcome(std::span<const std::uint8_t> payload);
@@ -191,6 +212,7 @@ std::optional<Account> DecodeAccount(std::span<const std::uint8_t> payload);
 std::optional<WebRequest> DecodeWebRequest(std::span<const std::uint8_t> payload);
 std::optional<WebReply> DecodeWebReply(std::span<const std::uint8_t> payload);
 std::optional<Datagram> DecodeDatagram(std::span<const std::uint8_t> payload);
+std::optional<PushEvent> DecodePushEvent(std::span<const std::uint8_t> payload);
 
 enum class Side : std::uint8_t { Launcher, Engine };
 ProofBytes MakeProof(const Secret& secret, Side side, const Nonce& engine, const Nonce& launcher);

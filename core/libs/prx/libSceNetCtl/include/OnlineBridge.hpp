@@ -43,6 +43,7 @@ public:
     std::optional<Wire::Refuse> Refusal();
     bool SendDatagram(const Wire::Datagram& datagram);
     void SetDatagramReceiver(std::function<void(const Wire::Datagram&)> receiver);
+    void SetPushReceiver(std::function<void(const Wire::PushEvent&)> receiver);
 
 private:
     struct Pending {
@@ -81,6 +82,7 @@ private:
     std::size_t outgoingBytes = 0;
     std::condition_variable outgoingChanged;
     std::function<void(const Wire::Datagram&)> datagramReceiver;
+    std::function<void(const Wire::PushEvent&)> pushReceiver;
 
     std::mutex writeMutex;
     std::thread worker;

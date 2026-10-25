@@ -779,6 +779,8 @@ int APS5_VABI sceNpCheckCallback(void) {
     for (const auto& entry : callbacksA) {
         if (entry.pending) entry.callback(USER_SERVICE_INITIAL_USER_ID, state, entry.userdata);
     }
+    // Web API push events (session news from the launcher) reach the game here, on its thread.
+    if (Online::Enabled()) OnlineDispatchPush_nid_no_patch();
     return call.Return(0);
 }
 

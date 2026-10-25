@@ -18,6 +18,11 @@ extern "C" bool OnlineWeb_nid_no_patch(const Online::Wire::WebRequest& request, 
 extern "C" bool OnlineObserving_nid_no_patch();
 extern "C" bool OnlineSendDatagram_nid_no_patch(const Online::Wire::Datagram& datagram);
 extern "C" void OnlineSetDatagramReceiver_nid_no_patch(void (*receiver)(const Online::Wire::Datagram& datagram));
+// Push events: the receiver runs on the bridge's reader thread; the dispatcher runs on the game's
+// thread from sceNpCheckCallback, where callbacks into the game are safe.
+extern "C" void OnlineSetPushReceiver_nid_no_patch(void (*receiver)(const Online::Wire::PushEvent& event));
+extern "C" void OnlineSetPushDispatcher_nid_no_patch(void (*dispatcher)());
+extern "C" void OnlineDispatchPush_nid_no_patch();
 extern "C" void OnlineObserve_nid_no_patch(const char* library, const char* function, const std::string& in, const std::string& out, const std::int64_t* result);
 
 namespace Online {
@@ -42,10 +47,10 @@ public:
         return Text(name, std::string_view(value, size));
     }
     Fields& Text(std::string_view name, std::string_view value) { return raw(name, quote(value)); }
-    Fields& Data(std::string_view name, const void* data, std::size_t size) {
+    Fields& Data(std::string_view name, const void* data, std::size_t size, std::size_t limit = ObservedBytes) {
         if (!data) return raw(name, "null");
         const auto* bytes = static_cast<const unsigned char*>(data);
-        const auto kept = size < ObservedBytes ? size : ObservedBytes;
+        const auto kept = size < limit ? size : limit;
         bool text = true;
         for (std::size_t index = 0; index < kept && text; ++index) text = bytes[index] >= 0x20 || bytes[index] == '\n' || bytes[index] == '\r' || bytes[index] == '\t';
         std::string value;

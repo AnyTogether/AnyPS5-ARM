@@ -111,6 +111,11 @@ void Bridge::SetDatagramReceiver(std::function<void(const Wire::Datagram&)> rece
     datagramReceiver = std::move(receiver);
 }
 
+void Bridge::SetPushReceiver(std::function<void(const Wire::PushEvent&)> receiver) {
+    std::lock_guard lock(mutex);
+    pushReceiver = std::move(receiver);
+}
+
 void Bridge::writeLoop() {
     while (true) {
         std::vector<std::uint8_t> frame;
@@ -280,6 +285,17 @@ void Bridge::dispatch(const Wire::Header& header, std::span<const std::uint8_t> 
             receiver = datagramReceiver;
         }
         if (receiver) receiver(*datagram);
+        return;
+    }
+    if (header.type == static_cast<std::uint16_t>(Wire::Type::PushEvent)) {
+        const auto event = Wire::DecodePushEvent(payload);
+        if (!event) return;
+        std::function<void(const Wire::PushEvent&)> receiver;
+        {
+            std::lock_guard lock(mutex);
+            receiver = pushReceiver;
+        }
+        if (receiver) receiver(*event);
         return;
     }
     if (header.type == static_cast<std::uint16_t>(Wire::Type::Account)) {

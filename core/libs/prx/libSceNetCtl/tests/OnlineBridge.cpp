@@ -456,6 +456,47 @@ void observerFile() {
     for (const auto& line : lines) require(line.starts_with("{\"v\":1,\"t_ms\":") && line.ends_with("}"), "every line is a v1 JSON object");
 }
 
+void pushEvents() {
+    Wire::PushEvent event{"sm", 1, "c", "t:x", {'{', '}'}, {{"k", "v"}}, 2, 3, "b"};
+    const auto bytes = Wire::Encode(event);
+    require(hex(bytes) == "0200736d" "01000000" "010063" "0300743a78" "020000007b7d" "0100" "01006b" "010076" "0200000000000000" "0300000000000000" "010062",
+        "push event layout");
+    const auto back = Wire::DecodePushEvent(bytes);
+    require(back && back->service == "sm" && back->label == 1 && back->pushContextId == "c" && back->dataType == "t:x" && back->data == event.data &&
+            back->extended == event.extended && back->to == 2 && back->from == 3 && back->fromOnlineId == "b",
+        "push event round trip");
+    auto bad = event;
+    bad.dataType.clear();
+    require(!Wire::DecodePushEvent(Wire::Encode(bad)), "a push event without a data type is dropped");
+    bad.dataType = std::string(Wire::MaxPushDataType + 1, 'x');
+    require(!Wire::DecodePushEvent(Wire::Encode(bad)), "a data type longer than the platform holds is dropped");
+    bad = event;
+    bad.extended = {{std::string(Wire::MaxPushExtendedKey + 1, 'k'), "v"}};
+    require(!Wire::DecodePushEvent(Wire::Encode(bad)), "an extended data key longer than the platform holds is dropped");
+    bad = event;
+    bad.pushContextId = std::string(Wire::MaxPushContextId + 1, 'c');
+    require(!Wire::DecodePushEvent(Wire::Encode(bad)), "a push context longer than a UUID is dropped");
+
+    Testing::FakeLauncher launcher(testSecret());
+    launcher.SetAccount(signedInAccount());
+    Bridge bridge(launcher.Port(), testSecret(), fastOptions());
+    require(bridge.Account().connected, "connected");
+    std::mutex receivedMutex;
+    std::vector<Wire::PushEvent> received;
+    bridge.SetPushReceiver([&](const Wire::PushEvent& in) {
+        std::lock_guard lock(receivedMutex);
+        received.push_back(in);
+    });
+    launcher.Send(Wire::Type::PushEvent, 0, 0, Wire::Encode(bad));
+    launcher.Send(Wire::Type::PushEvent, 0, 0, Wire::Encode(event));
+    require(eventually([&] {
+        std::lock_guard lock(receivedMutex);
+        return received.size() == 1;
+    }), "a push event from the launcher reaches the receiver");
+    std::lock_guard lock(receivedMutex);
+    require(received[0].dataType == "t:x" && received[0].pushContextId == "c", "only the well-formed event arrives");
+}
+
 }
 
 int main() {
@@ -477,6 +518,7 @@ int main() {
         {"no launcher", noLauncher},
         {"observer file", observerFile},
         {"datagrams", datagrams},
+        {"push events", pushEvents},
     };
     int failed = 0;
     for (const auto& [name, test] : tests) {

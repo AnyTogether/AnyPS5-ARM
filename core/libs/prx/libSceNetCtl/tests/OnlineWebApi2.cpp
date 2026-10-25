@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <chrono>
+#include <thread>
 
 extern "C" {
 int APS5_VABI sceNpWebApi2Initialize(int libHttpCtxId, std::size_t poolSize);
@@ -20,6 +22,15 @@ int APS5_VABI sceNpWebApi2ReadData(std::int64_t requestId, void* data, std::size
 int APS5_VABI sceNpWebApi2GetHttpResponseHeaderValueLength(std::int64_t requestId, const char* name, std::size_t* length);
 int APS5_VABI sceNpWebApi2GetHttpResponseHeaderValue(std::int64_t requestId, const char* name, char* value, std::size_t size);
 int APS5_VABI sceNpWebApi2DeleteRequest(std::int64_t requestId);
+int APS5_VABI sceNpWebApi2PushEventCreateHandle(int libCtxId);
+int APS5_VABI sceNpWebApi2PushEventCreateFilter(int libCtxId, int handleId, const char* service, std::uint32_t label, const void* params, std::size_t count);
+int APS5_VABI sceNpWebApi2PushEventRegisterCallback(int userContextId, int filterId, void* callback, void* userArg);
+int APS5_VABI sceNpWebApi2PushEventRegisterPushContextCallback(int userContextId, int filterId, void* callback, void* userArg);
+int APS5_VABI sceNpWebApi2PushEventCreatePushContext(int userContextId, char* pushContextId);
+int APS5_VABI sceNpWebApi2PushEventStartPushContextCallback(int userContextId, const char* pushContextId);
+int APS5_VABI sceNpWebApi2PushEventDeletePushContext(int userContextId, const char* pushContextId);
+int APS5_VABI sceNpWebApi2PushEventUnregisterCallback(int userContextId, int callbackId);
+int APS5_VABI sceNpCheckCallback(void);
 }
 
 namespace {
@@ -29,6 +40,106 @@ constexpr int Unavailable = static_cast<int>(0x80553406);
 
 void require(bool condition, const std::string& message) {
     if (!condition) throw std::runtime_error(message);
+}
+
+// The platform's push event structures as a game sees them.
+struct FilterParameter {
+    char dataType[65];
+    const void* keys;
+    std::size_t keyCount;
+};
+static_assert(sizeof(FilterParameter) == 88);
+
+struct PeerAddress {
+    std::uint64_t accountId;
+    std::int32_t platform;
+    std::int32_t reserved;
+};
+
+struct OnlineId {
+    char data[16];
+    char term;
+    char dummy[3];
+};
+
+struct ExtendedData {
+    char key[33];
+    const char* data;
+    std::size_t length;
+};
+
+struct Delivered {
+    int userContextId = 0;
+    int callbackId = 0;
+    std::string pushContextId;
+    int type = -1;
+    std::string service;
+    std::uint64_t to = 0;
+    std::string toOnlineId;
+    std::uint64_t from = 0;
+    std::string fromOnlineId;
+    std::string dataType;
+    std::string data;
+    std::vector<std::pair<std::string, std::string>> extended;
+    void* userArg = nullptr;
+};
+
+std::vector<Delivered> contextDeliveries;
+std::vector<Delivered> plainDeliveries;
+
+void fill(Delivered& out, const PeerAddress* to, const OnlineId* toOnlineId, const PeerAddress* from, const OnlineId* fromOnlineId, const char* dataType,
+    const char* data, std::size_t length, const ExtendedData* extended, std::size_t extendedCount) {
+    out.to = to ? to->accountId : 0;
+    out.toOnlineId = toOnlineId ? toOnlineId->data : "";
+    out.from = from ? from->accountId : 0;
+    out.fromOnlineId = fromOnlineId ? fromOnlineId->data : "";
+    out.dataType = dataType ? dataType : "";
+    out.data.assign(data, length);
+    for (std::size_t index = 0; index < extendedCount; ++index) out.extended.emplace_back(extended[index].key, std::string(extended[index].data, extended[index].length));
+}
+
+void APS5_VABI onPushContextEvent(int userContextId, int callbackId, const char* pushContextId, int type, const char* service, std::uint32_t, const PeerAddress* to,
+    const OnlineId* toOnlineId, const PeerAddress* from, const OnlineId* fromOnlineId, const char* dataType, const char* data, std::size_t length,
+    const ExtendedData* extended, std::size_t extendedCount, void* userArg) {
+    Delivered got;
+    got.userContextId = userContextId;
+    got.callbackId = callbackId;
+    got.pushContextId = pushContextId ? pushContextId : "";
+    got.type = type;
+    got.service = service ? service : "";
+    got.userArg = userArg;
+    fill(got, to, toOnlineId, from, fromOnlineId, dataType, data, length, extended, extendedCount);
+    contextDeliveries.push_back(got);
+}
+
+void APS5_VABI onPushEvent(int userContextId, int callbackId, const char* service, std::uint32_t, const PeerAddress* to, const OnlineId* toOnlineId,
+    const PeerAddress* from, const OnlineId* fromOnlineId, const char* dataType, const char* data, std::size_t length, const ExtendedData* extended,
+    std::size_t extendedCount, void* userArg) {
+    Delivered got;
+    got.userContextId = userContextId;
+    got.callbackId = callbackId;
+    got.service = service ? service : "";
+    got.userArg = userArg;
+    fill(got, to, toOnlineId, from, fromOnlineId, dataType, data, length, extended, extendedCount);
+    plainDeliveries.push_back(got);
+}
+
+FilterParameter parameter(const char* dataType) {
+    FilterParameter value{};
+    std::strncpy(value.dataType, dataType, sizeof(value.dataType) - 1);
+    return value;
+}
+
+// Runs the game's callback check until `done` or `limit` passes.
+template <typename TDone>
+bool pump(TDone done, std::chrono::milliseconds limit = std::chrono::milliseconds(3000)) {
+    const auto until = std::chrono::steady_clock::now() + limit;
+    while (std::chrono::steady_clock::now() < until) {
+        sceNpCheckCallback();
+        if (done()) return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    return false;
 }
 
 }
@@ -111,6 +222,63 @@ int main() {
             "a group the launcher does not offer fails as it does offline");
         require(sceNpWebApi2ReadData(other, chunk, sizeof(chunk)) == Unavailable, "a request that was not offered has no body");
         sceNpWebApi2DeleteRequest(other);
+
+        // Push events: a push context made here, news from the launcher handed to the game's
+        // callbacks on its own thread through sceNpCheckCallback.
+        const int handle = sceNpWebApi2PushEventCreateHandle(library);
+        require(handle > 0, "a push event handle is made");
+        const FilterParameter memberTypes[] = {parameter("psn:sessionManager:ps:m:players:created"), parameter("psn:sessionManager:ps:m:players:deleted")};
+        const int memberFilter = sceNpWebApi2PushEventCreateFilter(library, handle, "sessionManager", 0, memberTypes, 2);
+        require(memberFilter > 0, "a session filter is made");
+        const FilterParameter deletedType[] = {parameter("psn:sessionManager:playerSession:deleted")};
+        const int plainFilter = sceNpWebApi2PushEventCreateFilter(library, handle, nullptr, 0xFFFFFFFFu, deletedType, 1);
+        int userArg = 7;
+        const int contextCallback = sceNpWebApi2PushEventRegisterPushContextCallback(user, memberFilter, reinterpret_cast<void*>(onPushContextEvent), &userArg);
+        require(contextCallback > 0, "a push context callback is registered");
+        const int plainCallback = sceNpWebApi2PushEventRegisterCallback(user, plainFilter, reinterpret_cast<void*>(onPushEvent), &userArg);
+        require(plainCallback > 0, "a push event callback is registered");
+        char context[37] = {};
+        require(sceNpWebApi2PushEventCreatePushContext(user, context) == 0, "a push context is made while the launcher is there");
+        require(std::strlen(context) == 36 && context[8] == '-' && context[13] == '-' && context[14] == '4' && context[18] == '-' && context[23] == '-',
+            "the push context is a version 4 UUID");
+        char second[37] = {};
+        require(sceNpWebApi2PushEventCreatePushContext(user, second) == 0 && std::string(second) != context, "every push context is new");
+        require(sceNpWebApi2PushEventDeletePushContext(user, second) == 0, "a push context can be deleted");
+        require(sceNpWebApi2PushEventStartPushContextCallback(user, context) == 0, "the push context starts");
+
+        auto send = [&](const std::string& pushContextId, const std::string& dataType, const std::string& data) {
+            Online::Wire::PushEvent event;
+            event.service = "sessionManager";
+            event.pushContextId = pushContextId;
+            event.dataType = dataType;
+            event.data.assign(data.begin(), data.end());
+            event.extended = {{"sessionId", "s-1"}};
+            event.to = 42;
+            event.from = 77;
+            event.fromOnlineId = "bob";
+            launcher.Send(Online::Wire::Type::PushEvent, 0, 0, Online::Wire::Encode(event));
+        };
+        send(context, "psn:sessionManager:ps:leader:updated", "{}");
+        send(second, "psn:sessionManager:ps:m:players:created", "{\"gone\":1}");
+        send(context, "psn:sessionManager:ps:m:players:created", "{\"member\":1}");
+        require(pump([] { return !contextDeliveries.empty(); }), "the push context's callback gets the event");
+        pump([] { return false; }, std::chrono::milliseconds(300));
+        require(contextDeliveries.size() == 1, "events of another data type or a deleted push context are not delivered");
+        const auto& got = contextDeliveries[0];
+        require(got.userContextId == user && got.callbackId == contextCallback && got.pushContextId == context && got.type == 0, "context, callback and type");
+        require(got.service == "sessionManager" && got.dataType == "psn:sessionManager:ps:m:players:created" && got.data == "{\"member\":1}", "service, type and data");
+        require(got.to == 42 && got.toOnlineId == "player" && got.from == 77 && got.fromOnlineId == "bob", "to and from");
+        require(got.extended.size() == 1 && got.extended[0].first == "sessionId" && got.extended[0].second == "s-1", "extended data");
+        require(got.userArg == &userArg && plainDeliveries.empty(), "the game's argument comes back, and a plain callback does not get a push context's event");
+
+        send("", "psn:sessionManager:playerSession:deleted", "{\"deleted\":1}");
+        require(pump([] { return !plainDeliveries.empty(); }), "an event for no push context reaches the plain callback");
+        require(plainDeliveries[0].callbackId == plainCallback && plainDeliveries[0].data == "{\"deleted\":1}" && contextDeliveries.size() == 1,
+            "only the filter with that data type gets it");
+        require(sceNpWebApi2PushEventUnregisterCallback(user, contextCallback) == 0, "the callback is unregistered");
+        send(context, "psn:sessionManager:ps:m:players:deleted", "{}");
+        pump([] { return false; }, std::chrono::milliseconds(300));
+        require(contextDeliveries.size() == 1, "an unregistered callback gets nothing");
     } catch (const std::exception& error) {
         std::cerr << "online web api2: " << error.what() << '\n';
         return 1;

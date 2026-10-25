@@ -249,6 +249,36 @@ std::optional<Datagram> DecodeDatagram(std::span<const std::uint8_t> payload) {
     return datagram;
 }
 
+std::vector<std::uint8_t> Encode(const PushEvent& message) {
+    Writer writer;
+    writer.Str(message.service).U32(message.label).Str(message.pushContextId).Str(message.dataType).Bytes(message.data).PairList(message.extended)
+        .U64(message.to).U64(message.from).Str(message.fromOnlineId);
+    return writer.Take();
+}
+
+std::optional<PushEvent> DecodePushEvent(std::span<const std::uint8_t> payload) {
+    auto event = decode<PushEvent>(payload, [](Reader& reader) {
+        PushEvent message;
+        message.service = reader.Str();
+        message.label = reader.U32();
+        message.pushContextId = reader.Str();
+        message.dataType = reader.Str();
+        message.data = reader.Bytes();
+        message.extended = reader.PairList();
+        message.to = reader.U64();
+        message.from = reader.U64();
+        message.fromOnlineId = reader.Str();
+        return message;
+    });
+    if (!event || event->dataType.empty() || event->dataType.size() > MaxPushDataType || event->pushContextId.size() > MaxPushContextId ||
+        event->fromOnlineId.size() > MaxOnlineId)
+        return std::nullopt;
+    for (const auto& [key, value] : event->extended) {
+        if (key.empty() || key.size() > MaxPushExtendedKey) return std::nullopt;
+    }
+    return event;
+}
+
 std::optional<Hello> DecodeHello(std::span<const std::uint8_t> payload) {
     return decode<Hello>(payload, [](Reader& reader) {
         Hello message;

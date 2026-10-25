@@ -7,6 +7,9 @@
 #include <cstring>
 #include <algorithm>
 #include <cctype>
+#include <deque>
+#include <random>
+#include <vector>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -53,6 +56,200 @@ struct PushHandle {
 };
 
 static std::unordered_map<int, PushHandle> pushHandles;
+
+// Push events. Contexts, filters and callbacks are kept here; the launcher sends the events
+// (session and invitation news) over the bridge, they are queued on the bridge's thread and handed
+// to the game's callbacks on its own thread from sceNpCheckCallback. Nothing comes from Sony.
+struct NpWebApi2PushEventDataType {
+    char value[65];
+};
+
+struct NpWebApi2PushEventExtdDataKey {
+    char value[33];
+};
+
+struct NpWebApi2PushEventFilterParameter {
+    NpWebApi2PushEventDataType dataType;
+    const NpWebApi2PushEventExtdDataKey* extdDataKey;
+    std::size_t extdDataKeyNum;
+};
+
+static_assert(sizeof(NpWebApi2PushEventFilterParameter) == 88);
+
+struct NpWebApi2PushEventExtdData {
+    NpWebApi2PushEventExtdDataKey extdDataKey;
+    const char* data;
+    std::size_t dataLen;
+};
+
+static_assert(sizeof(NpWebApi2PushEventExtdData) == 56);
+
+struct NpWebApi2PeerAddressA {
+    std::uint64_t accountId;
+    std::int32_t platform;
+    std::int32_t reserved;
+};
+
+static_assert(sizeof(NpWebApi2PeerAddressA) == 16);
+
+struct NpWebApi2OnlineId {
+    char data[16];
+    char term;
+    char dummy[3];
+};
+
+static_assert(sizeof(NpWebApi2OnlineId) == 20);
+
+using NpWebApi2PushEventCallback = void(APS5_VABI*)(std::int32_t userContextId, std::int32_t callbackId, const char* npServiceName, std::uint32_t npServiceLabel,
+    const NpWebApi2PeerAddressA* to, const NpWebApi2OnlineId* toOnlineId, const NpWebApi2PeerAddressA* from, const NpWebApi2OnlineId* fromOnlineId,
+    const NpWebApi2PushEventDataType* dataType, const char* data, std::size_t dataLen, const NpWebApi2PushEventExtdData* extdData, std::size_t extdDataNum,
+    void* userArg);
+using NpWebApi2PushEventPushContextCallback = void(APS5_VABI*)(std::int32_t userContextId, std::int32_t callbackId, const NpWebApi2PushContextId* pushContextId,
+    std::int32_t callbackType, const char* npServiceName, std::uint32_t npServiceLabel, const NpWebApi2PeerAddressA* to, const NpWebApi2OnlineId* toOnlineId,
+    const NpWebApi2PeerAddressA* from, const NpWebApi2OnlineId* fromOnlineId, const NpWebApi2PushEventDataType* dataType, const char* data, std::size_t dataLen,
+    const NpWebApi2PushEventExtdData* extdData, std::size_t extdDataNum, void* userArg);
+
+static constexpr std::int32_t PushContextCallbackReceived = 0;
+static constexpr std::int32_t PlatformPs5 = 4;
+static constexpr std::size_t MaxFilterParameters = 256;
+static constexpr std::size_t MaxQueuedPushEvents = 256;
+
+struct PushFilter {
+    int libraryContextId = 0;
+    std::optional<std::string> service;
+    std::vector<std::string> dataTypes;
+};
+
+struct PushCallback {
+    int userContextId = 0;
+    int filterId = 0;
+    void* function = nullptr;
+    void* userArg = nullptr;
+    bool pushContext = false;
+};
+
+struct PushContext {
+    int userContextId = 0;
+    bool started = false;
+};
+
+static std::mutex g_pushMutex;
+static std::unordered_map<int, PushFilter> g_pushFilters;
+static std::unordered_map<int, PushCallback> g_pushCallbacks;
+static std::unordered_map<std::string, PushContext> g_pushContexts;
+static std::deque<Online::Wire::PushEvent> g_pushQueue;
+
+static std::string NewPushContextId() {
+    static std::mutex randomMutex;
+    static std::mt19937_64 random{std::random_device{}()};
+    std::uint64_t high = 0;
+    std::uint64_t low = 0;
+    {
+        std::lock_guard lock(randomMutex);
+        high = random();
+        low = random();
+    }
+    high = (high & ~0xF000ull) | 0x4000ull;
+    low = (low & ~(0xC000ull << 48)) | (0x8000ull << 48);
+    char text[37];
+    std::snprintf(text, sizeof(text), "%08x-%04x-%04x-%04x-%012llx", static_cast<unsigned>(high >> 32), static_cast<unsigned>((high >> 16) & 0xFFFF),
+        static_cast<unsigned>(high & 0xFFFF), static_cast<unsigned>(low >> 48), static_cast<unsigned long long>(low & 0xFFFFFFFFFFFFull));
+    return text;
+}
+
+static bool FilterMatches(const PushFilter& filter, const Online::Wire::PushEvent& event) {
+    if (filter.service && !filter.service->empty() && *filter.service != event.service) return false;
+    return filter.dataTypes.empty() || std::find(filter.dataTypes.begin(), filter.dataTypes.end(), event.dataType) != filter.dataTypes.end();
+}
+
+static void QueuePushEvent(const Online::Wire::PushEvent& event) {
+    std::lock_guard lock(g_pushMutex);
+    if (g_pushQueue.size() >= MaxQueuedPushEvents) g_pushQueue.pop_front();
+    g_pushQueue.push_back(event);
+}
+
+static void CopyText(char* out, std::size_t size, std::string_view text) {
+    std::memset(out, 0, size);
+    std::memcpy(out, text.data(), std::min(text.size(), size - 1));
+}
+
+static void DispatchPushEvents() {
+    std::deque<Online::Wire::PushEvent> events;
+    {
+        std::lock_guard lock(g_pushMutex);
+        events.swap(g_pushQueue);
+    }
+    if (events.empty()) return;
+    const auto account = Online::CurrentAccount();
+    for (const auto& event : events) {
+        struct Target {
+            int callbackId;
+            PushCallback callback;
+            std::string context;
+        };
+        std::vector<Target> targets;
+        {
+            std::lock_guard lock(g_pushMutex);
+            for (const auto& [callbackId, callback] : g_pushCallbacks) {
+                const auto filter = g_pushFilters.find(callback.filterId);
+                if (filter == g_pushFilters.end() || !FilterMatches(filter->second, event)) continue;
+                if (!callback.pushContext) {
+                    if (event.pushContextId.empty()) targets.push_back({callbackId, callback, {}});
+                    continue;
+                }
+                for (const auto& [contextId, context] : g_pushContexts) {
+                    if (context.userContextId != callback.userContextId) continue;
+                    if (!event.pushContextId.empty() && event.pushContextId != contextId) continue;
+                    targets.push_back({callbackId, callback, contextId});
+                }
+            }
+        }
+        Online::Call call("libSceNpWebApi2", "PushEventDelivered");
+        call.Args([&](Online::Fields& in) {
+            in.Text("np_service_name", event.service).Text("data_type", event.dataType).Text("push_context_id", event.pushContextId).Data("data", event.data.data(), event.data.size());
+        });
+        const std::string data(event.data.begin(), event.data.end());
+        NpWebApi2PushEventDataType dataType{};
+        CopyText(dataType.value, sizeof(dataType.value), event.dataType);
+        std::vector<NpWebApi2PushEventExtdData> extended(event.extended.size());
+        for (std::size_t index = 0; index < event.extended.size(); ++index) {
+            CopyText(extended[index].extdDataKey.value, sizeof(extended[index].extdDataKey.value), event.extended[index].first);
+            extended[index].data = event.extended[index].second.c_str();
+            extended[index].dataLen = event.extended[index].second.size();
+        }
+        NpWebApi2PeerAddressA to{account ? account->account.accountId : event.to, PlatformPs5, 0};
+        if (event.to != 0) to.accountId = event.to;
+        NpWebApi2OnlineId toOnlineId{};
+        if (account) CopyText(reinterpret_cast<char*>(&toOnlineId), sizeof(toOnlineId.data) + 1, account->account.onlineId);
+        NpWebApi2PeerAddressA from{event.from, PlatformPs5, 0};
+        NpWebApi2OnlineId fromOnlineId{};
+        CopyText(reinterpret_cast<char*>(&fromOnlineId), sizeof(fromOnlineId.data) + 1, event.fromOnlineId);
+        const auto* extendedData = extended.empty() ? nullptr : extended.data();
+        for (const auto& target : targets) {
+            if (target.callback.pushContext) {
+                NpWebApi2PushContextId context{};
+                CopyText(context.value, sizeof(context.value), target.context);
+                reinterpret_cast<NpWebApi2PushEventPushContextCallback>(target.callback.function)(target.callback.userContextId, target.callbackId, &context,
+                    PushContextCallbackReceived, event.service.c_str(), event.label, &to, &toOnlineId, event.from ? &from : nullptr, event.from ? &fromOnlineId : nullptr,
+                    &dataType, data.c_str(), data.size(), extendedData, extended.size(), target.callback.userArg);
+            } else {
+                reinterpret_cast<NpWebApi2PushEventCallback>(target.callback.function)(target.callback.userContextId, target.callbackId, event.service.c_str(),
+                    event.label, &to, &toOnlineId, event.from ? &from : nullptr, event.from ? &fromOnlineId : nullptr, &dataType, data.c_str(), data.size(),
+                    extendedData, extended.size(), target.callback.userArg);
+            }
+        }
+        call.Done([&](Online::Fields& out) { out.Uint("callbacks", targets.size()); });
+    }
+}
+
+static void ListenForPushEvents() {
+    static std::once_flag once;
+    if (!Online::Enabled()) return;
+    std::call_once(once, [] {
+        OnlineSetPushReceiver_nid_no_patch(QueuePushEvent);
+        OnlineSetPushDispatcher_nid_no_patch(DispatchPushEvents);
+    });
+}
 
 struct BridgedRequest {
     int userContextId = 0;
@@ -210,14 +407,27 @@ int APS5_VABI sceNpWebApi2GetMemoryPoolStats(int libraryContextId, NpWebApi2Memo
 
 int APS5_VABI sceNpWebApi2PushEventCreateFilter(int lib_ctx_id, int handle_id, const char* np_service_name, uint32_t np_service_label, const void* filter_param, size_t filter_param_num) {
     Online::Call call("libSceNpWebApi2", __func__);
-    call.Args([&](Online::Fields& in) { in.Int("lib_ctx_id", static_cast<std::int64_t>(lib_ctx_id)).Int("handle_id", static_cast<std::int64_t>(handle_id)).Str("np_service_name", np_service_name).Uint("np_service_label", static_cast<std::uint64_t>(np_service_label)).Ptr("filter_param", filter_param).Uint("filter_param_num", static_cast<std::uint64_t>(filter_param_num)); });
-    (void)lib_ctx_id;
+    PushFilter filter;
+    filter.libraryContextId = lib_ctx_id;
+    if (np_service_name) filter.service = std::string(np_service_name, strnlen(np_service_name, 256));
+    if (filter_param) {
+        const auto* params = static_cast<const NpWebApi2PushEventFilterParameter*>(filter_param);
+        for (std::size_t index = 0; index < std::min(filter_param_num, MaxFilterParameters); ++index)
+            filter.dataTypes.emplace_back(params[index].dataType.value, strnlen(params[index].dataType.value, sizeof(params[index].dataType.value)));
+    }
+    call.Args([&](Online::Fields& in) {
+        std::string types;
+        for (const auto& type : filter.dataTypes) types += (types.empty() ? "" : ",") + type;
+        in.Int("lib_ctx_id", static_cast<std::int64_t>(lib_ctx_id)).Int("handle_id", static_cast<std::int64_t>(handle_id)).Str("np_service_name", np_service_name).Uint("np_service_label", static_cast<std::uint64_t>(np_service_label)).Ptr("filter_param", filter_param).Uint("filter_param_num", static_cast<std::uint64_t>(filter_param_num)).Text("data_types", types);
+    });
     (void)handle_id;
-    (void)np_service_name;
     (void)np_service_label;
-    (void)filter_param;
-    (void)filter_param_num;
-    return call.Return(g_nextHandle.fetch_add(1, std::memory_order_relaxed));
+    const int filterId = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    {
+        std::lock_guard lock(g_pushMutex);
+        g_pushFilters[filterId] = std::move(filter);
+    }
+    return call.Return(filterId);
 }
 
 int APS5_VABI sceNpWebApi2PushEventCreateHandle(int libraryContextId) {
@@ -252,22 +462,27 @@ int APS5_VABI sceNpWebApi2PushEventDeleteHandle(int libraryContextId, int handle
     return call.Return(0);
 }
 
-int APS5_VABI sceNpWebApi2PushEventDeletePushContext(int user_context_id, const void* push_context_id) {
+int APS5_VABI sceNpWebApi2PushEventDeletePushContext(int user_context_id, const NpWebApi2PushContextId* push_context_id) {
     Online::Call call("libSceNpWebApi2", __func__);
-    call.Args([&](Online::Fields& in) { in.Int("user_context_id", static_cast<std::int64_t>(user_context_id)).Ptr("push_context_id", push_context_id); });
-    (void)user_context_id;
-    (void)push_context_id;
+    const std::string id = push_context_id ? std::string(push_context_id->value, strnlen(push_context_id->value, sizeof(push_context_id->value))) : std::string();
+    call.Args([&](Online::Fields& in) { in.Int("user_context_id", static_cast<std::int64_t>(user_context_id)).Text("push_context_id", id); });
+    if (!push_context_id) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
+    std::lock_guard lock(g_pushMutex);
+    const auto found = g_pushContexts.find(id);
+    if (found != g_pushContexts.end() && found->second.userContextId == user_context_id) g_pushContexts.erase(found);
     return call.Return(0);
 }
 
 int APS5_VABI sceNpWebApi2PushEventRegisterCallback(int user_context_id, int filter_id, void* callback, void* user_arg) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_context_id", static_cast<std::int64_t>(user_context_id)).Int("filter_id", static_cast<std::int64_t>(filter_id)).Ptr("callback", callback).Ptr("user_arg", user_arg); });
-    (void)user_context_id;
-    (void)filter_id;
-    (void)callback;
-    (void)user_arg;
-    return call.Return(g_nextHandle.fetch_add(1, std::memory_order_relaxed));
+    const int callbackId = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    if (callback) {
+        std::lock_guard lock(g_pushMutex);
+        g_pushCallbacks[callbackId] = PushCallback{user_context_id, filter_id, callback, user_arg, false};
+    }
+    ListenForPushEvents();
+    return call.Return(callbackId);
 }
 
 int APS5_VABI sceNpWebApi2ReadData(int64_t request_id, void* data, size_t size) {
@@ -287,7 +502,7 @@ int APS5_VABI sceNpWebApi2ReadData(int64_t request_id, void* data, size_t size) 
 
 int APS5_VABI sceNpWebApi2SendRequest(int64_t request_id, const void* data, size_t data_size, NpWebApi2ResponseInformationOption* response_info_option) {
     Online::Call call("libSceNpWebApi2", __func__);
-    call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)).Data("data", data, data_size).Uint("data_size", static_cast<std::uint64_t>(data_size)).Ptr("response_info_option", response_info_option); });
+    call.Args([&](Online::Fields& in) { in.Int("request_id", static_cast<std::int64_t>(request_id)).Data("data", data, data_size, 64u * 1024u).Uint("data_size", static_cast<std::uint64_t>(data_size)).Ptr("response_info_option", response_info_option); });
     if (!Online::Enabled() || (!data && data_size != 0) || data_size > MaxBridgedBody) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
     Online::Wire::WebRequest request;
     {
@@ -326,18 +541,34 @@ int APS5_VABI sceNpWebApi2Terminate(int lib_ctx_id) {
     std::lock_guard lock(g_poolsMutex);
     std::erase_if(pushHandles, [lib_ctx_id](const auto& item) { return item.second.libraryContextId == lib_ctx_id; });
     g_pools.erase(lib_ctx_id);
+    {
+        std::lock_guard pushLock(g_pushMutex);
+        std::erase_if(g_pushFilters, [lib_ctx_id](const auto& item) { return item.second.libraryContextId == lib_ctx_id; });
+    }
     return call.Return(0);
 }
 
 int APS5_VABI sceNpWebApi2PushEventCreatePushContext(std::int32_t userContextId, NpWebApi2PushContextId* pushContextId) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("userContextId", static_cast<std::int64_t>(userContextId)).Ptr("pushContextId", pushContextId); });
-    return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    // Offline there is nobody to push anything, as before the bridge.
+    if (!Online::Enabled()) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
+    if (!pushContextId) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
+    const auto id = NewPushContextId();
+    {
+        std::lock_guard lock(g_pushMutex);
+        g_pushContexts[id] = PushContext{userContextId, false};
+    }
+    CopyText(pushContextId->value, sizeof(pushContextId->value), id);
+    ListenForPushEvents();
+    return call.Return(0, [&](Online::Fields& out) { out.Text("pushContextId", id); });
 }
 
 int APS5_VABI sceNpWebApi2PushEventDeleteFilter(std::int32_t libraryContextId, std::int32_t filterId) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("libraryContextId", static_cast<std::int64_t>(libraryContextId)).Int("filterId", static_cast<std::int64_t>(filterId)); });
+    std::lock_guard lock(g_pushMutex);
+    g_pushFilters.erase(filterId);
     return call.Return(0);
 }
 
@@ -352,26 +583,41 @@ int APS5_VABI sceNpWebApi2PushEventSetHandleTimeout(int libraryContextId, int ha
     return call.Return(0);
 }
 
-int APS5_VABI sceNpWebApi2PushEventRegisterPushContextCallback() {
+int APS5_VABI sceNpWebApi2PushEventRegisterPushContextCallback(std::int32_t userContextId, std::int32_t filterId, void* callback, void* userArg) {
     Online::Call call("libSceNpWebApi2", __func__);
-    return call.Return(g_nextHandle.fetch_add(1, std::memory_order_relaxed));
+    call.Args([&](Online::Fields& in) { in.Int("userContextId", static_cast<std::int64_t>(userContextId)).Int("filterId", static_cast<std::int64_t>(filterId)).Ptr("callback", callback).Ptr("userArg", userArg); });
+    const int callbackId = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
+    if (callback) {
+        std::lock_guard lock(g_pushMutex);
+        g_pushCallbacks[callbackId] = PushCallback{userContextId, filterId, callback, userArg, true};
+    }
+    ListenForPushEvents();
+    return call.Return(callbackId);
 }
 
 int APS5_VABI sceNpWebApi2PushEventStartPushContextCallback(std::int32_t userContextId, const NpWebApi2PushContextId* pushContextId) {
     Online::Call call("libSceNpWebApi2", __func__);
-    call.Args([&](Online::Fields& in) { in.Int("userContextId", static_cast<std::int64_t>(userContextId)).Ptr("pushContextId", pushContextId); });
+    const std::string id = pushContextId ? std::string(pushContextId->value, strnlen(pushContextId->value, sizeof(pushContextId->value))) : std::string();
+    call.Args([&](Online::Fields& in) { in.Int("userContextId", static_cast<std::int64_t>(userContextId)).Text("pushContextId", id); });
+    std::lock_guard lock(g_pushMutex);
+    const auto found = g_pushContexts.find(id);
+    if (found != g_pushContexts.end() && found->second.userContextId == userContextId) found->second.started = true;
     return call.Return(0);
 }
 
 int APS5_VABI sceNpWebApi2PushEventUnregisterCallback(std::int32_t userContextId, std::int32_t callbackId) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("userContextId", static_cast<std::int64_t>(userContextId)).Int("callbackId", static_cast<std::int64_t>(callbackId)); });
+    std::lock_guard lock(g_pushMutex);
+    g_pushCallbacks.erase(callbackId);
     return call.Return(0);
 }
 
 int APS5_VABI sceNpWebApi2PushEventUnregisterPushContextCallback(std::int32_t userContextId, std::int32_t callbackId) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("userContextId", static_cast<std::int64_t>(userContextId)).Int("callbackId", static_cast<std::int64_t>(callbackId)); });
+    std::lock_guard lock(g_pushMutex);
+    g_pushCallbacks.erase(callbackId);
     return call.Return(0);
 }
 

@@ -13,6 +13,11 @@
 // SO_BROADCAST, "pong" on port 3659 and "ping" on 3660, so <address> may be 255.255.255.255 or the virtual network's broadcast:
 // "ping" sends <bytes>-byte pings (default 4) and first tries one datagram too big for UDP;
 // "pong" answers each ping to its sender with "pong" and the size it got.
+//
+// `online_probe host` plays Host the way Human Fall Flat (PPSA02429) does: it asks the block list
+// and the restriction status first thing, makes a sessionManager push context, creates a Player
+// Session with it, waits up to 10 s for the launcher's news of another player joining (pushed to
+// the context, delivered through sceNpCheckCallback), then leaves the session and a stale one.
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "SceTypes.hpp"
 #include <algorithm>
@@ -37,6 +42,13 @@ int APS5_VABI sceNpWebApi2AddHttpRequestHeader(std::int64_t requestId, const cha
 int APS5_VABI sceNpWebApi2SendRequest(std::int64_t requestId, const void* data, std::size_t size, NpWebApi2ResponseInformationOption* option);
 int APS5_VABI sceNpWebApi2ReadData(std::int64_t requestId, void* data, std::size_t size);
 int APS5_VABI sceNpWebApi2DeleteRequest(std::int64_t requestId);
+int APS5_VABI sceNpWebApi2PushEventCreateHandle(int libCtxId);
+int APS5_VABI sceNpWebApi2PushEventCreateFilter(int libCtxId, int handleId, const char* service, std::uint32_t label, const void* params, std::size_t count);
+int APS5_VABI sceNpWebApi2PushEventRegisterPushContextCallback(int userContextId, int filterId, void* callback, void* userArg);
+int APS5_VABI sceNpWebApi2PushEventCreatePushContext(int userContextId, char* pushContextId);
+int APS5_VABI sceNpWebApi2PushEventStartPushContextCallback(int userContextId, const char* pushContextId);
+int APS5_VABI sceNpWebApi2PushEventDeletePushContext(int userContextId, const char* pushContextId);
+int APS5_VABI sceNpCheckCallback(void);
 int APS5_VABI sceNetInit_nid_postfix(void);
 int APS5_VABI sceNetSocket(const char*, int, int, int);
 int APS5_VABI sceNetBind_nid_postfix(int, const void*, std::uint32_t);
@@ -56,25 +68,102 @@ std::string hexResult(int result) {
     return text;
 }
 
-// One web request as a title makes it; prints <name>_status and <name>_body (or <name>_error).
-void ask(int user, const char* name, const char* group, const char* path) {
+// One web request as a title makes it; prints <name>_status and <name>_body (or <name>_error)
+// and returns the body.
+std::string request(int user, const char* name, const char* group, const std::string& path, const char* method = "GET", const std::string& sent = {}) {
     std::int64_t request = 0;
-    if (const int created = sceNpWebApi2CreateRequest(user, group, path, "GET", nullptr, &request); created != 0) {
+    if (const int created = sceNpWebApi2CreateRequest(user, group, path.c_str(), method, nullptr, &request); created != 0) {
         std::cout << name << "_error=" << hexResult(created) << '\n';
-        return;
+        return {};
     }
     sceNpWebApi2AddHttpRequestHeader(request, "X-Psn-NpCppWebApi-Context", "probe");
+    if (!sent.empty()) sceNpWebApi2AddHttpRequestHeader(request, "Content-Type", "application/json; charset=utf-8");
     NpWebApi2ResponseInformationOption info{};
-    const int sent = sceNpWebApi2SendRequest(request, nullptr, 0, &info);
-    if (sent != 0) {
-        std::cout << name << "_error=" << hexResult(sent) << '\n';
+    const int result = sceNpWebApi2SendRequest(request, sent.empty() ? nullptr : sent.data(), sent.size(), &info);
+    std::string body;
+    if (result != 0) {
+        std::cout << name << "_error=" << hexResult(result) << '\n';
     } else {
-        std::string body;
         char chunk[256];
         for (int got; (got = sceNpWebApi2ReadData(request, chunk, sizeof(chunk))) > 0;) body.append(chunk, static_cast<std::size_t>(got));
         std::cout << name << "_status=" << info.http_status << '\n' << name << "_body=" << body << '\n';
     }
     sceNpWebApi2DeleteRequest(request);
+    return body;
+}
+
+void ask(int user, const char* name, const char* group, const char* path) {
+    request(user, name, group, path);
+}
+
+struct PushFilterParameter {
+    char dataType[65];
+    const void* keys;
+    std::size_t keyCount;
+};
+
+std::string pushedType;
+std::string pushedData;
+std::string pushedContext;
+
+void APS5_VABI onPush(int, int, const char* pushContextId, int, const char*, std::uint32_t, const void*, const void*, const void*, const void*,
+    const char* dataType, const char* data, std::size_t length, const void*, std::size_t, void*) {
+    if (!pushedType.empty()) return;
+    pushedContext = pushContextId ? pushContextId : "";
+    pushedType = dataType ? dataType : "";
+    pushedData.assign(data, length);
+}
+
+int host() {
+    using namespace std::chrono_literals;
+    std::uint64_t accountId = 0;
+    if (const int result = sceNpGetAccountIdA(InitialUser, &accountId); result != 0) {
+        std::cout << "account_id_error=" << hexResult(result) << '\n';
+        return 1;
+    }
+    const auto account = std::to_string(accountId);
+    const int library = sceNpWebApi2Initialize(1, 0x80000);
+    const int user = library > 0 ? sceNpWebApi2CreateUserContext(library, InitialUser) : library;
+    // The first thing the game asks, as soon as it starts.
+    request(user, "restriction", "communicationRestrictionStatus", "/v3/users/" + account + "/communication/restriction/status");
+    request(user, "blocks", "userProfile", "/v1/users/me/blocks?offset=0&limit=0");
+
+    const int handle = sceNpWebApi2PushEventCreateHandle(library);
+    static const char* const types[] = {"psn:sessionManager:playerSession:created", "psn:sessionManager:playerSession:deleted",
+        "psn:sessionManager:ps:m:players:created", "psn:sessionManager:ps:m:players:deleted", "psn:sessionManager:ps:leader:updated"};
+    PushFilterParameter parameters[5] = {};
+    for (std::size_t index = 0; index < 5; ++index) std::strncpy(parameters[index].dataType, types[index], sizeof(parameters[index].dataType) - 1);
+    const int filter = sceNpWebApi2PushEventCreateFilter(library, handle, "sessionManager", 0, parameters, 5);
+    sceNpWebApi2PushEventRegisterPushContextCallback(user, filter, reinterpret_cast<void*>(onPush), nullptr);
+    char context[37] = {};
+    const int made = sceNpWebApi2PushEventCreatePushContext(user, context);
+    std::cout << "push_context_result=" << hexResult(made) << "\npush_context=" << context << '\n';
+    if (made != 0) return 1;
+    sceNpWebApi2PushEventStartPushContextCallback(user, context);
+
+    const std::string created = request(user, "create", "sessionManager", "/v1/playerSessions", "POST",
+        std::string(R"({"playerSessions":[{"maxPlayers":8,"maxSpectators":0,"joinDisabled":false,"supportedPlatforms":["PS5"],)") +
+            R"("localizedSessionName":{"defaultLanguage":"en-US","localizedText":{"en-US":"Human Fall Flat"}},"joinableUserType":"ANYONE",)" +
+            R"("invitableUserType":"MEMBER","leaderPrivileges":["KICK","UPDATE_JOINABLE_USER_TYPE"],"swapSupported":false,"customData1":"cm9vbQ==",)" +
+            R"("member":{"players":[{"accountId":"me","platform":"me","pushContexts":[{"pushContextId":")" + context + R"("}]}]}}]})");
+    const auto at = created.find("\"sessionId\":\"");
+    if (at == std::string::npos) return 1;
+    const auto start = at + 13;
+    const std::string sessionId = created.substr(start, created.find('"', start) - start);
+    std::cout << "session_id=" << sessionId << '\n';
+    request(user, "get", "sessionManager", "/v1/playerSessions/" + sessionId);
+    request(user, "patch", "sessionManager", "/v1/playerSessions/" + sessionId, "PATCH", R"({"joinableUserType":"FRIENDS"})");
+    std::cout << "waiting=1" << std::endl;
+    for (auto until = std::chrono::steady_clock::now() + 10s; pushedType.empty() && std::chrono::steady_clock::now() < until;) {
+        sceNpCheckCallback();
+        std::this_thread::sleep_for(10ms);
+    }
+    std::cout << "pushed_type=" << pushedType << "\npushed_context=" << pushedContext << "\npushed_data=" << pushedData << '\n';
+    request(user, "leave", "sessionManager", "/v1/playerSessions/" + sessionId + "/members/" + account, "DELETE");
+    request(user, "stale_leave", "sessionManager", "/v1/playerSessions/cb8a5af3-067c-4fbc-87c3-f96b20fb4f33/members/" + account, "DELETE");
+    request(user, "after", "sessionManager", "/v1/playerSessions/" + sessionId);
+    sceNpWebApi2PushEventDeletePushContext(user, context);
+    return 0;
 }
 
 // The platform's socket address: the virtual port sits where IPv4 has zeros.
@@ -224,6 +313,7 @@ int udp(const std::string& destinationText, const std::string& role, std::size_t
 }
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "host") return host();
     if (argc == 4 && std::string(argv[1]) == "p2p") return p2p(argv[2], argv[3]);
     if ((argc == 4 || argc == 5) && std::string(argv[1]) == "udp") return udp(argv[2], argv[3], argc == 5 ? std::stoul(argv[4]) : 4);
     try {
@@ -253,7 +343,7 @@ int main(int argc, char** argv) {
         }
         ask(user, "friends", "userProfile", "/v1/users/local_268435456/friends?");
         if (accountId != 0) ask(user, "profile", "userProfile", "/v1/users/me/profiles");
-        ask(user, "sessions", "sessionManager", "/v1/playerSessions");
+        ask(user, "tickets", "matchmaking", "/v1/tickets");
     } catch (const std::exception& error) {
         std::cerr << "online probe: " << error.what() << '\n';
         return 1;

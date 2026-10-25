@@ -25,6 +25,7 @@ int APS5_VABI sceNpWebApi2PushEventAbortHandle(int, int);
 int APS5_VABI sceNpWebApi2PushEventDeleteHandle(int, int);
 int APS5_VABI sceNpWebApi2PushEventSetHandleTimeout(int, int, std::uint32_t);
 int APS5_VABI sceNpWebApi2CreateUserContext(int, int);
+int APS5_VABI sceNpWebApi2PushEventCreatePushContext(int, char*);
 int APS5_VABI sceNpWebApi2CreateRequest(int, const char*, const char*, const char*, const void*, std::int64_t*);
 int APS5_VABI sceNpWebApi2SetRequestTimeout(std::int64_t, std::uint32_t);
 int APS5_VABI sceNpWebApi2AddWebTraceTag(std::int64_t, const char*);
@@ -47,6 +48,9 @@ int main() {
     Require(stats.pool_size == 0x20000 && stats.max_inuse_size == 0 && stats.current_inuse_size == 0 && stats.reserved == 0);
     Require(sceNpWebApi2GetMemoryPoolStats(other, &stats) == 0 && stats.pool_size == 0x8000);
     Require(sceNpWebApi2GetMemoryPoolStats(context, nullptr) == 0);
+    // Offline nobody pushes anything: no push context, as before online play.
+    char pushContext[37] = {};
+    Require(sceNpWebApi2PushEventCreatePushContext(sceNpWebApi2CreateUserContext(context, 0x10000000), pushContext) == static_cast<int>(0x80553406));
     Require(sceNpWebApi2GetMemoryPoolStats(-1, nullptr) == invalidContext);
     Require(sceNpWebApi2PushEventCreateHandle(-1) == invalidContext);
     const int handle = sceNpWebApi2PushEventCreateHandle(context);

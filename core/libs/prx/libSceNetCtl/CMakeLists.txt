@@ -33,7 +33,7 @@ if(BUILD_TESTING)
 
     add_test_executable(online_web_api2_tests tests/OnlineWebApi2.cpp tests/FakeLauncher.cpp src/OnlineWire.cpp)
     target_include_directories(online_web_api2_tests PRIVATE ${LIBS_INCLUDE_DIR})
-    target_link_libraries(online_web_api2_tests PRIVATE libSceNpWebApi2 libSceNetCtl libc mbedcrypto)
+    target_link_libraries(online_web_api2_tests PRIVATE libSceNpWebApi2 libSceNpManager libSceNetCtl libc mbedcrypto)
     add_test(NAME online_web_api2 COMMAND online_web_api2_tests)
     set_tests_properties(online_web_api2 PROPERTIES TIMEOUT 60)
 
