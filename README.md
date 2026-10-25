@@ -153,7 +153,7 @@ Every trophy is kept and listed as on the console:
 
 - The **percentage**, weighted by grade as on the PS5, and the count of **platinum, gold, silver and bronze** trophies earned.
 - Every trophy with its **icon, name, description, grade** and the **day and time you earned it**. Trophies you have not earned yet are greyed out.
-- **Hidden** trophies stay hidden until you earn them.
+- **Hidden** trophies stay hidden until you earn them. **Show** (△, or a click on the row) reveals the focused one for this look at the list; **Settings → Behaviour → Always Show Hidden Trophies** reveals them all.
 - Trophies that count something (*Acquire all Tools*, *Bind all Silk Skills*) show **how far you are**, such as 23/51.
 
 The list, the texts and the icons come from the game's own trophy package (`sce_sys/trophy2`), in the game's language when it has one. The engine records each unlock in the installed game, and the list updates when the game closes. Unlocking a game again keeps them.
@@ -171,10 +171,11 @@ The **library** button shows every game as a grid. **Settings** hold:
   - **Themes:** the built-in themes, yours, and the ones people share on the **AnyPS5 Hub** ([`hub/`](hub/README.md)), installed with one press. **Share on the Hub** saves your theme and opens the page to send it. The phone wears the launcher's theme too.
 - **Library:** the games folder and scanning it again.
 - **Language:** Türkçe or English.
-- **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, Discord, update checks, and installing Rosetta if it is missing. Also:
+- **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, always showing hidden trophies, Discord, update checks, and installing Rosetta if it is missing. Also:
   - **Clips:** the launcher keeps the last 15 to 120 seconds of the game playing, picture and sound; **Create** on a DualSense (Share on a DualShock 4), **⌥F12** or Create on the phone saves them as an MP4 beside the screenshots. macOS asks once for the screen recording permission.
   - **Save Sync:** each game's saves and trophies stay the same on your other Macs through iCloud Drive or any folder you choose (Dropbox, a shared or USB folder). Newer saves from another Mac come down before a game starts, and the Mac's go up when it ends; whatever is replaced is backed up first.
-- **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder), and a folder of console system fonts for games that ask for them.
+- **Fonts:** games that ask for the console's system fonts get them without any setup; some (Astro's Playroom) stop at start without them. The app carries the Noto substitutes for Latin, italics, typewriter, Thai and Arabic (5.5 MB, SIL Open Font License 1.1). Japanese, Chinese and Korean (Noto Sans CJK, 105 MB once) download from Noto's own release the first time a game needs them, checked against their SHA-256 before use: a game started in one of those languages waits for them on its start screen, and any other game that asks for them while it runs (the engine logs every font set it opens) gets them for its next start. The page shows which font games get for each script and where it comes from, and holds **Your Fonts Folder**: the console's own fonts, if you have them, which come before the launcher's.
+- **Advanced:** where F12 screenshots go (`~/Pictures/AnyPS5` unless you pick another folder).
 - **Links:** `anyps5://game/<title ID>` selects a game and `anyps5://play/<title ID>` starts it (Copy Link in a game's settings); a folder opened with AnyPS5 from Finder can become the games folder.
 - **About:** the app and toolkit versions, **Check for Updates**, and **Update to …** when a newer AnyPS5 is out: the launcher downloads it, takes its place and opens again.
 
