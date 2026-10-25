@@ -120,6 +120,15 @@ final class CrashReportTests: XCTestCase {
         XCTAssertFalse(text.contains("5D3A-4E1F"))
     }
 
+    func testTheReportNamesTheUpdateChannel() {
+        var nightly = report()
+        nightly.launcherVersion = "0.2.17-arm-nightly.20261025.1"
+        nightly.updateChannel = "nightly"
+        XCTAssertTrue(nightly.text().contains("Launcher: 0.2.17-arm-nightly.20261025.1 (nightly channel)"))
+        XCTAssertTrue(nightly.versionsLine.hasPrefix("Launcher 0.2.17-arm-nightly.20261025.1 (nightly channel)"))
+        XCTAssertTrue(report().text().contains("Launcher: 0.2.14\n"), "no channel known, none said")
+    }
+
     func testOneFileIsTextAndSeveralAreAZip() throws {
         let plain = report(diagnosis: .engineError("boom"))
         XCTAssertFalse(plain.archived)

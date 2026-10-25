@@ -24,6 +24,8 @@ struct Preferences: Codable, Equatable {
     var musicVolume: Int?
     /// nil checks GitHub for a newer launcher, as true does.
     var checkUpdates: Bool?
+    /// Which releases the update check offers (Updates.Channel); nil is Stable.
+    var updateChannel: String?
     var hideWhilePlaying = false
     /// The party's voice sends only while ⌥V is held; nil means off (open microphone).
     var pushToTalk: Bool?
@@ -374,6 +376,21 @@ final class AppModel: ObservableObject {
 
     static var runningVersion: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev" }
 
+    var updateChannel: Updates.Channel { preferences.updateChannel.flatMap(Updates.Channel.init(rawValue:)) ?? .stable }
+
+    /// Settings → About → Update Channel: the new channel is asked at once. Nightly offers its
+    /// newest build; Stable offers its release only when it is newer than this version, so going
+    /// back to Stable never installs an older launcher.
+    func setUpdateChannel(_ channel: Updates.Channel) {
+        guard channel != updateChannel else { return }
+        preferences.updateChannel = channel == .stable ? nil : channel.rawValue
+        availableUpdate = nil
+        guard updateProgress == nil else { return }
+        // A check on its way asks again for the new channel when it ends.
+        guard !checkingUpdates else { return }
+        lookUpUpdate(told: true)
+    }
+
     func checkForUpdate() {
         guard persists, preferences.checkUpdates ?? true, updateProgress == nil, !checkingUpdates else { return }
         lookUpUpdate(told: false)
@@ -391,10 +408,13 @@ final class AppModel: ObservableObject {
 
     private func lookUpUpdate(told: Bool) {
         let current = AppModel.runningVersion
+        let channel = updateChannel
         checkingUpdates = true
         Task { @MainActor in
-            let found = await Updates.lookup(current: current)
+            let found = await Updates.lookup(current: current, channel: channel)
             self.checkingUpdates = false
+            // The channel changed meanwhile: this answer is the other channel's.
+            if channel != self.updateChannel { return self.lookUpUpdate(told: true) }
             switch found {
             case .newer(let release):
                 self.lastUpdateCheck = Date()
@@ -404,7 +424,12 @@ final class AppModel: ObservableObject {
             case .current:
                 self.lastUpdateCheck = Date()
                 self.availableUpdate = nil
-                if told { self.show(T.format(.launcherUpToDate, current), symbol: "checkmark.circle.fill") }
+                // On Stable after a nightly: this version stays until a newer release.
+                if told, channel == .stable, Updates.Version(current)?.isNightly == true {
+                    self.show(T.format(.updateChannelStays, current), symbol: "checkmark.circle.fill")
+                } else if told {
+                    self.show(T.format(.launcherUpToDate, current), symbol: "checkmark.circle.fill")
+                }
             case .failed:
                 if told { self.show(T.text(.updateCheckFailed), symbol: "exclamationmark.triangle.fill") }
             }

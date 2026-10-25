@@ -50,7 +50,7 @@ public struct IssueDraft: Sendable {
         let crash = report.crashSummary(frames: 6)
         let fixed = [
             Field(id: "summary", label: "What happens", value: report.reason),
-            Field(id: "commit", label: "AnyPS5 commit", value: "AnyPS5-ARM engine \(engine) (the macOS port, github.com/\(repository)), launcher \(report.launcherVersion)"),
+            Field(id: "commit", label: "AnyPS5 commit", value: "AnyPS5-ARM engine \(engine) (the macOS port, github.com/\(repository)), launcher \(report.launcherLine)"),
             Field(id: "system", label: "System", value: report.system.line),
             Field(id: "steps", label: "Steps to reproduce", value: "Started \(report.gameName) from the AnyPS5 macOS launcher.\nSettings: \(report.settings.reportSummary)\nSession: \(report.sessionLine)"),
         ]

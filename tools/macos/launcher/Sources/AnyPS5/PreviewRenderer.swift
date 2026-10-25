@@ -308,7 +308,21 @@ enum PreviewRenderer {
             model.overlay = .settings
             model.panelCategory = model.panelCategories().firstIndex { $0.id == "about" } ?? 0
             model.panelInRows = true
-            model.panelRow = 2
+            model.panelRow = 3
+        }
+        // On the Nightly channel, a nightly offered: the channel row selected.
+        do {
+            var nightly = preferences
+            nightly.updateChannel = Updates.Channel.nightly.rawValue
+            render(nightly, found, root, still, output.appendingPathComponent("about-nightly.png")) { model in
+                model.previewUpdate(Updates.Release(tag: "v0.2.17-arm-nightly.20261025.1", version: "0.2.17-nightly.20261025.1",
+                                                    page: URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.17-arm-nightly.20261025.1")!,
+                                                    download: nil, size: nil, prerelease: true), progress: nil)
+                model.overlay = .settings
+                model.panelCategory = model.panelCategories().firstIndex { $0.id == "about" } ?? 0
+                model.panelInRows = true
+                model.panelRow = 2
+            }
         }
         renderEngines(preferences, found, root, still, output)
         render(preferences, found, root, still, output.appendingPathComponent("gallery.png")) { model in model.open(.gallery); model.galleryIndex = 1 }

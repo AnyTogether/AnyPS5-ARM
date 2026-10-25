@@ -191,7 +191,8 @@ extension AppModel {
         rows.append(PanelRow(id: "engineAvailable", title: TE.text(.engineAvailableSection), kind: .info("")))
         // The release the app itself comes from carries the built-in toolkit.
         let downloaded = Set(installedToolkits.map(\.release) + [builtInToolkit.map { Toolkit.release(of: $0.version) }].compactMap { $0 })
-        for entry in engineCatalogue where !downloaded.contains(entry.release) {
+        // Nightly toolkits only on the Nightly update channel.
+        for entry in EngineCatalogue.offered(engineCatalogue, channel: updateChannel) where !downloaded.contains(entry.release) {
             let date = entry.date?.formatted(date: .abbreviated, time: .omitted)
             let detail = engineDownloads[entry.release].map { TE.format(.engineDownloading, Int($0 * 100)) }
                 ?? [date, entry.summary.nilIfEmpty ?? TE.text(.engineDownloadHint)].compactMap { $0 }.joined(separator: " · ")

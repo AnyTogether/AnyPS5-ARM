@@ -125,6 +125,8 @@ public struct SessionReport: Sendable {
     public var settings: GameSettings
     public var system: SystemInfo
     public var launcherVersion: String
+    /// The launcher's update channel ("stable", "nightly"), when it is known.
+    public var updateChannel: String?
     /// The engine toolkit the game's bundle was made with, and the one chosen for it now.
     public var unlockedWith: String?
     public var engineNow: String?
@@ -217,10 +219,15 @@ public struct SessionReport: Sendable {
     }
 
     var versionsLine: String {
-        var parts = ["Launcher \(launcherVersion)"]
+        var parts = ["Launcher \(launcherLine)"]
         if let unlockedWith { parts.append("unlocked with engine \(unlockedWith)") }
         if let engineNow, engineNow != unlockedWith { parts.append("engine chosen now \(engineNow)") }
         return parts.joined(separator: " · ")
+    }
+
+    /// The launcher's version and its update channel: "0.2.16-arm (stable channel)".
+    var launcherLine: String {
+        launcherVersion + (updateChannel.map { " (\($0) channel)" } ?? "")
     }
 
     var sessionLine: String {
@@ -250,7 +257,7 @@ public struct SessionReport: Sendable {
             "Session: \(sessionLine)",
             "",
             "System: \(system.line)",
-            "Launcher: \(launcherVersion)",
+            "Launcher: \(launcherLine)",
             "Engine the game was unlocked with: \(unlockedWith ?? "unknown")",
             "Engine chosen for it now: \(engineNow ?? "unknown")",
             "",

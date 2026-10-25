@@ -1,24 +1,42 @@
 import Foundation
 
 /// New releases of the launcher on GitHub, and replacing this app with one.
+///
+/// Two update channels: Stable follows the release GitHub calls latest; Nightly the newest
+/// release including pre-releases. Nightly builds are tagged
+/// `v<next release>-arm-nightly.<YYYYMMDD>.<n>` (tools/macos/publish_nightly.sh), the next
+/// release being the last one with its last number raised and n counting the day's builds from
+/// 1, so that they sort after the release before them and before the release they lead to:
+/// 0.2.16 < 0.2.16 + 766 commits < 0.2.17-nightly.20261025.1 < 0.2.17-nightly.20261025.2 <
+/// 0.2.17-nightly.20261026.1 < 0.2.17.
 public enum Updates {
     public static let latestURL = URL(string: "https://api.github.com/repos/utkuhalis/AnyPS5-ARM/releases/latest")!
+    public static let releasesURL = URL(string: "https://api.github.com/repos/utkuhalis/AnyPS5-ARM/releases?per_page=30")!
     public static let assetName = "AnyPS5-macOS.zip"
+
+    public enum Channel: String, Codable, CaseIterable, Sendable {
+        case stable, nightly
+    }
 
     public struct Release: Equatable, Sendable {
         public var tag: String
-        /// The release number alone, such as 0.2.6.
+        /// The release number alone, such as 0.2.6, or with its nightly part, such as
+        /// 0.2.17-nightly.20261025.1.
         public var version: String
         public var page: URL
         public var download: URL?
         public var size: Int?
+        public var prerelease: Bool
+        public var published: Date?
 
-        public init(tag: String, version: String, page: URL, download: URL?, size: Int?) {
+        public init(tag: String, version: String, page: URL, download: URL?, size: Int?, prerelease: Bool = false, published: Date? = nil) {
             self.tag = tag
             self.version = version
             self.page = page
             self.download = download
             self.size = size
+            self.prerelease = prerelease
+            self.published = published
         }
     }
 
@@ -26,40 +44,104 @@ public enum Updates {
         public let description: String
     }
 
+    /// A launcher version or release tag, in the order releases come out: "v0.2.16-arm",
+    /// "0.2.16-arm-766-gee1fab911" (git describe between releases),
+    /// "v0.2.17-arm-nightly.20261025.1", and git describe past a nightly tag.
+    public struct Version: Comparable, Sendable, CustomStringConvertible {
+        /// The release number, at least three parts.
+        public var numbers: [Int]
+        /// A nightly build of `numbers` (before it is released): its day (YYYYMMDD) and its
+        /// count that day; nil for the release itself.
+        public var nightly: (day: Int, count: Int)?
+        /// Commits past the tag (git describe).
+        public var build: Int
+
+        public init?(_ text: String) {
+            let text = text.hasPrefix("v") ? String(text.dropFirst()) : text
+            let head = text.prefix { $0.isNumber || $0 == "." }
+            let numbers = head.split(separator: ".").compactMap { Int($0) }
+            guard !numbers.isEmpty, numbers.count == head.split(separator: ".", omittingEmptySubsequences: false).count else { return nil }
+            self.numbers = numbers + Array(repeating: 0, count: max(0, 3 - numbers.count))
+            let parts = text.split(separator: "-")
+            nightly = nil
+            if let part = parts.first(where: { $0.hasPrefix("nightly.") }) {
+                let fields = part.dropFirst("nightly.".count).split(separator: ".", omittingEmptySubsequences: false)
+                guard (1...2).contains(fields.count), let day = Int(fields[0]), fields[0].count == 8 else { return nil }
+                guard let count = fields.count == 2 ? Int(fields[1]) : 0 else { return nil }
+                nightly = (day, count)
+            }
+            // git describe appends -<commits since the tag>-g<hash>.
+            build = parts.count >= 3 && parts.last?.hasPrefix("g") == true ? Int(parts[parts.count - 2]) ?? 0 : 0
+        }
+
+        /// The release number, a nightly's part after it: 0.2.17 or 0.2.17-nightly.20261025.1.
+        public var description: String {
+            numbers.map(String.init).joined(separator: ".") + (nightly.map { "-nightly.\($0.day).\($0.count)" } ?? "")
+        }
+
+        public var isNightly: Bool { nightly != nil }
+
+        public static func < (a: Version, b: Version) -> Bool {
+            if a.numbers != b.numbers { return a.numbers.lexicographicallyPrecedes(b.numbers) }
+            switch (a.nightly, b.nightly) {
+            case (nil, .some): return false
+            case (.some, nil): return true
+            case let (.some(x), .some(y)) where x != y: return (x.day, x.count) < (y.day, y.count)
+            default: return a.build < b.build
+            }
+        }
+
+        public static func == (a: Version, b: Version) -> Bool { !(a < b) && !(b < a) }
+    }
+
+    /// One release as GitHub describes it, nil for a draft, a tag that is no version or another
+    /// shape; a pre-release only when `prerelease` allows it.
+    static func release(from json: [String: Any], prerelease allowed: Bool) -> Release? {
+        guard let tag = json["tag_name"] as? String, let page = (json["html_url"] as? String).flatMap(URL.init(string:)),
+              json["draft"] as? Bool != true, let version = Version(tag) else { return nil }
+        let prerelease = json["prerelease"] as? Bool == true
+        guard allowed || !prerelease else { return nil }
+        let asset = (json["assets"] as? [[String: Any]] ?? []).first { $0["name"] as? String == assetName }
+        return Release(tag: tag, version: version.description, page: page,
+                       download: (asset?["browser_download_url"] as? String).flatMap(URL.init(string:)), size: asset?["size"] as? Int,
+                       prerelease: prerelease, published: (json["published_at"] as? String).flatMap { ISO8601DateFormatter().date(from: $0) })
+    }
+
     /// The release GitHub calls latest; drafts, prereleases and other answers (an error, a rate
     /// limit) are nil.
     public static func release(from data: Data) -> Release? {
-        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let tag = json["tag_name"] as? String, let page = (json["html_url"] as? String).flatMap(URL.init(string:)),
-              json["draft"] as? Bool != true, json["prerelease"] as? Bool != true,
-              let numbers = parse(tag) else { return nil }
-        let asset = (json["assets"] as? [[String: Any]] ?? []).first { $0["name"] as? String == assetName }
-        return Release(tag: tag, version: numbers.release.map(String.init).joined(separator: "."), page: page,
-                       download: (asset?["browser_download_url"] as? String).flatMap(URL.init(string:)), size: asset?["size"] as? Int)
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return nil }
+        return release(from: json, prerelease: false)
+    }
+
+    /// GitHub's list of releases, pre-releases included, drafts left out; nil for an answer that
+    /// is no list.
+    public static func releases(from data: Data) -> [Release]? {
+        guard let list = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else { return nil }
+        return list.compactMap { release(from: $0, prerelease: true) }
+    }
+
+    /// The release a channel offers out of a list: the highest version carrying the app (a
+    /// pre-release only on Nightly), the later published when two tie.
+    public static func newest(_ releases: [Release], channel: Channel) -> Release? {
+        releases.filter { $0.download != nil && (channel == .nightly || !$0.prerelease) }.max { a, b in
+            guard let x = Version(a.tag), let y = Version(b.tag) else { return false }
+            if x != y { return x < y }
+            return (a.published ?? .distantPast) < (b.published ?? .distantPast)
+        }
     }
 
     /// Whether the release tag is past the running version. A development build (git describe:
-    /// 0.2.4-arm-766-g…) is past its own tag but before the next release.
+    /// 0.2.4-arm-766-g…) is past its own tag but before the next release, a nightly before the
+    /// release it leads to: switching back to Stable never goes back to an older release.
     public static func isNewer(_ tag: String, than current: String) -> Bool {
-        guard let offered = parse(tag), let running = parse(current) else { return false }
-        if offered.release != running.release { return offered.release.lexicographicallyPrecedes(running.release) == false }
-        return offered.build > running.build
-    }
-
-    static func parse(_ version: String) -> (release: [Int], build: Int)? {
-        let text = version.hasPrefix("v") ? String(version.dropFirst()) : version
-        let head = text.prefix { $0.isNumber || $0 == "." }
-        let release = head.split(separator: ".").compactMap { Int($0) }
-        guard !release.isEmpty, release.count == head.split(separator: ".").count else { return nil }
-        // git describe appends -<commits since the tag>-g<hash>.
-        let parts = text.split(separator: "-")
-        let build = parts.count >= 3 && parts.last?.hasPrefix("g") == true ? Int(parts[parts.count - 2]) ?? 0 : 0
-        return (release + Array(repeating: 0, count: max(0, 3 - release.count)), build)
+        guard let offered = Version(tag), let running = Version(current) else { return false }
+        return running < offered
     }
 
     /// The latest release, when it is newer than `current`.
-    public static func check(current: String, session: URLSession = .shared) async -> Release? {
-        guard case .newer(let release) = await lookup(current: current, session: session) else { return nil }
+    public static func check(current: String, channel: Channel = .stable, session: URLSession = .shared) async -> Release? {
+        guard case .newer(let release) = await lookup(current: current, channel: channel, session: session) else { return nil }
         return release
     }
 
@@ -70,13 +152,23 @@ public enum Updates {
         case failed
     }
 
-    /// Asks GitHub for the latest release, never a cache, so a release just out is seen at once.
-    public static func lookup(current: String, session: URLSession = .shared) async -> Lookup {
-        var request = URLRequest(url: latestURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
+    /// Asks GitHub for the channel's newest release, never a cache, so a release just out is
+    /// seen at once: the latest release on Stable, the list of releases on Nightly.
+    public static func lookup(current: String, channel: Channel = .stable, session: URLSession = .shared) async -> Lookup {
+        var request = URLRequest(url: channel == .stable ? latestURL : releasesURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        guard let (data, response) = try? await session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200,
-              let release = release(from: data) else { return .failed }
-        return isNewer(release.tag, than: current) ? .newer(release) : .current
+        guard let (data, response) = try? await session.data(for: request), (response as? HTTPURLResponse)?.statusCode == 200 else { return .failed }
+        let found: Release?
+        switch channel {
+        case .stable:
+            guard let release = release(from: data) else { return .failed }
+            found = release
+        case .nightly:
+            guard let list = releases(from: data) else { return .failed }
+            found = newest(list, channel: .nightly)
+        }
+        guard let found, isNewer(found.tag, than: current) else { return .current }
+        return .newer(found)
     }
 
     /// The async download calls tell no delegate how far they are, so the task's own Progress is

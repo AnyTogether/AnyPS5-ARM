@@ -53,6 +53,7 @@ extension AppModel {
         let unlockedWith = installedRecords[game.id]?.toolkit
         let engineNow = engineVersion(for: game)
         let diagnosis = diagnoses[game.id]
+        let channel = updateChannel.rawValue
         let display = NSScreen.main?.maximumFramesPerSecond
         // The computer's name from SystemConfiguration: Host.current() can wait on the network.
         let names = [SCDynamicStoreCopyComputerName(nil, nil) as String?, togetherUser?.handle, togetherUser?.displayName].compactMap { $0 }
@@ -63,6 +64,7 @@ extension AppModel {
             var report = SessionReport(gameName: game.name, titleID: game.titleID, gameVersion: game.version, settings: settings,
                                        system: .current(displayHz: display), launcherVersion: AppModel.launcherVersion, session: session,
                                        privacy: .current(names: names, secrets: TokenStore().secrets))
+            report.updateChannel = channel
             report.unlockedWith = unlockedWith
             report.engineNow = engineNow
             report.diagnosis = diagnosis ?? Diagnosis.read(session: session, crashReport: crash)

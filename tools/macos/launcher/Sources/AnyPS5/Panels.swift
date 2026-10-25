@@ -199,7 +199,12 @@ extension AppModel {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         var about: [PanelRow] = [
             PanelRow(id: "text", title: T.text(.aboutText), kind: .info("")),
-            PanelRow(id: "version", title: T.text(.version), kind: .info(version)),
+            PanelRow(id: "version", title: T.text(.version), kind: .info(version + (updateChannel == .nightly ? " · " + T.text(.channelNightlyShort) : ""))),
+            PanelRow(id: "channel", title: T.text(.updateChannel), detail: T.text(updateChannel == .nightly ? .updateChannelNightlyDetail : .updateChannelStableDetail),
+                     symbol: "point.3.connected.trianglepath.dotted",
+                     kind: .choice(options: [T.text(.channelStable), T.text(.channelNightly)], selected: updateChannel == .nightly ? 1 : 0) { [weak self] index in
+                         self?.setUpdateChannel(index == 1 ? .nightly : .stable)
+                     }),
         ]
         if let update = availableUpdate {
             let detail = updateProgress.map { T.format(.updateDownloading, Int($0 * 100)) } ?? T.text(.updateDetail)

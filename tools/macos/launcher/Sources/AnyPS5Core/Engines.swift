@@ -216,6 +216,12 @@ public enum EngineCatalogue {
         return text.count <= 140 ? text : String(text.prefix(139)).trimmingCharacters(in: .whitespaces) + "…"
     }
 
+    /// The toolkits the engine picker offers on an update channel: nightly toolkits (those of
+    /// pre-releases) only on Nightly.
+    public static func offered(_ entries: [Entry], channel: Updates.Channel) -> [Entry] {
+        channel == .nightly ? entries : entries.filter { !$0.prerelease }
+    }
+
     /// GitHub's list of releases, never a cache; nil without an answer.
     public static func fetch(session: URLSession = .shared) async -> [Entry]? {
         var request = URLRequest(url: releasesURL, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 20)
