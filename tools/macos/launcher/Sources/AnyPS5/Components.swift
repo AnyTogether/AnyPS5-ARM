@@ -158,22 +158,125 @@ struct Clock: View {
     }
 }
 
-/// A key or button glyph with what it does.
+/// The hint a preview draws as if the pointer were over it (offscreen there is no pointer).
+struct HintHover: EnvironmentKey {
+    static let defaultValue: Command? = nil
+}
+
+extension EnvironmentValues {
+    var hintHover: Command? {
+        get { self[HintHover.self] }
+        set { self[HintHover.self] = newValue }
+    }
+}
+
+/// A key or button glyph with what it does. A click does what the key does: the whole pill when
+/// its glyphs all give one command ("↩ / ✕"), each glyph on its own when they give several (the
+/// arrows, Q and E). The click goes through the same handler as the key.
 struct Hint: View {
     let keys: String
     let label: String
     @Environment(\.scale) private var scale
 
     var body: some View {
-        HStack(spacing: 8 * scale) {
-            Text(keys)
-                .font(.system(size: 12 * scale, weight: .bold, design: .rounded))
-                .padding(.horizontal, 7 * scale)
-                .padding(.vertical, 3 * scale)
-                .background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 5 * scale))
-            Text(label).font(.display(13 * scale, .medium))
+        if let command = HintKeys.single(keys) {
+            Button { Input.shared.press(command) } label: {
+                HStack(spacing: 8 * scale) {
+                    keycap(Text(keys).font(glyphFont).padding(.horizontal, 7 * scale).padding(.vertical, 3 * scale))
+                    Text(label).font(.display(13 * scale, .medium))
+                }
+            }
+            .buttonStyle(HintPillStyle(command: command))
+        } else {
+            HStack(spacing: 8 * scale) {
+                keycap(HStack(spacing: 0) {
+                    ForEach(Array(HintKeys.tokens(keys).enumerated()), id: \.offset) { _, token in
+                        if let command = token.command {
+                            Button { Input.shared.press(command) } label: {
+                                Text(token.text).font(glyphFont)
+                            }
+                            .buttonStyle(HintGlyphStyle(command: command))
+                        } else {
+                            Text(token.text).font(glyphFont).padding(.horizontal, 2 * scale).opacity(0.6)
+                        }
+                    }
+                }
+                .padding(.horizontal, 2 * scale))
+                Text(label).font(.display(13 * scale, .medium))
+            }
+            .foregroundStyle(.white.opacity(0.72))
         }
-        .foregroundStyle(.white.opacity(0.72))
+    }
+
+    private var glyphFont: Font { .system(size: 12 * scale, weight: .bold, design: .rounded) }
+
+    private func keycap(_ content: some View) -> some View {
+        content.background(Color.white.opacity(0.16), in: RoundedRectangle(cornerRadius: 5 * scale))
+    }
+}
+
+/// A whole hint pill as a button: it lifts under the pointer and sinks while pressed.
+private struct HintPillStyle: ButtonStyle {
+    let command: Command
+
+    func makeBody(configuration: Configuration) -> some View {
+        HintPress(command: command, pressed: configuration.isPressed, whole: true) { configuration.label }
+    }
+}
+
+/// One glyph of a hint pill as a button (an arrow, Q or E).
+private struct HintGlyphStyle: ButtonStyle {
+    let command: Command
+
+    func makeBody(configuration: Configuration) -> some View {
+        HintPress(command: command, pressed: configuration.isPressed, whole: false) { configuration.label }
+    }
+}
+
+/// The hover and pressed looks of a hint's button. The pill's highlight reaches past its layout,
+/// so that hovering never moves the hints beside it.
+private struct HintPress<Label: View>: View {
+    let command: Command
+    let pressed: Bool
+    /// The whole pill (a capsule around glyph and label) or one glyph inside the keycap.
+    let whole: Bool
+    @ViewBuilder let label: () -> Label
+    @Environment(\.scale) private var scale
+    @Environment(\.hintHover) private var forced
+    @State private var hovering = false
+
+    var body: some View {
+        let lit = hovering || forced == command
+        let inset = whole ? CGSize(width: 9 * scale, height: 5 * scale) : CGSize(width: 5 * scale, height: 3 * scale)
+        let shape = RoundedRectangle(cornerRadius: whole ? 40 * scale : 4 * scale, style: .continuous)
+        label()
+            .foregroundStyle(.white.opacity(lit || pressed ? 1 : 0.72))
+            .padding(.horizontal, inset.width)
+            .padding(.vertical, inset.height)
+            .background(shape.fill(Color.white.opacity(pressed ? (whole ? 0.2 : 0.32) : lit ? (whole ? 0.1 : 0.2) : 0)))
+            .overlay(shape.strokeBorder(Color.white.opacity(whole && lit ? 0.14 : 0), lineWidth: 1))
+            .contentShape(shape)
+            .pointingHand($hovering)
+            .padding(.horizontal, whole ? -inset.width : 0)
+            .padding(.vertical, whole ? -inset.height : 0)
+            .scaleEffect(pressed ? (whole ? 0.96 : 0.9) : 1)
+            .animation(.easeOut(duration: 0.12), value: lit)
+            .animation(.easeOut(duration: 0.08), value: pressed)
+    }
+}
+
+extension View {
+    /// Tracks the pointer over the view and shows the pointing hand while it is there.
+    func pointingHand(_ hovering: Binding<Bool>) -> some View {
+        onHover { inside in
+            guard inside != hovering.wrappedValue else { return }
+            hovering.wrappedValue = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .onDisappear {
+            if hovering.wrappedValue { NSCursor.pop() }
+            hovering.wrappedValue = false
+        }
     }
 }
 

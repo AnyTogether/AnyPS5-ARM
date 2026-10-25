@@ -1,16 +1,7 @@
+import AnyPS5Core
 import AppKit
 import Carbon.HIToolbox
 import GameController
-
-enum Command {
-    case left, right, up, down, select, back, options
-    /// L1 and R1: the game before or after the selected one, from the home screen or a game's panel.
-    case previousGame, nextGame
-    /// The controller's PS button: the launcher in front of the game, or back to the game.
-    case home
-    /// Create on a DualSense (Share on a DualShock 4), or ⌥F12: the last seconds as a clip.
-    case capture
-}
 
 /// Keyboard and game controller input, as the commands the screens act on. Held directions repeat
 /// the way a console menu does.
@@ -175,6 +166,12 @@ final class Input {
     func unregisterHotKey(id: UInt32) {
         if let reference = hotKeys[id]?.reference { UnregisterEventHotKey(reference) }
         hotKeys[id] = nil
+    }
+
+    /// A click on a hint pill: the command its key gives, through the same handler.
+    func press(_ command: Command) {
+        guard capture == nil else { return }
+        _ = handler?(command)
     }
 
     /// A controller command; while the launcher is behind a game only PS is acted on.

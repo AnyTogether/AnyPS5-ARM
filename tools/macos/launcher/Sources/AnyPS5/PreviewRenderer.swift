@@ -11,6 +11,8 @@ enum PreviewRenderer {
         return parts.count == 2 ? CGSize(width: parts[0], height: parts[1]) : CGSize(width: 1600, height: 900)
     }()
     static var stills: [Theme: NSImage] = [:]
+    /// The hint drawn as if the pointer were over it.
+    static var hintHover: Command?
 
     /// The game ANYPS5_PREVIEW_SELECT picks: the first title ID in it.
     static var selectedTitle: String? {
@@ -52,6 +54,12 @@ enum PreviewRenderer {
         let still = BackgroundView.still(theme: .cosmic, width: Int(size.width), height: Int(size.height), time: 260)
         render(preferences, found, root, still, output.appendingPathComponent("home-artwork.png")) { model in signedIn(model) }
         render(preferences, found, root, still, output.appendingPathComponent("home-actions.png")) { model in signedIn(model); model.focus = .actions(0) }
+        // The pointer over a whole pill (Select) and over one glyph of another (→ of Move).
+        for (name, command) in [("hints-hover-select", Command.select), ("hints-hover-right", .right)] {
+            hintHover = command
+            render(preferences, found, root, still, output.appendingPathComponent("\(name).png")) { model in signedIn(model) }
+            hintHover = nil
+        }
         render(preferences, found, root, still, output.appendingPathComponent("home-unlocking.png")) { model in
             signedIn(model)
             if let game = model.selectedGame { model.previewProgress(game, step: .relink, fraction: 0.54) }
@@ -497,6 +505,7 @@ enum PreviewRenderer {
             .environmentObject(model)
             .environment(\.stillBackground, still)
             .environment(\.themeStills, stills)
+            .environment(\.hintHover, hintHover)
             .frame(width: size.width, height: size.height)
         let renderer = ImageRenderer(content: view)
         renderer.scale = 1
