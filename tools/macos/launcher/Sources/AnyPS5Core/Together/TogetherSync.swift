@@ -61,6 +61,10 @@ public final class TogetherSync: @unchecked Sendable {
         var uploadedSets: Set<String> = []
         var sentTrophies: Set<String> = []
         var sessions: [Session] = []
+        /// Games' age ratings (param.json's ageLevel) for the catalogue, and the games taught them;
+        /// optional, as outboxes written before them have neither.
+        var ageLevels: [String: [String: Int]]?
+        var taughtAges: Set<String>?
     }
 
     private let client: TogetherClient
@@ -91,12 +95,37 @@ public final class TogetherSync: @unchecked Sendable {
         }
     }
 
-    public func recordSession(titleId: String, gameName: String, startedAt: Date, endedAt: Date, exit: String) {
-        guard endedAt > startedAt.addingTimeInterval(5) else { return }
+    /// The session's ID comes back, nil when it was too short to keep or no one is signed in.
+    @discardableResult
+    public func recordSession(titleId: String, gameName: String, ageLevels: [String: Int]? = nil, startedAt: Date, endedAt: Date, exit: String) -> String? {
+        guard endedAt > startedAt.addingTimeInterval(5) else { return nil }
+        let id = UUID().uuidString.lowercased()
+        var kept = false
         change {
             $0.gameNames[titleId] = gameName
-            $0.sessions.append(Session(id: UUID().uuidString.lowercased(), titleId: titleId, startedAt: startedAt, endedAt: endedAt, exit: exit))
+            if let levels = TogetherSync.ageLevels(ageLevels) {
+                if $0.ageLevels?[titleId] != levels { $0.taughtAges?.remove(titleId) }
+                $0.ageLevels = ($0.ageLevels ?? [:]).merging([titleId: levels]) { _, new in new }
+            }
+            $0.sessions.append(Session(id: id, titleId: titleId, startedAt: startedAt, endedAt: endedAt, exit: exit))
+            kept = true
         }
+        return kept ? id : nil
+    }
+
+    /// The sessions still waiting to go up, for the account signed in now.
+    public var pendingSessionIDs: Set<String> {
+        lock.withLock { current() == nil ? [] : Set(outbox.sessions.map(\.id)) }
+    }
+
+    /// The ratings the server takes: "default" or a two-letter region, ages 0 to 99, 120 at most.
+    static func ageLevels(_ levels: [String: Int]?) -> [String: Int]? {
+        guard let levels else { return nil }
+        let valid = levels.filter { key, age in
+            (key == "default" || (key.count == 2 && key.unicodeScalars.allSatisfy { ("A" ... "Z").contains($0) })) && (0 ... 99).contains(age)
+        }
+        guard !valid.isEmpty else { return nil }
+        return Dictionary(uniqueKeysWithValues: valid.sorted { $0.key < $1.key }.prefix(120).map { ($0.key, $0.value) })
     }
 
     /// The game's trophy set as the launcher reads it now; the earned ones not sent yet go up.
@@ -139,9 +168,16 @@ public final class TogetherSync: @unchecked Sendable {
             change { $0.deviceRegistered = true }
         }
         for (titleId, name) in try snapshot().gameNames {
-            guard try !snapshot().taughtGames.contains(titleId) else { continue }
-            _ = try await client.authorized("PUT", "games/\(titleId)", ["names": ["en": name]])
-            change { _ = $0.taughtGames.insert(titleId) }
+            let ages = try snapshot().ageLevels?[titleId]
+            let agesTaught = try ages == nil || snapshot().taughtAges?.contains(titleId) == true
+            guard try !snapshot().taughtGames.contains(titleId) || !agesTaught else { continue }
+            var game: [String: Any] = ["names": ["en": name]]
+            if let ages { game["ageLevels"] = ages }
+            _ = try await client.authorized("PUT", "games/\(titleId)", game)
+            change {
+                $0.taughtGames.insert(titleId)
+                if ages != nil { $0.taughtAges = ($0.taughtAges ?? []).union([titleId]) }
+            }
         }
         for set in try snapshot().sets.values {
             guard try !snapshot().uploadedSets.contains(setKey(set)) else { continue }

@@ -26,6 +26,8 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var handleChangeAt: Date? = nil
     /// The theme already shared from the same file, with a 409 on sharing a theme.
     public var themeId: String? = nil
+    /// What a parent's family settings refused, with "restricted_by_family" ("voice_chat", …).
+    public var feature: String? = nil
     public var description: String { title }
 }
 
