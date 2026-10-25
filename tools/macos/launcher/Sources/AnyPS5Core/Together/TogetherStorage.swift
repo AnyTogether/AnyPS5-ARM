@@ -505,11 +505,6 @@ extension TogetherClient {
         return true
     }
 
-    /// Who may see the gallery: "everyone", "friends" or "nobody".
-    public func setGalleryPrivacy(_ audience: String) async throws {
-        _ = try await authorized("PATCH", "me/privacy", ["gallery": audience])
-    }
-
     /// The SHA-256 of a file, in hex, read in pieces.
     public static func sha256(of file: URL) throws -> String {
         let handle = try FileHandle(forReadingFrom: file)

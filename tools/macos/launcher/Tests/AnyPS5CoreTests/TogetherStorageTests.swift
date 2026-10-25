@@ -167,6 +167,18 @@ final class TogetherStorageTests: XCTestCase {
         XCTAssertEqual(profile.handle, "ece")
     }
 
+    func testTheGalleryPrivacyReadsAndDefaultsToFriends() throws {
+        let with = try JSONDecoder.together.decode(TogetherOwnProfile.self, from: JSONSerialization.data(withJSONObject: [
+            "handle": "utku", "displayName": "Utku", "privacy": ["library": "everyone", "gallery": "nobody", "someday": ["nested": true]],
+        ]))
+        XCTAssertEqual(with.privacy[.gallery], .nobody)
+        XCTAssertEqual(with.privacy[.library], .everyone)
+        let without = try JSONDecoder.together.decode(TogetherOwnProfile.self, from: JSONSerialization.data(withJSONObject: [
+            "handle": "utku", "displayName": "Utku", "privacy": ["library": "friends"],
+        ]))
+        XCTAssertEqual(without.privacy[.gallery], .friends, "an older server: the default")
+    }
+
     // MARK: Getting media ready
 
     func picture(width: Int, height: Int) throws -> URL {
