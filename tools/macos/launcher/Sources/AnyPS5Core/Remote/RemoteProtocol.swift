@@ -114,6 +114,9 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     case keyFrame
     /// How Remote Play is going for the phone: on, off, noPermission (screen recording) or noGame.
     case streaming(state: String)
+    /// Whether the game is being broadcast (Twitch, YouTube, RTMP), for the phone's Go live button;
+    /// the phone starts and stops it with the commands broadcastStart and broadcastStop.
+    case broadcast(on: Bool)
     /// AnyTogether: either side asks the other, already signed in, to sign it in. The id is the
     /// hand-off the asker started with the server; deviceName is shown before approving.
     case togetherHandoff(id: String, deviceName: String)
@@ -178,6 +181,8 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             self = .keyFrame
         case "streaming":
             self = .streaming(state: try values.decode(String.self, forKey: .state))
+        case "broadcast":
+            self = .broadcast(on: try values.decode(Bool.self, forKey: .on))
         case "look":
             self = .look(deep: try values.decode(String.self, forKey: .deep), middle: try values.decode(String.self, forKey: .middle), accent: try values.decode(String.self, forKey: .accent))
         case "togetherHandoff":
@@ -264,6 +269,9 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .streaming(let state):
             try values.encode("streaming", forKey: .type)
             try values.encode(state, forKey: .state)
+        case .broadcast(let on):
+            try values.encode("broadcast", forKey: .type)
+            try values.encode(on, forKey: .on)
         case .look(let deep, let middle, let accent):
             try values.encode("look", forKey: .type)
             try values.encode(deep, forKey: .deep)
@@ -302,6 +310,7 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .stream(let on, let width, let height): return "stream(\(on) \(width)x\(height))"
         case .keyFrame: return "keyFrame"
         case .streaming(let state): return "streaming(\(state))"
+        case .broadcast(let on): return "broadcast(\(on))"
         case .togetherHandoff: return "togetherHandoff"
         case .togetherHandoffAnswer(_, let approved): return "togetherHandoffAnswer(\(approved))"
         case .activity(let activity): return "activity(\(activity.map { "\($0.phase.rawValue) \($0.fraction.map { String(format: "%.2f", $0) } ?? "-")" } ?? "none"))"

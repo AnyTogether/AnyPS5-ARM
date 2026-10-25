@@ -261,6 +261,7 @@ extension AppModel {
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
+            PanelCategory(id: "broadcast", title: TB.text(.title), symbol: "dot.radiowaves.left.and.right", rows: broadcastSettingsRows()),
             PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
@@ -269,7 +270,8 @@ extension AppModel {
 
     private func gameRows(_ game: Game) -> [PanelRow] {
         let settings = settings(for: game)
-        var rows: [PanelRow] = []
+        // The game playing can be broadcast from here (BroadcastPanel.swift).
+        var rows: [PanelRow] = broadcastGameRows(game)
         let choices = resolutionChoices(for: game)
         if !choices.isEmpty {
             let options = [T.text(.resolutionDefault)] + choices

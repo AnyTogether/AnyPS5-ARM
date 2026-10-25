@@ -226,4 +226,16 @@ final class BroadcastProtocolTests: XCTestCase {
         XCTAssertEqual(BroadcastKeyStore.masked("live_123456789"), "••••••••••6789")
         XCTAssertEqual(BroadcastKeyStore.masked("abc"), "•••")
     }
+
+    // MARK: The phone
+
+    /// The phone hears whether the game is broadcast, and asks to start or stop it with commands.
+    func testThePhoneIsToldWhetherTheGameIsBroadcast() throws {
+        let message = RemoteMessage.broadcast(on: true)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: try JSONEncoder().encode(message)), message)
+        let json = try JSONSerialization.jsonObject(with: try JSONEncoder().encode(message)) as? [String: Any]
+        XCTAssertEqual(json?["type"] as? String, "broadcast")
+        XCTAssertEqual(json?["on"] as? Bool, true)
+        XCTAssertEqual(try JSONDecoder().decode(RemoteMessage.self, from: Data(#"{"type":"command","name":"broadcastStop"}"#.utf8)), .command(name: "broadcastStop"))
+    }
 }

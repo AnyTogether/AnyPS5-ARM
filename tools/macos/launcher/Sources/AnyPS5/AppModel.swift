@@ -1032,6 +1032,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: Broadcasting
+
+    /// Live to Twitch, YouTube or an RTMP server (Broadcaster.swift, BroadcastPanel.swift).
+    lazy var broadcaster: Broadcaster = makeBroadcaster()
+
     // MARK: Clips
 
     let clipRecorder = ClipRecorder()
@@ -1173,6 +1178,7 @@ final class AppModel: ObservableObject {
         sessionStart = nil
         familyGameEnded()
         clipRecorder.stop()
+        broadcaster.stop()
         gameWindowShown = false
         updateRemotePlay()
         followSharePlay()
@@ -1222,6 +1228,7 @@ final class AppModel: ObservableObject {
                 if !NSApp.isActive {
                     TrophyBanner.shared.notice(T.format(.phoneConnected, name), detail: T.text(.phoneConnectedDetail), symbol: "iphone.gen3", sounds: self.preferences.sounds)
                 }
+                self.tellPhoneBroadcast(self.broadcaster.phase.active)
                 self.phoneLibrary = nil
                 self.phoneLookSent = nil
                 self.phoneActivity = nil
@@ -1425,6 +1432,9 @@ final class AppModel: ObservableObject {
         case .command("capture"):
             // Create on the phone's pad: a clip of the game, the game staying in front.
             saveClip()
+        case .command("broadcastStart"), .command("broadcastStop"):
+            // Go live and Stop broadcast in the phone's PS menu.
+            phoneBroadcast(message == .command(name: "broadcastStart"))
         case .command(let name):
             let commands: [String: Command] = ["left": .left, "right": .right, "up": .up, "down": .down, "select": .select, "back": .back, "options": .options,
                                                "l1": .previousGame, "r1": .nextGame]
