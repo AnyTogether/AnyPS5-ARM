@@ -819,6 +819,8 @@ final class AppModel: ObservableObject {
     @Published var groupPicked: Set<String> = []
     @Published var groupName = ""
     @Published var groupFocus = 0
+    /// The open thread's actions: the message picked, the menu over it, a reply or an edit on its way.
+    @Published var messageActions = MessageActions()
     /// The party the user is in, the invites waiting, and whether a new party is open to friends.
     @Published var party: TogetherParty? {
         didSet { partyChanged() }

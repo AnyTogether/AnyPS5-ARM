@@ -71,6 +71,7 @@ extension AppModel {
         messagesIndex = 0
         messagesInThread = false
         composing = false
+        resetMessageActions()
         messageFocus = AppModel.quickReplies.count
         loadInbox()
         if togetherFriends.isEmpty { refreshFriends() }
@@ -82,6 +83,7 @@ extension AppModel {
             if command == .back || command == .select || command == .options { closeViewer() }
             return
         }
+        if messageActions.menu != nil { return menuCommand(command) }
         if composing {
             if command == .back { composing = false }
             return
@@ -93,11 +95,14 @@ extension AppModel {
                 let next = min(targets.count - 1, max(0, messagesIndex + (command == .down ? 1 : -1)))
                 guard !targets.isEmpty, next != messagesIndex else { return }
                 messagesIndex = next
+                resetMessageActions()
                 Sounds.shared.play(.move)
                 if let conversation = selectedConversation, inbox?.threads[conversation.id] == nil { loadThread(conversation.id) }
             case .right, .select:
                 enterThread()
-            case .back, .options:
+            case .options:
+                if let conversation = selectedConversation { openConversationMenu(conversation.id) } else { closeOverlay() }
+            case .back:
                 closeOverlay()
             default:
                 break
@@ -105,6 +110,7 @@ extension AppModel {
             return
         }
         if selectingNewGroup { return groupCommand(command) }
+        if messageActions.picked != nil { return pickedCommand(command) }
         let count = AppModel.quickReplies.count + 1
         switch command {
         case .left:
@@ -117,10 +123,13 @@ extension AppModel {
             } else {
                 composing = true
             }
-        case .back, .up:
-            leaveThread()
+        case .up:
+            // Up into the messages, the newest first, to react, reply, edit or unsend.
+            if !pickMessage(-1) { leaveThread() }
+        case .back:
+            if messageActions.replyTo != nil || messageActions.editing != nil { cancelReplyOrEdit() } else { leaveThread() }
         case .options:
-            closeOverlay()
+            if let conversation = selectedConversation { openConversationMenu(conversation.id) }
         default:
             break
         }
@@ -136,6 +145,7 @@ extension AppModel {
             groupFocus = 0
             Sounds.shared.play(.select)
         case .conversation:
+            resetMessageActions()
             withAnimation(Motion.focus) { messagesInThread = true }
             messageFocus = AppModel.quickReplies.count
             Sounds.shared.play(.select)
@@ -229,6 +239,8 @@ extension AppModel {
 
     func leaveThread() {
         composing = false
+        if messageActions.editing != nil { messageDraft = "" }
+        resetMessageActions()
         withAnimation(Motion.focus) { messagesInThread = false }
         Sounds.shared.play(.back)
     }
@@ -242,16 +254,21 @@ extension AppModel {
     }
 
     func sendMessage(_ raw: String) {
+        // The field's text while editing says the message again; a quick reply is still a new one.
+        if messageActions.editing != nil, raw == messageDraft { return saveEdit(raw) }
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let conversation = selectedConversation, !text.isEmpty else { return }
         if raw == messageDraft { messageDraft = "" }
+        let replyTo = messageActions.replyTo
+        withAnimation(Motion.focus) { messageActions.replyTo = nil }
         Sounds.shared.play(.select)
         Task {
             do {
-                let sent = try await together.send(text, in: conversation.id)
+                let sent = try await together.send(text, in: conversation.id, replyTo: replyTo)
                 withAnimation(Motion.focus) { _ = inbox?.apply(sent, open: conversation.id) }
-                messagesIndex = 0
+                keepSelection(conversation.id)
             } catch {
+                if messageActions.replyTo == nil, selectedConversation?.id == conversation.id { messageActions.replyTo = replyTo }
                 if messageDraft.isEmpty, !AppModel.quickReplies.contains(raw) { messageDraft = raw }
                 if let problem = error as? TogetherProblem, problem.code == "link_blocked" {
                     show(T.text(.togetherLinkBlocked), symbol: "link.badge.plus")
@@ -270,22 +287,42 @@ extension AppModel {
             let viewing = overlay == .messages && messagesInThread && selectedConversation?.id == message.conversationId && NSApp.isActive
             let selectedID = selectedConversation?.id
             if event.type == "message.created", let author = message.authorId { typing.wrote(author, in: message.conversationId) }
-            guard inbox?.apply(message, open: viewing ? message.conversationId : nil) == true else { return loadInbox() }
+            let known = inbox?.apply(message, open: viewing ? message.conversationId : nil) == true
+            if message.deletedAt != nil { forgetRemoved(message) }
+            guard known else { return loadInbox() }
             // The list moved under the selection: keep the same conversation selected.
-            if let selectedID, let index = messageTargets.firstIndex(where: { $0.id == selectedID }) { messagesIndex = index }
+            keepSelection(selectedID)
             if viewing, event.type == "message.created" {
                 let client = together
                 Task { try? await client.markRead(message.conversationId, upTo: message.seq) }
             }
+            // It reached this device: its sender sees it delivered (an open thread is being read).
+            if event.type == "message.created", inbox?.acknowledges(message, open: viewing ? message.conversationId : nil) == true {
+                let client = together
+                Task { try? await client.markDelivered(message.conversationId, upTo: message.seq) }
+            }
             guard event.type == "message.created", message.authorId != togetherUser?.id, !viewing, let text = messageWords(message) else { return }
-            let author = inbox?.conversations.first { $0.id == message.conversationId }?.members.first { $0.userId == message.authorId }?.displayName ?? ""
+            let conversation = inbox?.conversations.first { $0.id == message.conversationId }
+            guard conversation?.muted != true else { return }
+            let author = conversation?.members.first { $0.userId == message.authorId }?.displayName ?? ""
             Sounds.shared.play(.move)
             show(T.format(.messagesFrom, author, text), symbol: "bubble.left.fill")
             if !NSApp.isActive { TrophyBanner.shared.notice(author, detail: text, symbol: "bubble.left.fill", sounds: preferences.sounds) }
+        case "message.reactions":
+            guard let changed = event.decode(TogetherMessageReactions.self) else { return }
+            withAnimation(Motion.focus) { inbox?.react(changed.conversationId, seq: changed.seq, reactions: changed.reactions) }
         case "conversation.read":
             let data = event.data
             guard let id = data["conversationId"], let user = data["userId"], let seq = data["upToSeq"].flatMap(Int.init) else { return }
-            inbox?.read(id, by: user, upTo: seq)
+            inbox?.read(id, by: user, upTo: seq, unread: data["unread"].flatMap(Int.init))
+        case "conversation.delivered":
+            let data = event.data
+            guard let id = data["conversationId"], let user = data["userId"], let seq = data["upToSeq"].flatMap(Int.init) else { return }
+            inbox?.delivered(id, by: user, upTo: seq)
+        case "messages.settings":
+            guard let on = event.data["readReceipts"].map({ $0 == "1" || $0 == "true" }) else { return }
+            togetherProfile?.readReceipts = on
+            loadInbox()
         case "conversation.updated":
             loadInbox()
         case "typing":
@@ -332,6 +369,15 @@ struct MessagesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .screenFrost(0.74)
         .overlay {
+            if let menu = model.messageActions.menu {
+                HStack(spacing: 0) {
+                    Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture { model.closeMessageMenu() }
+                    MessageMenuSheet(menu: menu)
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .overlay {
             if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
         }
     }
@@ -367,6 +413,12 @@ struct MessagesView: View {
                             model.messagesIndex = index
                             model.enterThread()
                         }
+                        .contextMenu {
+                            if case .conversation(let conversation) = target {
+                                Button(TChat.text(conversation.pinned ? .unpin : .pin)) { model.setPinned(conversation, !conversation.pinned) }
+                                Button(TChat.text(conversation.muted ? .unmute : .mute)) { model.setMuted(conversation, !conversation.muted) }
+                            }
+                        }
                 }
             }
         }
@@ -390,8 +442,14 @@ struct MessagesView: View {
                     }
                     Spacer()
                     HStack(spacing: 22 * scale) {
-                        Hint(keys: "← → ↑ ↓", label: T.text(.hintMove))
-                        Hint(keys: "↩ / ✕", label: T.text(model.messagesInThread ? .messagesSend : .hintSelect))
+                        if model.messageActions.picked != nil {
+                            Hint(keys: "↑ ↓", label: T.text(.hintMove))
+                            Hint(keys: "↩ / ✕", label: TChat.text(.hintActions))
+                        } else {
+                            Hint(keys: "← → ↑ ↓", label: T.text(.hintMove))
+                            Hint(keys: "↩ / ✕", label: T.text(model.messagesInThread ? .messagesSend : .hintSelect))
+                            Hint(keys: "O / △", label: TChat.text(.hintActions))
+                        }
                         Hint(keys: "esc / ○", label: T.text(.hintBack))
                     }
                 }
@@ -439,7 +497,7 @@ struct MessagesView: View {
         return VStack(alignment: .leading, spacing: 12 * scale) {
             HStack(spacing: 10 * scale) {
                 ForEach(Array(replies.enumerated()), id: \.offset) { index, reply in
-                    let focused = inThread && !model.composing && model.messageFocus == index
+                    let focused = inThread && !model.composing && model.messageActions.picked == nil && model.messageFocus == index
                     Button { model.sendMessage(reply) } label: {
                         Text(reply).font(.display(14 * scale, .semibold))
                             .foregroundStyle(focused ? Color.black : .white)
@@ -451,7 +509,8 @@ struct MessagesView: View {
                     .animation(Motion.focus, value: focused)
                 }
             }
-            ComposerField(focused: inThread && model.messageFocus == replies.count)
+            ReplyBar()
+            ComposerField(focused: inThread && model.messageActions.picked == nil && model.messageFocus == replies.count)
         }
     }
 }
@@ -483,7 +542,7 @@ struct ComposerField: View {
                     .onExitCommand { model.composing = false }
                     .onChange(of: model.messageDraft) { _, _ in model.sayTyping() }
             }
-            Image(systemName: "paperplane.fill").font(.system(size: 16 * scale, weight: .semibold))
+            Image(systemName: model.messageActions.editing != nil ? "checkmark.circle.fill" : "paperplane.fill").font(.system(size: 16 * scale, weight: .semibold))
                 .foregroundStyle(model.messageDraft.isEmpty ? .white.opacity(0.3) : model.accent)
                 .onTapGesture { model.sendMessage(model.messageDraft) }
         }
@@ -655,11 +714,15 @@ struct ConversationRow: View {
                 }
                 Spacer(minLength: 8 * scale)
                 VStack(alignment: .trailing, spacing: 6 * scale) {
-                    Text(MessageList.time(conversation.updatedAt)).font(.display(12 * scale, .medium)).opacity(0.5)
+                    HStack(spacing: 8 * scale) {
+                        ConversationMarks(conversation: conversation, focused: focused)
+                        Text(MessageList.time(conversation.updatedAt)).font(.display(12 * scale, .medium)).opacity(0.5)
+                    }
                     if conversation.unread > 0 {
+                        // A muted conversation still counts, quietly.
                         Text("\(conversation.unread)").font(.display(12 * scale, .bold)).foregroundStyle(.white)
                             .padding(.horizontal, 7 * scale).frame(minHeight: 20 * scale)
-                            .background(Capsule().fill(model.accent))
+                            .background(Capsule().fill(conversation.muted ? (focused ? Color.black.opacity(0.35) : Color.white.opacity(0.22)) : model.accent))
                     }
                 }
             case .newGroup:
@@ -718,40 +781,87 @@ struct MessageList: View {
                         guard let last = messages.last else { return }
                         withAnimation(Motion.focus) { proxy.scrollTo(last.id, anchor: .bottom) }
                     }
+                    .onChange(of: model.messageActions.picked) { _, seq in
+                        guard let picked = messages.first(where: { $0.seq == seq }) else { return }
+                        withAnimation(Motion.focus) { proxy.scrollTo(picked.id, anchor: .center) }
+                    }
             }
         }
     }
 
-    private var bubbles: some View {
-        LazyVStack(spacing: 8 * scale) {
-            ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
-                let mine = message.authorId == me
-                let first = index == 0 || messages[index - 1].authorId != message.authorId
-                HStack {
-                    if mine { Spacer(minLength: 120 * scale) }
+    /// Lazy in the window; drawn whole offscreen, where a lazy stack guesses its height.
+    @ViewBuilder private var bubbles: some View {
+        if previewRender {
+            VStack(spacing: 8 * scale) { rows }.padding(.vertical, 6 * scale)
+        } else {
+            LazyVStack(spacing: 8 * scale) { rows }.padding(.vertical, 6 * scale)
+        }
+    }
+
+    private var rows: some View {
+        let receipt = model.inbox?.receipt(in: conversation.id)
+        let picked = model.messageActions.picked
+        return ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+            let mine = message.authorId == me
+            let first = index == 0 || messages[index - 1].authorId != message.authorId
+            let runEnd = index == messages.count - 1 || messages[index + 1].authorId != message.authorId
+            let receiptHere = receipt?.seq == message.seq ? receipt?.state : nil
+            HStack {
+                if mine { Spacer(minLength: 120 * scale) }
+                VStack(alignment: mine ? .trailing : .leading, spacing: 4 * scale) {
+                    if first, !mine, conversation.kind == "group" {
+                        Text(conversation.members.first { $0.userId == message.authorId }?.displayName ?? "")
+                            .font(.display(12 * scale, .semibold)).foregroundStyle(.white.opacity(0.55))
+                    }
+                    if message.deletedAt == nil, let quote = TogetherQuote(seq: message.replyTo, in: messages) {
+                        ReplyQuote(quote: quote, conversation: conversation, mine: mine)
+                    }
                     VStack(alignment: mine ? .trailing : .leading, spacing: 4 * scale) {
-                        if first, !mine, conversation.kind == "group" {
-                            Text(conversation.members.first { $0.userId == message.authorId }?.displayName ?? "")
-                                .font(.display(12 * scale, .semibold)).foregroundStyle(.white.opacity(0.55))
-                        }
                         if let attachment = message.attachment {
                             AttachmentBubble(attachment: attachment, mine: mine)
                             if let caption = message.words { bubble(caption, mine: mine) }
                         } else {
                             bubble(message.deletedAt == nil ? message.text : nil, mine: mine)
                         }
-                        if index == messages.count - 1 || messages[index + 1].authorId != message.authorId {
-                            Text(MessageList.time(message.createdAt) + (message.editedAt != nil ? " · " + T.text(.messagesEdited) : ""))
-                                .font(.display(11 * scale, .medium)).foregroundStyle(.white.opacity(0.4))
-                        }
                     }
-                    if !mine { Spacer(minLength: 120 * scale) }
+                    .focusRing(picked == message.seq, radius: 18 * scale, width: 2)
+                    .contextMenu { actions(message) }
+                    if message.deletedAt == nil, !message.reactions.isEmpty {
+                        ReactionChips(message: message, conversation: conversation)
+                    }
+                    if runEnd || receiptHere != nil {
+                        HStack(spacing: 5 * scale) {
+                            Text(MessageList.time(message.createdAt) + (message.editedAt != nil && message.deletedAt == nil ? " · " + T.text(.messagesEdited) : ""))
+                                .foregroundStyle(.white.opacity(0.4))
+                            if let receiptHere {
+                                Text("·").foregroundStyle(.white.opacity(0.4))
+                                ReceiptLabel(state: receiptHere)
+                            }
+                        }
+                        .font(.display(11 * scale, .medium))
+                    }
                 }
-                .id(message.id)
-                .padding(.top, first && index > 0 ? 6 * scale : 0)
+                .opacity(picked == nil || picked == message.seq ? 1 : 0.55)
+                .animation(Motion.focus, value: picked)
+                if !mine { Spacer(minLength: 120 * scale) }
             }
+            .id(message.id)
+            .padding(.top, first && index > 0 ? 6 * scale : 0)
         }
-        .padding(.vertical, 6 * scale)
+    }
+
+    /// A message's right-click menu: the same actions the controller's menu has.
+    @ViewBuilder private func actions(_ message: TogetherMessage) -> some View {
+        if message.deletedAt == nil {
+            Menu(TChat.text(.react)) {
+                ForEach(TogetherMessageReaction.allCases, id: \.self) { reaction in
+                    Button((message.hasReacted(reaction, by: me) ? "✓ " : "") + reaction.glyph + "  " + TChat.name(reaction)) { model.toggleReaction(reaction, on: message) }
+                }
+            }
+            Button(TChat.text(.reply)) { model.startReply(message) }
+            if message.canEdit(by: me) { Button(TChat.text(.edit)) { model.startEditing(message) } }
+            if message.authorId == me { Button(TChat.text(.unsend), role: .destructive) { model.askUnsend(message) } }
+        }
     }
 
     private func bubble(_ text: String?, mine: Bool) -> some View {

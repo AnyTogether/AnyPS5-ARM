@@ -169,7 +169,7 @@ extension AppModel {
         var sections = known.map { ($0.0, T.text($0.1), $0.2) }
         // The gallery's own setting, where the server keeps files.
         if cloud.enabled { sections.append((.gallery, TCloud.text(.privacyGallery), "photo.stack")) }
-        return [PanelRow(id: "together-privacy", title: T.text(.togetherPrivacyTitle), symbol: "lock", kind: .info(""))] + sections.map { section, title, symbol in
+        let choices = sections.map { section, title, symbol in
             let names = TogetherVisibility.allCases.map { visibility -> String in
                 switch visibility {
                 case .everyone: return T.text(.visibilityEveryone)
@@ -182,6 +182,7 @@ extension AppModel {
                                 self?.setPrivacy(section, TogetherVisibility.allCases[index])
                             })
         }
+        return [PanelRow(id: "together-privacy", title: T.text(.togetherPrivacyTitle), symbol: "lock", kind: .info(""))] + choices + [readReceiptsRow()].compactMap { $0 }
     }
 
     func previewOwnProfile(_ profile: TogetherOwnProfile) {

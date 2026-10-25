@@ -144,7 +144,7 @@ extension AppModel {
             if let up = TogetherLevelUp(event) { levelUp(up) }
         case "presence.mode":
             if let mode = TogetherPresenceMode(event) { withAnimation(Motion.overlay) { togetherProfile?.appearOffline = mode.appearOffline } }
-        case let type where type.hasPrefix("message.") || type.hasPrefix("conversation.") || type == "typing":
+        case let type where type.hasPrefix("message.") || type.hasPrefix("conversation.") || type == "typing" || type == "messages.settings":
             messageEvent(event)
         case let type where type.hasPrefix("lfg.") || type == "discover.changed":
             discoverEvent(event)
