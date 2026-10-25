@@ -339,6 +339,10 @@ int APS5_VABI sceKernelClose(int d) {
     return 0;
 }
 
+#ifndef _WIN32
+extern "C" void LogRepeatFilterWrite_nid_no_patch(int standard, int descriptor, const void* data, std::size_t size);
+#endif
+
 std::int64_t APS5_VABI sceKernelRead(int d, void* buf, std::size_t nbytes) {
     if (GuestSockets::IsOpen(d)) {
         const auto n = GuestSockets::Read(d, buf, nbytes);
@@ -369,6 +373,13 @@ std::int64_t APS5_VABI sceKernelWrite(int d, const void* buf, std::size_t nbytes
         return sceKernelWrite(d, &empty, 0);
     }
     GuestArena::GuestArenaPrepareHostRead_nid_no_patch(buf, nbytes);
+#ifndef _WIN32
+    // Descriptors 1 and 2 are the game log until the title points them elsewhere.
+    if ((d == 1 && File::HostStandardOutput() < 0) || (d == 2 && File::HostStandardError() < 0)) {
+        LogRepeatFilterWrite_nid_no_patch(d, d, buf, nbytes);
+        return static_cast<std::int64_t>(nbytes);
+    }
+#endif
     auto n = NativeWrite(d, buf, nbytes);
     if (n < 0) return SceIoErrorFromErrno(errno);
     return static_cast<std::int64_t>(n);

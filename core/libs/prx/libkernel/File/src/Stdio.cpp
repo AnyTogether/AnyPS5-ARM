@@ -823,6 +823,10 @@ int File::HostStandardError() {
     return g_hostStandardError.load();
 }
 
+int File::HostStandardOutput() {
+    return g_hostStandardOutput.load();
+}
+
 extern "C" {
 
 int APS5_VABI dup_nid_postfix(int d) {

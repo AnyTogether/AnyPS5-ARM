@@ -489,6 +489,9 @@ int SetWorkingDirectory(WorkingDirectory& state, const std::filesystem::path& re
 }
 
 #ifndef _WIN32
+extern "C" void LogRepeatFilterHookStream_nid_no_patch(std::FILE* file, int standard);
+extern "C" void LogRepeatFilterUnhookStream_nid_no_patch(std::FILE* file);
+
 namespace {
 std::mutex g_hostStandardErrorMutex;
 std::atomic<int> g_hostStandardError{-1};
@@ -510,6 +513,9 @@ extern "C" int KeepHostStandardError_nid_no_patch() {
     }
     std::setvbuf(stream, nullptr, _IONBF, 0);
     std::fflush(stderr);
+    // The old stream keeps descriptor 2, which the title is about to point elsewhere; the kept one is the log.
+    LogRepeatFilterUnhookStream_nid_no_patch(stderr);
+    LogRepeatFilterHookStream_nid_no_patch(stream, 2);
     stderr = stream;
     g_hostStandardError.store(kept);
     return kept;
@@ -540,6 +546,9 @@ extern "C" int KeepHostStandardOutput_nid_no_patch() {
     }
     std::setvbuf(stream, nullptr, _IONBF, 0);
     std::fflush(stdout);
+    // The old stream keeps descriptor 1, which the title is about to point elsewhere; the kept one is the log.
+    LogRepeatFilterUnhookStream_nid_no_patch(stdout);
+    LogRepeatFilterHookStream_nid_no_patch(stream, 1);
     stdout = stream;
     g_hostStandardOutput.store(kept);
     return kept;
