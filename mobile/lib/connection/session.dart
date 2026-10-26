@@ -126,6 +126,9 @@ class Session extends ChangeNotifier {
   /// Whether the Mac is broadcasting the game, as it last said.
   final broadcasting = ValueNotifier<bool>(false);
 
+  /// The text the game asks for now, as the launcher said; null when it asks for none.
+  final textPrompt = ValueNotifier<TextPrompt?>(null);
+
   /// The picture size asked for, while Remote Play is wanted.
   (int, int)? _streamSize;
   FrameAssembler? _assembler;
@@ -309,6 +312,8 @@ class Session extends ChangeNotifier {
         streaming.value = state;
       case Broadcasting(:final on):
         broadcasting.value = on;
+      case TextInputUpdate(:final prompt):
+        textPrompt.value = prompt;
       case final TogetherHandoff ask:
         if (together.user == null) {
           // Nothing to sign the Mac in with: it says so and offers the other ways.
@@ -464,6 +469,15 @@ class Session extends ChangeNotifier {
   /// A request to the launcher on the control channel; dropped while not connected.
   void send(Message message) => _socket?.add(message.toJson());
 
+  /// The text typed for the game's prompt; entered or cancelled, the keyboard goes away here at
+  /// once, as on the other phones once the launcher says so.
+  void type(TextPrompt prompt, String text, TypedAction action) {
+    send(Typed(prompt: prompt.id, text: text, action: action));
+    if (action != TypedAction.update && textPrompt.value?.id == prompt.id) {
+      textPrompt.value = null;
+    }
+  }
+
   /// The game lets go of everything held, then hears nothing from the phone until [resumePad].
   void pausePad() {
     haptics?.stop();
@@ -534,6 +548,7 @@ class Session extends ChangeNotifier {
     _stopPad();
     activity.value = null;
     broadcasting.value = false;
+    textPrompt.value = null;
     if (_closed || status == ConnectionStatus.rejected) return;
     _scheduleRetry(generation);
   }

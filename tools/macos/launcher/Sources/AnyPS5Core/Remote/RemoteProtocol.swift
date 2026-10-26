@@ -70,6 +70,56 @@ public struct RemoteActivity: Codable, Equatable, Sendable {
     }
 }
 
+/// What text the game asks for, for a phone to type it: the game's keyboard (sceImeOpen) or its
+/// text dialog (sceImeDialogInit), from the engine's prompt datagram (APRK).
+public struct RemoteTextPrompt: Codable, Equatable, Sendable {
+    /// The engine's number for this keyboard or dialog; the typed text names it.
+    public var id: UInt32
+    /// "keyboard" or "dialog".
+    public var kind: String
+    public var title: String
+    public var placeholder: String
+    /// The text the game starts with.
+    public var text: String
+    /// The most characters the game takes (UTF-16 units, as it counts them).
+    public var maxLength: Int
+    public var multiline: Bool
+    /// The keys the console would show: text, latin, url, mail or number.
+    public var keyboard: String
+    /// The Enter key's label: default, send, search or go.
+    public var enter: String
+
+    public init(id: UInt32, kind: String = "dialog", title: String = "", placeholder: String = "", text: String = "", maxLength: Int = 0,
+                multiline: Bool = false, keyboard: String = "text", enter: String = "default") {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.placeholder = placeholder
+        self.text = text
+        self.maxLength = maxLength
+        self.multiline = multiline
+        self.keyboard = keyboard
+        self.enter = enter
+    }
+
+    static let keyboards = ["text", "latin", "url", "mail", "number"]
+    static let enters = ["default", "send", "search", "go"]
+}
+
+/// What a phone does with the text it typed: send it as the game's text so far, enter it, or
+/// cancel the game's keyboard.
+public enum TypedAction: String, Codable, Sendable {
+    case update, submit, cancel
+
+    var code: UInt8 {
+        switch self {
+        case .update: return 0
+        case .submit: return 1
+        case .cancel: return 2
+        }
+    }
+}
+
 /// A message on the phone's control channel: one JSON object per WebSocket text frame, told
 /// apart by its `type`.
 public enum RemoteMessage: Codable, Equatable, Sendable {
@@ -122,12 +172,18 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
     case togetherHandoff(id: String, deviceName: String)
     /// The answer: approved on the server, or turned down.
     case togetherHandoffAnswer(id: String, approved: Bool)
+    /// The game asks for text, or (nil) no longer does: the phone shows its own keyboard with the
+    /// game's prompt. A phone that does not know this message ignores it.
+    case textInput(RemoteTextPrompt?)
+    /// The text a phone typed for a prompt (its id), replacing the game's, and what to do with it.
+    case typed(prompt: UInt32, text: String, action: TypedAction)
 
     public static let protocolVersion = 1
 
     enum CodingKeys: String, CodingKey {
         case type, `protocol`, deviceID, deviceName, key, code, session, udpPort, macName, reason, milliseconds, togetherServer
         case games, selected, running, language, id, icon, background, name, layout, detail, grade, activity, deep, middle, accent, on, width, height, state, approved
+        case prompt, text, action
     }
 
     public init(from decoder: Decoder) throws {
@@ -189,6 +245,11 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             self = .togetherHandoff(id: try values.decode(String.self, forKey: .id), deviceName: try values.decode(String.self, forKey: .deviceName))
         case "togetherHandoffAnswer":
             self = .togetherHandoffAnswer(id: try values.decode(String.self, forKey: .id), approved: try values.decode(Bool.self, forKey: .approved))
+        case "textInput":
+            self = .textInput(try values.decodeIfPresent(RemoteTextPrompt.self, forKey: .prompt))
+        case "typed":
+            self = .typed(prompt: try values.decode(UInt32.self, forKey: .prompt), text: try values.decode(String.self, forKey: .text),
+                          action: try values.decode(TypedAction.self, forKey: .action))
         case let other:
             throw DecodingError.dataCorruptedError(forKey: .type, in: values, debugDescription: "unknown message type \(other)")
         }
@@ -285,6 +346,14 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
             try values.encode("togetherHandoffAnswer", forKey: .type)
             try values.encode(id, forKey: .id)
             try values.encode(approved, forKey: .approved)
+        case .textInput(let prompt):
+            try values.encode("textInput", forKey: .type)
+            try values.encode(prompt, forKey: .prompt)
+        case .typed(let prompt, let text, let action):
+            try values.encode("typed", forKey: .type)
+            try values.encode(prompt, forKey: .prompt)
+            try values.encode(text, forKey: .text)
+            try values.encode(action, forKey: .action)
         }
     }
 
@@ -313,6 +382,8 @@ public enum RemoteMessage: Codable, Equatable, Sendable {
         case .broadcast(let on): return "broadcast(\(on))"
         case .togetherHandoff: return "togetherHandoff"
         case .togetherHandoffAnswer(_, let approved): return "togetherHandoffAnswer(\(approved))"
+        case .textInput(let prompt): return "textInput(\(prompt.map { "\($0.id) \($0.kind)" } ?? "none"))"
+        case .typed(let prompt, let text, let action): return "typed(\(prompt), \(text.count) characters, \(action.rawValue))"
         case .activity(let activity): return "activity(\(activity.map { "\($0.phase.rawValue) \($0.fraction.map { String(format: "%.2f", $0) } ?? "-")" } ?? "none"))"
         }
     }
@@ -330,7 +401,13 @@ public enum RemotePacket {
     public static let outputMagic: UInt32 = 0x4F52_5041
     public static let helloMagic: UInt32 = 0x4852_5041
     public static let pressMagic: UInt32 = 0x5052_5041
+    public static let promptMagic: UInt32 = 0x4B52_5041
+    public static let textMagic: UInt32 = 0x5452_5041
     public static let version: UInt16 = 1
+    public static let promptHeaderSize = 24
+    public static let textHeaderSize = 20
+    /// The largest prompt or text datagram (the engine's LargestTextDatagram).
+    public static let largestText = 8192
     public static let inputSize = 80
     public static let outputSize = 32
     public static let helloSize = 16
@@ -356,6 +433,80 @@ public enum RemotePacket {
     /// Whether a game's hello says its engine takes presses (bit 0 of byte 9).
     public static func helloTakesPresses(_ data: Data) -> Bool {
         isHello(data) && data[data.startIndex + 9] & 1 != 0
+    }
+
+    /// Whether a game's hello says its engine tells what text the game asks for and takes the
+    /// text typed for it (bit 1 of byte 9).
+    public static func helloTakesText(_ data: Data) -> Bool {
+        isHello(data) && data[data.startIndex + 9] & 2 != 0
+    }
+
+    /// A game's prompt (APRK): `.some(nil)` when it says no text is asked for any more, nil for
+    /// anything that is not a well-formed prompt.
+    public static func prompt(_ data: Data) -> RemoteTextPrompt?? {
+        guard data.count >= promptHeaderSize, data.count <= largestText, read(data, at: 0) as UInt32 == promptMagic,
+              read(data, at: 4) as UInt16 == version, Int(read(data, at: 6) as UInt16) == data.count else { return nil }
+        let bytes = [UInt8](data)
+        guard bytes[12] <= 2 else { return nil }
+        let lengths = [Int(read(data, at: 18) as UInt16), Int(read(data, at: 20) as UInt16), Int(read(data, at: 22) as UInt16)]
+        guard promptHeaderSize + lengths.reduce(0, +) == data.count else { return nil }
+        let id: UInt32 = read(data, at: 8)
+        guard id != 0, bytes[12] != 0 else { return .some(nil) }
+        var strings: [String] = []
+        var at = promptHeaderSize
+        for length in lengths {
+            strings.append(String(decoding: bytes[at..<(at + length)], as: UTF8.self))
+            at += length
+        }
+        let keyboard = Int(bytes[14]) < RemoteTextPrompt.keyboards.count ? RemoteTextPrompt.keyboards[Int(bytes[14])] : "text"
+        let enter = Int(bytes[15]) < RemoteTextPrompt.enters.count ? RemoteTextPrompt.enters[Int(bytes[15])] : "default"
+        return .some(RemoteTextPrompt(id: id, kind: bytes[12] == 1 ? "keyboard" : "dialog", title: strings[0], placeholder: strings[1], text: strings[2],
+                                      maxLength: Int(read(data, at: 16) as UInt16), multiline: bytes[13] & 1 != 0, keyboard: keyboard, enter: enter))
+    }
+
+    /// A prompt as the engine sends it, nil for none (a stand-in game in the tests).
+    public static func promptPacket(_ prompt: RemoteTextPrompt?) -> Data {
+        let parts = [prompt?.title ?? "", prompt?.placeholder ?? "", prompt?.text ?? ""].map { [UInt8]($0.utf8) }
+        var bytes = [UInt8](repeating: 0, count: promptHeaderSize)
+        func put<T: FixedWidthInteger>(_ value: T, at offset: Int) {
+            withUnsafeBytes(of: value.littleEndian) { bytes.replaceSubrange(offset..<(offset + $0.count), with: $0) }
+        }
+        put(promptMagic, at: 0)
+        put(version, at: 4)
+        put(UInt16(promptHeaderSize + parts.map(\.count).reduce(0, +)), at: 6)
+        put(prompt?.id ?? 0, at: 8)
+        if let prompt {
+            bytes[12] = prompt.kind == "keyboard" ? 1 : 2
+            bytes[13] = prompt.multiline ? 1 : 0
+            bytes[14] = UInt8(RemoteTextPrompt.keyboards.firstIndex(of: prompt.keyboard) ?? 0)
+            bytes[15] = UInt8(RemoteTextPrompt.enters.firstIndex(of: prompt.enter) ?? 0)
+            put(UInt16(clamping: prompt.maxLength), at: 16)
+        }
+        for (index, part) in parts.enumerated() { put(UInt16(part.count), at: 18 + index * 2) }
+        return Data(bytes + parts.joined())
+    }
+
+    /// The text a phone typed (APRT), for the engine: the whole text, replacing the game's, then
+    /// the action. `id` tells copies apart; the text is cut on a character to fit one datagram.
+    public static func text(prompt: UInt32, id: UInt32, action: TypedAction, text: String) -> Data {
+        var utf8: [UInt8] = []
+        for character in text {
+            let encoded = [UInt8](String(character).utf8)
+            if textHeaderSize + utf8.count + encoded.count > largestText { break }
+            utf8 += encoded
+        }
+        var bytes = [UInt8](repeating: 0, count: textHeaderSize)
+        func put<T: FixedWidthInteger>(_ value: T, at offset: Int) {
+            withUnsafeBytes(of: value.littleEndian) { bytes.replaceSubrange(offset..<(offset + $0.count), with: $0) }
+        }
+        put(textMagic, at: 0)
+        put(version, at: 4)
+        put(UInt16(textHeaderSize + utf8.count), at: 6)
+        put(prompt, at: 8)
+        put(id, at: 12)
+        bytes[16] = action.code
+        put(UInt16(utf8.count), at: 18)
+        return Data(bytes + utf8)
     }
 
     /// A press (APRP): `buttons` held on the game's first player's pad for `holdMillis`, whoever

@@ -53,6 +53,160 @@ std::unique_ptr<Channel> OpenNamed(const char* name) {
 
 }
 
+std::string ValidUtf8(std::string_view text, std::size_t bytes) {
+    std::string out;
+    std::size_t at = 0;
+    while (at < text.size()) {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        std::size_t length = 0;
+        std::uint32_t point = 0;
+        if (lead < 0x80) { length = 1; point = lead; }
+        else if (lead >= 0xc2 && lead <= 0xdf) { length = 2; point = lead & 0x1fu; }
+        else if (lead >= 0xe0 && lead <= 0xef) { length = 3; point = lead & 0x0fu; }
+        else if (lead >= 0xf0 && lead <= 0xf4) { length = 4; point = lead & 0x07u; }
+        if (length == 0 || at + length > text.size()) {
+            ++at;
+            continue;
+        }
+        bool whole = true;
+        for (std::size_t next = 1; next < length; ++next) {
+            const auto byte = static_cast<unsigned char>(text[at + next]);
+            if ((byte & 0xc0u) != 0x80u) { whole = false; break; }
+            point = (point << 6) | (byte & 0x3fu);
+        }
+        const bool shortest = length == 1 || (length == 2 && point >= 0x80) || (length == 3 && point >= 0x800) || (length == 4 && point >= 0x10000 && point <= 0x10ffff);
+        const bool character = (point >= 0x20 && point != 0x7f) || point == '\n';
+        const bool surrogate = point >= 0xd800 && point <= 0xdfff;
+        if (!whole || !shortest) {
+            ++at;
+            continue;
+        }
+        if (character && !surrogate) {
+            if (out.size() + length > bytes) break;
+            out.append(text.substr(at, length));
+        }
+        at += length;
+    }
+    return out;
+}
+
+std::vector<std::string> TextPieces(std::string_view text, std::size_t bytes) {
+    std::vector<std::string> pieces;
+    while (!text.empty()) {
+        std::size_t cut = std::min(bytes, text.size());
+        while (cut > 0 && cut < text.size() && (static_cast<unsigned char>(text[cut]) & 0xc0u) == 0x80u) --cut;
+        if (cut == 0) break;
+        pieces.emplace_back(text.substr(0, cut));
+        text.remove_prefix(cut);
+    }
+    return pieces;
+}
+
+std::string Utf8(std::u16string_view units) {
+    std::string out;
+    for (std::size_t at = 0; at < units.size(); ++at) {
+        std::uint32_t point = units[at];
+        if (point >= 0xd800 && point <= 0xdbff) {
+            if (at + 1 >= units.size() || units[at + 1] < 0xdc00 || units[at + 1] > 0xdfff) continue;
+            point = 0x10000 + ((point - 0xd800) << 10) + (units[++at] - 0xdc00u);
+        } else if (point >= 0xdc00 && point <= 0xdfff) {
+            continue;
+        }
+        if (point < 0x80) {
+            out.push_back(static_cast<char>(point));
+        } else if (point < 0x800) {
+            out.push_back(static_cast<char>(0xc0 | (point >> 6)));
+            out.push_back(static_cast<char>(0x80 | (point & 0x3f)));
+        } else if (point < 0x10000) {
+            out.push_back(static_cast<char>(0xe0 | (point >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((point >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (point & 0x3f)));
+        } else {
+            out.push_back(static_cast<char>(0xf0 | (point >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((point >> 12) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | ((point >> 6) & 0x3f)));
+            out.push_back(static_cast<char>(0x80 | (point & 0x3f)));
+        }
+    }
+    return out;
+}
+
+std::vector<std::uint8_t> EncodePrompt(const Prompt& prompt) {
+    const std::string title = ValidUtf8(prompt.title, LargestPromptTitle);
+    const std::string placeholder = ValidUtf8(prompt.placeholder, LargestPromptTitle);
+    const std::string text = ValidUtf8(prompt.text, LargestTextDatagram - PromptHeaderSize - title.size() - placeholder.size());
+    std::vector<std::uint8_t> bytes(PromptHeaderSize + title.size() + placeholder.size() + text.size(), 0);
+    write<std::uint32_t>(bytes.data(), 0, PromptMagic);
+    write<std::uint16_t>(bytes.data(), 4, Version);
+    write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(bytes.size()));
+    write<std::uint32_t>(bytes.data(), 8, prompt.id);
+    bytes[12] = static_cast<std::uint8_t>(prompt.id == 0 ? Prompt::Kind::None : prompt.kind);
+    bytes[13] = prompt.multiline ? 1 : 0;
+    bytes[14] = prompt.type;
+    bytes[15] = prompt.enterLabel;
+    write<std::uint16_t>(bytes.data(), 16, prompt.maxLength);
+    write<std::uint16_t>(bytes.data(), 18, static_cast<std::uint16_t>(title.size()));
+    write<std::uint16_t>(bytes.data(), 20, static_cast<std::uint16_t>(placeholder.size()));
+    write<std::uint16_t>(bytes.data(), 22, static_cast<std::uint16_t>(text.size()));
+    auto* at = bytes.data() + PromptHeaderSize;
+    for (const auto* part : {&title, &placeholder, &text}) {
+        std::memcpy(at, part->data(), part->size());
+        at += part->size();
+    }
+    return bytes;
+}
+
+std::optional<Prompt> DecodePrompt(std::span<const std::uint8_t> bytes) {
+    if (bytes.size() < PromptHeaderSize || bytes.size() > LargestTextDatagram) return std::nullopt;
+    if (read<std::uint32_t>(bytes, 0) != PromptMagic || read<std::uint16_t>(bytes, 4) != Version || read<std::uint16_t>(bytes, 6) != bytes.size()) return std::nullopt;
+    if (bytes[12] > static_cast<std::uint8_t>(Prompt::Kind::Dialog)) return std::nullopt;
+    const std::size_t lengths[] = {read<std::uint16_t>(bytes, 18), read<std::uint16_t>(bytes, 20), read<std::uint16_t>(bytes, 22)};
+    if (PromptHeaderSize + lengths[0] + lengths[1] + lengths[2] != bytes.size()) return std::nullopt;
+    Prompt prompt;
+    prompt.id = read<std::uint32_t>(bytes, 8);
+    prompt.kind = static_cast<Prompt::Kind>(bytes[12]);
+    prompt.multiline = (bytes[13] & 1u) != 0;
+    prompt.type = bytes[14];
+    prompt.enterLabel = bytes[15];
+    prompt.maxLength = read<std::uint16_t>(bytes, 16);
+    std::size_t at = PromptHeaderSize;
+    std::string* parts[] = {&prompt.title, &prompt.placeholder, &prompt.text};
+    for (std::size_t part = 0; part < 3; ++part) {
+        *parts[part] = ValidUtf8(std::string_view(reinterpret_cast<const char*>(bytes.data() + at), lengths[part]));
+        at += lengths[part];
+    }
+    if (prompt.id == 0) prompt.kind = Prompt::Kind::None;
+    return prompt;
+}
+
+std::vector<std::uint8_t> EncodeText(const TypedText& typed) {
+    const std::string text = ValidUtf8(typed.text, LargestTextDatagram - TextHeaderSize);
+    std::vector<std::uint8_t> bytes(TextHeaderSize + text.size(), 0);
+    write<std::uint32_t>(bytes.data(), 0, TextMagic);
+    write<std::uint16_t>(bytes.data(), 4, Version);
+    write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(bytes.size()));
+    write<std::uint32_t>(bytes.data(), 8, typed.prompt);
+    write<std::uint32_t>(bytes.data(), 12, typed.id);
+    bytes[16] = static_cast<std::uint8_t>(typed.action);
+    write<std::uint16_t>(bytes.data(), 18, static_cast<std::uint16_t>(text.size()));
+    std::memcpy(bytes.data() + TextHeaderSize, text.data(), text.size());
+    return bytes;
+}
+
+std::optional<TypedText> DecodeText(std::span<const std::uint8_t> bytes) {
+    if (bytes.size() < TextHeaderSize || bytes.size() > LargestTextDatagram) return std::nullopt;
+    if (read<std::uint32_t>(bytes, 0) != TextMagic || read<std::uint16_t>(bytes, 4) != Version || read<std::uint16_t>(bytes, 6) != bytes.size()) return std::nullopt;
+    if (bytes[16] > static_cast<std::uint8_t>(TypedText::Action::Cancel)) return std::nullopt;
+    const std::size_t length = read<std::uint16_t>(bytes, 18);
+    if (TextHeaderSize + length != bytes.size()) return std::nullopt;
+    TypedText typed;
+    typed.prompt = read<std::uint32_t>(bytes, 8);
+    typed.id = read<std::uint32_t>(bytes, 12);
+    typed.action = static_cast<TypedText::Action>(bytes[16]);
+    typed.text = ValidUtf8(std::string_view(reinterpret_cast<const char*>(bytes.data() + TextHeaderSize), length));
+    return typed;
+}
+
 std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes) {
     if (bytes.size() != InputSize) return std::nullopt;
     if (read<std::uint32_t>(bytes, 0) != InputMagic || read<std::uint16_t>(bytes, 4) != Version || read<std::uint16_t>(bytes, 6) != InputSize) return std::nullopt;
@@ -125,7 +279,7 @@ std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player) {
     write<std::uint16_t>(bytes.data(), 4, Version);
     write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(HelloSize));
     bytes[8] = player;
-    bytes[9] = HelloTakesPresses;
+    bytes[9] = HelloTakesPresses | HelloTakesText;
     return bytes;
 }
 
@@ -176,7 +330,7 @@ Channel::~Channel() {
 
 std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
     std::optional<Input> result;
-    std::array<std::uint8_t, InputSize + 1> buffer{};
+    thread_local std::array<std::uint8_t, LargestTextDatagram + 1> buffer{};
     std::optional<std::int64_t> arrived;
     while (true) {
         const auto got = Net::Receive(socket, buffer.data(), buffer.size(), arrived);
@@ -185,6 +339,12 @@ std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
         if (const auto press = DecodePress(bytes)) {
             if (lastPress != press->id) presses.push_back(*press);
             lastPress = press->id;
+            continue;
+        }
+        if (auto text = DecodeText(bytes)) {
+            const auto id = text->id;
+            if (lastText != id) texts.push_back(std::move(*text));
+            lastText = id;
             continue;
         }
         auto input = DecodeInput(bytes);
@@ -206,6 +366,15 @@ std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
 
 std::vector<Press> Channel::TakePresses() {
     return std::exchange(presses, {});
+}
+
+std::vector<TypedText> Channel::TakeTexts() {
+    return std::exchange(texts, {});
+}
+
+void Channel::SendPrompt(const Prompt& prompt) {
+    const auto bytes = EncodePrompt(prompt);
+    send(bytes.data(), bytes.size());
 }
 
 void Channel::Answer(const Input& last, const PadOutputState& output) {

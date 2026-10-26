@@ -66,6 +66,8 @@ private:
     void updateRemotes();
     void answer(Remote& remote, int player);
     void leave(std::uint32_t device);
+    void updatePrompt(std::chrono::steady_clock::time_point now);
+    void type(const RemotePad::TypedText& text);
 
     Pad::KeyboardMouse keyboardMouse;
     std::vector<Controller> controllers;
@@ -75,6 +77,10 @@ private:
     std::uint32_t playerOnePressed = 0;
     std::array<Output, PAD_MAX_CONTROLLERS> outputs{};
     std::array<bool, PAD_MAX_CONTROLLERS> published{};
+    // The text the game asks for, as the launcher was last told it (RemotePad prompt).
+    RemotePad::Prompt prompt;
+    std::uint32_t promptRevision = 0;
+    std::chrono::steady_clock::time_point promptSent{};
     VideoOutTelemetry::PadChangeFilter telemetryFilter;
 };
 

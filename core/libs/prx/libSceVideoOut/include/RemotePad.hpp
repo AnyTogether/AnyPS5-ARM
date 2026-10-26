@@ -8,6 +8,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/PadState.hpp"
@@ -18,13 +20,22 @@ constexpr std::uint32_t InputMagic = 0x49525041u;
 constexpr std::uint32_t OutputMagic = 0x4F525041u;
 constexpr std::uint32_t HelloMagic = 0x48525041u;
 constexpr std::uint32_t PressMagic = 0x50525041u;
+constexpr std::uint32_t PromptMagic = 0x4B525041u;
+constexpr std::uint32_t TextMagic = 0x54525041u;
 constexpr std::uint16_t Version = 1;
 constexpr std::size_t InputSize = 80;
 constexpr std::size_t OutputSize = 32;
 constexpr std::size_t HelloSize = 16;
 constexpr std::size_t PressSize = 24;
-// Bit 0 of the hello's byte 9: this engine takes presses.
+constexpr std::size_t PromptHeaderSize = 24;
+constexpr std::size_t TextHeaderSize = 20;
+// The largest prompt or text datagram: a whole 2048-character text fits in UTF-8 with room.
+constexpr std::size_t LargestTextDatagram = 8192;
+constexpr std::size_t LargestPromptTitle = 255;
+// Bit 0 of the hello's byte 9: this engine takes presses; bit 1: it says when the game asks for
+// text (APRK) and takes the text typed for it (APRT).
 constexpr std::uint8_t HelloTakesPresses = 1;
+constexpr std::uint8_t HelloTakesText = 2;
 constexpr auto ShortestHold = std::chrono::milliseconds(50);
 constexpr auto LongestHold = std::chrono::milliseconds(2000);
 constexpr auto Silence = std::chrono::milliseconds(500);
@@ -50,6 +61,48 @@ struct Press {
     std::chrono::milliseconds hold{};
 };
 
+// The game asks for text (APRK, engine to launcher): sceImeDialogInit's dialog or sceImeOpen's
+// keyboard, with the title, the placeholder and the text it starts with, all UTF-8. id 0 says no
+// text is asked for any more.
+struct Prompt {
+    enum class Kind : std::uint8_t { None = 0, Keyboard = 1, Dialog = 2 };
+    std::uint32_t id = 0;
+    Kind kind = Kind::None;
+    // The console's keyboard type (0 default, 1 basic Latin, 2 URL, 3 mail, 4 number) and Enter
+    // label (0 default, 1 send, 2 search, 3 go).
+    std::uint8_t type = 0;
+    std::uint8_t enterLabel = 0;
+    bool multiline = false;
+    // In UTF-16 units, as the game counts them.
+    std::uint16_t maxLength = 0;
+    std::string title;
+    std::string placeholder;
+    std::string text;
+};
+
+// What a phone typed for a prompt (APRT, launcher to engine): the whole text, replacing what was
+// there, and then Enter, Escape or nothing. id tells copies apart, as a press's does.
+struct TypedText {
+    enum class Action : std::uint8_t { Update = 0, Submit = 1, Cancel = 2 };
+    std::uint32_t prompt = 0;
+    std::uint32_t id = 0;
+    Action action = Action::Update;
+    std::string text;
+};
+
+std::vector<std::uint8_t> EncodePrompt(const Prompt& prompt);
+std::optional<Prompt> DecodePrompt(std::span<const std::uint8_t> bytes);
+std::vector<std::uint8_t> EncodeText(const TypedText& text);
+std::optional<TypedText> DecodeText(std::span<const std::uint8_t> bytes);
+// The longest start of `text` that is whole UTF-8 and at most `bytes` long; malformed UTF-8 and
+// characters that are no text (C0 controls other than a line feed, surrogates) are left out.
+std::string ValidUtf8(std::string_view text, std::size_t bytes = LargestTextDatagram);
+// `text` (valid UTF-8) cut into pieces of at most `bytes` bytes that end on a character, so each
+// fits an ImeHostInput.
+std::vector<std::string> TextPieces(std::string_view text, std::size_t bytes);
+// UTF-16 as a game keeps it in UTF-8; a lone surrogate is left out.
+std::string Utf8(std::u16string_view units);
+
 std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes);
 std::optional<Press> DecodePress(std::span<const std::uint8_t> bytes);
 std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOutputState& output);
@@ -69,6 +122,10 @@ public:
     std::optional<Input> Poll(std::chrono::steady_clock::time_point now);
     // The presses Poll read since the last call; a copy of the last one (the same id) is dropped.
     std::vector<Press> TakePresses();
+    // The texts Poll read since the last call; a copy of the last one (the same id) is dropped.
+    std::vector<TypedText> TakeTexts();
+    // Tells the launcher what text the game asks for (id 0: none).
+    void SendPrompt(const Prompt& prompt);
     void Answer(const Input& last, const PadOutputState& output);
     void Greet(std::chrono::steady_clock::time_point now);
     // Which player the phone is, from 1, or 0; a change is said in the next hello at once.
@@ -85,6 +142,8 @@ private:
     std::optional<std::uint64_t> session;
     std::optional<std::uint32_t> lastPress;
     std::vector<Press> presses;
+    std::optional<std::uint32_t> lastText;
+    std::vector<TypedText> texts;
     std::optional<std::chrono::steady_clock::time_point> greeted;
     std::uint8_t player = 0;
 };

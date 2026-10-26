@@ -445,6 +445,8 @@ public final class BrowserPadServer: @unchecked Sendable {
                 }
             case .look(let deep, let middle, let accent):
                 peer?.send(.look(deep: deep, middle: middle, accent: accent))
+            case .textInput(let prompt):
+                peer?.send(.ime(prompt))
             default:
                 break
             }
@@ -506,6 +508,8 @@ public final class BrowserPadServer: @unchecked Sendable {
                 peer?.send(.pong(at))
             case .latency(let milliseconds):
                 if padSession != nil { tell(.latency(milliseconds: milliseconds)) }
+            case .typed(let prompt, let text, let action):
+                if padSession != nil { tell(.typed(prompt: prompt, text: text, action: action)) }
             }
         }
 

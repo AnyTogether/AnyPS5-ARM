@@ -66,6 +66,11 @@ sealed class Message {
           id: json['id'] as String,
           approved: json['approved'] as bool,
         ),
+        'textInput' => TextInputUpdate(
+          json['prompt'] == null
+              ? null
+              : TextPrompt.fromJson(json['prompt'] as Map<String, dynamic>),
+        ),
         _ => null,
       };
     } on Object {
@@ -491,5 +496,92 @@ class TogetherHandoffAnswer extends Message {
     'type': 'togetherHandoffAnswer',
     'id': id,
     'approved': approved,
+  });
+}
+
+/// What text the game asks for: its keyboard or its text dialog, with the dialog's title and
+/// placeholder, the text it starts with and the most characters it takes (UTF-16 units).
+class TextPrompt {
+  const TextPrompt({
+    required this.id,
+    this.kind = 'dialog',
+    this.title = '',
+    this.placeholder = '',
+    this.text = '',
+    this.maxLength = 0,
+    this.multiline = false,
+    this.keyboard = 'text',
+    this.enter = 'default',
+  });
+
+  factory TextPrompt.fromJson(Map<String, dynamic> json) => TextPrompt(
+    id: json['id'] as int,
+    kind: json['kind'] as String? ?? 'dialog',
+    title: json['title'] as String? ?? '',
+    placeholder: json['placeholder'] as String? ?? '',
+    text: json['text'] as String? ?? '',
+    maxLength: json['maxLength'] as int? ?? 0,
+    multiline: json['multiline'] as bool? ?? false,
+    keyboard: json['keyboard'] as String? ?? 'text',
+    enter: json['enter'] as String? ?? 'default',
+  );
+
+  final int id;
+
+  /// keyboard (the game draws its own field) or dialog.
+  final String kind;
+  final String title;
+  final String placeholder;
+  final String text;
+  final int maxLength;
+  final bool multiline;
+
+  /// text, latin, url, mail or number.
+  final String keyboard;
+
+  /// The Enter key's label: default, send, search or go.
+  final String enter;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'kind': kind,
+    'title': title,
+    'placeholder': placeholder,
+    'text': text,
+    'maxLength': maxLength,
+    'multiline': multiline,
+    'keyboard': keyboard,
+    'enter': enter,
+  };
+}
+
+/// The game asks for text, or (null) no longer does.
+class TextInputUpdate extends Message {
+  const TextInputUpdate(this.prompt);
+
+  final TextPrompt? prompt;
+
+  @override
+  String toJson() =>
+      jsonEncode({'type': 'textInput', 'prompt': prompt?.toJson()});
+}
+
+/// What the phone does with the text it typed.
+enum TypedAction { update, submit, cancel }
+
+/// The text typed for a prompt: it replaces the game's, then is entered or cancelled.
+class Typed extends Message {
+  const Typed({required this.prompt, required this.text, required this.action});
+
+  final int prompt;
+  final String text;
+  final TypedAction action;
+
+  @override
+  String toJson() => jsonEncode({
+    'type': 'typed',
+    'prompt': prompt,
+    'text': text,
+    'action': action.name,
   });
 }

@@ -7,17 +7,20 @@ import Foundation
 ///   sent on every change and again every 200 ms while nothing changes;
 /// - `{"t":"btn","n":"ps"|"create"}`: the PS and Create buttons, which are the launcher's, not
 ///   the game's (the phone app sends them the same way);
-/// - `{"t":"ping","at":ms}`, answered with a pong; `{"t":"lat","ms":ms}`, the latency it measured.
+/// - `{"t":"ping","at":ms}`, answered with a pong; `{"t":"lat","ms":ms}`, the latency it measured;
+/// - `{"t":"type","id":prompt,"text":"...","a":"update"|"submit"|"cancel"}`: the text typed for the
+///   game's keyboard (`{"t":"ime",...}`), replacing the game's.
 public enum BrowserPadMessage: Equatable, Sendable {
     case pad(SharePadState)
     case button(String)
     case ping(Double)
     case latency(Double)
+    case typed(prompt: UInt32, text: String, action: TypedAction)
 
     /// The pad buttons a page may hold: every libScePad bit the phone app sends, nothing else.
     public static let buttonMask: UInt32 = 0x0002 | 0x0004 | 0x0008 | 0x00F0 | 0x0F00 | 0xF000 | 0x100000
-    /// A text frame longer than this is not one of the page's.
-    public static let maxLength = 1024
+    /// A text frame longer than this is not one of the page's (a typed text is the longest).
+    public static let maxLength = 4096
 
     public static func parse(_ text: String) -> BrowserPadMessage? {
         guard text.utf8.count <= maxLength, let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
@@ -34,6 +37,10 @@ public enum BrowserPadMessage: Equatable, Sendable {
         case "lat":
             guard let ms = number(object["ms"]), ms >= 0, ms < 10_000 else { return nil }
             return .latency(ms)
+        case "type":
+            guard let id = number(object["id"]), id >= 1, id <= Double(UInt32.max), let text = object["text"] as? String,
+                  let action = TypedAction(rawValue: object["a"] as? String ?? "") else { return nil }
+            return .typed(prompt: UInt32(id), text: text, action: action)
         default:
             return nil
         }
@@ -93,6 +100,8 @@ public enum BrowserPadReply: Equatable, Sendable {
     case player(Int)
     case look(deep: String, middle: String, accent: String)
     case pong(Double)
+    /// The game asks for text (the page shows a keyboard), or no longer does (nil).
+    case ime(RemoteTextPrompt?)
 
     public static func == (left: BrowserPadReply, right: BrowserPadReply) -> Bool { left.text == right.text }
 
@@ -111,6 +120,13 @@ public enum BrowserPadReply: Equatable, Sendable {
         case .player(let number): object = ["t": "player", "n": number]
         case .look(let deep, let middle, let accent): object = ["t": "look", "deep": deep, "middle": middle, "accent": accent]
         case .pong(let at): object = ["t": "pong", "at": at]
+        case .ime(let prompt):
+            if let prompt {
+                object = ["t": "ime", "id": Int(prompt.id), "kind": prompt.kind, "title": prompt.title, "placeholder": prompt.placeholder, "text": prompt.text,
+                          "max": prompt.maxLength, "multi": prompt.multiline, "kb": prompt.keyboard, "enter": prompt.enter]
+            } else {
+                object = ["t": "ime", "id": 0]
+            }
         }
         let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
         return String(decoding: data, as: UTF8.self)

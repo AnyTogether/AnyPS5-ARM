@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstddef>
+#include <memory>
 #include <mutex>
 #include <string>
 #include "SceTypes.hpp"
@@ -54,6 +55,33 @@ void Finish(std::uint32_t endStatus) {
     g_dialog.endStatus = endStatus;
     g_dialog.status = StatusFinished;
     ImeSetHostTextSink_nid_no_patch(nullptr);
+    ImeSetHostPrompt_nid_no_patch(nullptr);
+}
+
+template <std::size_t Size>
+void CopyUnits(char16_t (&target)[Size], const char16_t* source) {
+    std::size_t length = 0;
+    if (source != nullptr) {
+        while (length + 1 < Size && source[length] != u'\0') ++length;
+        if (length > 0 && length + 1 == Size && IsHighSurrogate(source[length - 1])) --length;
+        std::copy(source, source + length, target);
+    }
+    target[length] = u'\0';
+}
+
+// The dialog's param is laid out as sceImeDialogParam: its placeholder and title pointers are
+// where the keyboard's param keeps work and arg.
+void Announce(const Param& param, const std::u16string& text) {
+    auto prompt = std::make_unique<ImeHostPrompt>();
+    prompt->kind = 2;
+    prompt->type = param.type;
+    prompt->enterLabel = param.enter_label;
+    prompt->multiline = (param.option & 0x00000001u) != 0;
+    prompt->maxLength = param.max_text_length;
+    CopyUnits(prompt->title, static_cast<const char16_t*>(param.arg));
+    CopyUnits(prompt->placeholder, static_cast<const char16_t*>(param.work));
+    std::copy(text.begin(), text.begin() + static_cast<std::ptrdiff_t>(std::min<std::size_t>(text.size(), 2048)), prompt->text);
+    ImeSetHostPrompt_nid_no_patch(prompt.get());
 }
 
 void Insert(Dialog& dialog, const char16_t* units, std::size_t length) {
@@ -103,6 +131,10 @@ void Receive(ImeHostInputKind kind, const char16_t* units, std::size_t length) {
             return;
         case ImeHostInputKind::Escape:
             Finish(EndStatusUserCanceled);
+            return;
+        case ImeHostInputKind::Clear:
+            dialog.text.clear();
+            dialog.caret = 0;
             return;
     }
 }
@@ -167,6 +199,7 @@ int APS5_VABI sceImeDialogInit(const Param* param, const ExtendedParam* extended
     g_dialog.caret = length;
     g_dialog.status = StatusRunning;
     ImeSetHostTextSink_nid_no_patch(&Receive);
+    Announce(*param, g_dialog.text);
     return 0;
 }
 
@@ -174,6 +207,7 @@ int APS5_VABI sceImeDialogTerm(void) {
     std::lock_guard lock(g_mutex);
     if (g_dialog.status == StatusNone) return ErrorNotOpened;
     ImeSetHostTextSink_nid_no_patch(nullptr);
+    ImeSetHostPrompt_nid_no_patch(nullptr);
     g_dialog = Dialog{};
     return 0;
 }
@@ -186,6 +220,7 @@ int APS5_VABI sceImeDialogForceClose(void) {
     std::lock_guard lock(g_mutex);
     if (g_dialog.status == StatusNone) return ErrorNotInUse;
     ImeSetHostTextSink_nid_no_patch(nullptr);
+    ImeSetHostPrompt_nid_no_patch(nullptr);
     g_dialog = Dialog{};
     return 0;
 }

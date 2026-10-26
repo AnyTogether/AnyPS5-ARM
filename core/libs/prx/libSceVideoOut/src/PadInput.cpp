@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -374,6 +375,7 @@ void PadInput::updateRemotes() {
             remote.channel->SetPlayer(static_cast<std::uint8_t>(player + 1));
             answer(remote, player);
         }
+        for (const auto& text : remote.channel->TakeTexts()) type(text);
         for (const auto& press : remote.channel->TakePresses()) {
             playerOnePresses.Add(press, now);
             APS5_LOG_OUT("Pad: channel %zu presses 0x%x on player 1 for %lld ms", channel + 1, press.buttons, static_cast<long long>(press.hold.count()));
@@ -387,9 +389,58 @@ void PadInput::updateRemotes() {
     }
 }
 
+// What the game asks for goes to the launcher at once and again every second while it is open,
+// so a launcher that starts again or a phone that joins late still sees it.
+void PadInput::updatePrompt(std::chrono::steady_clock::time_point now) {
+    if (remotes.empty()) return;
+    const auto revision = ImeHostPromptRevision_nid_postfix();
+    const bool changed = revision != promptRevision;
+    if (!changed && (prompt.id == 0 || now - promptSent < std::chrono::seconds(1))) return;
+    if (changed) {
+        auto asked = std::make_unique<ImeHostPrompt>();
+        promptRevision = ImeGetHostPrompt_nid_postfix(asked.get());
+        prompt = RemotePad::Prompt{};
+        if (asked->id != 0) {
+            prompt.id = asked->id;
+            prompt.kind = asked->kind == 2 ? RemotePad::Prompt::Kind::Dialog : RemotePad::Prompt::Kind::Keyboard;
+            prompt.type = static_cast<std::uint8_t>(std::min<std::uint32_t>(asked->type, 255));
+            prompt.enterLabel = static_cast<std::uint8_t>(std::min<std::uint32_t>(asked->enterLabel, 255));
+            prompt.multiline = asked->multiline;
+            prompt.maxLength = static_cast<std::uint16_t>(std::min<std::uint32_t>(asked->maxLength, 0xffff));
+            prompt.title = RemotePad::Utf8(asked->title);
+            prompt.placeholder = RemotePad::Utf8(asked->placeholder);
+            prompt.text = RemotePad::Utf8(asked->text);
+            APS5_LOG_OUT("Pad: the game asks for text (prompt %u), told to the launcher", prompt.id);
+        }
+    }
+    promptSent = now;
+    for (auto& remote : remotes) remote.channel->SendPrompt(prompt);
+}
+
+// A phone's text for the prompt open now replaces the game's text: Clear, the text in pieces
+// that each fit an ImeHostInput, then Enter or Escape.
+void PadInput::type(const RemotePad::TypedText& text) {
+    if (prompt.id == 0 || text.prompt != prompt.id) return;
+    ImeHostInput clear{};
+    clear.kind = ImeHostInputKind::Clear;
+    ImePublishInput_nid_postfix(clear);
+    for (const auto& piece : RemotePad::TextPieces(text.text, sizeof(ImeHostInput{}.text) - 1)) {
+        ImeHostInput input{};
+        input.kind = ImeHostInputKind::Text;
+        std::memcpy(input.text, piece.data(), piece.size());
+        ImePublishInput_nid_postfix(input);
+    }
+    if (text.action == RemotePad::TypedText::Action::Update) return;
+    ImeHostInput finish{};
+    finish.kind = text.action == RemotePad::TypedText::Action::Submit ? ImeHostInputKind::Enter : ImeHostInputKind::Escape;
+    ImePublishInput_nid_postfix(finish);
+    APS5_LOG_OUT("Pad: a phone %s the text for prompt %u", text.action == RemotePad::TypedText::Action::Submit ? "entered" : "cancelled", prompt.id);
+}
+
 void PadInput::Update(const DisplayWindow& window) {
     if (!controllers.empty()) SDL_GameControllerUpdate();
     applyOutput();
+    updatePrompt(std::chrono::steady_clock::now());
     std::vector<PadInputState> remotesBefore;
     for (const auto& remote : remotes) remotesBefore.push_back(remote.state);
     updateRemotes();

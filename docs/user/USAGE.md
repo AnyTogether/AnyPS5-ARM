@@ -279,6 +279,37 @@ A 24-byte press datagram (`APRP`) holds buttons on the first player's pad for a 
 
 The buttons are added to the first player's for the hold, starting when the press arrives; presses that overlap are held together. A press with the same id as the channel's last one is a copy and is dropped, so a sender repeats a press two or three times in case one is lost and gives the next press another id. A press of no known button, or one that is malformed, is dropped, and a press does not change the order of the channel's inputs or its phone's player. Only digital buttons are pressed: an L2 or R2 bit does not move the analog trigger. Byte 8 of the hello is the channel's player counting from 1 (0 while its phone is none), and bit 0 of byte 9 says the engine takes presses; an engine without it drops them unread, so a launcher sends a press only to a game whose hello sets that bit.
 
+When the game asks for text, with its text dialog (`sceImeDialogInit`) or its keyboard (`sceImeOpen`), the engine says so on every remote pad channel at once and again every second while it stays open, so a phone can type it: a prompt datagram (`APRK`) of a 24-byte header followed by the title, the placeholder and the text the game starts with, in UTF-8. The title and placeholder are the dialog's own (the keyboard has none) and are cut to 255 bytes each, the text to what fits in 8192 bytes. When the game no longer asks, one prompt with id 0 says so. Bit 1 of the hello's byte 9 says the engine sends prompts and takes typed text.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | magic `0x4B525041` (`APRK`) |
+| 4 | 2 | version, 1 |
+| 6 | 2 | size: 24 and the three strings |
+| 8 | 4 | prompt id, a new one for each dialog or keyboard opened; 0 when none is open |
+| 12 | 1 | kind: 0 none, 1 keyboard, 2 dialog |
+| 13 | 1 | bit 0: multiline |
+| 14 | 1 | keyboard type: 0 default, 1 basic Latin, 2 URL, 3 mail, 4 number |
+| 15 | 1 | Enter label: 0 default, 1 send, 2 search, 3 go |
+| 16 | 2 | the most characters the game takes, in UTF-16 units |
+| 18 | 2 | title bytes |
+| 20 | 2 | placeholder bytes |
+| 22 | 2 | text bytes |
+
+The launcher answers with a text datagram (`APRT`) on any channel: the whole text typed, which replaces the game's, and what to do then. A text for a prompt that is not the one open, a copy with the channel's last text id, or a malformed one is dropped; malformed UTF-8 and control characters other than a line feed are left out of the text.
+
+| Offset | Size | Field |
+| --- | --- | --- |
+| 0 | 4 | magic `0x54525041` (`APRT`) |
+| 4 | 2 | version, 1 |
+| 6 | 2 | size: 20 and the text |
+| 8 | 4 | prompt id |
+| 12 | 4 | text id |
+| 16 | 1 | action: 0 only replace the text, 1 then Enter, 2 then Escape (cancel) |
+| 17 | 1 | zero |
+| 18 | 2 | text bytes |
+| 20 | n | the text, UTF-8 |
+
 ### Video-out and pad telemetry
 
 Set `APS5_VIDEOOUT_TELEMETRY_DIR` to a directory before launching the application to write the run's presents and pad changes to `<directory>/videoout.jsonl`, one JSON object per line, appended when the file already exists. Every line starts with `"v":1`, the host's steady-clock nanoseconds in `t_ns` and the event name in `ev`. A run starts with a `contract` line, `{"v":1,"t_ns":<ns>,"ev":"contract","contract":"v1-pad","commit":"<12 hex>","pid":<pid>,"prx":"libSceVideoOut"}`: `commit` is the source commit the libraries were built from (`unknown` when Git was not found at configuration) and `pid` tells apart the runs that appended to the same file. A `pad` line is written when the pad state the title reads changes in its buttons, sticks or triggers, `{"v":1,"t_ns":<ns>,"ev":"pad","n":<present>,"buttons":<bits>,"sticks":[<left x>,<left y>,<right x>,<right y>],"triggers":[<L2>,<R2>]}`, where `n` is the number of presents completed when the change was published, the count the window title shows. `buttons` is the button bit field in decimal, stick axes run 0-255 with 128 at the centre, and both triggers run 0-255. Motion, touch and the device kind are not compared, so a run that only moves the controller writes no `pad` line. The state a `pad` line reports is the controller and keyboard/mouse input read through SDL; input fed by `APS5_PAD_INPUT_FILE` is applied later, in `libScePad`, so a scripted run writes no `pad` line. A `present` line is written after the first present and every 30 presents after that, `{"v":1,"t_ns":<ns>,"ev":"present","n":<present>,"fps":<rate>}`, with the count and rate the window title shows. A background thread writes the lines and the title is not waited for: when it falls behind, the line is dropped and a `drops` line with the number dropped so far, `{"v":1,"t_ns":<ns>,"ev":"drops","dropped":<count>}`, is written every ten seconds while the count grows, and once at a normal exit, only when lines were dropped; an exit that skips static destructors writes no last line. A pad line the full queue refused counts as dropped even though a later publish writes the change. Without the variable no file is opened and no thread is started; an empty value is the same as an unset one, and a directory that cannot be written stops the title when video output starts, with an error naming the file.

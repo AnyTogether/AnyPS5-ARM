@@ -479,6 +479,142 @@ void helloSaysItTakesPresses() {
     require(hello[8] == 2 && (hello[9] & RemotePad::HelloTakesPresses) != 0, "the hello names the player and says presses are taken");
 }
 
+// A prompt (APRK) says what text the game asks for: a header, then the title, the placeholder
+// and the starting text in UTF-8, each with its length in the header.
+void promptRoundTrip() {
+    RemotePad::Prompt prompt;
+    prompt.id = 12;
+    prompt.kind = RemotePad::Prompt::Kind::Dialog;
+    prompt.type = 4;
+    prompt.enterLabel = 2;
+    prompt.multiline = true;
+    prompt.maxLength = 16;
+    prompt.title = "Name your save";
+    prompt.placeholder = "Save 1";
+    prompt.text = "Kral \xc3\xbc";
+    const auto bytes = RemotePad::EncodePrompt(prompt);
+    require(get<std::uint32_t>(bytes.data(), 0) == RemotePad::PromptMagic, "prompt magic");
+    require(get<std::uint16_t>(bytes.data(), 4) == 1 && get<std::uint16_t>(bytes.data(), 6) == bytes.size(), "prompt version and size");
+    require(bytes.size() == RemotePad::PromptHeaderSize + prompt.title.size() + prompt.placeholder.size() + prompt.text.size(), "header and three strings");
+    require(get<std::uint32_t>(bytes.data(), 8) == 12 && bytes[12] == 2 && bytes[13] == 1 && bytes[14] == 4 && bytes[15] == 2, "id, kind, flags, type and Enter label");
+    require(get<std::uint16_t>(bytes.data(), 16) == 16, "the most characters");
+    const auto decoded = RemotePad::DecodePrompt(view(bytes));
+    require(decoded && decoded->id == 12 && decoded->kind == RemotePad::Prompt::Kind::Dialog && decoded->multiline, "the prompt decodes");
+    require(decoded->title == prompt.title && decoded->placeholder == prompt.placeholder && decoded->text == prompt.text, "its strings come back");
+    require(decoded->type == 4 && decoded->enterLabel == 2 && decoded->maxLength == 16, "with its type, label and length");
+    const auto none = RemotePad::DecodePrompt(view(RemotePad::EncodePrompt(RemotePad::Prompt{})));
+    require(none && none->id == 0 && none->kind == RemotePad::Prompt::Kind::None, "no prompt is said with id 0");
+}
+
+void promptKeepsToItsLimits() {
+    RemotePad::Prompt prompt;
+    prompt.id = 1;
+    prompt.kind = RemotePad::Prompt::Kind::Keyboard;
+    prompt.title = std::string(400, 'a');
+    prompt.text = std::string(9000, 'b');
+    const auto bytes = RemotePad::EncodePrompt(prompt);
+    require(bytes.size() <= RemotePad::LargestTextDatagram, "a prompt stays one datagram");
+    const auto decoded = RemotePad::DecodePrompt(view(bytes));
+    require(decoded && decoded->title.size() == RemotePad::LargestPromptTitle, "a long title is cut");
+    require(!decoded->text.empty() && decoded->text.size() + decoded->title.size() + RemotePad::PromptHeaderSize <= RemotePad::LargestTextDatagram, "the text is cut to fit");
+    prompt.title = "\xc3\xbc\xc3\xbc";
+    prompt.text = {};
+    auto cut = RemotePad::EncodePrompt(prompt);
+    cut.resize(cut.size() - 1);
+    put<std::uint16_t>(cut, 6, static_cast<std::uint16_t>(cut.size()));
+    require(!RemotePad::DecodePrompt(view(cut)), "string lengths that do not add up are dropped");
+    auto magic = RemotePad::EncodePrompt(prompt);
+    put<std::uint32_t>(magic, 0, RemotePad::TextMagic);
+    require(!RemotePad::DecodePrompt(view(magic)), "a wrong magic is dropped");
+    auto kind = RemotePad::EncodePrompt(prompt);
+    kind[12] = 9;
+    require(!RemotePad::DecodePrompt(view(kind)), "an unknown kind is dropped");
+}
+
+// A text (APRT) carries the whole text typed for a prompt and what to do after.
+void textRoundTrip() {
+    RemotePad::TypedText text;
+    text.prompt = 12;
+    text.id = 3;
+    text.action = RemotePad::TypedText::Action::Submit;
+    text.text = "Ay\xc5\x9f" "e \xf0\x9f\x98\x80";
+    const auto bytes = RemotePad::EncodeText(text);
+    require(get<std::uint32_t>(bytes.data(), 0) == RemotePad::TextMagic && get<std::uint16_t>(bytes.data(), 6) == bytes.size(), "text magic and size");
+    require(get<std::uint32_t>(bytes.data(), 8) == 12 && get<std::uint32_t>(bytes.data(), 12) == 3 && bytes[16] == 1, "prompt, id and action");
+    const auto decoded = RemotePad::DecodeText(view(bytes));
+    require(decoded && decoded->prompt == 12 && decoded->id == 3 && decoded->action == RemotePad::TypedText::Action::Submit && decoded->text == text.text, "the text decodes");
+    auto action = bytes;
+    action[16] = 7;
+    require(!RemotePad::DecodeText(view(action)), "an unknown action is dropped");
+    auto broken = bytes;
+    broken[RemotePad::TextHeaderSize] = static_cast<std::uint8_t>(0xff);
+    const auto cleaned = RemotePad::DecodeText(view(broken));
+    require(cleaned && cleaned->text.find('\xff') == std::string::npos, "malformed UTF-8 is left out of the text");
+    auto shorter = bytes;
+    shorter.pop_back();
+    require(!RemotePad::DecodeText(view(shorter)), "a text whose length does not add up is dropped");
+    require(!RemotePad::DecodeInput(view(bytes)) && !RemotePad::DecodePress(view(bytes)), "a text is no input and no press");
+}
+
+void validUtf8AndPieces() {
+    require(RemotePad::ValidUtf8("ab\xc3\xbc") == "ab\xc3\xbc", "valid UTF-8 stays");
+    require(RemotePad::ValidUtf8("a\xc3") == "a", "a cut character is left out");
+    require(RemotePad::ValidUtf8("a\x01" "b\nc") == "ab\nc", "control characters other than a line feed go");
+    require(RemotePad::ValidUtf8("a\xed\xa0\x80" "b") == "ab", "an encoded surrogate goes");
+    require(RemotePad::ValidUtf8("ab\xc3\xbc", 3) == "ab", "a limit never cuts a character");
+    const std::string text = "\xf0\x9f\x98\x80\xf0\x9f\x98\x80" + std::string(30, 'x') + "\xc3\xbc";
+    const auto pieces = RemotePad::TextPieces(text, 31);
+    std::string joined;
+    for (const auto& piece : pieces) {
+        require(!piece.empty() && piece.size() <= 31, "each piece fits");
+        require(RemotePad::ValidUtf8(piece) == piece, "and ends on a character");
+        joined += piece;
+    }
+    require(joined == text, "the pieces make the text");
+    require(RemotePad::TextPieces("", 31).empty(), "no text, no piece");
+    require(RemotePad::Utf8(u"Ay\u015fe \U0001F600") == "Ay\xc5\x9f" "e \xf0\x9f\x98\x80", "a game's UTF-16 becomes UTF-8");
+    const char16_t lone[] = {u'a', 0xd800, u'b', 0xdc00, 0};
+    require(RemotePad::Utf8(lone) == "ab", "lone surrogates are left out");
+}
+
+// The engine says on its channel what text the game asks for, and takes the typed text the
+// launcher sends back, a copy counting once.
+void channelCarriesPromptsAndTexts() {
+    Peer launcher;
+    RemotePad::Channel channel(launcher.port);
+    RemotePad::Prompt prompt;
+    prompt.id = 5;
+    prompt.kind = RemotePad::Prompt::Kind::Dialog;
+    prompt.title = "Code";
+    channel.SendPrompt(prompt);
+    std::vector<std::uint8_t> bytes(RemotePad::LargestTextDatagram);
+    std::optional<std::int64_t> arrived;
+    const auto got = RemotePad::Net::Receive(launcher.socket, bytes.data(), bytes.size(), arrived);
+    require(got.has_value(), "the prompt reaches the launcher");
+    bytes.resize(*got);
+    const auto heard = RemotePad::DecodePrompt(view(bytes));
+    require(heard && heard->id == 5 && heard->title == "Code", "as it was sent");
+    RemotePad::TypedText text{5, 1, RemotePad::TypedText::Action::Submit, std::string(3000, 'k')};
+    launcher.send(RemotePad::EncodeText(text), channel.Port());
+    launcher.send(RemotePad::EncodeText(text), channel.Port());
+    const auto now = std::chrono::steady_clock::now();
+    std::vector<RemotePad::TypedText> taken;
+    for (int attempt = 0; attempt < 50 && taken.empty(); ++attempt) {
+        require(!channel.Poll(now), "a text is not an input");
+        taken = channel.TakeTexts();
+        if (taken.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    channel.Poll(now);
+    const auto more = channel.TakeTexts();
+    require(taken.size() + more.size() == 1, "a copy of the last text is dropped");
+    require(taken[0].text.size() == 3000 && taken[0].prompt == 5, "a long text arrives whole");
+}
+
+void helloSaysItTakesText() {
+    require((RemotePad::EncodeHello(1)[9] & RemotePad::HelloTakesText) != 0, "the hello says the engine takes text");
+}
+
 void environmentForMorePlayers() {
     unsetVariable("ANYPS5_REMOTE_PAD");
     setVariable("ANYPS5_REMOTE_PAD_2", "127.0.0.1:5002");
@@ -525,6 +661,12 @@ int main() try {
     pressesHoldForTheirTime();
     channelTakesPresses();
     helloSaysItTakesPresses();
+    promptRoundTrip();
+    promptKeepsToItsLimits();
+    textRoundTrip();
+    validUtf8AndPieces();
+    channelCarriesPromptsAndTexts();
+    helloSaysItTakesText();
     std::cout << "remote pad tests passed\n";
     return 0;
 } catch (const std::exception& error) {
