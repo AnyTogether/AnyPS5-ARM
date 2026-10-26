@@ -431,6 +431,9 @@ int stream(const std::string& peerText, const std::string& role, std::size_t byt
     const bool read = readAll(socket, back, bytes);
     std::cout << "echoed=" << back.size() << "\nsame=" << (read && back == sent ? 1 : 0) << '\n';
     sceNetSocketClose(socket);
+    // A game keeps running after it closes a stream; the close reaches the peer before this
+    // stand-in exits (an exit with the bridge's queue unsent would break the stream instead).
+    std::this_thread::sleep_for(300ms);
     return read && back == sent ? 0 : 1;
 }
 

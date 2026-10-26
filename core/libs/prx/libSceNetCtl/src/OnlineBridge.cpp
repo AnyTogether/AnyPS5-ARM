@@ -94,7 +94,12 @@ bool Bridge::SendStream(const Wire::Stream& stream) {
         std::unique_lock lock(mutex);
         const auto socket = liveSocket;
         if (stream.type == Wire::Type::StreamData) {
-            outgoingChanged.wait(lock, [&] { return stopping || !state.connected || liveSocket != socket || outgoingBytes + frame.size() <= MaxQueuedBytes; });
+            // Half the queue stays free for datagrams and the other frames, so a busy stream never
+            // crowds them out.
+            outgoingChanged.wait(lock, [&] {
+                return stopping || !state.connected || liveSocket != socket ||
+                    (outgoingBytes + frame.size() <= MaxQueuedBytes / 2 && outgoing.size() < MaxQueuedFrames / 2);
+            });
         }
         if (stopping || !state.connected || liveSocket == Net::None || liveSocket != socket) return false;
         outgoingBytes += frame.size();

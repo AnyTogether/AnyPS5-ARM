@@ -1450,6 +1450,90 @@ static int disconnect_datagram(const Sock& socket) {
 extern "C" void RefuseClosedLoopbackAtOnce_nid_no_patch(SOCKET socket, const sockaddr* address);
 #endif
 
+// A stream P2P connect opens a stream to the player through the launcher (a blocking one waits for
+// the player to accept or refuse it, ending early when the socket is closed or aborted), then
+// connects the host socket to the engine's relay listener, which pairs it with the stream.
+static int connect_stream_p2p(int s, const Sock& socket, const void* addr, std::uint32_t addrlen) {
+    const auto peer = VirtualNet::VirtualDestination(addr, addrlen);
+    if (!peer || Online::Wire::IsGroup(*peer)) return fail(NET_EHOSTUNREACH);
+    if (socket.streamPeer != 0) return fail(NET_EISCONN);
+    if (socket.listening) return fail(NET_EINVAL);
+    if (!bind_stream_loopback(socket.native->value)) return fail(native_error());
+    std::uint16_t port = 0;
+    std::memcpy(&port, static_cast<const std::uint8_t*>(addr) + 2, 2);
+    const auto vport = VirtualNet::GuestVport(addr, addrlen);
+    const auto opening = VirtualStream::Open(*peer, ntohs(port), vport, socket.gamePort, socket.gameVport, native_port(*socket.native));
+    if (!opening) return fail(NET_ENETUNREACH);
+    // Still the socket that asked (not closed, nor its number reused meanwhile)?
+    const auto same = [&](bool& wasAborted) {
+        std::lock_guard lk(g_mutex);
+        const auto it = g_socks.find(s);
+        if (it == g_socks.end() || it->second.native != socket.native) return false;
+        wasAborted = it->second.aborted;
+        return !wasAborted;
+    };
+    const auto giveUp = [&](int error) {
+        VirtualStream::Abandon(opening->id);
+        std::lock_guard lk(g_mutex);
+        const auto it = g_socks.find(s);
+        if (it != g_socks.end() && it->second.native == socket.native) {
+            it->second.streamPeer = 0;
+            it->second.streamPeerPort = 0;
+            it->second.streamPeerVport = 0;
+        }
+        return fail(error);
+    };
+    bool aborted = false;
+    if (!socket.native->nonblock) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
+        auto answer = VirtualStream::Answer::TimedOut;
+        while (std::chrono::steady_clock::now() < deadline) {
+            answer = VirtualStream::Wait(opening->id, std::chrono::milliseconds(100));
+            if (answer != VirtualStream::Answer::TimedOut) break;
+            if (!same(aborted)) return giveUp(aborted ? NET_ECONNABORTED : NET_EBADF);
+        }
+        if (answer != VirtualStream::Answer::Accepted) {
+            return giveUp(answer == VirtualStream::Answer::Refused ? NET_ECONNREFUSED : answer == VirtualStream::Answer::TimedOut ? NET_ETIMEDOUT : NET_EHOSTUNREACH);
+        }
+    }
+    {
+        std::lock_guard lk(g_mutex);
+        auto it = g_socks.find(s);
+        if (it == g_socks.end() || it->second.native != socket.native) {
+            VirtualStream::Abandon(opening->id);
+            return fail(NET_EBADF);
+        }
+        it->second.bound = true;
+        it->second.streamPeer = *peer;
+        it->second.streamPeerPort = ntohs(port);
+        it->second.streamPeerVport = vport;
+    }
+    sockaddr_in relay{};
+    relay.sin_family = AF_INET;
+    relay.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    relay.sin_port = htons(opening->relayPort);
+    if (::connect(socket.native->value, reinterpret_cast<const sockaddr*>(&relay), sizeof(relay)) == 0) return 0;
+#ifdef _WIN32
+    if (WSAGetLastError() == WSAEWOULDBLOCK) {
+        if (socket.native->nonblock) return fail(NET_EINPROGRESS);
+        fd_set writable;
+        fd_set failed;
+        FD_ZERO(&writable);
+        FD_ZERO(&failed);
+        FD_SET(socket.native->value, &writable);
+        FD_SET(socket.native->value, &failed);
+        if (::select(0, nullptr, &writable, &failed, nullptr) < 0) return giveUp(native_error());
+        int error = 0;
+        int size = sizeof(error);
+        if (::getsockopt(socket.native->value, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &size) != 0) return giveUp(native_error());
+        return error == 0 ? 0 : giveUp(net_error(error));
+    }
+#else
+    if (errno == EINPROGRESS) return fail(NET_EINPROGRESS);
+#endif
+    return giveUp(native_error());
+}
+
 int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
     Sock socket;
     {
@@ -1485,46 +1569,8 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
     }
     sockaddr_storage native{};
     NativeLength native_length = 0;
-    std::uint32_t openedStream = 0;
-    if (stream_p2p(socket)) {
-        // A stream P2P connect opens a stream to the player through the launcher (a blocking one waits
-        // for the player to accept or refuse it), then connects the host socket to the engine's relay.
-        const auto peer = VirtualNet::VirtualDestination(addr, addrlen);
-        if (!peer || Online::Wire::IsGroup(*peer)) return fail(NET_EHOSTUNREACH);
-        if (socket.streamPeer != 0) return fail(NET_EISCONN);
-        if (socket.listening) return fail(NET_EINVAL);
-        if (!bind_stream_loopback(socket.native->value)) return fail(native_error());
-        std::uint16_t port = 0;
-        std::memcpy(&port, static_cast<const std::uint8_t*>(addr) + 2, 2);
-        const auto vport = VirtualNet::GuestVport(addr, addrlen);
-        const auto opening = VirtualStream::Open(*peer, ntohs(port), vport, socket.gamePort, socket.gameVport, native_port(*socket.native));
-        if (!opening) return fail(NET_ENETUNREACH);
-        if (!socket.native->nonblock) {
-            const auto answer = VirtualStream::Wait(opening->id, std::chrono::seconds(20));
-            if (answer != VirtualStream::Answer::Accepted) {
-                VirtualStream::Abandon(opening->id);
-                return fail(answer == VirtualStream::Answer::Refused ? NET_ECONNREFUSED : answer == VirtualStream::Answer::TimedOut ? NET_ETIMEDOUT : NET_EHOSTUNREACH);
-            }
-        }
-        {
-            std::lock_guard lk(g_mutex);
-            auto it = g_socks.find(s);
-            if (it == g_socks.end()) {
-                VirtualStream::Abandon(opening->id);
-                return fail(NET_EBADF);
-            }
-            it->second.bound = true;
-            it->second.streamPeer = *peer;
-            it->second.streamPeerPort = ntohs(port);
-            it->second.streamPeerVport = vport;
-        }
-        auto& relay = reinterpret_cast<sockaddr_in&>(native);
-        relay.sin_family = AF_INET;
-        relay.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        relay.sin_port = htons(opening->relayPort);
-        native_length = sizeof(relay);
-        openedStream = opening->id;
-    } else if (!guest_to_native_address(addr, addrlen, native, native_length)) return fail(NET_EINVAL);
+    if (stream_p2p(socket)) return connect_stream_p2p(s, socket, addr, addrlen);
+    if (!guest_to_native_address(addr, addrlen, native, native_length)) return fail(NET_EINVAL);
 #ifdef _WIN32
     if (socket.type == NET_SOCK_STREAM) RefuseClosedLoopbackAtOnce_nid_no_patch(socket.native->value, reinterpret_cast<const sockaddr*>(&native));
 #endif
@@ -1534,16 +1580,6 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
         note_local_address(s, socket);
 #endif
         return 0;
-    }
-#ifdef _WIN32
-    const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
-#else
-    const bool pending = errno == EINPROGRESS;
-#endif
-    if (openedStream != 0 && !pending) {
-        const int error = native_error();
-        VirtualStream::Abandon(openedStream);
-        return fail(error);
     }
 #ifdef _WIN32
     if (WSAGetLastError() == WSAEWOULDBLOCK) {

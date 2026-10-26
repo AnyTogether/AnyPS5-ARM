@@ -45,7 +45,7 @@ public:
     bool SendDatagram(const Wire::Datagram& datagram);
     void SetDatagramReceiver(std::function<void(const Wire::Datagram&)> receiver);
     void SetPushReceiver(std::function<void(const Wire::PushEvent&)> receiver);
-    // Stream frames keep their order with each other and with datagrams. StreamData waits while
+    // Stream frames keep their order with each other and with datagrams. StreamData waits while half
     // the queue to the launcher is full (the game's socket then fills up, as TCP would); the
     // other stream frames never wait. False while no launcher is connected.
     bool SendStream(const Wire::Stream& stream);

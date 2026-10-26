@@ -213,6 +213,17 @@ void streams(Online::Testing::FakeLauncher& launcher) {
     const auto nobody = make(Peer, 4000, 1);
     require(sceNetConnect(refused, &nobody, sizeof(nobody)) == (ErrorBase | 61), "a connect to a port nobody listens on is refused");
     sceNetSocketClose(refused);
+    const int refusedLater = sceNetSocket("refused later", AfInet, SockStreamP2p, 0);
+    require(sceNetSetsockopt(refusedLater, SolSocket, SoNbio, &on, sizeof(on)) == 0, "non-blocking");
+    const int later = sceNetConnect(refusedLater, &nobody, sizeof(nobody));
+    require(later == 0 || later == (ErrorBase | 36), "a non-blocking connect to nobody starts");
+    std::int64_t refusedRead = ErrorBase | 35;
+    for (int attempt = 0; attempt < 300 && refusedRead == (ErrorBase | 35); ++attempt) {
+        refusedRead = sceNetRecv(refusedLater, end, sizeof(end), 0);
+        if (refusedRead == (ErrorBase | 35)) std::this_thread::sleep_for(10ms);
+    }
+    require(refusedRead == (ErrorBase | 54), "and the refusal resets it, never a clean end: " + std::to_string(refusedRead));
+    sceNetSocketClose(refusedLater);
     const int outside = sceNetSocket("outside", AfInet, SockStreamP2p, 0);
     const auto real = make(0x7F000001u, 3659, 1);
     require(sceNetConnect(outside, &real, sizeof(real)) == (ErrorBase | 65), "a stream P2P socket cannot reach a real address");

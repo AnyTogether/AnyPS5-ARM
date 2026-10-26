@@ -41,7 +41,6 @@ struct Stream {
     // The game ended its side; the launcher was told.
     bool localEnded = false;
     int running = 0;
-    // The port accept sees for a connection into a listener, kept until the stream ends.
 
     ~Stream() {
         if (socket != Net::None) Net::Close(socket);
@@ -53,17 +52,27 @@ struct Listener {
     int descriptor = -1;
 };
 
-std::mutex mutex;
-std::map<std::pair<std::uint16_t, std::uint16_t>, Listener> listeners;
-std::map<std::uint32_t, std::shared_ptr<Stream>> streams;
-// Streams opened by the game whose socket has not connected to the relay listener yet, by the
-// loopback port the socket is bound to.
-std::map<std::uint16_t, std::uint32_t> connecting;
-std::map<std::uint16_t, VirtualNet::Source> acceptedFrom;
-std::uint32_t lastId = 0;
-Net::Handle relay = Net::None;
-std::uint16_t relayPort = 0;
-bool receiving = false;
+// Never destroyed: the streams' threads are detached and may still run while the process exits.
+struct Shared {
+    std::mutex mutex;
+    std::map<std::pair<std::uint16_t, std::uint16_t>, Listener> listeners;
+    std::map<std::uint32_t, std::shared_ptr<Stream>> streams;
+    // Streams opened by the game whose socket has not connected to the relay listener yet, by the
+    // loopback port the socket is bound to.
+    std::map<std::uint16_t, std::uint32_t> connecting;
+    // Who each connection into a listener is, by the engine port accept sees it come from; taken by
+    // accept, or dropped with its listener.
+    struct Player {
+        VirtualNet::Source source;
+        std::uint16_t listener = 0;
+    };
+    std::map<std::uint16_t, Player> acceptedFrom;
+    std::uint32_t lastId = 0;
+    Net::Handle relay = Net::None;
+    std::uint16_t relayPort = 0;
+    bool receiving = false;
+};
+Shared& shared = *new Shared;
 
 void send(const Wire::Stream& frame) {
     OnlineSendStream_nid_no_patch(frame);
@@ -78,10 +87,10 @@ void sendClose(std::uint32_t id, Wire::StreamCloseReason reason) {
 }
 
 void finished(const std::shared_ptr<Stream>& stream) {
-    std::lock_guard lock(mutex);
-    const auto found = streams.find(stream->id);
-    if (found != streams.end() && found->second == stream) streams.erase(found);
-    std::erase_if(connecting, [&](const auto& entry) { return entry.second == stream->id; });
+    std::lock_guard lock(shared.mutex);
+    const auto found = shared.streams.find(stream->id);
+    if (found != shared.streams.end() && found->second == stream) shared.streams.erase(found);
+    std::erase_if(shared.connecting, [&](const auto& entry) { return entry.second == stream->id; });
 }
 
 // Marks a thread of the stream done; the last one forgets the stream (its socket closes with it).
@@ -94,13 +103,16 @@ void leave(const std::shared_ptr<Stream>& stream) {
     if (last) finished(stream);
 }
 
+// Ends both directions: the game's socket gets a reset when the engine's end closes (after both
+// threads leave), never a clean end first. The reader wakes from its receive; the writer from its
+// wait, or from its send within the send timeout.
 void breakStream(Stream& stream) {
     std::lock_guard lock(stream.mutex);
     if (stream.broken) return;
     stream.broken = true;
     if (stream.socket != Net::None) {
         Net::ResetOnClose(stream.socket);
-        Net::ShutdownBoth(stream.socket);
+        Net::WakeReceiver(stream.socket);
     }
     stream.changed.notify_all();
 }
@@ -161,11 +173,22 @@ void writeLoop(std::shared_ptr<Stream> stream) {
             stream->queued -= chunk.size();
         }
         std::size_t done = 0;
-        while (done < chunk.size()) {
+        bool broken = false;
+        while (done < chunk.size() && !broken) {
             const auto sent = Net::Send(stream->socket, chunk.data() + done, chunk.size() - done);
-            if (sent <= 0) break;
-            done += static_cast<std::size_t>(sent);
+            if (sent > 0) {
+                done += static_cast<std::size_t>(sent);
+                continue;
+            }
+            if (sent < 0 && Net::TimedOut()) {
+                // The game is not reading; keep trying unless the stream broke meanwhile.
+                std::lock_guard lock(stream->mutex);
+                broken = stream->broken;
+                continue;
+            }
+            break;
         }
+        if (broken) break;
         if (done < chunk.size()) {
             // The game closed its socket: what the peer still sends has nowhere to go.
             bool ended = false;
@@ -184,14 +207,18 @@ void writeLoop(std::shared_ptr<Stream> stream) {
 void start(const std::shared_ptr<Stream>& stream, Net::Handle socket) {
     {
         std::lock_guard lock(stream->mutex);
-        stream->socket = socket;
-        stream->running = 2;
         if (stream->broken) {
+            // Refused or broken before the game's socket was paired: it gets a reset at once.
             Net::ResetOnClose(socket);
-            Net::ShutdownBoth(socket);
+            Net::Close(socket);
+        } else {
+            stream->socket = socket;
+            stream->running = 2;
         }
     }
+    if (stream->socket == Net::None) return finished(stream);
     Net::SetNoDelay(socket);
+    Net::SetSendTimeout(socket, std::chrono::milliseconds(200));
     std::thread(readLoop, stream).detach();
     std::thread(writeLoop, stream).detach();
 }
@@ -207,12 +234,12 @@ void relayLoop(Net::Handle listener) {
         const auto port = Net::PeerPort(accepted);
         std::shared_ptr<Stream> stream;
         {
-            std::lock_guard lock(mutex);
-            const auto found = connecting.find(port);
-            if (found != connecting.end()) {
-                const auto opened = streams.find(found->second);
-                if (opened != streams.end()) stream = opened->second;
-                connecting.erase(found);
+            std::lock_guard lock(shared.mutex);
+            const auto found = shared.connecting.find(port);
+            if (found != shared.connecting.end()) {
+                const auto opened = shared.streams.find(found->second);
+                if (opened != shared.streams.end()) stream = opened->second;
+                shared.connecting.erase(found);
             }
         }
         if (!stream) {
@@ -223,43 +250,31 @@ void relayLoop(Net::Handle listener) {
     }
 }
 
-void opened(const Wire::Stream& frame) {
-    Listener listener;
-    {
-        std::lock_guard lock(mutex);
-        const auto found = listeners.find({frame.localPort, frame.localVport});
-        if (found == listeners.end() || streams.contains(frame.stream)) {
-            listener.descriptor = -1;
-        } else {
-            listener = found->second;
-        }
-    }
-    if (listener.descriptor < 0) return sendClose(frame.stream, Wire::StreamCloseReason::Refused);
+// Connects a stream the launcher opened into the game's listener. On its own thread: a listener
+// whose backlog is full may hold the connect for up to a second, and the bridge's reader must not
+// wait for it.
+void connectIn(std::shared_ptr<Stream> stream, Wire::Stream frame, Listener listener) {
     // The engine's end is bound before it connects, so the game's accept always finds who it is.
-    const auto socket = Net::OpenTcp();
-    if (socket == Net::None) return sendClose(frame.stream, Wire::StreamCloseReason::Refused);
-    const auto port = Net::BindLoopback(socket);
-    if (!port) {
+    auto socket = Net::OpenTcp();
+    const auto port = socket == Net::None ? std::nullopt : Net::BindLoopback(socket);
+    if (port) {
+        {
+            std::lock_guard lock(shared.mutex);
+            shared.acceptedFrom[*port] = {VirtualNet::Source{frame.peer, frame.peerPort, frame.peerVport}, listener.nativePort};
+        }
+        if (!Net::ConnectLoopbackWithin(socket, listener.nativePort, 1000)) {
+            std::lock_guard lock(shared.mutex);
+            shared.acceptedFrom.erase(*port);
+            Net::Close(socket);
+            socket = Net::None;
+        }
+    } else if (socket != Net::None) {
         Net::Close(socket);
+        socket = Net::None;
+    }
+    if (socket == Net::None) {
+        finished(stream);
         return sendClose(frame.stream, Wire::StreamCloseReason::Refused);
-    }
-    {
-        std::lock_guard lock(mutex);
-        acceptedFrom[*port] = VirtualNet::Source{frame.peer, frame.peerPort, frame.peerVport};
-    }
-    if (!Net::ConnectLoopbackWithin(socket, listener.nativePort, 1000)) {
-        Net::Close(socket);
-        std::lock_guard lock(mutex);
-        acceptedFrom.erase(*port);
-        return sendClose(frame.stream, Wire::StreamCloseReason::Refused);
-    }
-    auto stream = std::make_shared<Stream>();
-    stream->id = frame.stream;
-    stream->answered = true;
-    stream->accepted = true;
-    {
-        std::lock_guard lock(mutex);
-        streams[frame.stream] = stream;
     }
     Wire::Stream accept;
     accept.type = Wire::Type::StreamAccept;
@@ -268,14 +283,35 @@ void opened(const Wire::Stream& frame) {
     start(stream, socket);
 }
 
+void opened(const Wire::Stream& frame) {
+    Listener listener;
+    auto stream = std::make_shared<Stream>();
+    stream->id = frame.stream;
+    stream->answered = true;
+    stream->accepted = true;
+    {
+        std::lock_guard lock(shared.mutex);
+        const auto found = shared.listeners.find({frame.localPort, frame.localVport});
+        if (found == shared.listeners.end() || shared.streams.contains(frame.stream)) {
+            listener.descriptor = -1;
+        } else {
+            listener = found->second;
+            // Known at once, so bytes that follow the open wait in its queue.
+            shared.streams[frame.stream] = stream;
+        }
+    }
+    if (listener.descriptor < 0) return sendClose(frame.stream, Wire::StreamCloseReason::Refused);
+    std::thread(connectIn, stream, frame, listener).detach();
+}
+
 void received(const Wire::Stream& frame) {
     if (frame.type == Wire::Type::StreamOpen) return opened(frame);
     std::vector<std::shared_ptr<Stream>> targets;
     {
-        std::lock_guard lock(mutex);
+        std::lock_guard lock(shared.mutex);
         if (frame.stream == 0) {
-            for (const auto& entry : streams) targets.push_back(entry.second);
-        } else if (const auto found = streams.find(frame.stream); found != streams.end()) {
+            for (const auto& entry : shared.streams) targets.push_back(entry.second);
+        } else if (const auto found = shared.streams.find(frame.stream); found != shared.streams.end()) {
             targets.push_back(found->second);
         }
     }
@@ -322,13 +358,13 @@ void dispatch(const Wire::Stream& frame) {
     received(frame);
 }
 
-// Under `mutex`.
+// Under `shared.mutex`.
 bool prepare() {
-    if (!receiving) {
+    if (!shared.receiving) {
         OnlineSetStreamReceiver_nid_no_patch(dispatch);
-        receiving = true;
+        shared.receiving = true;
     }
-    if (relay != Net::None) return true;
+    if (shared.relay != Net::None) return true;
     const auto listener = Net::OpenTcp();
     if (listener == Net::None) return false;
     const auto port = Net::ListenLoopback(listener, 64);
@@ -336,8 +372,8 @@ bool prepare() {
         Net::Close(listener);
         return false;
     }
-    relay = listener;
-    relayPort = *port;
+    shared.relay = listener;
+    shared.relayPort = *port;
     std::thread(relayLoop, listener).detach();
     return true;
 }
@@ -345,17 +381,22 @@ bool prepare() {
 }
 
 bool Listen(std::uint16_t port, std::uint16_t vport, std::uint16_t nativePort, int descriptor) {
-    std::lock_guard lock(mutex);
+    std::lock_guard lock(shared.mutex);
     if (!prepare()) return false;
-    const auto found = listeners.find({port, vport});
-    if (found != listeners.end() && found->second.descriptor != descriptor) return false;
-    listeners[{port, vport}] = Listener{nativePort, descriptor};
+    const auto found = shared.listeners.find({port, vport});
+    if (found != shared.listeners.end() && found->second.descriptor != descriptor) return false;
+    shared.listeners[{port, vport}] = Listener{nativePort, descriptor};
     return true;
 }
 
 void Forget(int descriptor) {
-    std::lock_guard lock(mutex);
-    std::erase_if(listeners, [descriptor](const auto& entry) { return entry.second.descriptor == descriptor; });
+    std::lock_guard lock(shared.mutex);
+    for (const auto& [key, listener] : shared.listeners) {
+        if (listener.descriptor != descriptor) continue;
+        // Connections still waiting in its backlog go with it.
+        std::erase_if(shared.acceptedFrom, [&](const auto& entry) { return entry.second.listener == listener.nativePort; });
+    }
+    std::erase_if(shared.listeners, [descriptor](const auto& entry) { return entry.second.descriptor == descriptor; });
 }
 
 std::optional<Opening> Open(std::uint32_t peer, std::uint16_t peerPort, std::uint16_t peerVport, std::uint16_t localPort, std::uint16_t localVport,
@@ -363,15 +404,15 @@ std::optional<Opening> Open(std::uint32_t peer, std::uint16_t peerPort, std::uin
     auto stream = std::make_shared<Stream>();
     Opening opening;
     {
-        std::lock_guard lock(mutex);
+        std::lock_guard lock(shared.mutex);
         if (!prepare()) return std::nullopt;
         do {
-            lastId = (lastId + 1) & ~Wire::LauncherStream;
-        } while (lastId == 0 || streams.contains(lastId));
-        stream->id = lastId;
-        streams[lastId] = stream;
-        connecting[guestPort] = lastId;
-        opening = Opening{lastId, relayPort};
+            shared.lastId = (shared.lastId + 1) & ~Wire::LauncherStream;
+        } while (shared.lastId == 0 || shared.streams.contains(shared.lastId));
+        stream->id = shared.lastId;
+        shared.streams[shared.lastId] = stream;
+        shared.connecting[guestPort] = shared.lastId;
+        opening = Opening{shared.lastId, shared.relayPort};
     }
     Wire::Stream frame;
     frame.type = Wire::Type::StreamOpen;
@@ -391,9 +432,9 @@ std::optional<Opening> Open(std::uint32_t peer, std::uint16_t peerPort, std::uin
 Answer Wait(std::uint32_t id, std::chrono::milliseconds timeout) {
     std::shared_ptr<Stream> stream;
     {
-        std::lock_guard lock(mutex);
-        const auto found = streams.find(id);
-        if (found == streams.end()) return Answer::Broken;
+        std::lock_guard lock(shared.mutex);
+        const auto found = shared.streams.find(id);
+        if (found == shared.streams.end()) return Answer::Broken;
         stream = found->second;
     }
     std::unique_lock lock(stream->mutex);
@@ -406,12 +447,12 @@ Answer Wait(std::uint32_t id, std::chrono::milliseconds timeout) {
 void Abandon(std::uint32_t id) {
     std::shared_ptr<Stream> stream;
     {
-        std::lock_guard lock(mutex);
-        const auto found = streams.find(id);
-        if (found == streams.end()) return;
+        std::lock_guard lock(shared.mutex);
+        const auto found = shared.streams.find(id);
+        if (found == shared.streams.end()) return;
         stream = found->second;
-        streams.erase(found);
-        std::erase_if(connecting, [id](const auto& entry) { return entry.second == id; });
+        shared.streams.erase(found);
+        std::erase_if(shared.connecting, [id](const auto& entry) { return entry.second == id; });
     }
     bool told = false;
     {
@@ -424,11 +465,11 @@ void Abandon(std::uint32_t id) {
 }
 
 std::optional<VirtualNet::Source> Accepted(std::uint16_t enginePort) {
-    std::lock_guard lock(mutex);
-    const auto found = acceptedFrom.find(enginePort);
-    if (found == acceptedFrom.end()) return std::nullopt;
-    const auto source = found->second;
-    acceptedFrom.erase(found);
+    std::lock_guard lock(shared.mutex);
+    const auto found = shared.acceptedFrom.find(enginePort);
+    if (found == shared.acceptedFrom.end()) return std::nullopt;
+    const auto source = found->second.source;
+    shared.acceptedFrom.erase(found);
     return source;
 }
 

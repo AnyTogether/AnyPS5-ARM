@@ -172,6 +172,22 @@ inline void ShutdownWrite(Handle handle) {
     ::shutdown(native(handle), SD_SEND);
 }
 
+// Wakes a thread blocked receiving on the socket (and, on Windows, one blocked sending) without
+// sending the peer anything.
+inline void WakeReceiver(Handle handle) {
+    ::shutdown(native(handle), SD_RECEIVE);
+    ::CancelIoEx(reinterpret_cast<HANDLE>(native(handle)), nullptr);
+}
+
+// Nothing on Windows: a Winsock send that times out leaves the socket unusable, and WakeReceiver's
+// CancelIoEx already ends a blocked send.
+inline void SetSendTimeout(Handle, std::chrono::milliseconds) {}
+
+// The last send failed because its timeout passed.
+inline bool TimedOut() {
+    return false;
+}
+
 // The next close sends a reset instead of a graceful end.
 inline void ResetOnClose(Handle handle) {
     linger value{1, 0};
@@ -311,6 +327,21 @@ inline bool InProgress() {
 
 inline void ShutdownWrite(Handle handle) {
     ::shutdown(static_cast<int>(handle), SHUT_WR);
+}
+
+inline void WakeReceiver(Handle handle) {
+    ::shutdown(static_cast<int>(handle), SHUT_RD);
+}
+
+inline void SetSendTimeout(Handle handle, std::chrono::milliseconds timeout) {
+    timeval value{};
+    value.tv_sec = static_cast<decltype(value.tv_sec)>(timeout.count() / 1000);
+    value.tv_usec = static_cast<decltype(value.tv_usec)>((timeout.count() % 1000) * 1000);
+    ::setsockopt(static_cast<int>(handle), SOL_SOCKET, SO_SNDTIMEO, &value, sizeof(value));
+}
+
+inline bool TimedOut() {
+    return errno == EAGAIN || errno == EWOULDBLOCK;
 }
 
 inline void ResetOnClose(Handle handle) {
