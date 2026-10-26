@@ -37,16 +37,23 @@ extension AppModel {
         } else if gameSession == nil {
             // Left from a launcher that stopped without ending it.
             try? TogetherGameSession.write(nil, me: me.id, to: TogetherGameSession.bridgeFile)
-        } else if let session = gameSession {
+        } else if let session = gameSession, starting == nil {
+            // The game ended: the host's session ends with it (a Play Together game says the
+            // game exited), a player leaves theirs.
             let client = together
             keepSession(nil, me: me.id)
+            peerLinks = [:]
             Task {
-                if session.host?.userId == me.id { try? await client.endGameSession(session.id) } else { try? await client.leaveGameSession(session.id) }
+                if session.host?.userId == me.id {
+                    try? await client.endGameSession(session.id, reason: session.together ? .gameExited : .ended)
+                } else {
+                    try? await client.leaveGameSession(session.id)
+                }
             }
         }
     }
 
-    private func keepSession(_ session: TogetherGameSession?, me: String) {
+    func keepSession(_ session: TogetherGameSession?, me: String) {
         withAnimation(Motion.overlay) { gameSession = session }
         try? TogetherGameSession.write(session, me: me, to: TogetherGameSession.bridgeFile)
         OnlinePlayHost.follow(sessionId: session?.id)
@@ -150,11 +157,19 @@ extension AppModel {
         case "game_session.updated":
             guard let session = event.decode(TogetherGameSession.self), session.id == gameSession?.id, let me = togetherUser?.id else { return }
             keepSession(session, me: me)
+        case "game_session.started":
+            togetherStarted(event)
+        case "game_session.member_joined", "game_session.member_left":
+            // The party's Play Together players changed: the party view says who plays now.
+            if gameSession?.together == true || party?.together != nil { loadParty() }
         case "game_session.ended":
             let id = event.data["sessionId"]
+            togetherEnded(id)
             gameInvites.removeAll { $0.sessionId == id }
             guard let session = gameSession, session.id == id, let me = togetherUser?.id else { return }
-            if session.host?.userId != me { show(T.format(.sessionEnded, session.host?.displayName ?? ""), symbol: "gamecontroller") }
+            if session.host?.userId != me {
+                show(session.together ? PT.format(.ended, session.host?.displayName ?? "") : T.format(.sessionEnded, session.host?.displayName ?? ""), symbol: "gamecontroller")
+            }
             keepSession(nil, me: me)
         default:
             break
@@ -164,7 +179,7 @@ extension AppModel {
     /// Friends panel rows: invites to answer, friends' games to join, and (while hosting) friends
     /// to invite.
     func gameRows() -> [PanelRow] {
-        var rows: [PanelRow] = []
+        var rows: [PanelRow] = togetherOfferRows()
         for invite in gameInvites {
             let host = invite.from?.displayName ?? ""
             rows.append(PanelRow(id: "game-accept-\(invite.sessionId)", title: T.format(.gameJoin, host, gameName(invite.titleId)), detail: T.text(.gameInvitedDetail),

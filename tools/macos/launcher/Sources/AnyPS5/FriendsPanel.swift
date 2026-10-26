@@ -64,6 +64,8 @@ extension AppModel {
     func presenceText(_ presence: TogetherFriend.Presence?) -> String {
         var text = stateText(presence)
         guard presence?.online == true else { return text }
+        // Playing together with their party: "Playing Minecraft together (2/8)".
+        if let game = presence?.game, game.together { return PT.format(.presence, gameName(game.titleId), game.players, game.capacity) }
         if presence?.game?.joinable == true { text += " · " + T.text(.gameJoinable) }
         if let party = presence?.party { text += " · " + T.format(.friendsInParty, party.size, party.max) }
         return text

@@ -49,6 +49,7 @@ extension AppModel {
         }
         let leader = party.isLeader(me.id)
         rows += voiceRows(party)
+        rows += togetherRows(party, me: me.id)
         if leader { rows += partyRequestRows(party) }
         rows += partyCodeRows(party, leader: leader)
         rows.append(PanelRow(id: "party-members", title: T.format(.partyMembers, party.members.count, TogetherParty.maxSize), symbol: "person.3.fill", kind: .info("")))

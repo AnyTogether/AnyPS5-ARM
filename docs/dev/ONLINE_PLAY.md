@@ -119,7 +119,15 @@ The setting is Together → **Online play (experimental)** (the `OnlinePlay` def
 - `OnlinePlay`: one game start: the bridge, the router, the transport; follows the AnyTogether game session (publishes the launcher as a member, takes the players and their devices, tells the game its address). `OnlinePlayHost` keeps the running one and writes each title's observation log to `~/Library/Logs/AnyPS5/Online/<TitleID>.jsonl` (the engine writes it, so a crash keeps the last line; over 20 MB it is kept aside as `.1`).
 - `OnlinePeerTransport`: what carries packets between players. `OnlinePeerMesh` (`Sources/AnyPS5Online`, WebRTC) is the app's; `OnlinePeerLink` (plain UDP with a per-packet HMAC under a session key, no NAT traversal) is kept for tests and one network.
 
-Still missing on this side: a run between two Macs on different networks (needs STUN and TURN configured on the server), stream channels, and showing peers' connection state in the UI.
+Still missing on this side: a run between two Macs on different networks (needs STUN and TURN configured on the server) and stream channels.
+
+### Play Together (LAN games)
+
+For a game that finds others by local network broadcast. In a party, the host picks a game on Home and presses **Play Together: <game>** in the party panel. The launcher opens an AnyTogether game session of kind `lan` (it belongs to the party, at most one per party, its host never changes), then starts the game with online play on for this session only (`OnlinePlayHost.playTogether(sessionId:)`; the `OnlinePlay` setting is left as the user chose and the override ends with the game). The rest of the party hears `game_session.started` and gets "<host> started <game> — Join" (a toast, a banner when the launcher is in the background, and a row in the party and friends panels).
+
+Join runs `PlayTogetherCheck` first, in order: signed in, owned, game version (under the host's version rule: `exact`, `major` or `any`; another copy with a fitting version is picked), engine build, no game running, room left, unlocked. A locked copy offers **Unlock and Play**, a copy unlocked with an older engine that the current one brings to the host's build **Update and Play**; anything else names what is missing and who should update (the server's `version_mismatch` refusal carries `reason`, `expected`, `actual` and `update` too). The joiner's game then starts in the same session, the WebRTC mesh connects the players' virtual LAN, and broadcasts reach the host's game through the existing carriage.
+
+The party panel shows the game, who plays, and for each other player how they are reached (`OnlinePeerMesh.links`: direct or relay from the selected candidate pair, and the round trip), with **Leave** for a player and **End Play Together** plus a join code for the host. It ends when the host's game exits (`DELETE /game-sessions/{id}?reason=game_exited`), the host leaves it or the party, or the host's launcher stays away past the gateway's grace; the others' games keep running, alone.
 
 ## Version guard
 
