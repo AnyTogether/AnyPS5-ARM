@@ -308,6 +308,14 @@ void main() {
     expect(find.text('1'), findsNothing);
     await tester.tap(find.text('Close post'));
     await settle(tester);
+    // It asks first: nothing is closed until the question is answered.
+    expect(
+      find.text('Close this post? Its requests go with it.'),
+      findsOneWidget,
+    );
+    expect(account.paths('DELETE'), isEmpty);
+    await tester.tap(find.widgetWithText(FilledButton, 'Close post'));
+    await settle(tester);
     expect(account.paths('DELETE'), ['lfg/m1']);
     expect(find.text('Closed'), findsOneWidget);
     expect(find.text('Close post'), findsNothing);

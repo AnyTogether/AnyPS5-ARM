@@ -85,6 +85,51 @@ void main() {
     clientName: 'remote-ios/1.9.1',
   );
 
+  test(
+    'client_too_old tells the app to update, with the minimum and where',
+    () async {
+      server.answer = (method, path, body) => (
+        426,
+        {
+          'code': 'client_too_old',
+          'status': 426,
+          'title': 'This version is too old. Update to 1.17.0 or newer.',
+          'client': 'phone',
+          'current': '1.9.1',
+          'minimum': '1.17.0',
+          'downloadUrl': 'https://anytogether.test/download',
+        },
+      );
+      final phone = account();
+      expect(phone.tooOld.value, isNull);
+      await expectLater(
+        phone.startEmail('u@example.com'),
+        throwsA(
+          isA<TogetherProblem>().having(
+            (p) => p.code,
+            'code',
+            'client_too_old',
+          ),
+        ),
+      );
+      expect(phone.tooOld.value?.minimum, '1.17.0');
+      expect(phone.tooOld.value?.current, '1.9.1');
+      expect(
+        phone.tooOld.value?.downloadUrl,
+        Uri.parse('https://anytogether.test/download'),
+      );
+      // Another refusal is not an update.
+      final other = account();
+      server.answer = (method, path, body) =>
+          (409, {'code': 'conflict', 'status': 409, 'title': 'x'});
+      await expectLater(
+        other.startEmail('u@example.com'),
+        throwsA(isA<TogetherProblem>()),
+      );
+      expect(other.tooOld.value, isNull);
+    },
+  );
+
   test('a hand-off goes to the launcher and back as JSON', () {
     const ask = TogetherHandoff(id: 'h1', deviceName: "Utku's iPhone");
     final json = jsonDecode(ask.toJson()) as Map<String, dynamic>;

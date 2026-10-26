@@ -321,6 +321,78 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('leaving the party and removing someone ask first', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(2556, 1179);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    final (hub, account) = await scriptedHub();
+    addTearDown(hub.dispose);
+    account.answer = (method, path, body) => switch ((method, path)) {
+      ('GET', 'me/party') => {
+        'party': party('p1', members: ['me', 'ece']),
+        'invites': <Object>[],
+        'requests': <Object>[],
+      },
+      ('POST', 'parties/p1/kick') => party('p1', members: ['me']),
+      ('POST', 'parties/p1/leave') => const {},
+      _ => null,
+    };
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TogetherScreen(hub: hub, tab: TogetherTab.party),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.byTooltip('ECE'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from party'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Remove ECE from the party? They need a new invite to come back.',
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(account.paths('POST'), isEmpty);
+    await tester.tap(find.byTooltip('ECE'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from party'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Remove from party'));
+    await tester.pumpAndSettle();
+    expect(account.paths('POST'), ['parties/p1/kick']);
+
+    await tester.scrollUntilVisible(
+      find.text('Leave party'),
+      80,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).last,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Leave party'));
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'Leave the party? Voice ends for you, and an invite-only party takes a new invite to get back in.',
+      ),
+      findsOneWidget,
+    );
+    expect(account.paths('POST'), ['parties/p1/kick']);
+    await tester.tap(find.widgetWithText(FilledButton, 'Leave party'));
+    await tester.pumpAndSettle();
+    expect(account.paths('POST'), ['parties/p1/kick', 'parties/p1/leave']);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('the leader lists the party in public and answers who asks', (
     tester,
   ) async {

@@ -83,6 +83,27 @@ class TogetherProblem implements Exception {
   String toString() => title;
 }
 
+/// AnyTogether no longer answers this version of the app (client_too_old): the oldest it still
+/// answers, this one's, and where to get a newer one.
+class ClientTooOld {
+  const ClientTooOld({required this.minimum, this.current, this.downloadUrl});
+
+  final String minimum;
+  final String? current;
+  final Uri? downloadUrl;
+
+  static ClientTooOld? fromProblem(Map<String, dynamic> json) {
+    final minimum = json['minimum'];
+    if (json['code'] != 'client_too_old' || minimum is! String) return null;
+    final url = json['downloadUrl'];
+    return ClientTooOld(
+      minimum: minimum,
+      current: json['current'] as String?,
+      downloadUrl: url is String ? Uri.tryParse(url) : null,
+    );
+  }
+}
+
 /// Waiting for an approval was given up on the phone.
 class TogetherCancelled implements Exception {
   const TogetherCancelled();
@@ -141,6 +162,9 @@ class TogetherAccount extends ChangeNotifier {
   /// Set at build time (or by a test): the phone cannot pick another server.
   final bool serverFixed;
   final String clientName;
+
+  /// Set when AnyTogether answers client_too_old to any call: the app shows Update required.
+  final tooOld = ValueNotifier<ClientTooOld?>(null);
   final _http = HttpClient()..connectionTimeout = const Duration(seconds: 15);
 
   static const _key = 'together.session';
@@ -520,6 +544,8 @@ class TogetherAccount extends ChangeNotifier {
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       if (json is Map<String, dynamic> && json['code'] is String) {
+        final old = ClientTooOld.fromProblem(json);
+        if (old != null) tooOld.value = old;
         throw TogetherProblem(
           response.statusCode,
           json['code'] as String,

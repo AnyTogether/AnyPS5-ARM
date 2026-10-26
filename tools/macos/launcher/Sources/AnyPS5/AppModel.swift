@@ -143,6 +143,8 @@ enum Overlay: Equatable {
     case confirmUninstall
     /// Play on a game an older toolkit made: update it first, or play it as it is.
     case updateChoice
+    /// AnyTogether no longer answers this launcher's version: update (UpdateRequired.swift).
+    case updateRequired
     /// An unlock that did not start for want of room (spaceShortage): how much, and what to do.
     case noSpace
     case controls
@@ -218,7 +220,10 @@ final class AppModel: ObservableObject {
     @Published var focus = HomeFocus.tiles
     @Published var overlay: Overlay? {
         didSet {
-            if oldValue != overlay { discoverOverlayChanged() }
+            if oldValue != overlay {
+                discoverOverlayChanged()
+                askingRow = nil
+            }
             // The controller test takes the pads' buttons: only PS acts while it is open.
             Input.shared.testing = overlay == .controllerTest
         }
@@ -601,6 +606,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var lastUpdateCheck: Date?
     @Published private(set) var checkingUpdates = false
 
+    /// Update Required: look for the newer launcher at once, quietly, so the screen can offer it.
+    func lookUpUpdateQuietly() {
+        guard updateProgress == nil, !checkingUpdates, readyUpdate == nil else { return }
+        lookUpUpdate(told: false)
+    }
+
     private func lookUpUpdate(told: Bool) {
         let current = AppModel.runningVersion
         let channel = updateChannel
@@ -765,7 +776,7 @@ final class AppModel: ObservableObject {
     // MARK: AnyTogether
 
     /// The client for the server chosen in Settings → AnyTogether (or ANYTOGETHER_URL).
-    lazy var together = AppModel.makeTogetherClient(base: TogetherServer.base(chosen: preferences.togetherServer))
+    lazy var together = wireTogether(AppModel.makeTogetherClient(base: TogetherServer.base(chosen: preferences.togetherServer)))
     var serverDraft = ""
     @Published var togetherUser: TogetherUser?
     @Published var togetherStep = TogetherStep.idle
@@ -855,6 +866,14 @@ final class AppModel: ObservableObject {
     @Published var playTogetherOffers: [PlayTogetherOffer] = []
     @Published var peerLinks: [String: OnlinePeerLinkInfo] = [:]
     var togetherAfterUnlock: (String, PlayTogetherOffer)?
+    /// Play Together games the user chose to join with a game version that does not fit (Try
+    /// anyway), and games the server refused for the version though the check here let them by.
+    @Published var togetherTryAnyway: Set<String> = []
+    @Published var togetherVersionRefused: Set<String> = []
+    /// The row whose social step is asking first (AskFirst.swift): it shows the question instead.
+    @Published var askingRow: String?
+    /// AnyTogether answered client_too_old: the minimum version and where to update.
+    @Published var updateRequired: TogetherClientTooOld?
     var togetherLinkPoll: Task<Void, Never>?
     /// Find players, Live now, public parties, discovery and game hubs.
     @Published var discover = DiscoverState()
@@ -2439,6 +2458,7 @@ final class AppModel: ObservableObject {
         panelCategory = 0
         panelRow = 0
         panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport || next == .noSpace
+            || next == .updateRequired
         // The controls panel opens on its first key, below the hint.
         if next == .controls {
             panelRow = 1
@@ -2449,7 +2469,7 @@ final class AppModel: ObservableObject {
             revealedTrophies = []
         }
         if next == .gallery { loadGallery() }
-        if next == .advanced { panelRow = 1 }
+        if next == .advanced || next == .updateRequired { panelRow = 1 }
         panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends || next == .party
         if next == .friends { refreshFriends() }
         if next == .party {

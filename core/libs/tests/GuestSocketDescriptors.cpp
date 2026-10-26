@@ -33,6 +33,8 @@ struct PollDescriptor {
 
 extern "C" {
 int APS5_VABI socket_nid_postfix(int, int, int);
+int APS5_VABI sceKernelAllocateDirectMemory(std::int64_t, std::int64_t, std::size_t, std::size_t, int, std::int64_t*);
+int APS5_VABI sceKernelReleaseDirectMemory(std::int64_t, std::size_t);
 int APS5_VABI bind_nid_postfix(int, const void*, std::uint32_t);
 int APS5_VABI getsockname_nid_postfix(int, void*, std::uint32_t*);
 int APS5_VABI connect_nid_postfix(int, const void*, std::uint32_t);
@@ -208,6 +210,23 @@ static void SocketNumbersStayInDescriptorSet() {
     Require(close_nid_postfix(socket) == 0);
 }
 
+// Direct memory is backed by host descriptors on macOS (one shared memory object per block), and
+// a long game run holds well over a thousand of them. They must not take the numbers below the
+// descriptor set's size that sockets need: Human Fall Flat could not open a socket to join a room
+// after 25 minutes ("Too many open files" with 1,422 such descriptors open).
+static void DirectMemoryLeavesSocketNumbers() {
+    constexpr std::size_t Block = 0x10000;
+    std::vector<std::int64_t> blocks;
+    for (int index = 0; index < DescriptorSetSize + 100; ++index) {
+        std::int64_t physical = 0;
+        Require(sceKernelAllocateDirectMemory(0, 0x7fffffffffll, Block, Block, 0, &physical) == 0);
+        blocks.push_back(physical);
+    }
+    const int socket = Socket();
+    Require(close_nid_postfix(socket) == 0);
+    for (const auto physical : blocks) Require(sceKernelReleaseDirectMemory(physical, Block) == 0);
+}
+
 static void SocketTypeErrors() {
     constexpr int PrototypeError = 41;
     constexpr int ProtocolError = 43;
@@ -230,5 +249,6 @@ int main() {
     CloseReleasesNumber();
     DuplicateKeepsSocket();
     SocketNumbersStayInDescriptorSet();
+    DirectMemoryLeavesSocketNumbers();
     return 0;
 }

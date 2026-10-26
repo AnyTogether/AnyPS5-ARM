@@ -68,8 +68,9 @@ extension AppModel {
             for member in party.members where party.canManage(member.userId, me: me.id) {
                 rows.append(PanelRow(id: "party-lead-\(member.userId)", title: T.format(.partyMakeLeader, member.displayName), symbol: "crown",
                                      kind: .action(destructive: false) { [weak self] in self?.makePartyLeader(member) }))
-                rows.append(PanelRow(id: "party-kick-\(member.userId)", title: T.format(.partyRemove, member.displayName), symbol: "person.badge.minus",
-                                     kind: .action(destructive: true) { [weak self] in self?.removeFromParty(member) }))
+                rows += askingFirst(PanelRow(id: "party-kick-\(member.userId)", title: T.format(.partyRemove, member.displayName), symbol: "person.badge.minus",
+                                             kind: .action(destructive: true) { [weak self] in self?.removeFromParty(member) }),
+                                    question: TK.format(.askKick, member.displayName))
             }
             rows.append(PanelRow(id: "party-privacy", title: T.text(.partyOpen), detail: T.text(.partyOpenDetail), symbol: "door.left.hand.open", kind: .toggle(party.open) { [weak self] value in
                 self?.setPartyOpen(value)
@@ -94,9 +95,9 @@ extension AppModel {
             }
         }
         rows += joinCodeEntryRows()
-        rows.append(PanelRow(id: "party-leave", title: T.text(.partyLeave), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
+        rows += askingFirst(PanelRow(id: "party-leave", title: T.text(.partyLeave), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
             self?.leaveParty()
-        }))
+        }), question: TK.text(.askLeaveParty))
         return rows
     }
 

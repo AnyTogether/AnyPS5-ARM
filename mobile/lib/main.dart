@@ -23,6 +23,7 @@ import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
 import 'ui/setup_screen.dart';
 import 'ui/handoff_card.dart';
+import 'ui/update_required_card.dart';
 import 'ui/trophy_card.dart';
 import 'ui/voice_pill.dart';
 import 'ui/welcome_screen.dart';
@@ -338,6 +339,7 @@ class _RemoteAppState extends State<RemoteApp> {
                     ),
                     TrophyCard(trophy: _session.trophy),
                     CallLayer(calls: _together.calls),
+                    UpdateRequiredCard(tooOld: _session.together.tooOld),
                     HandoffCard(
                       asked: _session.handoffAsked,
                       handle: _session.together.user?.handle,

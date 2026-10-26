@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../discover_strings.dart';
+import '../safety_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
 import '../together/activity.dart';
@@ -13,6 +14,7 @@ import 'lfg_form.dart';
 import 'live_now_view.dart';
 import 'share_watch_screen.dart';
 import 'together_widgets.dart';
+import 'ask_first.dart';
 
 /// Find players: the looking-for-group board, the reader's own posts, Live now (public share
 /// plays and parties) and people to meet, one at a time under a row of tabs. What is on screen
@@ -929,7 +931,14 @@ class _MineState extends State<_Mine> {
       ],
       trailing: open
           ? TextButton(
-              onPressed: () => _try(() => _discover.close(post.id)),
+              onPressed: () async {
+                final sure = await askFirst(
+                  context,
+                  question: texts.askClosePost,
+                  action: texts.closePost,
+                );
+                if (sure && mounted) await _try(() => _discover.close(post.id));
+              },
               style: TextButton.styleFrom(foregroundColor: togetherError),
               child: Text(texts.closePost),
             )

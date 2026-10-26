@@ -8,6 +8,7 @@ enum PT {
         case you, host, inGame, notYet, connecting, direct, relay, unreachable, ms
         case signIn, missing, versionYou, versionHost, engineYou, engineHost, closeFirst, full, unlockAndPlay, updateAndPlay, unlockingFirst, updatingFirst
         case code, codeDetail, codeCopied, presence
+        case tryAnyway, tryAnywayDetail, triedAnyway, tryingAnyway
     }
 
     static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
@@ -58,6 +59,10 @@ enum PT {
         .codeDetail: "Lets someone outside the party in",
         .codeCopied: "Join code %@ copied",
         .presence: "Playing %@ together (%d/%d)",
+        .tryAnyway: "Try Anyway",
+        .tryAnywayDetail: "Join with your version. The game may not find the others, or may misbehave",
+        .triedAnyway: "Tried anyway",
+        .tryingAnyway: "Joining %@ with another version…",
     ]
 
     static let turkish: [Key: String] = [
@@ -105,5 +110,9 @@ enum PT {
         .codeDetail: "Parti dışından birini içeri alır",
         .codeCopied: "Katılma kodu %@ kopyalandı",
         .presence: "%@ birlikte oynanıyor (%d/%d)",
+        .tryAnyway: "Yine de Dene",
+        .tryAnywayDetail: "Kendi sürümünle katıl. Oyun diğerlerini bulamayabilir ya da sorun çıkarabilir",
+        .triedAnyway: "Yine de denedi",
+        .tryingAnyway: "%@ başka bir sürümle katılınıyor…",
     ]
 }

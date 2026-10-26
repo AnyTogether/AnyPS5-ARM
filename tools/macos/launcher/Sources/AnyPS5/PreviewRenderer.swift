@@ -282,6 +282,25 @@ enum PreviewRenderer {
             model.peerLinks = ["f1": OnlinePeerLinkInfo(userId: "f1", route: .direct, rttMs: 23), "f2": OnlinePeerLinkInfo(userId: "f2", route: .relay, rttMs: 81)]
             model.overlay = .party; model.panelInRows = true; model.panelRow = 0
         }
+        // Leaving the party asks first, Cancel focused; Bora tried anyway with another game version.
+        render(preferences, found, root, still, output.appendingPathComponent("party-leave-ask.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.togetherFriends = partyFriends
+            let anyway = TogetherPartyTogether(sessionId: "gs1", hostId: "f1", titleId: lanTitle, gameVersion: lanVersion, engineBuild: "0.2.21-4194",
+                                               players: ["f1", "f2"], versionOverrides: ["f2"], capacity: 8)
+            model.previewParty(TogetherParty(id: "p1", leaderId: "f1", privacy: "invite", members: [people[0], robin, people[1]], invited: [], call: nil, together: anyway))
+            model.overlay = .party; model.panelInRows = true
+            model.ask("party-leave")
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("party-together-anyway.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.togetherFriends = partyFriends
+            let other = TogetherPartyTogether(sessionId: "gs1", hostId: "f1", titleId: lanTitle, gameVersion: "09.000.000", engineBuild: model.previewEngineBuild(lanTitle) ?? "0.2.21-4194",
+                                              players: ["f1"], capacity: 8)
+            model.previewParty(TogetherParty(id: "p1", leaderId: "f1", privacy: "invite", members: [people[0], robin, people[1]], invited: [], call: nil, together: other))
+            model.togetherVersionRefused = ["gs1"]
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+        }
         render(preferences, found, root, still, output.appendingPathComponent("call-ringing.png")) { model in
             model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
             model.previewRinging(TogetherRinging(callId: "call2", from: people[0], device: "sess-f1"))

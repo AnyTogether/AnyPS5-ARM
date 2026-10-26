@@ -5,6 +5,7 @@ import 'package:anyps5_remote/together/together_account.dart';
 import 'package:anyps5_remote/ui/handoff_card.dart';
 import 'package:anyps5_remote/ui/together_screen.dart';
 import 'package:anyps5_remote/ui/together_sheet.dart';
+import 'package:anyps5_remote/ui/update_required_card.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +38,49 @@ void main() {
     await tester.pumpAndSettle();
     expect(answers, [('h1', true)]);
   });
+
+  testWidgets(
+    'AnyTogether retiring this version shows Update required, Later hides it',
+    (tester) async {
+      final tooOld = ValueNotifier<ClientTooOld?>(null);
+      final opened = <Uri>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: UpdateRequiredCard(
+              tooOld: tooOld,
+              open: (page) async => opened.add(page),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('Update required'), findsNothing);
+      tooOld.value = ClientTooOld(
+        minimum: '1.17.0',
+        current: '1.16.0',
+        downloadUrl: Uri.parse('https://anytogether.test/download'),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Update required'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'needs AnyPS5 Remote 1.17.0 or newer; this is 1.16.0',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('Update'));
+      await tester.pumpAndSettle();
+      expect(opened, [Uri.parse('https://anytogether.test/download')]);
+      await tester.tap(find.text('Later'));
+      await tester.pumpAndSettle();
+      expect(find.text('Update required'), findsNothing);
+      // A newer minimum asks again.
+      tooOld.value = const ClientTooOld(minimum: '1.18.0');
+      await tester.pumpAndSettle();
+      expect(find.text('Update required'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   /// An iPhone 14 Pro on its side: the Mac's way and the email way side by side, on the screen.
   testWidgets('signed out, the sheet offers the Mac first and fits sideways', (

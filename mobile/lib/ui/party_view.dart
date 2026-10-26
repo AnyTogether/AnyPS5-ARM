@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../discover_strings.dart';
 import '../join_strings.dart';
+import '../safety_strings.dart';
 import '../strings.dart';
 import '../together/join_codes.dart';
 import '../together/parties.dart';
@@ -9,6 +10,7 @@ import '../together/people.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
 import '../together/voice.dart';
+import 'ask_first.dart';
 import 'find_players_view.dart';
 import 'join_code_view.dart';
 import 'together_widgets.dart';
@@ -256,7 +258,16 @@ class _PartyPaneState extends State<PartyPane> {
                   ? togetherPlaying
                   : null,
               onKick: leader && member.id != me
-                  ? () => _try(() => parties.kick(member.id))
+                  ? () async {
+                      final sure = await askFirst(
+                        context,
+                        question: texts.askKick(member.displayName),
+                        action: texts.partyKick,
+                      );
+                      if (sure && mounted) {
+                        await _try(() => parties.kick(member.id));
+                      }
+                    }
                   : null,
             ),
         ],
@@ -362,7 +373,14 @@ class _PartyPaneState extends State<PartyPane> {
       PartyDiscord(parties: parties, party: party, leader: leader, run: _try),
       const SizedBox(height: 10),
       OutlinedButton.icon(
-        onPressed: () => _try(parties.leave),
+        onPressed: () async {
+          final sure = await askFirst(
+            context,
+            question: texts.askLeaveParty,
+            action: texts.partyLeave,
+          );
+          if (sure && mounted) await _try(parties.leave);
+        },
         style: OutlinedButton.styleFrom(
           foregroundColor: togetherError,
           side: const BorderSide(color: Color(0x66FF8A80)),
@@ -703,11 +721,13 @@ class _Member extends StatelessWidget {
     );
     final kick = onKick;
     if (kick == null) return card;
-    return PopupMenuButton<void>(
+    // Chosen once the menu is gone, so the question it asks has the screen to itself.
+    return PopupMenuButton<bool>(
       color: const Color(0xFF1A1D27),
       tooltip: person.displayName,
+      onSelected: (_) => kick(),
       itemBuilder: (context) => [
-        PopupMenuItem(onTap: kick, child: Text(texts.partyKick)),
+        PopupMenuItem(value: true, child: Text(texts.partyKick)),
       ],
       child: card,
     );

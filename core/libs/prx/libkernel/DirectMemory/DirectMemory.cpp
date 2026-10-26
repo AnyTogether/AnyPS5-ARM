@@ -328,6 +328,9 @@ void Trace(const char* format, ...) {
 }
 
 #if defined(__APPLE__)
+// Direct memory descriptors live at or above this number, out of the guest's way.
+constexpr int HostOnlyDescriptorFloor = 4096;
+
 // Every direct memory block holds a descriptor, and apps opened from Finder start with a soft limit of 256.
 bool RaiseOpenFileLimit() {
     rlimit limit {};
@@ -453,6 +456,22 @@ public:
         if (file < 0) throw std::system_error(errno, std::generic_category(), "create direct memory backing");
         ::shm_unlink(name);
         ::fcntl(file, F_SETFD, FD_CLOEXEC);
+        // The descriptor is the host's alone: move it above the numbers guest sockets and files
+        // use (guest sockets must stay below the descriptor set's 1024). A long game run holds
+        // well over a thousand of these, and below that line they left no number for a socket.
+        if (file < HostOnlyDescriptorFloor) {
+            const int moved = ::fcntl(file, F_DUPFD_CLOEXEC, HostOnlyDescriptorFloor);
+            if (moved < 0 && errno == EINVAL && RaiseOpenFileLimit()) {
+                const int again = ::fcntl(file, F_DUPFD_CLOEXEC, HostOnlyDescriptorFloor);
+                if (again >= 0) {
+                    ::close(file);
+                    file = again;
+                }
+            } else if (moved >= 0) {
+                ::close(file);
+                file = moved;
+            }
+        }
         if (ftruncate(file, static_cast<off_t>(bytes)) != 0) {
             const int error = errno;
             ::close(file);
