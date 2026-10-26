@@ -28,6 +28,12 @@
 #   ANYPS5_SKIP_SIGN=1    publish without SHA256SUMS(.sig) (the release key is not on this Mac);
 #                         launchers that check signatures then refuse its app and engine
 #   ANYPS5_SIGN_IDENTITY, ANYPS5_NOTARY_PROFILE  as for build_launcher_app.sh
+#   ANYPS5_ENGINE_ARCHIVES  the Windows and Linux engine archives for AnyPS5 Desktop
+#                         (AnyPS5-toolkit-<windows|linux>-<commit>.zip/.tar.gz), built from this
+#                         commit on a Windows machine and its WSL as in
+#                         docs/dev/WINDOWS_LINUX_ENGINE.md; attached and signed with the rest.
+#                         This Mac cannot build them; without them the release has no
+#                         Windows/Linux engine of its own.
 set -eu
 
 dry=0
@@ -125,6 +131,17 @@ if [ "${ANYPS5_SKIP_PHONE:-0}" != 1 ]; then
     (cd "$scratch" && zip -qry "$out/AnyPS5-Remote.ipa" Payload)
     files="$files $out/AnyPS5-Remote.apk $out/AnyPS5-Remote.ipa"
 fi
+
+for archive in ${ANYPS5_ENGINE_ARCHIVES:-}; do
+    case "$(basename "$archive")" in
+        AnyPS5-toolkit-windows-*.zip|AnyPS5-toolkit-linux-*.zip|AnyPS5-toolkit-linux-*.tar.gz) ;;
+        *) echo "publish_nightly: $archive is not named AnyPS5-toolkit-<windows|linux>-<commit>.zip/.tar.gz" >&2; exit 1 ;;
+    esac
+    [ -s "$archive" ] || { echo "publish_nightly: $archive is missing or empty" >&2; exit 1; }
+    cp "$archive" "$out/"
+    files="$files $out/$(basename "$archive")"
+done
+[ -n "${ANYPS5_ENGINE_ARCHIVES:-}" ] || echo "publish_nightly: no Windows/Linux engine (ANYPS5_ENGINE_ARCHIVES, docs/dev/WINDOWS_LINUX_ENGINE.md)" >&2
 
 # Signed as releases are (docs/dev/SIGNED_UPDATES.md), so the launcher's check accepts it.
 if [ "${ANYPS5_SKIP_SIGN:-0}" != 1 ]; then

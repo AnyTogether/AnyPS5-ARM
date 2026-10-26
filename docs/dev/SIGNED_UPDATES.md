@@ -63,6 +63,8 @@ release's `SHA256SUMS` too.
 
 To add files to a release that is already signed, sign all of them again and replace both
 `SHA256SUMS` and `SHA256SUMS.sig`.
+The Windows and Linux engine archives AnyPS5 Desktop downloads are added this way; how they are
+built is in [WINDOWS_LINUX_ENGINE.md](WINDOWS_LINUX_ENGINE.md).
 
 ## What the launchers check
 
