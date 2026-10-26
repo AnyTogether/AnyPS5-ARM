@@ -54,23 +54,25 @@ extension AppModel {
         rows += partyCodeRows(party, leader: leader)
         rows.append(PanelRow(id: "party-members", title: T.format(.partyMembers, party.members.count, TogetherParty.maxSize), symbol: "person.3.fill", kind: .info("")))
         for member in party.members {
-            var details: [String] = ["@\(member.handle)"]
+            let identity = shown(member)
+            var details: [String] = [handleLine(member)]
             if party.isLeader(member.userId) { details.append(T.text(.partyLeader)) }
             if party.call?.in.contains(member.userId) == true { details.append(T.text(.partyInVoice)) }
             if let state = voiceState(of: member.userId, in: party) { details.append(state) }
-            rows.append(PanelRow(id: "party-member-\(member.userId)", title: member.userId == me.id ? "\(member.displayName) (\(T.text(.profileYou)))" : member.displayName,
+            rows.append(PanelRow(id: "party-member-\(member.userId)", title: member.userId == me.id ? "\(member.displayName) (\(T.text(.profileYou)))" : identity.name,
                                  detail: details.joined(separator: " · "), symbol: "person", kind: .info(""),
-                                 person: PanelPerson(name: member.displayName, avatar: member.avatar,
-                                                     status: party.call?.in.contains(member.userId) == true ? .online : nil, speaking: voiceSpeaking.contains(member.userId))))
+                                 person: member.userId == me.id ? PanelPerson(name: member.displayName, avatar: member.avatar, status: party.call?.in.contains(member.userId) == true ? .online : nil,
+                                                                             speaking: voiceSpeaking.contains(member.userId))
+                                     : panelPerson(member, status: party.call?.in.contains(member.userId) == true ? .online : nil, speaking: voiceSpeaking.contains(member.userId))))
         }
         if leader {
             // The leader may remove someone or hand the lead over.
             for member in party.members where party.canManage(member.userId, me: me.id) {
-                rows.append(PanelRow(id: "party-lead-\(member.userId)", title: T.format(.partyMakeLeader, member.displayName), symbol: "crown",
+                rows.append(PanelRow(id: "party-lead-\(member.userId)", title: T.format(.partyMakeLeader, shown(member).name), symbol: "crown",
                                      kind: .action(destructive: false) { [weak self] in self?.makePartyLeader(member) }))
-                rows += askingFirst(PanelRow(id: "party-kick-\(member.userId)", title: T.format(.partyRemove, member.displayName), symbol: "person.badge.minus",
+                rows += askingFirst(PanelRow(id: "party-kick-\(member.userId)", title: T.format(.partyRemove, shown(member).name), symbol: "person.badge.minus",
                                              kind: .action(destructive: true) { [weak self] in self?.removeFromParty(member) }),
-                                    question: TK.format(.askKick, member.displayName))
+                                    question: TK.format(.askKick, shown(member).name))
             }
             rows.append(PanelRow(id: "party-privacy", title: T.text(.partyOpen), detail: T.text(.partyOpenDetail), symbol: "door.left.hand.open", kind: .toggle(party.open) { [weak self] value in
                 self?.setPartyOpen(value)
@@ -85,12 +87,12 @@ extension AppModel {
             for friend in invitable {
                 let status: PanelPerson.Status = friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline
                 if invited.contains(friend.userId) {
-                    rows.append(PanelRow(id: "party-invited-\(friend.userId)", title: friend.displayName, detail: T.text(.partyInvited), symbol: "hourglass", kind: .info(""),
-                                         person: PanelPerson(name: friend.displayName, avatar: friend.avatar, status: status)))
+                    rows.append(PanelRow(id: "party-invited-\(friend.userId)", title: shown(friend).name, detail: handleLine(friend) + " · " + T.text(.partyInvited), symbol: "hourglass", kind: .info(""),
+                                         person: panelPerson(friend, status: status)))
                 } else {
-                    rows.append(PanelRow(id: "party-invite-\(friend.userId)", title: T.format(.partyInvite, friend.displayName), detail: presenceText(friend.presence),
+                    rows.append(PanelRow(id: "party-invite-\(friend.userId)", title: T.format(.partyInvite, shown(friend).name), detail: handleLine(friend) + " · " + presenceText(friend.presence),
                                          symbol: "person.badge.plus", kind: .action(destructive: false) { [weak self] in self?.inviteToParty(friend) },
-                                         person: PanelPerson(name: friend.displayName, avatar: friend.avatar, status: status)))
+                                         person: panelPerson(friend, status: status)))
                 }
             }
         }

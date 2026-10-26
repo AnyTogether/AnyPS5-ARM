@@ -9,7 +9,7 @@ enum TH {
         case pauseOnMenu, pauseOnMenuDetail
         case resume, closeGame, paused, stillRunning, quickMenuKicker
         case closeGameTitle, closeGameText
-        case homeMenuKicker, switchProfile, switchProfileDetail, quitApp, quitWithGame
+        case homeMenuKicker, switchProfile, quitApp, quitWithGame
         case shortcuts, shortcutsIntro, keyboard, controller, held, notSet, pressButtons, inGameToo
         case actionHome, actionQuickMenu, actionScreenshot, actionClip, actionFullScreen, actionPrevious, actionNext
         case conflictSame, conflictNavigationKey, conflictNavigationButton, conflictReservedKey, conflictNeedsModifier, refused, cleared
@@ -69,7 +69,6 @@ enum TH {
         .closeGameText: "Anything since your last save is lost.",
         .homeMenuKicker: "AnyPS5",
         .switchProfile: "Switch Profile",
-        .switchProfileDetail: "Comes with profiles",
         .quitApp: "Quit AnyPS5",
         .quitWithGame: "Closes %@ first",
         .shortcuts: "Shortcuts",
@@ -123,7 +122,6 @@ enum TH {
         .closeGameText: "Son kayıttan sonraki her şey kaybolur.",
         .homeMenuKicker: "AnyPS5",
         .switchProfile: "Profil Değiştir",
-        .switchProfileDetail: "Profillerle gelecek",
         .quitApp: "AnyPS5'ten Çık",
         .quitWithGame: "Önce %@ kapanır",
         .shortcuts: "Kısayollar",

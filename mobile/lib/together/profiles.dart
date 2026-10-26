@@ -139,6 +139,8 @@ class OwnProfile {
     this.appearOffline = false,
     this.trophyLevel,
     this.readReceipts = true,
+    this.privateName,
+    this.privateAvatar,
   });
 
   factory OwnProfile.fromJson(Map<String, dynamic> json) => OwnProfile(
@@ -153,6 +155,8 @@ class OwnProfile {
     trophyLevel: TrophyLevel.fromJson(json['trophyLevel']),
     // On unless the profile says off (older answers lack it).
     readReceipts: json['readReceipts'] != false,
+    privateName: IdentityBook.clean(json['privateName'] as String?),
+    privateAvatar: IdentityBook.clean(json['privateAvatar'] as String?),
   );
 
   final String handle;
@@ -172,11 +176,19 @@ class OwnProfile {
   /// Others see when this person read their messages (and they see others').
   final bool readReceipts;
 
+  /// The name and picture only accepted friends see; null when not set (or an older server).
+  final String? privateName;
+  final String? privateAvatar;
+
   OwnProfile copyWith({
     String? avatar,
     bool clearAvatar = false,
     Privacy? privacy,
     bool? appearOffline,
+    String? privateName,
+    bool clearPrivateName = false,
+    String? privateAvatar,
+    bool clearPrivateAvatar = false,
   }) => OwnProfile(
     handle: handle,
     displayName: displayName,
@@ -188,6 +200,10 @@ class OwnProfile {
     appearOffline: appearOffline ?? this.appearOffline,
     trophyLevel: trophyLevel,
     readReceipts: readReceipts,
+    privateName: clearPrivateName ? null : privateName ?? this.privateName,
+    privateAvatar: clearPrivateAvatar
+        ? null
+        : privateAvatar ?? this.privateAvatar,
   );
 }
 
@@ -506,4 +522,30 @@ class Profiles {
   }
 
   Future<void> removeAvatar() => account.call('DELETE', 'me/avatar');
+
+  /// The friends-only name; blank clears it. What the server kept comes back.
+  Future<String?> setPrivateName(String name) async {
+    final trimmed = name.trim();
+    final json = await account.call('PATCH', 'me/profile', {
+      'privateName': trimmed.isEmpty ? null : trimmed,
+    });
+    return json.containsKey('privateName')
+        ? IdentityBook.clean(json['privateName'] as String?)
+        : IdentityBook.clean(trimmed);
+  }
+
+  /// A square picture (PNG or JPEG) as the friends-only one (the public picture stays); its
+  /// signed link comes back.
+  Future<String> uploadPrivateAvatar(Uint8List bytes) async {
+    final png = bytes.length > 3 && bytes[0] == 0x89 && bytes[1] == 0x50;
+    final json = await account.upload(
+      'me/avatar/private',
+      bytes,
+      png ? 'image/png' : 'image/jpeg',
+    );
+    return json['privateAvatar'] as String;
+  }
+
+  Future<void> removePrivateAvatar() =>
+      account.call('DELETE', 'me/avatar/private');
 }

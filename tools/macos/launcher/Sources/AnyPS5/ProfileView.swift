@@ -123,7 +123,8 @@ extension AppModel {
 
     func previewProfile(_ page: TogetherProfilePage?, column: Int = 0, index: Int = 0, showcase: TogetherShowcase? = nil) {
         social.profileShowcase = showcase
-        profileCard = page.map { TogetherPerson(userId: $0.profile.userId, handle: $0.profile.handle, displayName: $0.profile.displayName, avatar: $0.profile.avatar) }
+        profileCard = page.map { TogetherPerson(userId: $0.profile.userId, handle: $0.profile.handle, displayName: $0.profile.displayName, avatar: $0.profile.avatar,
+                                                privateName: $0.profile.privateName, privateAvatar: $0.profile.privateAvatar) }
         profilePage = page
         profileColumn = column
         profileIndex = index
@@ -183,10 +184,12 @@ struct ProfileView: View {
     private func header(_ page: TogetherProfilePage?) -> some View {
         let card = model.profileCard
         let profile = page?.profile
-        let name = profile?.displayName ?? card?.displayName ?? ""
+        // A friend's friends-only name and picture (the user's own too), the handle under it.
+        let identity = (profile.map { model.shown($0) } ?? card.map { model.shown($0) })
+        let name = identity?.name ?? ""
         let handle = profile?.handle ?? card?.handle ?? ""
         return HStack(alignment: .center, spacing: 30 * scale) {
-            ProfileAvatar(url: profile?.avatar ?? card?.avatar, name: name, size: 128 * scale)
+            ProfileAvatar(url: identity?.avatar, name: name, size: 128 * scale)
                 .overlay(alignment: .bottomTrailing) {
                     if profile?.isMe == true, model.appearingOffline { AppearingOfflineDot(size: 34 * scale).offset(x: -4 * scale, y: -4 * scale) }
                 }
@@ -202,6 +205,12 @@ struct ProfileView: View {
                     .lineLimit(1)
                 HStack(spacing: 12 * scale) {
                     Text("@\(handle)").font(.display(17 * scale, .medium)).foregroundStyle(.white.opacity(0.75))
+                    if let identity, identity.isPrivate {
+                        // Whose real name it is stays clear: the public name and who sees this.
+                        Label(identity.publicName == identity.name ? TPro.text(.friendsOnlyBadge) : "\(identity.publicName) · \(TPro.text(.friendsOnlyBadge))", systemImage: "lock.fill")
+                            .font(.display(12 * scale, .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
                     if let country = profile?.country, let flag = Self.flag(country) { Text(flag).font(.system(size: 17 * scale)) }
                     if let tag = profile.flatMap(Self.relation) {
                         Text(tag)

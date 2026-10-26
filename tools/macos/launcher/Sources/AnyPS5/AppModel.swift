@@ -138,7 +138,8 @@ extension Overlay {
     /// Panels drawn over the whole screen rather than sliding in at its side.
     var coversScreen: Bool {
         switch self {
-        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest:
+        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
+             .profilePicker, .addProfile, .signIn:
             return true
         default:
             return false
@@ -206,6 +207,14 @@ enum Overlay: Equatable {
     case closeGame
     /// PS held in the launcher: Switch Profile, Quit AnyPS5.
     case homeMenu
+    /// "Who's playing?": the profiles' tiles and Add Profile (Profiles.swift).
+    case profilePicker
+    /// A new profile: its name, then offline or online.
+    case addProfile
+    /// Signing in to AnyTogether for a profile (a new one, one going online or signing in again).
+    case signIn
+    /// Options (or a right click) on Home: the game's settings, Switch Profile, online or offline.
+    case profileMenu
 }
 
 /// A newer launcher downloaded and checked, unpacked in a folder of its own, waiting for a restart.
@@ -233,13 +242,24 @@ final class AppModel: ObservableObject {
     }
     /// Off for the offscreen previews, which must not touch the user's settings.
     let persists: Bool
-    /// Settings → Game Presets, in a file of their own (GamePresetsStore): every game starts with
-    /// them. One set for now; a profile can own its own file once there are profiles.
-    @Published var gamePresets: GamePresets {
+    /// Settings → Game Presets of the profile playing, in a file of their own in its folder
+    /// (GamePresetsStore): every game it starts begins with them.
+    @Published var gamePresets = GamePresets() {
         didSet {
-            guard gamePresets != oldValue, persists else { return }
-            try? GamePresetsStore().save(gamePresets)
+            guard gamePresets != oldValue, persists, !loadingGamePresets else { return }
+            try? gamePresetsStore.save(gamePresets)
         }
+    }
+    private var loadingGamePresets = false
+    var gamePresetsStore: GamePresetsStore {
+        GamePresetsStore(file: profiles.gamePresetsFile(for: profileBook.currentProfile?.id ?? LauncherProfile.legacyID))
+    }
+
+    /// The current profile's presets; the previews start with none.
+    func loadGamePresets() {
+        loadingGamePresets = true
+        gamePresets = persists ? gamePresetsStore.load() : GamePresets()
+        loadingGamePresets = false
     }
     @Published private(set) var games: [Game] = []
     @Published private(set) var scanning = false
@@ -249,6 +269,8 @@ final class AppModel: ObservableObject {
         didSet {
             if oldValue != overlay {
                 discoverOverlayChanged()
+                // Friends' private picture links run out (6 to 12 hours): the list is read again.
+                if let overlay, [.friends, .party, .profile].contains(overlay), togetherUser != nil, identityBook.learnedAt != nil, identityBook.stale() { refreshFriends() }
                 askingRow = nil
                 if rowEditor.editing != nil { rowEditor.stop() }
                 if shortcutCapture != nil { endShortcutCapture() }
@@ -463,8 +485,19 @@ final class AppModel: ObservableObject {
 
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
-        self.preferences = preferences ?? Preferences.load()
-        self.gamePresets = preferences == nil ? GamePresetsStore().load() : GamePresets()
+        let loaded = preferences ?? Preferences.load()
+        self.preferences = loaded
+        // Profiles: a launcher set up before them becomes its first profile at once, its session
+        // moving from the old file into that profile's Keychain item.
+        let vault: SecretVault = preferences == nil ? KeychainVault() : MemoryVault()
+        self.vault = vault
+        let legacyUser = preferences == nil ? TokenStore(file: TokenStore.legacyFile).user : nil
+        profiles = ProfileStore(folder: preferences == nil ? ProfileStore.defaultFolder : FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-profiles-\(UUID().uuidString)"),
+                                existing: .init(onboarded: loaded.onboarded, user: legacyUser, name: loaded.profileName), persists: preferences == nil)
+        if preferences == nil, let owner = profiles.book.legacyOwner {
+            _ = TokenStore.migrate(file: TokenStore.legacyFile, into: vault, account: ProfileSessions.account(for: owner))
+        }
+        if preferences == nil, let current = profiles.book.currentProfile { ProfilePicture.file = profiles.pictureFile(for: current.id) }
         toolkitStore = preferences == nil ? ToolkitStore() : ToolkitStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-toolkits-\(UUID().uuidString)"))
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
         let fonts = preferences == nil ? FontDownloads.root : FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-fonts-\(UUID().uuidString)")
@@ -472,10 +505,19 @@ final class AppModel: ObservableObject {
         gameFonts = fonts.appendingPathComponent("Games")
         cjkInstalled = fontDownloads.installed
         designs = themes.all
+        profileBook = profiles.book
+        // Settings → Game Presets of the profile playing.
+        loadGamePresets()
         if persists {
-            togetherUser = together.user
+            // An offline profile keeps its session (if it has one) unused.
+            togetherUser = currentProfile?.mode == .offline ? nil : together.user
             DispatchQueue.main.async { [weak self] in self?.startFamily() }
-            if togetherUser != nil { DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() } }
+            // With the picker up, the socket waits for the profile picked.
+            if profiles.launchScreen == .picker && self.preferences.onboarded {
+                DispatchQueue.main.async { [weak self] in self?.openProfilePicker(atLaunch: true) }
+            } else if togetherUser != nil {
+                DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() }
+            }
         }
         apply()
         changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
@@ -823,8 +865,22 @@ final class AppModel: ObservableObject {
 
     // MARK: AnyTogether
 
-    /// The client for the server chosen in Settings → AnyTogether (or ANYTOGETHER_URL).
-    lazy var together = wireTogether(AppModel.makeTogetherClient(base: TogetherServer.base(chosen: preferences.togetherServer)))
+    /// The client for the server chosen in Settings → AnyTogether (or ANYTOGETHER_URL), with the
+    /// session of the profile playing.
+    lazy var together = wireTogether(AppModel.makeTogetherClient(base: TogetherServer.base(chosen: preferences.togetherServer), store: sessionStore(for: sessionProfileID)))
+    /// Who plays on this Mac (Profiles.swift), their sessions in the Keychain.
+    let profiles: ProfileStore
+    let vault: SecretVault
+    @Published var profileBook = ProfileBook() {
+        didSet {
+            // Another profile plays: its own Game Presets come.
+            if profileBook.currentProfile?.id != oldValue.currentProfile?.id { loadGamePresets() }
+        }
+    }
+    @Published var profileFlow = ProfileFlow()
+    /// The friends' private names and pictures as the friends list last said.
+    @Published var identityBook = TogetherIdentityBook()
+    var privateNameDraft: String?
     var serverDraft = ""
     @Published var togetherUser: TogetherUser?
     @Published var togetherStep = TogetherStep.idle
@@ -845,7 +901,9 @@ final class AppModel: ObservableObject {
     @Published var family = FamilyStanding.free
     lazy var familyCache = persists ? FamilyCache() : FamilyCache(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-family"), defaults: UserDefaults(suiteName: "AnyPS5-preview-family") ?? .standard)
     let familyWatch = FamilyWatch()
-    @Published var togetherFriends: [TogetherFriend] = []
+    @Published var togetherFriends: [TogetherFriend] = [] {
+        didSet { if togetherFriends != oldValue { identityBook.learn(friends: togetherFriends) } }
+    }
     @Published var togetherRequests = TogetherRequests(incoming: [], outgoing: [])
     var friendHandle = ""
     /// The profile open: who (known before it loads), what came back, and the focused row.
@@ -1090,6 +1148,12 @@ final class AppModel: ObservableObject {
     // MARK: Trophies
 
     /// Reads the game's trophies once, or `again` after it may have unlocked some.
+    /// Another profile plays: its trophies are read again.
+    func forgetTrophies() {
+        trophies = [:]
+        trophiesRead = []
+    }
+
     func loadTrophies(_ game: Game, again: Bool = false) {
         guard let root, again || !trophiesRead.contains(game.id) else { return }
         trophiesRead.insert(game.id)
@@ -1456,6 +1520,8 @@ final class AppModel: ObservableObject {
     /// detailed logging on for this start only.
     func play(_ game: Game, trace: Bool = false) {
         guard root != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
+        // The profile's own saves and trophies in the game folder before anything reads them.
+        activateProfileSaves(game)
         familyGate(game) { self.syncSaves(game) { self.ensureFonts(game) { self.start(game, trace: trace) } } }
     }
 
@@ -1598,7 +1664,9 @@ final class AppModel: ObservableObject {
 
     private func saveSync(for game: Game) -> SaveSync? {
         guard preferences.saveSync == true, let root = syncRoot, let folder = gameFolder(game) else { return nil }
-        return SaveSync(game: folder, cloud: SaveSync.folder(in: root, titleID: game.titleID), backups: SaveBackup.folder(for: game), mac: Host.current().localizedName ?? "Mac")
+        let profile = saveSyncProfile
+        return SaveSync(game: folder, cloud: SaveSync.folder(in: root, titleID: game.titleID, profile: profile), backups: SaveBackup.folder(for: game),
+                        mac: Host.current().localizedName ?? "Mac", profile: profile)
     }
 
     /// Syncs the game's saves off the main thread, says what came from another Mac, then goes on.

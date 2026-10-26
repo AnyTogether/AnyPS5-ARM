@@ -32,6 +32,8 @@ class Friends extends ChangeNotifier {
           Presence.fromJson(json['presence'] as Map<String, dynamic>?),
         ),
     ]);
+    // The friends-only names and pictures, for the cards that carry none.
+    IdentityBook.shared.learn(friends);
     incoming = _people(requests['incoming']);
     outgoing = _people(requests['outgoing']);
     loaded = true;
@@ -70,6 +72,7 @@ class Friends extends ChangeNotifier {
   /// Signed out: nothing kept.
   void clear() {
     friends = const [];
+    IdentityBook.shared.learn(const []);
     incoming = const [];
     outgoing = const [];
     loaded = false;
@@ -83,6 +86,7 @@ class Friends extends ChangeNotifier {
       case 'friend.removed':
         final gone = event.json['userId'];
         friends = friends.where((friend) => friend.person.id != gone).toList();
+        IdentityBook.shared.learn(friends);
         notifyListeners();
       case 'presence.updated':
         final userId = event.json['userId'];

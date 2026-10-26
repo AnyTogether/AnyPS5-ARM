@@ -30,7 +30,7 @@ class Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final picture = person.avatar;
+    final picture = person.shownAvatar;
     final initials = Center(
       child: Text(
         person.initials,

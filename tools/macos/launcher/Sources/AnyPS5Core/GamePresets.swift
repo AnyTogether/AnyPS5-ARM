@@ -65,12 +65,12 @@ public struct GamePresets: Codable, Equatable, Sendable {
     }
 }
 
-/// Where the presets are kept: one small file of their own, so that a profile can own its file
-/// later (each profile's folder holding a GamePresets.json) without touching the rest.
+/// Where a profile's presets are kept: one small file of their own in the profile's folder
+/// (ProfileStore.gamePresetsFile), removed with the profile.
 public struct GamePresetsStore: Sendable {
     public let file: URL
 
-    public init(file: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AnyPS5/GamePresets.json")) {
+    public init(file: URL) {
         self.file = file
     }
 
@@ -84,5 +84,12 @@ public struct GamePresetsStore: Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(presets).write(to: file, options: .atomic)
+    }
+}
+
+extension ProfileStore {
+    /// The Game Presets of profile `id`, beside its picture in the profile's folder.
+    public func gamePresetsFile(for id: String) -> URL {
+        folder.appendingPathComponent(id).appendingPathComponent("GamePresets.json")
     }
 }

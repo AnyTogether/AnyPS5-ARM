@@ -116,6 +116,7 @@ extension AppModel {
         case .noSpace:
             guard let (game, shortage) = spaceShortage else { return [] }
             return [PanelCategory(id: "noSpace", title: TPrep.text(.noSpaceTitle), symbol: "externaldrive.badge.exclamationmark", rows: noSpaceRows(game, shortage))]
+        case .signIn: return [PanelCategory(id: "signin", title: "AnyTogether", symbol: "person.2.circle", rows: signInRows())]
         default: return []
         }
     }
@@ -216,9 +217,8 @@ extension AppModel {
             self?.preferences.language = Language.allCases[index]
         })
 
+        // The name and picture are the profile's: Settings → Profiles.
         var behaviour: [PanelRow] = [
-            PanelRow(id: "name", title: T.text(.profileName), symbol: "person.crop.circle", kind: .text(preferences.profileName) { [weak self] value in self?.preferences.profileName = value }),
-        ] + profilePictureRows() + [
             PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2",
                      kind: .stepper(value: preferences.sounds ? preferences.soundVolume ?? 100 : 0, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
                          self?.preferences.sounds = value > 0
@@ -336,6 +336,7 @@ extension AppModel {
         advanced += browserPlayRows()
 
         return [
+            PanelCategory(id: "profiles", title: TPro.text(.profilesCategory), symbol: "person.crop.circle", rows: profileRows()),
             PanelCategory(id: "appearance", title: T.text(.appearance), symbol: "paintbrush", rows: appearance),
             PanelCategory(id: "library", title: T.text(.storage), symbol: "square.grid.2x2", rows: library),
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),

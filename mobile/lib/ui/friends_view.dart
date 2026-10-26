@@ -197,7 +197,7 @@ class _FriendsPaneState extends State<FriendsPane> {
                       invite.from ??
                       const Person(id: '', handle: '?', displayName: '?'),
                   subtitle: texts.shareInvited(
-                    invite.from?.displayName ?? '',
+                    invite.from?.shownName ?? '',
                     widget.gameName?.call(invite.titleId) ?? invite.name,
                   ),
                   subtitleColor: togetherPlaying,
@@ -230,7 +230,7 @@ class _FriendsPaneState extends State<FriendsPane> {
               for (final person in friends.incoming)
                 _PersonRow(
                   person: person,
-                  subtitle: '@${person.handle}',
+                  subtitle: person.handleLine,
                   onTap: widget.onProfile == null
                       ? null
                       : () => widget.onProfile!(person.handle),
@@ -274,8 +274,13 @@ class _FriendsPaneState extends State<FriendsPane> {
                     ? null
                     : () => widget.onProfile!(friend.person.handle),
                 presence: friend.presence.state,
+                // A friends-only name keeps the handle (and the public name) beside it.
                 subtitle: friend.presence.share == null
-                    ? presenceText(texts, friend.presence, widget.gameName)
+                    ? [
+                        if (ShownIdentity.of(friend.person).isPrivate)
+                          friend.person.handleLine,
+                        presenceText(texts, friend.presence, widget.gameName),
+                      ].join(' · ')
                     : '${texts.shareSharing(widget.gameName?.call(friend.presence.share!.titleId) ?? friend.presence.share!.title ?? friend.presence.share!.titleId)}'
                           ' · ${texts.shareViewers(friend.presence.share!.viewers, friend.presence.share!.maxViewers)}',
                 subtitleColor: friend.presence.state == PresenceState.offline
@@ -289,7 +294,7 @@ class _FriendsPaneState extends State<FriendsPane> {
                       JoinablePill(game: game),
                     if (widget.onCall case final call?)
                       IconButton(
-                        tooltip: texts.callFriend(friend.person.displayName),
+                        tooltip: texts.callFriend(friend.person.shownName),
                         onPressed: widget.hub.calls.inCall
                             ? null
                             : () => call(friend.person),
@@ -334,7 +339,7 @@ class _FriendsPaneState extends State<FriendsPane> {
                         final sure = await askFirst(
                           context,
                           question: texts.askRemoveFriend(
-                            friend.person.displayName,
+                            friend.person.shownName,
                           ),
                           action: texts.friendsRemove,
                         );
@@ -357,7 +362,7 @@ class _FriendsPaneState extends State<FriendsPane> {
               for (final person in friends.outgoing)
                 _PersonRow(
                   person: person,
-                  subtitle: '@${person.handle}',
+                  subtitle: person.handleLine,
                   trailing: Text(
                     texts.friendsWaiting,
                     style: const TextStyle(color: Colors.white38, fontSize: 13),
@@ -406,7 +411,7 @@ class _PersonRow extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          person.displayName,
+                          person.shownName,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.white,

@@ -73,23 +73,31 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
     public let presence: Presence?
     /// Their trophy level; nil when their trophies are private to this user (or an older server).
     public var level: TogetherLevelBadge?
+    /// The friends-only name and picture (docs/private-identity.md): nil when not set or not
+    /// for this user to see. The picture is a signed link that runs out: not kept for later.
+    public var privateName: String?
+    public var privateAvatar: String?
 
-    public init(userId: String, handle: String, displayName: String, avatar: String?, presence: Presence?, level: TogetherLevelBadge? = nil) {
+    public init(userId: String, handle: String, displayName: String, avatar: String?, presence: Presence?, level: TogetherLevelBadge? = nil,
+                privateName: String? = nil, privateAvatar: String? = nil) {
         self.userId = userId
         self.handle = handle
         self.displayName = displayName
         self.avatar = avatar
         self.presence = presence
         self.level = level
+        self.privateName = privateName
+        self.privateAvatar = privateAvatar
     }
 
-    enum CodingKeys: String, CodingKey { case userId, handle, displayName, avatar, presence, level }
+    enum CodingKeys: String, CodingKey { case userId, handle, displayName, avatar, presence, level, privateName, privateAvatar }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(userId: try container.decode(String.self, forKey: .userId), handle: try container.decode(String.self, forKey: .handle),
                   displayName: try container.decode(String.self, forKey: .displayName), avatar: try container.decodeIfPresent(String.self, forKey: .avatar),
-                  presence: try container.decodeIfPresent(Presence.self, forKey: .presence), level: container.lenient(TogetherLevelBadge.self, .level))
+                  presence: try container.decodeIfPresent(Presence.self, forKey: .presence), level: container.lenient(TogetherLevelBadge.self, .level),
+                  privateName: container.lenient(String.self, .privateName), privateAvatar: container.lenient(String.self, .privateAvatar))
     }
 }
 
@@ -100,12 +108,17 @@ public struct TogetherPerson: Codable, Equatable, Sendable, Identifiable {
     public let handle: String
     public let displayName: String
     public let avatar: String?
+    /// The friends-only name and picture, on the cards of friends in answers that carry them.
+    public var privateName: String?
+    public var privateAvatar: String?
 
-    public init(userId: String, handle: String, displayName: String, avatar: String?) {
+    public init(userId: String, handle: String, displayName: String, avatar: String?, privateName: String? = nil, privateAvatar: String? = nil) {
         self.userId = userId
         self.handle = handle
         self.displayName = displayName
         self.avatar = avatar
+        self.privateName = privateName
+        self.privateAvatar = privateAvatar
     }
 }
 

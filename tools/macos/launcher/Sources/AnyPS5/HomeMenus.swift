@@ -41,6 +41,8 @@ extension AppModel {
     /// PS: over a game, the quick menu (held, "Close game?"); in the launcher, back to the game
     /// or, held, the home menu; on the game's menus, back to the game.
     func homeButton(hold: Bool) {
+        // At start a profile is picked first.
+        if overlay == .profilePicker && profileFlow.atLaunch { return Sounds.shared.play(.bump) }
         if hold {
             guard pairing == nil, preferences.onboarded, starting == nil, fontWait == nil else { return }
             if watchCommand(.home) != nil { return }
@@ -165,10 +167,21 @@ extension AppModel {
                     Sounds.shared.play(.select)
                     quitApp()
                 } else {
-                    // Profiles are still to come.
-                    Sounds.shared.play(.bump)
-                    Feel.shared.vibrate(.error)
+                    // Not while a game plays: it is closed first.
+                    openProfilePicker()
                 }
+            default: break
+            }
+        case .profileMenu:
+            let items = profileMenuItems()
+            switch command {
+            case .up, .left: move(-1, count: items.count)
+            case .down, .right: move(1, count: items.count)
+            case .back, .options: closeOverlay()
+            case .select:
+                guard items.indices.contains(menuIndex) else { return true }
+                Sounds.shared.play(.select)
+                runProfileMenu(items[menuIndex].action)
             default: break
             }
         default:
@@ -442,7 +455,7 @@ struct GameMenuCard: View {
     }
 
     var body: some View {
-        let game = model.overlay == .homeMenu ? nil : (model.selectedGame ?? model.runningGame)
+        let game = model.overlay == .homeMenu || model.overlay == .profileMenu ? nil : (model.selectedGame ?? model.runningGame)
         ZStack {
             FrostFill(opacity: 0.6).ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -477,8 +490,8 @@ struct GameMenuCard: View {
 
     @ViewBuilder private func header(_ game: Game?) -> some View {
         HStack(alignment: .center, spacing: 18 * scale) {
-            if model.overlay == .homeMenu {
-                ProfileAvatar(url: model.togetherUser?.avatar, name: model.preferences.profileName, size: 64 * scale, glow: false, picture: model.profilePicture)
+            if model.overlay == .homeMenu || model.overlay == .profileMenu {
+                ProfileTileAvatar(profile: model.currentProfile, picture: model.profilePicture, size: 64 * scale)
             } else if let game {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(Color.white.opacity(0.08))
@@ -510,6 +523,7 @@ struct GameMenuCard: View {
         switch model.overlay {
         case .closeGame: return TH.text(.closeGame)
         case .homeMenu: return TH.text(.homeMenuKicker)
+        case .profileMenu: return TPro.text(.menuKicker)
         default: return TH.text(.quickMenuKicker)
         }
     }
@@ -517,7 +531,7 @@ struct GameMenuCard: View {
     private func title(_ game: Game?) -> String {
         switch model.overlay {
         case .closeGame: return TH.format(.closeGameTitle, game?.name ?? "")
-        case .homeMenu: return model.preferences.profileName
+        case .homeMenu, .profileMenu: return model.currentProfile?.name ?? model.preferences.profileName
         default: return game?.name ?? ""
         }
     }
@@ -551,6 +565,11 @@ struct GameMenuCard: View {
             powerLine
         case .closeGame:
             Text(TH.text(.closeGameText)).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.65))
+        case .homeMenu, .profileMenu:
+            let online = model.currentProfile?.mode == .online
+            Label(online ? (model.togetherUser.map { "@\($0.handle)" } ?? TPro.text(.online)) : TPro.text(.offline),
+                  systemImage: online ? "person.2.wave.2.fill" : "wifi.slash")
+                .font(.display(13 * scale, .medium)).foregroundStyle(.white.opacity(0.65))
         default:
             EmptyView()
         }
@@ -594,8 +613,11 @@ struct GameMenuCard: View {
             return [Item(id: 0, title: T.text(.cancel), symbol: "arrow.uturn.backward"),
                     Item(id: 1, title: TH.text(.closeGame), symbol: "xmark.circle.fill", destructive: true)]
         case .homeMenu:
-            return [Item(id: 0, title: TH.text(.switchProfile), detail: TH.text(.switchProfileDetail), symbol: "person.2.circle", disabled: true),
+            let others = model.profileBook.profiles.count - 1
+            return [Item(id: 0, title: TH.text(.switchProfile), detail: TPro.others(others), symbol: "person.2.circle"),
                     Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
+        case .profileMenu:
+            return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         default:
             var items = [Item(id: 0, title: TH.text(.resume), symbol: "play.fill"),
                          Item(id: 1, title: T.text(.gameSettings), symbol: "slider.horizontal.3")]
@@ -655,7 +677,7 @@ struct GameMenuCard: View {
             Hint(keys: "↑ ↓", label: T.text(.hintMove))
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Spacer(minLength: 0)
-            if model.overlay == .homeMenu {
+            if model.overlay == .homeMenu || model.overlay == .profileMenu {
                 Hint(keys: "esc / ○", label: T.text(.hintBack))
             } else {
                 Hint(keys: "PS / esc / ○", label: TH.text(.resume))
@@ -673,7 +695,7 @@ extension AppModel {
     /// The PS menus take every command while one is up.
     func gameMenuCommandIfOpen(_ command: Command) -> Bool? {
         switch overlay {
-        case .quickMenu, .closeGame, .homeMenu: return gameMenuCommand(command)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu: return gameMenuCommand(command)
         default: return nil
         }
     }

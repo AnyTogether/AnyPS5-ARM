@@ -270,7 +270,7 @@ class _ProfileViewState extends State<ProfileView> {
     final person = profile.person;
     final presence = profile.presence;
     final where = [
-      '@${person.handle}',
+      person.handleLine,
       if (profile.country case final code?) '${flagOf(code)} $code',
     ].join('  ·  ');
     // On a small phone the buttons go under the bio, not beside a squeezed name.
@@ -294,7 +294,7 @@ class _ProfileViewState extends State<ProfileView> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    person.displayName,
+                    person.shownName,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white,
@@ -450,7 +450,7 @@ class _ProfileViewState extends State<ProfileView> {
   );
 
   Widget _partBody(Strings texts, ProfilePage page) {
-    final name = page.profile.person.displayName;
+    final name = page.profile.person.shownName;
     Widget empty(String text) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 18),
       child: Text(
@@ -848,7 +848,7 @@ class _PersonChip extends StatelessWidget {
             Avatar(person: person, size: 26),
             const SizedBox(width: 8),
             Text(
-              person.displayName,
+              person.shownName,
               style: const TextStyle(color: Colors.white70, fontSize: 13),
             ),
           ],

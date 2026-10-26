@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../chat_strings.dart';
+import '../private_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
 import '../together/people.dart';
@@ -72,6 +73,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   final _name = TextEditingController();
   final _handle = TextEditingController();
   final _bio = TextEditingController();
+  final _privateName = TextEditingController();
   OwnProfile? _profile;
   String? _country;
   Privacy _privacy = defaultPrivacy;
@@ -83,6 +85,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
   String? _error;
   String? _handleError;
   String? _pictureError;
+
+  /// The friends-only picture going up or away, and why it could not.
+  bool _privatePicture = false;
+  String? _privatePictureError;
 
   Profiles get _profiles => widget.profiles;
 
@@ -104,6 +110,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     _name.dispose();
     _handle.dispose();
     _bio.dispose();
+    _privateName.dispose();
     super.dispose();
   }
 
@@ -117,6 +124,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         _name.text = profile.displayName;
         _handle.text = profile.handle;
         _bio.text = profile.bio ?? '';
+        _privateName.text = profile.privateName ?? '';
         _country = profile.country;
         _privacy = profile.privacy;
         _appearOffline = profile.appearOffline;
@@ -160,6 +168,20 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         });
       }
       return;
+    }
+    // The friends-only name goes with Save too; empty clears it.
+    if (_privateName.text.trim() != (profile.privateName ?? '')) {
+      try {
+        await _profiles.setPrivateName(_privateName.text);
+      } on Object catch (error) {
+        if (mounted) {
+          setState(() {
+            _error = _problem(texts, error);
+            _saving = false;
+          });
+        }
+        return;
+      }
     }
     if (handleChanged) {
       try {
@@ -240,17 +262,21 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
   }
 
-  Future<void> _changePicture() async {
+  /// A new picture, cut square: the public one, or with [private] the friends-only one.
+  Future<void> _changePicture({bool private = false}) async {
     final texts = Texts.of(context);
     final navigator = Navigator.of(context);
-    setState(() => _pictureError = null);
+    void fail(String? text) => setState(
+      () => private ? _privatePictureError = text : _pictureError = text,
+    );
+    fail(null);
     final Uint8List? bytes;
     try {
       bytes = await widget.pickPhoto();
     } on PlatformException catch (error) {
       if (mounted) {
-        setState(
-          () => _pictureError = error.code.contains('access_denied')
+        fail(
+          error.code.contains('access_denied')
               ? texts.photoDenied
               : texts.avatarBad,
         );
@@ -260,10 +286,10 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     if (bytes == null || !mounted) return;
     switch (avatarIssue(bytes)) {
       case AvatarIssue.tooBig:
-        setState(() => _pictureError = texts.avatarTooBig);
+        fail(texts.avatarTooBig);
         return;
       case AvatarIssue.wrongType:
-        setState(() => _pictureError = texts.avatarWrongType);
+        fail(texts.avatarWrongType);
         return;
       case _:
     }
@@ -273,14 +299,14 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
       image = (await codec.getNextFrame()).image;
       codec.dispose();
     } on Object {
-      if (mounted) setState(() => _pictureError = texts.avatarBad);
+      if (mounted) fail(texts.avatarBad);
       return;
     }
     if (image.width < ProfileLimits.avatarMinSide ||
         image.height < ProfileLimits.avatarMinSide ||
         image.width * image.height > ProfileLimits.avatarMaxPixels) {
       image.dispose();
-      if (mounted) setState(() => _pictureError = texts.avatarBad);
+      if (mounted) fail(texts.avatarBad);
       return;
     }
     final square = await navigator.push<Uint8List>(
@@ -289,17 +315,26 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     image.dispose();
     if (square == null || !mounted) return;
     if (avatarIssue(square) != null) {
-      setState(() => _pictureError = texts.avatarTooBig);
+      fail(texts.avatarTooBig);
       return;
     }
-    setState(() => _picture = true);
+    setState(() => private ? _privatePicture = true : _picture = true);
     try {
-      final url = await _profiles.uploadAvatar(square);
-      if (mounted) setState(() => _profile = _profile?.copyWith(avatar: url));
+      if (private) {
+        final url = await _profiles.uploadPrivateAvatar(square);
+        if (mounted) {
+          setState(() => _profile = _profile?.copyWith(privateAvatar: url));
+        }
+      } else {
+        final url = await _profiles.uploadAvatar(square);
+        if (mounted) setState(() => _profile = _profile?.copyWith(avatar: url));
+      }
     } on Object catch (error) {
-      if (mounted) setState(() => _pictureError = _problem(texts, error));
+      if (mounted) fail(_problem(texts, error));
     }
-    if (mounted) setState(() => _picture = false);
+    if (mounted) {
+      setState(() => private ? _privatePicture = false : _picture = false);
+    }
   }
 
   Future<void> _removePicture() async {
@@ -319,6 +354,103 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     }
     if (mounted) setState(() => _picture = false);
   }
+
+  Future<void> _removePrivatePicture() async {
+    setState(() {
+      _privatePicture = true;
+      _privatePictureError = null;
+    });
+    try {
+      await _profiles.removePrivateAvatar();
+      if (mounted) {
+        setState(() => _profile = _profile?.copyWith(clearPrivateAvatar: true));
+      }
+    } on Object catch (error) {
+      if (mounted) {
+        setState(
+          () => _privatePictureError = _problem(Texts.of(context), error),
+        );
+      }
+    }
+    if (mounted) setState(() => _privatePicture = false);
+  }
+
+  /// The friends-only name and picture: only accepted friends see them, beside the handle.
+  List<Widget> _privateIdentity(Strings texts, OwnProfile profile) => [
+    SectionLabel(texts.privateTitle),
+    Text(
+      texts.privateLead,
+      style: const TextStyle(color: Colors.white38, fontSize: 12.5),
+    ),
+    const SizedBox(height: 10),
+    _Field(
+      label: texts.privateName,
+      controller: _privateName,
+      maxLength: ProfileLimits.nameMax,
+      helper: texts.privateNameHelper,
+      onChanged: (_) => setState(() {}),
+    ),
+    const SizedBox(height: 10),
+    Row(
+      children: [
+        Avatar(
+          person: Person(
+            id: '',
+            handle: profile.handle,
+            displayName: _privateName.text.trim().isEmpty
+                ? profile.displayName
+                : _privateName.text.trim(),
+            avatar: profile.privateAvatar,
+          ),
+          size: 48,
+        ),
+        const SizedBox(width: 14),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: _privatePicture
+                        ? null
+                        : () => _changePicture(private: true),
+                    icon: _privatePicture
+                        ? const SizedBox.square(
+                            dimension: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.lock_person_rounded, size: 17),
+                    label: Text(texts.privatePicture),
+                  ),
+                  if (profile.privateAvatar != null)
+                    TextButton(
+                      onPressed: _privatePicture ? null : _removePrivatePicture,
+                      child: Text(
+                        texts.privatePictureRemove,
+                        style: const TextStyle(color: Colors.white60),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                _privatePictureError ?? texts.privatePictureHint,
+                style: TextStyle(
+                  color: _privatePictureError == null
+                      ? Colors.white38
+                      : togetherError,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  ];
 
   Future<void> _pickCountry() async {
     final picked = await showDialog<(String?,)>(
@@ -522,6 +654,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           ),
         ),
       ),
+      ..._privateIdentity(texts, profile),
     ],
   );
 

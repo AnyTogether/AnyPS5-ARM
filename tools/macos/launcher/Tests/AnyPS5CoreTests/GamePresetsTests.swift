@@ -58,4 +58,18 @@ final class GamePresetsTests: XCTestCase {
         try Data("not json".utf8).write(to: file)
         XCTAssertEqual(GamePresetsStore(file: file).load(), GamePresets())
     }
+
+    func testEachProfileKeepsItsOwnPresetsWhichGoWithIt() throws {
+        let profiles = ProfileStore(folder: folder, existing: .init(onboarded: true, user: nil, name: "Robin"), persists: true)
+        let robin = try XCTUnwrap(profiles.book.currentProfile)
+        let sam = profiles.add(name: "Sam", mode: .offline)
+        XCTAssertNotEqual(profiles.gamePresetsFile(for: robin.id), profiles.gamePresetsFile(for: sam.id))
+        var hard = GamePresets()
+        hard.difficulty = .hard
+        try GamePresetsStore(file: profiles.gamePresetsFile(for: sam.id)).save(hard)
+        XCTAssertEqual(GamePresetsStore(file: profiles.gamePresetsFile(for: sam.id)).load(), hard)
+        XCTAssertEqual(GamePresetsStore(file: profiles.gamePresetsFile(for: robin.id)).load(), GamePresets(), "another profile's presets are not this one's")
+        try profiles.remove(sam.id)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: profiles.gamePresetsFile(for: sam.id).path), "a removed profile takes its presets with it")
+    }
 }

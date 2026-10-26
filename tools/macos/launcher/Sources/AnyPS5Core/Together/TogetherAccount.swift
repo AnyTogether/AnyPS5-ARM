@@ -62,9 +62,12 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
     /// Others see when the user has read their messages, and the user sees theirs. True from an
     /// older server.
     public var readReceipts: Bool
+    /// The name and picture only accepted friends see; nil when not set (or an older server).
+    public var privateName: String?
+    public var privateAvatar: String?
 
     public init(handle: String, displayName: String, bio: String?, avatar: String?, country: String?, handleChangeAt: Date?, privacy: TogetherPrivacy,
-                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, readReceipts: Bool = true) {
+                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, readReceipts: Bool = true, privateName: String? = nil, privateAvatar: String? = nil) {
         self.handle = handle
         self.displayName = displayName
         self.bio = bio
@@ -75,9 +78,11 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         self.trophyLevel = trophyLevel
         self.appearOffline = appearOffline
         self.readReceipts = readReceipts
+        self.privateName = privateName
+        self.privateAvatar = privateAvatar
     }
 
-    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, readReceipts }
+    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, readReceipts, privateName, privateAvatar }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -91,6 +96,8 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         trophyLevel = container.lenient(TogetherTrophyLevel.self, .trophyLevel)
         appearOffline = container.lenient(Bool.self, .appearOffline) ?? false
         readReceipts = container.lenient(Bool.self, .readReceipts) ?? true
+        privateName = container.lenient(String.self, .privateName)
+        privateAvatar = container.lenient(String.self, .privateAvatar)
     }
 }
 

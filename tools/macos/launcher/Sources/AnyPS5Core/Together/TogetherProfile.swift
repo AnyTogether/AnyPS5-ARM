@@ -12,8 +12,12 @@ public struct TogetherProfile: Decodable, Equatable, Sendable {
     public let friendship: String
     /// Their trophy level; nil when their trophies are private to this user (or an older server).
     public let trophyLevel: TogetherTrophyLevel?
+    /// The friends-only name and picture, for a friend (or the user) signed in.
+    public var privateName: String?
+    public var privateAvatar: String?
 
-    public init(userId: String, handle: String, displayName: String, avatar: String?, bio: String?, country: String?, friendship: String, trophyLevel: TogetherTrophyLevel? = nil) {
+    public init(userId: String, handle: String, displayName: String, avatar: String?, bio: String?, country: String?, friendship: String, trophyLevel: TogetherTrophyLevel? = nil,
+                privateName: String? = nil, privateAvatar: String? = nil) {
         self.userId = userId
         self.handle = handle
         self.displayName = displayName
@@ -22,16 +26,19 @@ public struct TogetherProfile: Decodable, Equatable, Sendable {
         self.country = country
         self.friendship = friendship
         self.trophyLevel = trophyLevel
+        self.privateName = privateName
+        self.privateAvatar = privateAvatar
     }
 
-    enum CodingKeys: String, CodingKey { case userId, handle, displayName, avatar, bio, country, friendship, trophyLevel }
+    enum CodingKeys: String, CodingKey { case userId, handle, displayName, avatar, bio, country, friendship, trophyLevel, privateName, privateAvatar }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.init(userId: try container.decode(String.self, forKey: .userId), handle: try container.decode(String.self, forKey: .handle),
                   displayName: try container.decode(String.self, forKey: .displayName), avatar: try container.decodeIfPresent(String.self, forKey: .avatar),
                   bio: try container.decodeIfPresent(String.self, forKey: .bio), country: try container.decodeIfPresent(String.self, forKey: .country),
-                  friendship: try container.decode(String.self, forKey: .friendship), trophyLevel: container.lenient(TogetherTrophyLevel.self, .trophyLevel))
+                  friendship: try container.decode(String.self, forKey: .friendship), trophyLevel: container.lenient(TogetherTrophyLevel.self, .trophyLevel),
+                  privateName: container.lenient(String.self, .privateName), privateAvatar: container.lenient(String.self, .privateAvatar))
     }
 
     public var isMe: Bool { friendship == "me" }

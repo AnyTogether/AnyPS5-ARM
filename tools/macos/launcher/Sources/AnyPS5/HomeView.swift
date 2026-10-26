@@ -896,8 +896,14 @@ extension AppModel {
             return controllerTestCommand(command)
         case .browserPlay:
             return browserPlayCommand(command)
-        case .quickMenu, .closeGame, .homeMenu:
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu:
             return gameMenuCommand(command)
+        case .profilePicker:
+            return pickerCommand(command)
+        case .addProfile:
+            return modeChoiceCommand(command)
+        case .signIn:
+            return signInCommand(command)
         case .gallery:
             galleryCommand(command)
             return true
