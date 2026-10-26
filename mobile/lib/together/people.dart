@@ -1,3 +1,7 @@
+import 'private_identity.dart';
+
+export 'private_identity.dart';
+
 /// Someone on AnyTogether as the API's name cards show them.
 class Person {
   const Person({
@@ -5,6 +9,8 @@ class Person {
     required this.handle,
     required this.displayName,
     this.avatar,
+    this.privateName,
+    this.privateAvatar,
   });
 
   factory Person.fromJson(Map<String, dynamic> json) => Person(
@@ -12,6 +18,12 @@ class Person {
     handle: json['handle'] as String,
     displayName: json['displayName'] as String,
     avatar: json['avatar'] as String?,
+    privateName: json['privateName'] is String
+        ? json['privateName'] as String
+        : null,
+    privateAvatar: json['privateAvatar'] is String
+        ? json['privateAvatar'] as String
+        : null,
   );
 
   final String id;
@@ -21,9 +33,25 @@ class Person {
   /// The picture's full address, or null for none.
   final String? avatar;
 
+  /// The friends-only name and picture (AnyTogether's docs/private-identity.md): on the cards of
+  /// friends in the answers that carry them, null when not set or not for this user to see.
+  /// The picture is a signed link that runs out.
+  final String? privateName;
+  final String? privateAvatar;
+
+  /// The name to show: the friends-only one when this user may see it (from this card, or the
+  /// friends list kept by user ID), else the public one. The handle goes beside a private name.
+  String get shownName => ShownIdentity.of(this).name;
+
+  /// The picture to show, the same way.
+  String? get shownAvatar => ShownIdentity.of(this).avatar;
+
+  /// "@handle", with the public name too when a private one is shown.
+  String get handleLine => ShownIdentity.of(this).handleLine;
+
   /// One or two letters for a person with no picture.
   String get initials {
-    final words = displayName.trim().split(RegExp(r'\s+'));
+    final words = shownName.trim().split(RegExp(r'\s+'));
     final letters = words
         .where((word) => word.isNotEmpty)
         .take(2)

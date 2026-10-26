@@ -121,7 +121,7 @@ class _PartyPaneState extends State<PartyPane> {
         for (final invite in parties.invites)
           _Row(
             person: invite.from,
-            title: invite.from?.displayName ?? texts.party,
+            title: invite.from?.shownName ?? texts.party,
             subtitle: invite.size == null
                 ? null
                 : texts.partyInviteFrom(
@@ -153,8 +153,8 @@ class _PartyPaneState extends State<PartyPane> {
         for (final friend in open)
           _Row(
             person: friend.person,
-            title: friend.person.displayName,
-            subtitle: '@${friend.person.handle}',
+            title: friend.person.shownName,
+            subtitle: friend.person.handleLine,
             trailing: OutlinedButton(
               onPressed: _busy
                   ? null
@@ -261,7 +261,7 @@ class _PartyPaneState extends State<PartyPane> {
                   ? () async {
                       final sure = await askFirst(
                         context,
-                        question: texts.askKick(member.displayName),
+                        question: texts.askKick(member.shownName),
                         action: texts.partyKick,
                       );
                       if (sure && mounted) {
@@ -281,7 +281,7 @@ class _PartyPaneState extends State<PartyPane> {
             for (final person in party.invited)
               Chip(
                 avatar: Avatar(person: person, size: 22),
-                label: Text(person.displayName),
+                label: Text(person.shownName),
                 backgroundColor: const Color(0x14FFFFFF),
                 side: BorderSide.none,
                 labelStyle: const TextStyle(
@@ -297,8 +297,8 @@ class _PartyPaneState extends State<PartyPane> {
         for (final person in party.requests)
           _Row(
             person: person,
-            title: person.displayName,
-            subtitle: '@${person.handle}',
+            title: person.shownName,
+            subtitle: person.handleLine,
             trailing: leader
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
@@ -343,7 +343,7 @@ class _PartyPaneState extends State<PartyPane> {
         _Row(
           person: friend.person,
           presence: friend.presence.state,
-          title: friend.person.displayName,
+          title: friend.person.shownName,
           trailing: TextButton(
             onPressed: party.full
                 ? null
@@ -701,7 +701,7 @@ class _Member extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            person.displayName,
+            person.shownName,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -711,7 +711,7 @@ class _Member extends StatelessWidget {
             ),
           ),
           Text(
-            leader ? texts.partyLeader : '@${person.handle}',
+            leader ? texts.partyLeader : person.handleLine,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(color: Colors.white38, fontSize: 11.5),
@@ -724,7 +724,7 @@ class _Member extends StatelessWidget {
     // Chosen once the menu is gone, so the question it asks has the screen to itself.
     return PopupMenuButton<bool>(
       color: const Color(0xFF1A1D27),
-      tooltip: person.displayName,
+      tooltip: person.shownName,
       onSelected: (_) => kick(),
       itemBuilder: (context) => [
         PopupMenuItem(value: true, child: Text(texts.partyKick)),
