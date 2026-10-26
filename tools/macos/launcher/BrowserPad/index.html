@@ -207,6 +207,23 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
 .switch[aria-checked="true"] { background: var(--accent); }
 .switch[aria-checked="true"]::after { transform: translateX(18px); }
 
+/* The game asks for text: a sheet with the phone's own keyboard. */
+.card.type { text-align: left; padding: 22px 22px 18px; }
+.card.type .kicker { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+.card.type .kicker svg { width: 18px; height: 18px; }
+.card.type .kicker svg * { fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.card.type h1 { font-size: 23px; margin-bottom: 14px; }
+.field { position: relative; }
+.field input, .field textarea { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 14px 16px; border-radius: 16px; font-family: inherit; font-weight: 600; font-size: 18px; line-height: 1.3;
+  background: var(--surface-hi); border: 1px solid var(--line); color: var(--ink); -webkit-user-select: text; user-select: text; caret-color: var(--accent); white-space: pre-wrap; overflow-wrap: anywhere; }
+.field textarea { min-height: 96px; max-height: 40vh; overflow: auto; }
+.field input::placeholder, .field textarea::placeholder { color: var(--ink-faint); }
+.field input:focus, .field textarea:focus { border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+.count { margin-top: 6px; text-align: right; font-size: 12px; font-weight: 600; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.count.full { color: var(--orange); }
+.card.type .actions { justify-content: flex-end; margin-top: 12px; }
+body.typing #turn { display: none !important; }
+
 /* Held upright: ask to turn the phone. */
 #turn { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; text-align: center; padding: 24px; background: var(--shell); }
 #turn .phone { width: 44px; height: 76px; margin: 0 auto 18px; border: 2.5px solid var(--ink); border-radius: 10px; position: relative; animation: turn 2.2s cubic-bezier(.6, 0, .2, 1) infinite; }
@@ -246,6 +263,8 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
       tryAgain: "Try again", menuTitle: "Pad", vibration: "Vibration", vibrationText: "Buzz on presses and when the game rumbles",
       vibrationNone: "This browser cannot vibrate", fullscreen: "Full screen", homeScreen: "For full screen, add this page to your Home Screen.",
       leave: "Leave", done: "Done", player: "Player", touchpad: "Touchpad", ms: "ms",
+      typeKicker: "The game asks", typeTitle: "Type here", send: "Send", cancel: "Cancel",
+      enterSend: "Send", enterSearch: "Search", enterGo: "Go",
     },
     tr: {
       connecting: "Bağlanıyor", connectingText: "Bilgisayarındaki AnyPS5'e ulaşılıyor.",
@@ -260,6 +279,8 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
       tryAgain: "Yeniden dene", menuTitle: "Kumanda", vibration: "Titreşim", vibrationText: "Basınca ve oyun titreştiğinde titrer",
       vibrationNone: "Bu tarayıcı titreşemiyor", fullscreen: "Tam ekran", homeScreen: "Tam ekran için bu sayfayı Ana Ekran'a ekle.",
       leave: "Ayrıl", done: "Tamam", player: "Oyuncu", touchpad: "Dokunmatik yüzey", ms: "ms",
+      typeKicker: "Oyun soruyor", typeTitle: "Buraya yaz", send: "Gönder", cancel: "Vazgeç",
+      enterSend: "Gönder", enterSearch: "Ara", enterGo: "Git",
     },
   };
   const lang = (navigator.languages || [navigator.language || "en"]).some((l) => /^tr\b/i.test(l)) ? "tr" : "en";
@@ -634,6 +655,7 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
       case "out": output(m); break;
       case "player": setPlayer(m.n); break;
       case "look": look(m); break;
+      case "ime": m.id ? showType(m) : closeType(); break;
       case "pong": {
         const ms = Math.max(1, Math.round(performance.now() - m.at));
         chipMs.textContent = `${ms} ${t("ms")}`;
@@ -698,6 +720,69 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
     }
   }
 
+  // ---------- Typing for the game ----------
+  // The game opened its keyboard: the phone's own keyboard types the text, which replaces the
+  // game's when it is sent ({"t":"type","id":prompt,"text":...,"a":"submit"|"cancel"|"update"}).
+  const keycap = svg('<rect x="2.5" y="6" width="19" height="12" rx="2.6"/><path d="M6 10h.01M9.3 10h.01M12.6 10h.01M15.9 10h.01M7.5 14h9"/>');
+  let typing = null;
+  const utf16 = (text) => [...text].reduce((n, ch) => n + ch.length, 0);
+  // A page message stays well inside one WebSocket frame (4096 bytes).
+  const fitBytes = (text) => { let out = "", bytes = 0; for (const ch of text) { const n = new TextEncoder().encode(ch).length; if (bytes + n > 3500) break; bytes += n; out += ch; } return out; };
+  function showType(m) {
+    if (typing && typing.id === m.id) return;
+    releaseAll();
+    send(current());
+    typing = { id: m.id, max: m.max > 0 ? m.max : 2048 };
+    cardKind = "type";
+    document.body.classList.add("typing");
+    const multi = !!m.multi;
+    const mode = { number: "numeric", url: "url", mail: "email" }[m.kb] || "text";
+    const kind = { number: "text", url: "url", mail: "email" }[m.kb] || "text";
+    const enter = { send: "enterSend", search: "enterSearch", go: "enterGo" }[m.enter];
+    const label = enter ? t(enter) : t("send");
+    const field = multi
+      ? `<textarea id="typed" rows="3" inputmode="${mode}" autocapitalize="sentences" autocomplete="off" spellcheck="true"></textarea>`
+      : `<input id="typed" type="${kind}" inputmode="${mode}" enterkeyhint="${m.enter === "search" ? "search" : m.enter === "go" ? "go" : "send"}" autocomplete="off" autocapitalize="${m.kb === "url" || m.kb === "mail" ? "off" : "sentences"}">`;
+    card.className = "card type";
+    card.innerHTML = `<div class="kicker">${keycap}<span>${t("typeKicker")}</span></div><h1>${escape(m.title || t("typeTitle"))}</h1>
+      <div class="field">${field}</div><div class="count" id="count"></div>
+      <div class="actions"><button class="btn" type="button" id="cancelType">${t("cancel")}</button><button class="btn primary" type="button" id="sendType">${escape(label)}</button></div>`;
+    card.style.animation = "none"; void card.offsetWidth; card.style.animation = "";
+    veil.classList.remove("hidden");
+    const input = document.getElementById("typed");
+    const count = document.getElementById("count");
+    input.placeholder = m.placeholder || "";
+    input.value = m.text || "";
+    const recount = () => {
+      let value = input.value;
+      if (!multi) value = value.replace(/[\r\n]+/g, " ");
+      while (utf16(value) > typing.max) value = [...value].slice(0, -1).join("");
+      if (value !== input.value) input.value = value;
+      const used = utf16(value);
+      count.textContent = `${used}/${typing.max}`;
+      count.classList.toggle("full", used >= typing.max);
+    };
+    recount();
+    input.addEventListener("input", recount);
+    const answer = (action) => {
+      if (!typing) return;
+      send({ t: "type", id: typing.id, text: fitBytes(input.value), a: action });
+      closeType();
+    };
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter" && !multi) { event.preventDefault(); answer("submit"); } });
+    document.getElementById("sendType").addEventListener("click", () => answer("submit"));
+    document.getElementById("cancelType").addEventListener("click", () => answer("cancel"));
+    setTimeout(() => { input.focus(); try { input.setSelectionRange(input.value.length, input.value.length); } catch {} }, 60);
+  }
+  function closeType() {
+    if (!typing) return;
+    typing = null;
+    document.body.classList.remove("typing");
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    card.className = "card";
+    if (cardKind === "type") hideCard();
+  }
+
   // ---------- Cards ----------
   const veil = document.getElementById("veil"), card = document.getElementById("card");
   const marks = {
@@ -723,6 +808,9 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
       protocol: ["stop", "protocolTitle", "protocolText", false],
     }[kind];
     const [mark, title, text, spin] = spec;
+    typing = null;
+    document.body.classList.remove("typing");
+    card.className = "card";
     const digits = code ? `<div class="code" aria-label="${escape(code)}">${[...String(code)].map((d) => `<b>${escape(d)}</b>`).join("")}</div>` : "";
     const retry = kind === "expired" || kind === "denied" ? `<div class="actions"><button class="btn" type="button" id="again">${t("tryAgain")}</button></div>` : "";
     card.innerHTML = `<div class="mark">${marks[mark]}</div><h1>${t(title)}</h1>${digits}<p>${t(text)}</p>${spin ? '<div class="spinner" role="progressbar"></div>' : ""}${retry}`;
@@ -735,6 +823,7 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
 
   function showMenu() {
     cardKind = "menu";
+    card.className = "card";
     const canFull = !!document.documentElement.requestFullscreen;
     card.innerHTML = `<h1 style="margin-bottom:12px">${t("menuTitle")}</h1>
       <div class="row"><div><span>${t("vibration")}</span><small>${canVibrate ? t("vibrationText") : t("vibrationNone")}</small></div>
@@ -775,12 +864,13 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
   layout();
   setPlayer(0);
   showCard("connecting");
-  // Screenshots and checks can drive the page without a launcher: #demo=pad|pair|busy|expired.
+  // Screenshots and checks can drive the page without a launcher: #demo=pad|pair|busy|expired|type.
   const demo = new URLSearchParams(location.hash.slice(1)).get("demo");
   if (demo) {
-    finished = demo !== "pad";
+    finished = demo !== "pad" && demo !== "type";
     if (demo === "pad") { heard({ t: "welcome", host: "Utku's MacBook Pro" }); setPlayer(2); chipMs.textContent = "9 ms"; }
     else if (demo === "pair") showCard("pair", "4821");
+    else if (demo === "type") { heard({ t: "welcome", host: "Utku's MacBook Pro" }); heard({ t: "ime", id: 3, title: "Name your save", placeholder: "Save 1", text: "Kral", max: 16, kb: "text", enter: "default" }); }
     else showCard(demo);
     window.anyps5Pad = { heard, current: () => current() };
   } else {

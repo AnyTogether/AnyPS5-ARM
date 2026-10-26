@@ -65,6 +65,7 @@ extension AppModel {
                      kind: .stepper(value: preferences.stickDeadzone ?? 0, range: StickDeadzone.range, step: StickDeadzone.step, format: { $0 == 0 ? T.text(.off) : "\($0)%" }) { [weak self] value in
                          self?.preferences.stickDeadzone = value == 0 ? nil : value
                      }),
+            assistRow(),
             PanelRow(id: "padTroubleshoot", title: TP.text(.troubleshoot), kind: .info("")),
         ]
         let findings = controllers.findings

@@ -83,6 +83,9 @@ struct Preferences: Codable, Equatable {
     var controllerLight: String?
     var confirmCircle: Bool?
     var stickDeadzone: Int?
+    /// Settings → Controllers → Assist Player 1 (AssistTarget): nil off, "controllers", or the
+    /// device ID of the phone or browser pad that helps.
+    var assistPlayerOne: String?
     /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
     /// the built-in one, "custom" the folder below, else a downloaded version).
     var engine: String?
@@ -138,7 +141,7 @@ extension Overlay {
     /// Panels drawn over the whole screen rather than sliding in at its side.
     var coversScreen: Bool {
         switch self {
-        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
+        case .settings, .library, .log, .messages, .profile, .compare, .feed, .captures, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
              .profilePicker, .addProfile, .signIn:
             return true
         default:
@@ -177,6 +180,8 @@ enum Overlay: Equatable {
     case party
     /// Friends' activity on AnyTogether.
     case feed
+    /// Screenshots and clips posted on AnyTogether, their likes and comments (CapturesView.swift).
+    case captures
     /// A game's leaderboard, or overall trophy points.
     case leaderboard
     /// AnyTogether's notifications, from the bell.
@@ -645,6 +650,7 @@ final class AppModel: ObservableObject {
         Input.shared.circleConfirms = preferences.confirmCircle == true
         if persists, Input.shared.shortcuts != shortcutMap { Input.shared.apply(shortcutMap) }
         Input.shared.deadzone = preferences.stickDeadzone ?? 0
+        applyAssist()
         let controllers = Controllers.shared
         controllers.light = preferences.controllerLight.flatMap(PadLight.init(rawValue:)) ?? .theme
         if let rgb = NSColor(accent).usingColorSpace(.sRGB) {
@@ -894,6 +900,8 @@ final class AppModel: ObservableObject {
     lazy var social = SocialState(owner: self)
     /// Cloud saves and media: whether the server keeps files, Settings → Cloud Storage.
     lazy var cloud = CloudState(owner: self)
+    /// Captures: the post written over the gallery, the Captures feed and its comments.
+    lazy var captures = CapturesState(owner: self)
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?
@@ -2003,6 +2011,7 @@ final class AppModel: ObservableObject {
             server.togetherServer = together.base.absoluteString
             if (try? server.start()) != nil {
                 remote = server
+                applyAssist()
                 updateBrowserPlay()
                 if let port = server.controlPort {
                     cable = UsbTunnel(targetPort: port)

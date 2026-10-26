@@ -25,6 +25,7 @@ import 'ui/setup_screen.dart';
 import 'ui/handoff_card.dart';
 import 'ui/update_required_card.dart';
 import 'ui/trophy_card.dart';
+import 'ui/typing_sheet.dart';
 import 'ui/voice_pill.dart';
 import 'ui/welcome_screen.dart';
 import 'version.dart';
@@ -349,6 +350,13 @@ class _RemoteAppState extends State<RemoteApp> {
                     ),
                   ],
                 ),
+              ),
+            ),
+            Positioned.fill(
+              child: TypingSheet(
+                prompt: _session.textPrompt,
+                look: _session.look,
+                onAnswer: _session.type,
               ),
             ),
             const Positioned(

@@ -572,10 +572,44 @@ void CheckHostEvents() {
 
 }
 
+// A phone types for the keyboard: the launcher hears what is asked, and the phone's whole text
+// replaces what was there (Clear empties it in one edit).
+void CheckPhonePrompt() {
+    Buffers buffers;
+    std::memcpy(buffers.text, u"abc", sizeof(u"abc"));
+    Param param = MakeParam(buffers, 8);
+    param.type = 4;
+    ImeHostPrompt prompt{};
+    const std::uint32_t before = ImeGetHostPrompt_nid_postfix(&prompt);
+    Require(prompt.id == 0, "no prompt before open");
+    Require(sceImeOpen_nid_postfix(&param, nullptr) == 0, "open for the phone");
+    Require(ImeHostPromptRevision_nid_postfix() != before, "opening changes the prompt");
+    ImeGetHostPrompt_nid_postfix(&prompt);
+    Require(prompt.id != 0 && prompt.kind == 1 && prompt.type == 4 && prompt.maxLength == 8, "the keyboard's prompt");
+    Require(std::u16string(prompt.text) == u"abc" && prompt.title[0] == u'\0', "with its text and no title");
+    Require(sceImeUpdate(Record) == 0, "update after open");
+    Drain();
+    Publish(ImeHostInputKind::Clear);
+    auto events = Drain();
+    Require(events.size() == 1, "one edit empties the text");
+    RequireText(events[0], EventUpdateText, u"", 0, 0, -3);
+    Publish(ImeHostInputKind::Clear);
+    Require(Drain().empty(), "clearing nothing changes nothing");
+    Publish(ImeHostInputKind::Text, "xy");
+    events = Drain();
+    RequireText(events.at(0), EventUpdateText, u"xy", 2, 0, 2);
+    const std::uint32_t open = ImeHostPromptRevision_nid_postfix();
+    Require(sceImeClose_nid_postfix() == 0, "close for the phone");
+    Require(ImeHostPromptRevision_nid_postfix() != open, "closing changes the prompt");
+    ImeGetHostPrompt_nid_postfix(&prompt);
+    Require(prompt.id == 0, "no prompt after close");
+}
+
 int main() {
     CheckValidation();
     CheckEditing();
     CheckMultiline();
     CheckTextFilter();
     CheckHostEvents();
+    CheckPhonePrompt();
 }

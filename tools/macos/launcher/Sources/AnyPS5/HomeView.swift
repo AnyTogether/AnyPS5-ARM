@@ -849,6 +849,9 @@ extension AppModel {
         case .feed:
             feedCommand(command)
             return true
+        case .captures:
+            capturesCommand(command)
+            return true
         case .leaderboard:
             leaderboardCommand(command)
             return true
@@ -975,6 +978,7 @@ extension AppModel {
     }
 
     private func galleryCommand(_ command: Command) {
+        if captures.draft != nil { return postDraftCommand(command) }
         if cloud.sharing { return shareCommand(command) }
         let count = galleryShots.count
         func move(_ delta: Int) {

@@ -217,4 +217,42 @@ int main() {
     Require(sceImeDialogAbort() == 0);
     Require(sceImeDialogSetPanelPosition(0, 0) == ErrorSuspending);
     Close();
+
+    // A phone types for the dialog: the launcher hears its title, placeholder and text, and the
+    // whole typed text replaces what was there (Clear, then the text, then Enter).
+    {
+        ImeHostPrompt none{};
+        const std::uint32_t before = ImeGetHostPrompt_nid_postfix(&none);
+        Require(none.id == 0);
+        std::memcpy(buffer, u"Old", sizeof(u"Old"));
+        Param titled = DialogParam(buffer, 12);
+        char16_t title[] = u"Name your hero";
+        char16_t placeholder[] = u"Hero";
+        titled.arg = title;
+        titled.work = placeholder;
+        titled.type = 1;
+        Open(titled);
+        ImeHostPrompt asked{};
+        Require(ImeGetHostPrompt_nid_postfix(&asked) != before && ImeHostPromptRevision_nid_postfix() != before);
+        Require(asked.id != 0 && asked.kind == 2 && asked.type == 1 && asked.maxLength == 12);
+        Require(std::u16string(asked.title) == u"Name your hero" && std::u16string(asked.placeholder) == u"Hero" && std::u16string(asked.text) == u"Old");
+        ImeHostInput clear{};
+        clear.kind = ImeHostInputKind::Clear;
+        ImePublishInput_nid_postfix(clear);
+        Type("Kral \xc3\xbc");
+        Press(SDL_SCANCODE_RETURN);
+        Require(EndStatus() == EndStatusOk);
+        Require(std::u16string(buffer) == u"Kral ü");
+        ImeHostPrompt after{};
+        ImeGetHostPrompt_nid_postfix(&after);
+        Require(after.id == 0);
+        Close();
+        Open(param);
+        ImeHostPrompt untitled{};
+        ImeGetHostPrompt_nid_postfix(&untitled);
+        Require(untitled.id != 0 && untitled.id != asked.id && untitled.title[0] == u'\0');
+        Close();
+        ImeGetHostPrompt_nid_postfix(&untitled);
+        Require(untitled.id == 0);
+    }
 }

@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -155,8 +156,17 @@ void PadInput::leave(std::uint32_t device) {
 void PadInput::sampleControllers() {
     for (auto& controller : controllers) {
         controller.state = sampleController(controller.handle);
+        if (controller.helping) continue;
         const auto id = static_cast<std::uint32_t>(controller.id);
         const bool seated = seats.Of(id) >= 0;
+        if (!seated && RemotePad::Wants(controller.state) && RemotePad::Helps(controllersHelp, seats.Held(0))) {
+            controller.helping = true;
+            controller.outputPending = true;
+            controller.lightBar.Reset();
+            controller.triggerEffect.Reset();
+            APS5_LOG_OUT("Pad: game controller helps player %d", 1);
+            continue;
+        }
         const int player = seats.Seat(id, RemotePad::Wants(controller.state));
         if (!seated && player >= 0) {
             controller.outputPending = true;
@@ -164,6 +174,31 @@ void PadInput::sampleControllers() {
             controller.triggerEffect.Reset();
             APS5_LOG_OUT("Pad: game controller is player %d", player + 1);
         }
+    }
+}
+
+// The player whose pad a controller feeds: its seat, or the first player's while it helps.
+int PadInput::playerOf(const Controller& controller) const {
+    return controller.helping ? 0 : seats.Of(static_cast<std::uint32_t>(controller.id));
+}
+
+// Controllers help the first player (AssistControllers) or are players of their own again: one
+// that holds player 2 to 4 gives it up to help, and helpers take a seat on their next press.
+void PadInput::setControllersHelp(bool help) {
+    if (help == controllersHelp) return;
+    controllersHelp = help;
+    APS5_LOG_OUT("Pad: the launcher says other controllers %s player 1", help ? "help" : "no longer help");
+    for (auto& controller : controllers) {
+        const auto id = static_cast<std::uint32_t>(controller.id);
+        if (help && seats.Of(id) > 0) {
+            leave(id);
+            controller.helping = true;
+        } else if (!help) {
+            controller.helping = false;
+        }
+        controller.outputPending = true;
+        controller.lightBar.Reset();
+        controller.triggerEffect.Reset();
     }
 }
 
@@ -186,16 +221,17 @@ void PadInput::applyOutput() {
         const bool motionChanged = fetched.motionEnabled != output.state.motionEnabled;
         output.state = fetched;
         for (auto& controller : controllers) {
-            if (seats.Of(static_cast<std::uint32_t>(controller.id)) != player) continue;
+            if (playerOf(controller) != player) continue;
             controller.outputPending = true;
             if (motionChanged) enableSensors(controller, fetched.motionEnabled);
         }
         for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
-            if (seats.Of(RemotePad::RemoteDevice(channel)) == player) answer(remotes[channel], player);
+            const bool helps = player == 0 && remotes[channel].helping;
+            if (helps || seats.Of(RemotePad::RemoteDevice(channel)) == player) answer(remotes[channel], player);
         }
     }
     for (auto& controller : controllers) {
-        const int player = seats.Of(static_cast<std::uint32_t>(controller.id));
+        const int player = playerOf(controller);
         if (player >= 0 && controller.sensors != outputs[static_cast<std::size_t>(player)].state.motionEnabled) {
             enableSensors(controller, outputs[static_cast<std::size_t>(player)].state.motionEnabled);
         }
@@ -368,18 +404,36 @@ void PadInput::updateRemotes() {
         if (auto input = remote.channel->Poll(now)) {
             remote.last = std::move(input);
             remote.seen = now;
-            const bool seated = seats.Of(device) >= 0;
-            const int player = seats.Seat(device, RemotePad::Wants(remote.last->state), remote.last->seat);
-            if (!seated && player >= 0) APS5_LOG_OUT("Pad: phone %zu is player %d", channel + 1, player + 1);
-            remote.channel->SetPlayer(static_cast<std::uint8_t>(player + 1));
-            answer(remote, player);
+            if (remote.last->seat == RemotePad::AssistSeat) {
+                // Helps the first player: it gives up a seat it held and takes none.
+                if (!remote.helping) {
+                    leave(device);
+                    remote.helping = true;
+                    APS5_LOG_OUT("Pad: phone %zu helps player 1", channel + 1);
+                }
+                remote.channel->SetPlayer(1);
+                answer(remote, 0);
+            } else {
+                if (remote.helping) {
+                    remote.helping = false;
+                    APS5_LOG_OUT("Pad: phone %zu no longer helps player 1", channel + 1);
+                }
+                const bool seated = seats.Of(device) >= 0;
+                const int player = seats.Seat(device, RemotePad::Wants(remote.last->state), remote.last->seat);
+                if (!seated && player >= 0) APS5_LOG_OUT("Pad: phone %zu is player %d", channel + 1, player + 1);
+                remote.channel->SetPlayer(static_cast<std::uint8_t>(player + 1));
+                answer(remote, player);
+            }
         }
+        if (const auto flags = remote.channel->TakeAssist()) setControllersHelp((*flags & RemotePad::AssistControllers) != 0);
+        for (const auto& text : remote.channel->TakeTexts()) type(text);
         for (const auto& press : remote.channel->TakePresses()) {
             playerOnePresses.Add(press, now);
             APS5_LOG_OUT("Pad: channel %zu presses 0x%x on player 1 for %lld ms", channel + 1, press.buttons, static_cast<long long>(press.hold.count()));
         }
         if (remote.last && now - remote.seen >= RemotePad::Gone) {
             remote.last.reset();
+            remote.helping = false;
             leave(device);
             remote.channel->SetPlayer(0);
         }
@@ -387,9 +441,58 @@ void PadInput::updateRemotes() {
     }
 }
 
+// What the game asks for goes to the launcher at once and again every second while it is open,
+// so a launcher that starts again or a phone that joins late still sees it.
+void PadInput::updatePrompt(std::chrono::steady_clock::time_point now) {
+    if (remotes.empty()) return;
+    const auto revision = ImeHostPromptRevision_nid_postfix();
+    const bool changed = revision != promptRevision;
+    if (!changed && (prompt.id == 0 || now - promptSent < std::chrono::seconds(1))) return;
+    if (changed) {
+        auto asked = std::make_unique<ImeHostPrompt>();
+        promptRevision = ImeGetHostPrompt_nid_postfix(asked.get());
+        prompt = RemotePad::Prompt{};
+        if (asked->id != 0) {
+            prompt.id = asked->id;
+            prompt.kind = asked->kind == 2 ? RemotePad::Prompt::Kind::Dialog : RemotePad::Prompt::Kind::Keyboard;
+            prompt.type = static_cast<std::uint8_t>(std::min<std::uint32_t>(asked->type, 255));
+            prompt.enterLabel = static_cast<std::uint8_t>(std::min<std::uint32_t>(asked->enterLabel, 255));
+            prompt.multiline = asked->multiline;
+            prompt.maxLength = static_cast<std::uint16_t>(std::min<std::uint32_t>(asked->maxLength, 0xffff));
+            prompt.title = RemotePad::Utf8(asked->title);
+            prompt.placeholder = RemotePad::Utf8(asked->placeholder);
+            prompt.text = RemotePad::Utf8(asked->text);
+            APS5_LOG_OUT("Pad: the game asks for text (prompt %u), told to the launcher", prompt.id);
+        }
+    }
+    promptSent = now;
+    for (auto& remote : remotes) remote.channel->SendPrompt(prompt);
+}
+
+// A phone's text for the prompt open now replaces the game's text: Clear, the text in pieces
+// that each fit an ImeHostInput, then Enter or Escape.
+void PadInput::type(const RemotePad::TypedText& text) {
+    if (prompt.id == 0 || text.prompt != prompt.id) return;
+    ImeHostInput clear{};
+    clear.kind = ImeHostInputKind::Clear;
+    ImePublishInput_nid_postfix(clear);
+    for (const auto& piece : RemotePad::TextPieces(text.text, sizeof(ImeHostInput{}.text) - 1)) {
+        ImeHostInput input{};
+        input.kind = ImeHostInputKind::Text;
+        std::memcpy(input.text, piece.data(), piece.size());
+        ImePublishInput_nid_postfix(input);
+    }
+    if (text.action == RemotePad::TypedText::Action::Update) return;
+    ImeHostInput finish{};
+    finish.kind = text.action == RemotePad::TypedText::Action::Submit ? ImeHostInputKind::Enter : ImeHostInputKind::Escape;
+    ImePublishInput_nid_postfix(finish);
+    APS5_LOG_OUT("Pad: a phone %s the text for prompt %u", text.action == RemotePad::TypedText::Action::Submit ? "entered" : "cancelled", prompt.id);
+}
+
 void PadInput::Update(const DisplayWindow& window) {
     if (!controllers.empty()) SDL_GameControllerUpdate();
     applyOutput();
+    updatePrompt(std::chrono::steady_clock::now());
     std::vector<PadInputState> remotesBefore;
     for (const auto& remote : remotes) remotesBefore.push_back(remote.state);
     updateRemotes();
@@ -428,10 +531,19 @@ void PadInput::publish(std::uint64_t frame) {
     for (int player = 0; player < PAD_MAX_CONTROLLERS; ++player) {
         std::optional<PadInputState> device;
         for (const auto& controller : controllers) {
-            if (seats.Of(static_cast<std::uint32_t>(controller.id)) == player) device = controller.state;
+            if (!controller.helping && seats.Of(static_cast<std::uint32_t>(controller.id)) == player) device = controller.state;
         }
         for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
-            if (seats.Of(RemotePad::RemoteDevice(channel)) == player) device = RemotePad::Merge(device.value_or(PadInputState{}), remotes[channel].state);
+            if (!remotes[channel].helping && seats.Of(RemotePad::RemoteDevice(channel)) == player) device = RemotePad::Merge(device.value_or(PadInputState{}), remotes[channel].state);
+        }
+        if (player == 0) {
+            // Assist: every helper's input joins the first player's.
+            for (const auto& controller : controllers) {
+                if (controller.helping) device = RemotePad::Assisted(device.value_or(PadInputState{}), controller.state);
+            }
+            for (const auto& remote : remotes) {
+                if (remote.helping) device = RemotePad::Assisted(device.value_or(PadInputState{}), remote.state);
+            }
         }
         if (player != 0) {
             if (!device) continue;

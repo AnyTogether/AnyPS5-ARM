@@ -505,6 +505,7 @@ enum PreviewRenderer {
         DiscoverPreviews.run(preferences, found, root, still, output)
         BroadcastPreviews.run(preferences, found, root, still, output)
         CloudPreviews.run(preferences, found, root, still, output)
+        CapturesPreviews.run(preferences, found, root, still, output)
         LevelPreviews.run(preferences, found, root, still, output)
         ChatPreviews.run(preferences, found, root, still, output)
         UpdatePreviews.run(preferences, found, root, still, output)

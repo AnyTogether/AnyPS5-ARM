@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstring>
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -105,6 +106,50 @@ std::mutex g_imeMutex;
 std::optional<Session> g_session;
 std::atomic<ImeHostTextSink> g_textSink{nullptr};
 std::uint64_t g_nextSessionId = 0;
+
+bool IsHighSurrogateUnit(char16_t unit) { return unit >= 0xd800 && unit <= 0xdbff; }
+
+// What text the game asks for, for a phone (ImeGetHostPrompt): the keyboard's while one is open,
+// else the dialog's.
+std::mutex g_promptMutex;
+std::optional<ImeHostPrompt> g_keyboardPrompt;
+std::optional<ImeHostPrompt> g_dialogPrompt;
+std::uint32_t g_nextPromptId = 0;
+std::atomic<std::uint32_t> g_promptRevision{0};
+
+template <std::size_t Size>
+void CopyUnits(char16_t (&target)[Size], const char16_t* source, std::size_t limit) {
+    std::size_t length = 0;
+    if (source != nullptr) {
+        while (length < limit && length + 1 < Size && source[length] != u'\0') ++length;
+        if (length > 0 && length + 1 == Size && IsHighSurrogateUnit(source[length - 1])) --length;
+        std::copy(source, source + length, target);
+    }
+    target[length] = u'\0';
+}
+
+void SetPrompt(std::optional<ImeHostPrompt>& slot, const ImeHostPrompt* prompt) {
+    std::lock_guard lock(g_promptMutex);
+    if (prompt == nullptr) {
+        if (!slot) return;
+        slot.reset();
+    } else {
+        slot = *prompt;
+        slot->id = ++g_nextPromptId == 0 ? ++g_nextPromptId : g_nextPromptId;
+    }
+    ++g_promptRevision;
+}
+
+void SetKeyboardPrompt(const Param& param, const std::u16string& text) {
+    auto prompt = std::make_unique<ImeHostPrompt>();
+    prompt->kind = 1;
+    prompt->type = param.type;
+    prompt->enterLabel = param.enter_label;
+    prompt->multiline = (param.option & 0x00000001u) != 0;
+    prompt->maxLength = param.max_text_length;
+    CopyUnits(prompt->text, text.c_str(), text.size());
+    SetPrompt(g_keyboardPrompt, prompt.get());
+}
 
 void PanelSize(const Param& param, uint32_t* width, uint32_t* height) {
     const uint32_t scale = (param.option & OptionUseOver2K) != 0 ? 2 : 1;
@@ -339,6 +384,14 @@ std::optional<DeferredFilter> Apply(Session& session, const ImeHostInput& input)
         case ImeHostInputKind::Escape:
             QueueText(session, EventPressClose, session.caret, 0);
             return std::nullopt;
+        case ImeHostInputKind::Clear: {
+            if (session.text.empty()) return std::nullopt;
+            const std::u16string oldText = session.text;
+            const auto removed = static_cast<int32_t>(oldText.size());
+            session.text.clear();
+            session.caret = 0;
+            return CommitEdit(session, oldText, 0, -removed);
+        }
     }
     throw std::invalid_argument("IME host input: unknown input kind");
 }
@@ -406,6 +459,24 @@ void ImeSetHostTextSink_nid_no_patch(ImeHostTextSink sink) {
     g_textSink = sink;
 }
 
+void ImeSetHostPrompt_nid_no_patch(const ImeHostPrompt* prompt) {
+    SetPrompt(g_dialogPrompt, prompt);
+}
+
+std::uint32_t ImeHostPromptRevision_nid_postfix() {
+    return g_promptRevision.load();
+}
+
+std::uint32_t ImeGetHostPrompt_nid_postfix(ImeHostPrompt* prompt) {
+    std::lock_guard lock(g_promptMutex);
+    if (prompt != nullptr) {
+        if (g_keyboardPrompt) *prompt = *g_keyboardPrompt;
+        else if (g_dialogPrompt) *prompt = *g_dialogPrompt;
+        else *prompt = ImeHostPrompt{};
+    }
+    return g_promptRevision.load();
+}
+
 int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const ExtendedParam* extended) {
     std::lock_guard lock(g_imeMutex);
     if (g_session) return ErrorBusy;
@@ -423,6 +494,7 @@ int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const ExtendedParam* ex
     open.param.rect.y = param->posy;
     PanelSize(*param, &open.param.rect.width, &open.param.rect.height);
     session.events.push_back(open);
+    SetKeyboardPrompt(session.param, session.text);
     g_session = std::move(session);
     return 0;
 }
@@ -431,6 +503,7 @@ int APS5_VABI sceImeClose_nid_postfix(void) {
     std::lock_guard lock(g_imeMutex);
     if (!g_session) return ErrorNotOpened;
     g_session.reset();
+    SetPrompt(g_keyboardPrompt, nullptr);
     return 0;
 }
 

@@ -45,11 +45,14 @@ public final class RemoteServer: @unchecked Sendable {
         public var players: @Sendable () -> Void
         /// A phone asked for Remote Play or stopped wanting it (`streamWishes`).
         public var streamWishes: @Sendable () -> Void
+        /// The game began or stopped asking for text (`textPrompt`).
+        public var textPrompt: @Sendable () -> Void
 
         public init(pairing: @escaping @Sendable (PairingRequest) -> Void = { _ in }, connected: @escaping @Sendable (String) -> Void = { _ in },
                     disconnected: @escaping @Sendable () -> Void = {}, latency: @escaping @Sendable (Double) -> Void = { _ in },
                     request: @escaping @Sendable (RemoteMessage) -> Void = { _ in }, connecting: @escaping @Sendable (String?) -> Void = { _ in },
-                    players: @escaping @Sendable () -> Void = {}, streamWishes: @escaping @Sendable () -> Void = {}) {
+                    players: @escaping @Sendable () -> Void = {}, streamWishes: @escaping @Sendable () -> Void = {},
+                    textPrompt: @escaping @Sendable () -> Void = {}) {
             self.pairing = pairing
             self.connected = connected
             self.disconnected = disconnected
@@ -58,6 +61,7 @@ public final class RemoteServer: @unchecked Sendable {
             self.connecting = connecting
             self.players = players
             self.streamWishes = streamWishes
+            self.textPrompt = textPrompt
         }
     }
 
@@ -280,11 +284,14 @@ public final class RemoteServer: @unchecked Sendable {
             if client === phones.first { events.latency(milliseconds) }
         case .wantArt, .command, .select, .launch, .close, .home, .saveLayout, .keyFrame, .togetherHandoff, .togetherHandoffAnswer:
             if phones.contains(where: { $0 === client }) { events.request(message) }
+        case .typed(let prompt, let text, let action):
+            guard phones.contains(where: { $0 === client }) else { return }
+            type(text, action: action, for: prompt)
         case .stream(let on, let width, let height):
             guard phones.contains(where: { $0 === client }) else { return }
             client.streamSize = on ? (max(160, width), max(90, height)) : nil
             events.streamWishes()
-        case .pairing, .welcome, .rejected, .library, .art, .trophy, .activity, .look, .streaming, .broadcast:
+        case .pairing, .welcome, .rejected, .library, .art, .trophy, .activity, .look, .streaming, .broadcast, .textInput:
             break
         }
     }
@@ -334,6 +341,8 @@ public final class RemoteServer: @unchecked Sendable {
         phones.append(client)
         phones.sort { ($0.slot ?? 0) < ($1.slot ?? 0) }
         send(.welcome(session: session, udpPort: relayPort ?? 0, macName: name, key: key, togetherServer: togetherServer), to: client)
+        // A phone that comes while the game asks for text sees the keyboard at once.
+        if let gamePrompt { send(.textInput(gamePrompt), to: client) }
         if let name = client.name { events.connected(name) }
     }
 
@@ -384,6 +393,15 @@ public final class RemoteServer: @unchecked Sendable {
     private var gamePlayers: [Int?] = []
     /// Whether the game's hello on each bridge says its engine takes presses.
     private var gamePresses: [Bool] = []
+    /// Whether the game's hello on each bridge says its engine takes typed text.
+    private var gameTexts: [Bool] = []
+    /// The text the game asks for, from its prompts, and when it last said so.
+    private var gamePrompt: RemoteTextPrompt?
+    private var promptHeard = Date.distantPast
+    private var nextTextID: UInt32 = 0
+    private var answeredPrompt: UInt32?
+    /// A prompt not said again for this long is over: the game went away with it open.
+    static let promptLifetime: TimeInterval = 3
 
     /// The UDP port the phone sends its pad to, on every interface.
     public var udpPort: UInt16? { queue.sync { relayPort } }
@@ -438,6 +456,7 @@ public final class RemoteServer: @unchecked Sendable {
             gameAddresses = Array(repeating: nil, count: bridges.count)
             gamePlayers = Array(repeating: nil, count: bridges.count)
             gamePresses = Array(repeating: false, count: bridges.count)
+            gameTexts = Array(repeating: false, count: bridges.count)
             sources = [watch(phone) { [weak self] in self?.fromPhone() }]
                 + bridges.indices.map { slot in watch(bridges[slot]) { [weak self] in self?.fromGame(slot) } }
         }
@@ -451,6 +470,8 @@ public final class RemoteServer: @unchecked Sendable {
         gameAddresses = []
         gamePlayers = []
         gamePresses = []
+        gameTexts = []
+        gamePrompt = nil
     }
 
     private func watch(_ socket: Int32, _ handler: @escaping () -> Void) -> DispatchSourceRead {
@@ -467,8 +488,14 @@ public final class RemoteServer: @unchecked Sendable {
         while let (data, source) = RemoteServer.receive(phoneSocket) {
             guard let session = RemotePacket.inputSession(data), let client = phones.first(where: { $0.session == session }), let slot = client.slot else { continue }
             client.address = source
-            if var game = gameAddresses[slot] { RemoteServer.send(data, from: bridgeSockets[slot], to: &game) }
+            if var game = gameAddresses[slot] { RemoteServer.send(assisted(data, client), from: bridgeSockets[slot], to: &game) }
         }
+    }
+
+    /// A pad packet from a phone the launcher set to help the first player is marked so.
+    private func assisted(_ data: Data, _ client: Client) -> Data {
+        guard let id = client.deviceID, assistDevices.contains(id) else { return data }
+        return RemotePacket.helping(data)
     }
 
     /// A pad packet on a welcomed phone's own control channel goes to the game as if it had
@@ -476,7 +503,7 @@ public final class RemoteServer: @unchecked Sendable {
     private func padFromChannel(_ data: Data, session: UInt64, client: Client) {
         guard client.session == session, phones.contains(where: { $0 === client }), let slot = client.slot, gameAddresses.indices.contains(slot) else { return }
         client.padOnChannel = true
-        if var game = gameAddresses[slot] { RemoteServer.send(data, from: bridgeSockets[slot], to: &game) }
+        if var game = gameAddresses[slot] { RemoteServer.send(assisted(data, client), from: bridgeSockets[slot], to: &game) }
     }
 
     /// A hello names the game to send to on that bridge; its answers go back to the slot's phone.
@@ -485,11 +512,20 @@ public final class RemoteServer: @unchecked Sendable {
             if RemotePacket.isHello(data) {
                 gameAddresses[slot] = source
                 gamePresses[slot] = RemotePacket.helloTakesPresses(data)
+                gameTexts[slot] = RemotePacket.helloTakesText(data)
+                // The engine hears whether controllers help with every hello: a game started later
+                // or again learns it within a second.
+                if RemotePacket.helloTakesAssist(data) {
+                    var game = source
+                    RemoteServer.send(RemotePacket.assist(controllers: assistControllers), from: bridgeSockets[slot], to: &game)
+                }
                 let player = RemotePacket.helloPlayer(data)
                 if gamePlayers[slot] != player {
                     gamePlayers[slot] = player
                     events.players()
                 }
+            } else if let prompt = RemotePacket.prompt(data) {
+                heard(prompt)
             } else if RemotePacket.isOutput(data), let game = gameAddresses[slot], RemoteServer.same(source, game), reservedBridges.contains(slot) {
                 padOutputs.value?(slot, data)
             } else if RemotePacket.isOutput(data), let game = gameAddresses[slot], RemoteServer.same(source, game),
@@ -501,6 +537,66 @@ public final class RemoteServer: @unchecked Sendable {
                     RemoteServer.send(data, from: phoneSocket, to: &phone)
                 }
             }
+        }
+    }
+
+    // MARK: Assist
+
+    /// The phones and browser pads (by device ID) that help the first player, and whether the
+    /// Mac's other controllers do.
+    private var assistDevices: Set<String> = []
+    private var assistControllers = false
+
+    public func setAssist(devices: Set<String>, controllers: Bool) {
+        queue.async { [self] in
+            assistDevices = devices
+            guard controllers != assistControllers else { return }
+            assistControllers = controllers
+            let packet = RemotePacket.assist(controllers: controllers)
+            for slot in bridgeSockets.indices {
+                if var game = gameAddresses[slot] { RemoteServer.send(packet, from: bridgeSockets[slot], to: &game) }
+            }
+        }
+    }
+
+    // MARK: Typing for the game
+
+    /// The text the game asks for now, nil when none.
+    public var textPrompt: RemoteTextPrompt? { queue.sync { gamePrompt } }
+
+    /// A prompt from the game (on any bridge: the engine says it on each): the phones are told
+    /// when it changes, and it ends when the game stops saying it.
+    private func heard(_ said: RemoteTextPrompt?) {
+        promptHeard = Date()
+        // A keyboard a phone already answered stays away while the game keeps it open.
+        let prompt = said?.id == answeredPrompt ? nil : said
+        guard prompt != gamePrompt else { return }
+        gamePrompt = prompt
+        RemoteServer.log.info("game prompt: \(prompt.map { "\($0.id) \($0.kind)" } ?? "none", privacy: .public)")
+        for client in phones { send(.textInput(prompt), to: client) }
+        events.textPrompt()
+        guard prompt != nil else { return }
+        queue.asyncAfter(deadline: .now() + RemoteServer.promptLifetime + 0.5) { [weak self] in
+            guard let self, self.gamePrompt != nil, Date().timeIntervalSince(self.promptHeard) > RemoteServer.promptLifetime else { return }
+            self.heard(nil)
+        }
+    }
+
+    /// A phone's text goes to the game, twice in case one is lost (the engine counts a copy once),
+    /// if the prompt it was typed for is still open.
+    private func type(_ text: String, action: TypedAction, for prompt: UInt32) {
+        guard let open = gamePrompt, open.id == prompt,
+              let bridge = gameTexts.indices.first(where: { gameTexts[$0] && gameAddresses[$0] != nil }), var game = gameAddresses[bridge] else { return }
+        nextTextID &+= 1
+        let packet = RemotePacket.text(prompt: prompt, id: nextTextID, action: action, text: text)
+        RemoteServer.send(packet, from: bridgeSockets[bridge], to: &game)
+        RemoteServer.send(packet, from: bridgeSockets[bridge], to: &game)
+        if action != .update {
+            // Answered: the other phones put their keyboards away at once.
+            answeredPrompt = prompt
+            gamePrompt = nil
+            for client in phones { send(.textInput(nil), to: client) }
+            events.textPrompt()
         }
     }
 
@@ -540,7 +636,7 @@ public final class RemoteServer: @unchecked Sendable {
     }
 
     private static func receive(_ socket: Int32) -> (Data, sockaddr_storage)? {
-        var buffer = [UInt8](repeating: 0, count: 512)
+        var buffer = [UInt8](repeating: 0, count: RemotePacket.largestText + 1)
         var address = sockaddr_storage()
         var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
         let got = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { recvfrom(socket, &buffer, buffer.count, 0, $0, &length) } }
