@@ -57,6 +57,33 @@ int main(int argc, char** argv) {
         std::puts("Guest entitlements rejected a missing configured file");
         return 0;
     }
+    if (argc == 2 && std::string_view(argv[1]) == "disk") {
+        // No list of owned add-ons: only the add-on folders dumped beside the game count.
+        const auto expansion = directory / "EXPANSION0000001";
+        const auto license = directory / "SOUNDTRACK000003";
+        std::filesystem::create_directories(expansion / "sce_sys");
+        std::filesystem::create_directories(license / "sce_sys");
+        { std::ofstream data(expansion / "island.pak", std::ios::binary); data << "island"; }
+#ifdef _WIN32
+        const std::string folders = expansion.string() + ";" + license.string() + ";" + (directory / "MISSING000000004").string();
+        Require(_putenv_s("ANYPS5_ADDCONT_DIRS", folders.c_str()) == 0);
+#else
+        const std::string folders = expansion.string() + ":" + license.string() + ":" + (directory / "MISSING000000004").string();
+        Require(::setenv("ANYPS5_ADDCONT_DIRS", folders.c_str(), 1) == 0);
+#endif
+        NpEntitlementAccessAddcontEntitlementInfo list[4]{};
+        std::uint32_t hits = 0;
+        Require(sceNpEntitlementAccessGetAddcontEntitlementInfoList(0, list, 4, &hits) == 0 && hits == 2);
+        Require(std::strcmp(list[0].entitlement_label.data, "EXPANSION0000001") == 0 && list[0].download_status == 4);
+        Require(std::strcmp(list[1].entitlement_label.data, "SOUNDTRACK000003") == 0 && list[1].download_status == 0);
+        NpUnifiedEntitlementLabel missing{};
+        std::memcpy(missing.data, "MISSING000000004", 16);
+        NpEntitlementAccessAddcontEntitlementInfo info{};
+        Require(sceNpEntitlementAccessGetAddcontEntitlementInfo(0, &missing, &info) == static_cast<int>(0x80558007));
+        std::filesystem::remove_all(root);
+        std::puts("Guest entitlements listed the add-ons on the disk");
+        return 0;
+    }
     std::filesystem::create_directories(directory);
     {
         std::ofstream ini(file, std::ios::binary);

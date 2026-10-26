@@ -582,8 +582,9 @@ if(BUILD_TESTING)
     configure_windows_unwind(guest_entitlements_tests)
     add_test(NAME guest_entitlements COMMAND guest_entitlements_tests)
     add_test(NAME guest_entitlements_missing COMMAND guest_entitlements_tests missing)
+    add_test(NAME guest_entitlements_disk COMMAND guest_entitlements_tests disk)
     if(WIN32)
-        set_tests_properties(guest_entitlements guest_entitlements_missing PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(guest_entitlements guest_entitlements_missing guest_entitlements_disk PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNpEntitlementAccess>")
     endif()
 

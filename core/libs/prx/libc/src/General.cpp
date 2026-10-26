@@ -1,5 +1,6 @@
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -293,10 +294,49 @@ std::optional<std::filesystem::path> ProvidedPath(const WorkingDirectory& state,
     if (provided.empty()) return std::nullopt;
     return provided.make_preferred();
 }
+// A game update dumped beside the game (ANYPS5_UPDATE_DIR, from the launcher): its files take the
+// place of the same files under /app0 and the rest still comes from the game.
+const std::optional<std::filesystem::path>& UpdateFolder() {
+    static const auto folder = []() -> std::optional<std::filesystem::path> {
+#ifdef _WIN32
+        const wchar_t* value = _wgetenv(L"ANYPS5_UPDATE_DIR");
+#else
+        const char* value = std::getenv("ANYPS5_UPDATE_DIR");
+#endif
+        if (value == nullptr || value[0] == 0) return std::nullopt;
+        const std::filesystem::path path(value);
+        std::error_code error;
+        if (!std::filesystem::is_directory(path, error)) return std::nullopt;
+        return path;
+    }();
+    return folder;
+}
+bool ModuleName(std::string_view name) {
+    const auto dot = name.rfind('.');
+    if (dot == std::string_view::npos) return false;
+    const auto extension = name.substr(dot);
+    return SameName(extension, ".prx") || SameName(extension, ".sprx");
+}
+// Modules stay the relinked ones in app0 (the launcher relinks the update's), and a folder both
+// have stays the game's, so that listing it shows the game's files.
+std::optional<std::filesystem::path> UpdatedPath(const std::vector<std::string>& names, bool module, const std::filesystem::path& base) {
+    if (names.size() < 2 || !SameName(names[0], "app0") || (names.size() == 2 && names[1].empty())) return std::nullopt;
+    if (module && (ModuleName(names.back()) || ModuleName(base.filename().string()))) return std::nullopt;
+    const auto& update = UpdateFolder();
+    if (!update) return std::nullopt;
+    const auto updated = ResolveHostPath(*update, std::vector<std::string>(names.begin() + 1, names.end())).make_preferred();
+    std::error_code error;
+    const auto status = std::filesystem::status(updated, error);
+    if (!std::filesystem::exists(status)) return std::nullopt;
+    if (std::filesystem::is_directory(status) && std::filesystem::exists(base, error)) return std::nullopt;
+    return updated;
+}
 std::filesystem::path HostPath(WorkingDirectory& state, const std::vector<std::string>& names, bool module = false) {
     if (auto aliased = ResolveAlias(JoinNames(names), module)) return *aliased;
     if (auto provided = ProvidedPath(state, names)) return *provided;
-    return ResolveHostPath(state.root, names, module).make_preferred();
+    auto base = ResolveHostPath(state.root, names, module).make_preferred();
+    if (auto updated = UpdatedPath(names, module, base)) return *updated;
+    return base;
 }
 void RequireHostDirectory(WorkingDirectory& state, const std::vector<std::string>& names) {
     const auto host = HostPath(state, names);

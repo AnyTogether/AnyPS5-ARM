@@ -3,6 +3,7 @@
 #include <cstddef>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libSceAppContent/include/DiskAddons.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -58,7 +59,6 @@ const std::vector<NpEntitlementAccessAddcontEntitlementInfo>& OwnedAddons() {
         std::ifstream file(path);
         if (!file) {
             if (ConfiguredEntitlements() != nullptr || std::filesystem::exists(path)) throw std::runtime_error("NpEntitlementAccess: cannot read " + path.string());
-            return addons;
         }
         std::string line;
         while (std::getline(file, line)) {
@@ -71,6 +71,16 @@ const std::vector<NpEntitlementAccessAddcontEntitlementInfo>& OwnedAddons() {
             std::memcpy(info.entitlement_label.data, label.data(), label.size());
             info.package_type = 3;
             info.download_status = 4;
+            addons.push_back(info);
+        }
+        // The add-ons dumped beside the game (ANYPS5_ADDCONT_DIRS) that the list above does not name.
+        for (const auto& addon : DiskAddons::InstalledAddons()) {
+            const bool listed = std::any_of(addons.begin(), addons.end(), [&](const auto& owned) { return addon.label == owned.entitlement_label.data; });
+            if (listed) continue;
+            NpEntitlementAccessAddcontEntitlementInfo info{};
+            std::memcpy(info.entitlement_label.data, addon.label.data(), addon.label.size());
+            info.package_type = 3;
+            info.download_status = addon.status();
             addons.push_back(info);
         }
         return addons;
