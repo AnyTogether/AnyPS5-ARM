@@ -164,9 +164,11 @@ final class Input {
     private func attach(_ controller: GCController) {
         guard let pad = controller.extendedGamepad else { return }
         let id = AnyHashable(ObjectIdentifier(controller))
+        // A DualShock 3's framework copy while the launcher's reader delivers the same pad: ignored.
+        func ignored(_ controller: GCController?) -> Bool { controller.map { Controllers.shared.ignores($0) } ?? false }
         pad.dpad.valueChangedHandler = { [weak self, weak controller, weak pad] _, x, y in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, !ignored(controller) else { return }
                 self.dpads[id] = abs(x) > abs(y) ? (x > 0 ? .right : x < 0 ? .left : nil) : (y > 0 ? .up : y < 0 ? .down : nil)
                 if let pad { self.padButtons(id, Input.shortcutButtons(of: pad), controller) }
                 self.padMoved(id, controller)
@@ -174,7 +176,7 @@ final class Input {
         }
         pad.leftThumbstick.valueChangedHandler = { [weak self, weak controller] _, x, y in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, !ignored(controller) else { return }
                 var stick = self.sticks[id] ?? StickGate()
                 let before = stick.held
                 let zoned = StickDeadzone.apply(x: Double(x), y: Double(y), percent: self.deadzone)
@@ -188,7 +190,7 @@ final class Input {
         func button(_ input: GCControllerButtonInput?, _ command: Command?) {
             input?.pressedChangedHandler = { [weak self, weak controller, weak pad] _, _, pressed in
                 MainActor.assumeIsolated {
-                    guard let self else { return }
+                    guard let self, !ignored(controller) else { return }
                     if let pad { self.padButtons(id, Input.shortcutButtons(of: pad), controller) }
                     if pressed, let command { self.controller(command, from: controller) }
                 }
@@ -200,7 +202,7 @@ final class Input {
         // Options/Start: on Home the Options menu (Switch Profile, online or offline), else Options.
         pad.buttonMenu.pressedChangedHandler = { [weak self, weak controller, weak pad] _, _, pressed in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, !ignored(controller) else { return }
                 if let pad { self.padButtons(id, Input.shortcutButtons(of: pad), controller) }
                 guard pressed else { return }
                 if NSApp.isActive, let controller { self.usedPad(controller) }

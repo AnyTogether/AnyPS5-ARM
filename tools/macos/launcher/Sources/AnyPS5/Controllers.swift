@@ -30,6 +30,12 @@ final class Controllers: ObservableObject {
     }
 
     private var controllers: [String: GCController] = [:]
+    /// The framework's controllers that are a DualShock 3 the launcher's reader holds (macOS 26
+    /// lists one as a generic 'HID' pad of its own): kept out of the roster, their input used only
+    /// while the reader gets nothing. Framework id → reader id.
+    private var aliases: [String: String] = [:]
+    /// Value changes seen from each framework controller (for the alias that does deliver).
+    private var frameworkChanges: [String: Int] = [:]
     let ds3 = DualShock3HID()
     private var batteryTimer: Timer?
     private var hid: [(name: String, vendor: Int, product: Int, transport: String?)] = []
@@ -53,6 +59,8 @@ final class Controllers: ObservableObject {
         }
         ds3.connected = { [weak self] info in self?.connect(info) }
         ds3.disconnected = { [weak self] id in self?.disconnect(id) }
+        ds3.note = { [weak self] line in self?.record(line) }
+        ds3.devicesChanged = { [weak self] in self?.mergeAliases() }
         ds3.changed = { [weak self] id, state, previous in
             guard let self else { return }
             self.live.states[id] = state
@@ -85,19 +93,76 @@ final class Controllers: ObservableObject {
         controller.extendedGamepad?.valueChangedHandler = { [weak self] pad, _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
+                self.frameworkChanges[id, default: 0] += 1
+                // A DualShock 3's framework copy stands in for the reader's entry while that gets nothing.
+                var target = id
+                if let reader = self.aliases[id] {
+                    guard self.frameworkFeeds(id) else { return }
+                    target = reader
+                }
                 let state = Self.state(of: pad)
-                let before = self.live.states[id] ?? .idle
-                self.live.states[id] = state
-                if !state.pressed.subtracting(before.pressed).isEmpty { self.used(id) }
+                let before = self.live.states[target] ?? .idle
+                self.live.states[target] = state
+                if !state.pressed.subtracting(before.pressed).isEmpty { self.used(target) }
             }
         }
-        connect(info(for: controller, id: id))
+        let info = info(for: controller, id: id)
+        if info.kind == .xbox, let exit = ds3.lastUnseenExit, Date().timeIntervalSince(exit) < 5 {
+            record("a DualShock 3 clone switched itself to its Xbox 360 mode: read as \(info.name) through GameController")
+        }
+        guard info.kind == .dualShock3 else {
+            connect(info)
+            return
+        }
+        // macOS's own copy of a DualShock 3: shown only when the reader holds no such pad, and
+        // like the reader's only once it has stayed (a clone leaves after a second).
+        mergeAliases()
+        DispatchQueue.main.asyncAfter(deadline: .now() + PadSettle.delay + 0.1) { [weak self] in
+            guard let self, self.controllers[id] != nil, self.aliases[id] == nil else { return }
+            self.connect(self.info(for: controller, id: id))
+        }
     }
 
     private func detach(_ controller: GCController) {
         let id = Self.id(controller)
         guard controllers.removeValue(forKey: id) != nil else { return }
+        frameworkChanges[id] = nil
+        if aliases.removeValue(forKey: id) != nil { return }
         disconnect(id)
+    }
+
+    /// Matches the framework's DualShock 3 copies to the reader's devices again (PadMerge): a copy
+    /// already listed leaves the roster quietly when its device turns up in the reader.
+    private func mergeAliases() {
+        let framework = controllers.compactMap { id, controller -> PadMerge.Entry? in
+            let name = controller.vendorName ?? controller.productCategory
+            let kind = PadKind.classify(vendor: nil, product: nil, name: name + " " + controller.productCategory)
+            guard kind == .dualShock3, !(controller.extendedGamepad is GCDualShockGamepad), !(controller.extendedGamepad is GCDualSenseGamepad) else { return nil }
+            return PadMerge.Entry(id: id, name: name, kind: kind)
+        }.sorted { $0.id < $1.id }
+        let merged = PadMerge.aliases(framework: framework, reader: ds3.held)
+        for (copy, reader) in merged where aliases[copy] == nil {
+            record("controller merged: GameController's copy of the DualShock 3 (\(copy)) is the same pad as \(reader)")
+            if roster.pad(copy) != nil {
+                live.states[copy] = nil
+                roster.disconnect(copy)
+                refreshFindings()
+            }
+        }
+        aliases = merged
+    }
+
+    /// Whether a framework copy's input is used: only while the reader's device has sent nothing.
+    private func frameworkFeeds(_ id: String) -> Bool {
+        guard let reader = aliases[id] else { return true }
+        return PadMerge.preferFramework(readerReports: ds3.reports(reader), frameworkChanges: frameworkChanges[id] ?? 0)
+    }
+
+    /// For Input: a framework controller whose presses the launcher ignores (a DualShock 3's copy
+    /// while the reader delivers the same pad).
+    func ignores(_ controller: GCController) -> Bool {
+        let id = Self.id(controller)
+        return aliases[id] != nil && !frameworkFeeds(id)
     }
 
     private func connect(_ info: PadInfo) {
