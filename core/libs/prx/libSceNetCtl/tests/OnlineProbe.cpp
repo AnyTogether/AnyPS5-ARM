@@ -18,6 +18,8 @@
 // and the restriction status first thing, makes a sessionManager push context, creates a Player
 // Session with it, waits up to 10 s for the launcher's news of another player joining (pushed to
 // the context, delivered through sceNpCheckCallback), then leaves the session and a stale one.
+// Creating the session and inviting to it go the way the game's own libSceNpCppWebApi.prx sends
+// them (cppWebApi below), so a reply it would not take shows here as <name>_response=none.
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "SceTypes.hpp"
 #include <algorithm>
@@ -46,6 +48,8 @@ int APS5_VABI sceNpWebApi2CreateRequest(int userContextId, const char* apiGroup,
 int APS5_VABI sceNpWebApi2AddHttpRequestHeader(std::int64_t requestId, const char* name, const char* value);
 int APS5_VABI sceNpWebApi2SendRequest(std::int64_t requestId, const void* data, std::size_t size, NpWebApi2ResponseInformationOption* option);
 int APS5_VABI sceNpWebApi2ReadData(std::int64_t requestId, void* data, std::size_t size);
+int APS5_VABI sceNpWebApi2GetHttpResponseHeaderValueLength(std::int64_t requestId, const char* name, std::size_t* length);
+int APS5_VABI sceNpWebApi2GetHttpResponseHeaderValue(std::int64_t requestId, const char* name, char* value, std::size_t size);
 int APS5_VABI sceNpWebApi2DeleteRequest(std::int64_t requestId);
 int APS5_VABI sceNpWebApi2PushEventCreateHandle(int libCtxId);
 int APS5_VABI sceNpWebApi2PushEventCreateFilter(int libCtxId, int handleId, const char* service, std::uint32_t label, const void* params, std::size_t count);
@@ -92,6 +96,48 @@ std::string request(int user, const char* name, const char* group, const std::st
         char chunk[256];
         for (int got; (got = sceNpWebApi2ReadData(request, chunk, sizeof(chunk))) > 0;) body.append(chunk, static_cast<std::size_t>(got));
         std::cout << name << "_status=" << info.http_status << '\n' << name << "_body=" << body << '\n';
+    }
+    sceNpWebApi2DeleteRequest(request);
+    return body;
+}
+
+// One request the way the game's bundled libSceNpCppWebApi.prx makes it for an API whose reply
+// has a body (PlayerSessionsApi::createPlayerSessions and the like): the response information
+// option set, then the body read in 255-byte pieces and parsed ONLY when the status is the one
+// the API answers with (201 for every POST that makes something). Any other 2xx status leaves the
+// transaction finished with no response body, and the game then reads a member of a null body
+// (SIGSEGV at address 0x10 in PostPlayerSessionsResponseBody::getPlayerSessions). Prints
+// <name>_status, the Content-Type and Content-Length headers, and <name>_response=parsed or none.
+std::string cppWebApi(int user, const char* name, const char* group, const std::string& path, const char* method, const std::string& sent, int expected) {
+    std::int64_t request = 0;
+    if (const int created = sceNpWebApi2CreateRequest(user, group, path.c_str(), method, nullptr, &request); created != 0) {
+        std::cout << name << "_error=" << hexResult(created) << '\n';
+        return {};
+    }
+    sceNpWebApi2AddHttpRequestHeader(request, "X-Psn-NpCppWebApi-Context", "PS5/2.00");
+    NpWebApi2ResponseInformationOption info{};
+    const int result = sceNpWebApi2SendRequest(request, sent.data(), sent.size(), &info);
+    std::string body;
+    if (result != 0) {
+        std::cout << name << "_error=" << hexResult(result) << '\n';
+    } else {
+        std::cout << name << "_status=" << info.http_status << '\n' << name << "_size=" << info.response_data_size << '\n';
+        static const char* const headers[][2] = {{"Content-Type", "_content_type="}, {"Content-Length", "_content_length="}};
+        for (const auto& [header, key] : headers) {
+            std::size_t length = 0;
+            std::string value;
+            if (sceNpWebApi2GetHttpResponseHeaderValueLength(request, header, &length) == 0) {
+                value.assign(length + 1, '\0');
+                if (sceNpWebApi2GetHttpResponseHeaderValue(request, header, value.data(), value.size()) != 0) value = "?";
+                value.resize(std::strlen(value.c_str()));
+            }
+            std::cout << name << key << value << '\n';
+        }
+        if (info.http_status == expected) {
+            char chunk[255];
+            for (int got; (got = sceNpWebApi2ReadData(request, chunk, sizeof(chunk))) > 0;) body.append(chunk, static_cast<std::size_t>(got));
+        }
+        std::cout << name << "_response=" << (body.empty() || body.front() != '{' ? "none" : "parsed") << '\n' << name << "_body=" << body << '\n';
     }
     sceNpWebApi2DeleteRequest(request);
     return body;
@@ -146,11 +192,11 @@ int host() {
     if (made != 0) return 1;
     sceNpWebApi2PushEventStartPushContextCallback(user, context);
 
-    const std::string created = request(user, "create", "sessionManager", "/v1/playerSessions", "POST",
+    const std::string created = cppWebApi(user, "create", "sessionManager", "/v1/playerSessions", "POST",
         std::string(R"({"playerSessions":[{"maxPlayers":8,"maxSpectators":0,"joinDisabled":false,"supportedPlatforms":["PS5"],)") +
             R"("localizedSessionName":{"defaultLanguage":"en-US","localizedText":{"en-US":"Human Fall Flat"}},"joinableUserType":"ANYONE",)" +
             R"("invitableUserType":"MEMBER","leaderPrivileges":["KICK","UPDATE_JOINABLE_USER_TYPE"],"swapSupported":false,"customData1":"cm9vbQ==",)" +
-            R"("member":{"players":[{"accountId":"me","platform":"me","pushContexts":[{"pushContextId":")" + context + R"("}]}]}}]})");
+            R"("member":{"players":[{"accountId":"me","platform":"me","pushContexts":[{"pushContextId":")" + context + R"("}]}]}}]})", 201);
     const auto at = created.find("\"sessionId\":\"");
     if (at == std::string::npos) return 1;
     const auto start = at + 13;
@@ -158,6 +204,7 @@ int host() {
     std::cout << "session_id=" << sessionId << '\n';
     request(user, "get", "sessionManager", "/v1/playerSessions/" + sessionId);
     request(user, "patch", "sessionManager", "/v1/playerSessions/" + sessionId, "PATCH", R"({"joinableUserType":"FRIENDS"})");
+    cppWebApi(user, "invite", "sessionManager", "/v1/playerSessions/" + sessionId + "/invitations", "POST", R"({"invitations":[{"to":{"accountId":"123"}}]})", 201);
     std::cout << "waiting=1" << std::endl;
     for (auto until = std::chrono::steady_clock::now() + 10s; pushedType.empty() && std::chrono::steady_clock::now() < until;) {
         sceNpCheckCallback();

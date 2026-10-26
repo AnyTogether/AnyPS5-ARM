@@ -10,6 +10,12 @@ import Foundation
 /// the console network's Session Manager API and are unverified, so every request body is in the
 /// title's observation log (the engine writes it with the request).
 ///
+/// Status codes are the platform's, and they matter: the game's own `libSceNpCppWebApi.prx`
+/// reads and parses a reply body only when the status is the one the call answers with — 201 for
+/// every POST that makes something (a session, members, invitations, joinable users), 200 for
+/// GETs. With 200 for a POST it finishes the request "successfully" with no body, and Human Fall
+/// Flat then crashes reading it (SIGSEGV at 0x10 in `PostPlayerSessionsResponseBody::getPlayerSessions`).
+///
 /// Changes the game makes itself bring it no push events (the platform does not tell a member
 /// about its own change). Changes from elsewhere (`playerJoined`, `playerLeft`) are pushed to
 /// every push context the session's players registered, with the data types the game listens
@@ -123,7 +129,7 @@ public final class OnlinePlayerSessions: @unchecked Sendable {
                     session.spectators.removeAll { $0.accountId == player.accountId }
                     if spectators { session.spectators.append(player) } else { session.players.append(player) }
                 }
-                return json(200, [parts[4]: joining.map { ["accountId": $0.accountId, "platform": $0.platform] }])
+                return json(201, [parts[4]: joining.map { ["accountId": $0.accountId, "platform": $0.platform] }])
             }
         case ("DELETE", 5, "members"):
             let who = isMe(parts[4]) ? me : parts[4]
@@ -160,14 +166,14 @@ public final class OnlinePlayerSessions: @unchecked Sendable {
                 }
                 return nil
             }
-            return reply.status == 204 ? json(200, ["invitations": made]) : reply
+            return reply.status == 204 ? json(201, ["invitations": made]) : reply
         case ("POST", 4, "joinableSpecifiedUsers"):
             let users = (body["joinableSpecifiedUsers"] as? [[String: Any]] ?? []).compactMap { accountId($0["accountId"]) }
             let reply = change(id) { session in
                 for user in users where !session.joinableSpecifiedUsers.contains(user) { session.joinableSpecifiedUsers.append(user) }
                 return nil
             }
-            return reply.status == 204 ? json(200, ["joinableSpecifiedUsers": users.map { ["accountId": $0] }]) : reply
+            return reply.status == 204 ? json(201, ["joinableSpecifiedUsers": users.map { ["accountId": $0] }]) : reply
         case ("DELETE", 4, "joinableSpecifiedUsers"):
             let users = Set((query["accountIds"] ?? "").split(separator: ",").map(String.init))
             return change(id) { session in
@@ -245,14 +251,15 @@ public final class OnlinePlayerSessions: @unchecked Sendable {
                                       invitations: [])
                 sessions[session.id] = session
                 order.append(session.id)
-                made.append(["sessionId": session.id,
-                             "member": ["players": playing.map { ["accountId": $0.accountId, "platform": $0.platform] },
-                                        "spectators": watching.map { ["accountId": $0.accountId, "platform": $0.platform] }]])
+                // The platform's reply: the session ID and its members, spectators only when there are any.
+                var members: [String: Any] = ["players": playing.map { ["accountId": $0.accountId, "platform": $0.platform] }]
+                if !watching.isEmpty { members["spectators"] = watching.map { ["accountId": $0.accountId, "platform": $0.platform] } }
+                made.append(["sessionId": session.id, "member": members])
             }
             return false
         }
         if full { return problem(429, "Too many player sessions") }
-        return json(200, ["playerSessions": made])
+        return json(201, ["playerSessions": made])
     }
 
     /// Runs `apply` on session `id`; its reply, or 204 when it returns nil.
@@ -325,11 +332,11 @@ public final class OnlinePlayerSessions: @unchecked Sendable {
 
     private func json(_ status: UInt16, _ object: [String: Any]) -> OnlineWire.WebReply {
         let body = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
-        return OnlineWire.WebReply(status: status, headers: [.init("Content-Type", "application/json")], body: body)
+        return OnlineWire.WebReply(status: status, headers: [.init("Content-Type", "application/json"), .init("Content-Length", String(body.count))], body: body)
     }
 
     private func problem(_ status: Int, _ message: String) -> OnlineWire.WebReply {
         let body = (try? JSONSerialization.data(withJSONObject: ["error": ["code": status, "message": message]], options: [.sortedKeys])) ?? Data()
-        return OnlineWire.WebReply(status: UInt16(clamping: status), headers: [.init("Content-Type", "application/json")], body: body)
+        return OnlineWire.WebReply(status: UInt16(clamping: status), headers: [.init("Content-Type", "application/json"), .init("Content-Length", String(body.count))], body: body)
     }
 }

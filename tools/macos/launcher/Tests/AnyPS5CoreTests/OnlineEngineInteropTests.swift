@@ -91,10 +91,18 @@ final class OnlineEngineInteropTests: XCTestCase {
         XCTAssertEqual(seen["push_context_result"], "0x00000000", "a push context is made")
         let context = try XCTUnwrap(seen["push_context"])
         XCTAssertEqual(context.count, 36)
-        XCTAssertEqual(seen["create_status"], "200", "Host gets its Player Session")
+        // The game's own libSceNpCppWebApi.prx reads and parses a created session only from a
+        // 201 reply; with any other 2xx it finishes the transaction without a body and the game
+        // crashes reading it (SIGSEGV at 0x10 in PostPlayerSessionsResponseBody::getPlayerSessions).
+        XCTAssertEqual(seen["create_status"], "201", "Host gets its Player Session as the platform answers it")
+        XCTAssertEqual(seen["create_response"], "parsed", "the game's web API library takes the reply")
+        XCTAssertEqual(seen["create_content_type"], "application/json")
+        XCTAssertEqual(seen["create_content_length"], seen["create_size"], "Content-Length is the body's size")
         let sessionId = try XCTUnwrap(seen["session_id"])
         XCTAssertEqual(seen["get_status"], "200")
         XCTAssertEqual(seen["patch_status"], "204")
+        XCTAssertEqual(seen["invite_status"], "201")
+        XCTAssertEqual(seen["invite_response"], "parsed")
         XCTAssertEqual(seen["pushed_type"], "psn:sessionManager:ps:m:players:created", "the news reaches the game's push context callback")
         XCTAssertEqual(seen["pushed_context"], context)
         XCTAssertTrue(seen["pushed_data"]?.contains(sessionId) == true)

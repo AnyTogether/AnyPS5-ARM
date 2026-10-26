@@ -157,12 +157,15 @@ int main() {
         std::mutex seenMutex;
         std::vector<Online::Wire::WebRequest> seen;
         const std::string replyBody = "{\"sessionId\":\"0123-abcd\",\"members\":[]}";
+        const std::string conflictBody = "{\"error\":{\"code\":2269185,\"message\":\"Conflict\"}}";
         launcher.SetWebHandler([&](const Online::Wire::WebRequest& request) -> std::optional<Online::Wire::WebReply> {
             {
                 std::lock_guard lock(seenMutex);
                 seen.push_back(request);
             }
             if (request.apiGroup != "sessionManager") return Online::Wire::WebReply{0, {}, {}};
+            if (request.path.ends_with("/invitations")) return Online::Wire::WebReply{409, {{"Content-Type", "application/json"}, {"Content-Length", "2"}},
+                std::vector<std::uint8_t>(conflictBody.begin(), conflictBody.end())};
             return Online::Wire::WebReply{201, {{"Content-Type", "application/json"}, {"X-Request-Id", "r-7"}},
                 std::vector<std::uint8_t>(replyBody.begin(), replyBody.end())};
         });
@@ -203,6 +206,13 @@ int main() {
         char tiny[3] = {};
         require(sceNpWebApi2GetHttpResponseHeaderValue(request, "X-Request-Id", tiny, sizeof(tiny)) != 0, "a buffer without room for the terminator is refused");
         require(sceNpWebApi2GetHttpResponseHeaderValueLength(request, "Missing", &length) == Unavailable, "a missing header is not found");
+        // Every HTTP reply has a Content-Length; when the launcher leaves it out it is the body's size.
+        const std::string replySize = std::to_string(replyBody.size());
+        require(sceNpWebApi2GetHttpResponseHeaderValueLength(request, "content-length", &length) == 0 && length == replySize.size(),
+            "Content-Length is there though the launcher did not send it");
+        char sizeText[16] = {};
+        require(sceNpWebApi2GetHttpResponseHeaderValue(request, "Content-Length", sizeText, sizeof(sizeText)) == 0 && replySize == sizeText,
+            "Content-Length is the body's size");
         std::string read;
         char chunk[10];
         while (true) {
@@ -213,6 +223,29 @@ int main() {
         }
         require(read == replyBody, "the body is read back in pieces");
         require(sceNpWebApi2DeleteRequest(request) == 0 && sceNpWebApi2ReadData(request, chunk, sizeof(chunk)) == Unavailable, "a deleted request has no body");
+
+        // An HTTP error is a sent request with that status (libSceNpCppWebApi reads the error body
+        // itself for 400, 401, 403, 404, 409 and 412); the error object the game asked for gets
+        // the body as text, and the body can still be read.
+        std::int64_t failing = 0;
+        require(sceNpWebApi2CreateRequest(user, "sessionManager", "/v1/playerSessions/s-1/invitations", "POST", nullptr, &failing) == 0, "a request that fails is made");
+        char errorText[24];
+        std::memset(errorText, 'x', sizeof(errorText));
+        NpWebApi2ResponseInformationOption failed{};
+        failed.error_object = errorText;
+        failed.error_object_size = sizeof(errorText);
+        require(sceNpWebApi2SendRequest(failing, "{}", 2, &failed) == 0 && failed.http_status == 409 && failed.response_data_size == conflictBody.size(),
+            "an HTTP error is sent with its status");
+        require(std::string(errorText) == conflictBody.substr(0, sizeof(errorText) - 1), "the error object gets as much of the body as fits, terminated");
+        std::size_t sentLength = 0;
+        char sentSize[8] = {};
+        require(sceNpWebApi2GetHttpResponseHeaderValueLength(failing, "Content-Length", &sentLength) == 0 && sentLength == 1 &&
+            sceNpWebApi2GetHttpResponseHeaderValue(failing, "Content-Length", sentSize, sizeof(sentSize)) == 0 && std::string(sentSize) == "2",
+            "a Content-Length the launcher sent is kept as it is");
+        std::string errorRead;
+        for (int got; (got = sceNpWebApi2ReadData(failing, chunk, sizeof(chunk))) > 0;) errorRead.append(chunk, static_cast<std::size_t>(got));
+        require(errorRead == conflictBody, "the error body can still be read");
+        sceNpWebApi2DeleteRequest(failing);
 
         std::int64_t other = 0;
         require(sceNpWebApi2CreateRequest(user, "matchmaking", "/v1/tickets", "GET", nullptr, &other) == 0, "another request is made");

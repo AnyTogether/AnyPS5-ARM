@@ -278,6 +278,8 @@ static bool SameHeaderName(std::string_view left, std::string_view right) {
     });
 }
 
+// A header of the launcher's reply. Every HTTP reply has a Content-Length, so when the launcher
+// leaves it out it is the body's size.
 static std::optional<std::string> ReplyHeader(std::int64_t requestId, const char* name) {
     if (!name) return std::nullopt;
     std::lock_guard lock(g_bridgedMutex);
@@ -286,6 +288,7 @@ static std::optional<std::string> ReplyHeader(std::int64_t requestId, const char
     for (const auto& [field, value] : found->second.reply->headers) {
         if (SameHeaderName(field, name)) return value;
     }
+    if (SameHeaderName("Content-Length", name)) return std::to_string(found->second.reply->body.size());
     return std::nullopt;
 }
 
@@ -521,6 +524,13 @@ int APS5_VABI sceNpWebApi2SendRequest(int64_t request_id, const void* data, size
     if (!OnlineWeb_nid_no_patch(request, BridgedTimeoutMilliseconds, reply)) return call.Return(SCE_NP_WEBAPI2_ERROR_UNAVAILABLE);
     const auto status = reply.status;
     const auto size = reply.body.size();
+    // An HTTP error is still a sent request: the game sees the status, and the error object it
+    // asked for gets the error body as text (as much as fits, terminated). The body stays readable.
+    if (response_info_option && status >= 400 && response_info_option->error_object && response_info_option->error_object_size != 0) {
+        const auto copied = std::min(size, response_info_option->error_object_size - 1);
+        if (copied != 0) std::memcpy(response_info_option->error_object, reply.body.data(), copied);
+        response_info_option->error_object[copied] = '\0';
+    }
     {
         std::lock_guard lock(g_bridgedMutex);
         const auto found = g_bridgedRequests.find(request_id);

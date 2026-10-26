@@ -40,14 +40,16 @@ final class OnlinePlayerSessionsTests: XCTestCase {
         "invitableUserType":"MEMBER","leaderPrivileges":["KICK"],"swapSupported":false,"customData1":"cm9vbQ==",
         "member":{"players":[{"accountId":"me","platform":"me","pushContexts":[{"pushContextId":"\(context)"}]}]}}]}
         """))
-        XCTAssertEqual(created?.status, 200, "Host gets its Player Session")
-        XCTAssertEqual(created?.headers, [.init("Content-Type", "application/json")])
+        // 201, as the platform answers it: the game's libSceNpCppWebApi.prx reads the body of a
+        // created session only from a 201 reply (its executor compares the status with 201).
+        XCTAssertEqual(created?.status, 201, "Host gets its Player Session")
+        XCTAssertEqual(created?.headers, [.init("Content-Type", "application/json"), .init("Content-Length", String(created?.body.count ?? -1))])
         let made = try XCTUnwrap((try body(created)["playerSessions"] as? [[String: Any]])?.first)
         let sessionId = try XCTUnwrap(made["sessionId"] as? String)
         XCTAssertNotNil(UUID(uuidString: sessionId), "the session ID is a UUID")
-        let createdPlayers = (made["member"] as? [String: Any])?["players"] as? [[String: Any]]
-        XCTAssertEqual(createdPlayers?.first?["accountId"] as? String, mine, "\"me\" is the signed-in player")
-        XCTAssertEqual(createdPlayers?.first?["platform"] as? String, "PS5")
+        XCTAssertEqual(String(decoding: try XCTUnwrap(created).body, as: UTF8.self),
+                       #"{"playerSessions":[{"member":{"players":[{"accountId":"\#(mine)","platform":"PS5"}]},"sessionId":"\#(sessionId)"}]}"#,
+                       "the platform's shape: sessionId and member.players, nothing else")
 
         let got = try body(engine.web(request("GET", "/v1/playerSessions/\(sessionId)?fields=@default")))
         let session = try XCTUnwrap((got["playerSessions"] as? [[String: Any]])?.first)
@@ -73,9 +75,11 @@ final class OnlinePlayerSessionsTests: XCTestCase {
         XCTAssertEqual(engine.web(request("PUT", "/v1/playerSessions/\(sessionId)/leader", #"{"accountId":"\#(mine)","platform":"PS5"}"#))?.status, 204)
         XCTAssertEqual(engine.web(request("PUT", "/v1/playerSessions/\(sessionId)/leader", #"{"accountId":"123","platform":"PS5"}"#))?.status, 400,
                        "only a player can lead")
-        let invited = try body(engine.web(request("POST", "/v1/playerSessions/\(sessionId)/invitations", #"{"invitations":[{"to":{"accountId":"123"}}]}"#)))
+        let invitedReply = engine.web(request("POST", "/v1/playerSessions/\(sessionId)/invitations", #"{"invitations":[{"to":{"accountId":"123"}}]}"#))
+        XCTAssertEqual(invitedReply?.status, 201)
+        let invited = try body(invitedReply)
         XCTAssertEqual((invited["invitations"] as? [[String: Any]])?.count, 1)
-        XCTAssertEqual(engine.web(request("POST", "/v1/playerSessions/\(sessionId)/joinableSpecifiedUsers", #"{"joinableSpecifiedUsers":[{"accountId":"123"}]}"#))?.status, 200)
+        XCTAssertEqual(engine.web(request("POST", "/v1/playerSessions/\(sessionId)/joinableSpecifiedUsers", #"{"joinableSpecifiedUsers":[{"accountId":"123"}]}"#))?.status, 201)
         XCTAssertEqual(engine.web(request("DELETE", "/v1/playerSessions/\(sessionId)/joinableSpecifiedUsers?accountIds=123"))?.status, 204)
         XCTAssertEqual(engine.web(request("POST", "/v1/playerSessions/\(sessionId)/sessionMessage", #"{"payload":"hi"}"#))?.status, 204)
 
@@ -107,7 +111,7 @@ final class OnlinePlayerSessionsTests: XCTestCase {
         let pushed = PushRecorder()
         let sessions = OnlinePlayerSessions(account: 42, onlineId: "alice", push: { pushed.add($0) })
         let created = sessions.handle(request("POST", "/v1/playerSessions", #"{"playerSessions":[{"maxPlayers":2}]}"#))
-        XCTAssertEqual(created.status, 200)
+        XCTAssertEqual(created.status, 201)
         let id = try XCTUnwrap(((try body(created)["playerSessions"] as? [[String: Any]])?.first)?["sessionId"] as? String)
         let leader = { () throws -> String? in
             let got = try self.body(sessions.handle(self.request("GET", "/v1/playerSessions/\(id)")))
@@ -116,9 +120,9 @@ final class OnlinePlayerSessionsTests: XCTestCase {
         XCTAssertEqual(try leader(), "42", "without members the creator plays and leads")
 
         let joined = sessions.handle(request("POST", "/v1/playerSessions/\(id)/member/players", #"{"players":[{"accountId":"77","platform":"PS5"}]}"#))
-        XCTAssertEqual(joined.status, 200)
+        XCTAssertEqual(joined.status, 201, "joining makes a member: 201, which the game's web API library needs to read the reply")
         XCTAssertEqual((try body(joined)["players"] as? [[String: Any]])?.first?["accountId"] as? String, "77")
-        XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions/\(id)/member/spectators", #"{"spectators":[{"accountId":88}]}"#)).status, 200)
+        XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions/\(id)/member/spectators", #"{"spectators":[{"accountId":88}]}"#)).status, 201)
         XCTAssertEqual(sessions.handle(request("DELETE", "/v1/playerSessions/\(id)/members/me")).status, 204)
         XCTAssertEqual(try leader(), "77", "the next player leads when the leader leaves")
         XCTAssertTrue(pushed.events.isEmpty, "a game's own changes push nothing")
@@ -136,6 +140,39 @@ final class OnlinePlayerSessionsTests: XCTestCase {
                                     playerSessions: sessions, platformGroups: false)
         let off = await quiet.handle(request("POST", "/v1/playerSessions", #"{"playerSessions":[{}]}"#))
         XCTAssertEqual(off, .notOffered, "with platform groups off, Player Sessions are not offered either")
+    }
+
+    /// What libSceNpCppWebApi needs from the replies: 201 for each POST that makes something, 200
+    /// for GETs, a JSON body with its Content-Type and Content-Length, errors with theirs.
+    func testRepliesCarryThePlatformsStatusesAndHeaders() throws {
+        let sessions = OnlinePlayerSessions(account: 42, onlineId: "alice")
+        let created = sessions.handle(request("POST", "/v1/playerSessions",
+                                              #"{"playerSessions":[{"member":{"players":[{"accountId":"me","platform":"PS5"}],"spectators":[{"accountId":"88","platform":"PS5"}]}}]}"#))
+        XCTAssertEqual(created.status, 201)
+        let made = try XCTUnwrap((try body(created)["playerSessions"] as? [[String: Any]])?.first)
+        XCTAssertEqual(Set(made.keys), ["sessionId", "member"])
+        let member = try XCTUnwrap(made["member"] as? [String: Any])
+        XCTAssertEqual((member["players"] as? [[String: Any]])?.map { $0["accountId"] as? String }, ["42"])
+        XCTAssertEqual((member["spectators"] as? [[String: Any]])?.map { $0["accountId"] as? String }, ["88"], "spectators appear when there are any")
+        let id = try XCTUnwrap(made["sessionId"] as? String)
+
+        let statuses: [(String, String, String, UInt16)] = [
+            ("GET", "/v1/playerSessions/\(id)", "", 200),
+            ("GET", "/v1/users/me/playerSessions", "", 200),
+            ("GET", "/v1/users/me/playerSessionsInvitations", "", 200),
+            ("POST", "/v1/playerSessions/\(id)/member/players", #"{"players":[{"accountId":"77","platform":"PS5"}]}"#, 201),
+            ("POST", "/v1/playerSessions/\(id)/member/spectators", #"{"spectators":[{"accountId":"99","platform":"PS5"}]}"#, 201),
+            ("POST", "/v1/playerSessions/\(id)/invitations", #"{"invitations":[{"to":{"accountId":"123"}}]}"#, 201),
+            ("POST", "/v1/playerSessions/\(id)/joinableSpecifiedUsers", #"{"joinableSpecifiedUsers":[{"accountId":"123"}]}"#, 201),
+        ]
+        for (method, path, json, status) in statuses {
+            let reply = sessions.handle(request(method, path, json))
+            XCTAssertEqual(reply.status, status, "\(method) \(path)")
+            XCTAssertEqual(reply.headers, [.init("Content-Type", "application/json"), .init("Content-Length", String(reply.body.count))], "\(method) \(path)")
+        }
+        let missing = sessions.handle(request("GET", "/v1/playerSessions/nope"))
+        XCTAssertEqual(missing.status, 404)
+        XCTAssertEqual(missing.headers, [.init("Content-Type", "application/json"), .init("Content-Length", String(missing.body.count))])
     }
 }
 
