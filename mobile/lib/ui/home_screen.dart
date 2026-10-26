@@ -70,6 +70,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     final selectedID = _picked ?? library?.selected;
     final selected = games.where((game) => game.id == selectedID).firstOrNull;
+    final tile = _tileSide(context);
+    final compact = _compact(context);
     if (selected != null && selected.id != _shown) {
       _shown = selected.id;
       WidgetsBinding.instance.addPostFrameCallback(
@@ -129,7 +131,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(28, 14, 28, 18),
+              padding: compact
+                  ? const EdgeInsets.fromLTRB(22, 6, 22, 10)
+                  : const EdgeInsets.fromLTRB(28, 14, 28, 18),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -194,9 +198,9 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 14),
+                  SizedBox(height: compact ? 4 : 14),
                   SizedBox(
-                    height: 92,
+                    height: tile,
                     child: games.isEmpty
                         ? Align(
                             alignment: Alignment.centerLeft,
@@ -216,6 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             separatorBuilder: (_, _) =>
                                 const SizedBox(width: 14),
                             itemBuilder: (context, index) => _Tile(
+                              side: tile,
                               game: games[index],
                               icon: widget.session.art[games[index].id]?.icon,
                               selected: games[index].id == selectedID,
@@ -245,6 +250,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _details(Strings texts, RemoteGame game, Library library) {
     final playing = library.running == game.id;
     final otherPlaying = library.running != null && !playing;
+    final compact = _compact(context);
     final ambient = Theme.of(context).textTheme.labelLarge;
     final font = TextStyle(
       fontFamily: ambient?.fontFamily,
@@ -265,16 +271,16 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         Text(
           game.name,
-          maxLines: 2,
+          maxLines: compact ? 1 : 2,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
+          style: TextStyle(
             color: Colors.white,
-            fontSize: 30,
+            fontSize: compact ? 24 : 30,
             fontWeight: FontWeight.w300,
             height: 1.1,
           ),
         ),
-        const SizedBox(height: 8),
+        SizedBox(height: compact ? 4 : 8),
         Row(
           children: [
             if (playing)
@@ -283,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
               _Chip(text: '🏆 ${game.trophies}', color: Colors.white70),
           ],
         ),
-        const SizedBox(height: 16),
+        SizedBox(height: compact ? 8 : 16),
         Wrap(
           spacing: 12,
           runSpacing: 10,
@@ -302,9 +308,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 backgroundColor: Colors.white,
                 foregroundColor: Colors.black,
                 disabledBackgroundColor: const Color(0x55FFFFFF),
-                padding: const EdgeInsets.symmetric(
+                padding: EdgeInsets.symmetric(
                   horizontal: 34,
-                  vertical: 15,
+                  vertical: compact ? 11 : 15,
                 ),
                 textStyle: font.copyWith(
                   fontSize: 16,
@@ -319,9 +325,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
                   side: const BorderSide(color: Color(0x66FFFFFF)),
-                  padding: const EdgeInsets.symmetric(
+                  padding: EdgeInsets.symmetric(
                     horizontal: 22,
-                    vertical: 15,
+                    vertical: compact ? 11 : 15,
                   ),
                   textStyle: font.copyWith(
                     fontSize: 15,
@@ -376,7 +382,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _reveal(List<RemoteGame> games, RemoteGame selected) {
     if (!_row.hasClients) return;
     final index = games.indexOf(selected);
-    const pitch = 92.0 + 14;
+    final pitch = _tileSide(context) + 14;
     final target = (index * pitch - _row.position.viewportDimension / 2 + pitch)
         .clamp(0.0, _row.position.maxScrollExtent);
     _row.animateTo(
@@ -387,14 +393,22 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+/// A short screen (a small phone on its side, 320 or 375 points tall) draws the launcher
+/// tighter: smaller tiles, a one-line title, slimmer buttons.
+bool _compact(BuildContext context) => MediaQuery.sizeOf(context).height < 400;
+
+double _tileSide(BuildContext context) => _compact(context) ? 72 : 92;
+
 class _Tile extends StatelessWidget {
   const _Tile({
+    required this.side,
     required this.game,
     required this.icon,
     required this.selected,
     required this.onTap,
   });
 
+  final double side;
   final RemoteGame game;
   final Uint8List? icon;
   final bool selected;
@@ -403,57 +417,67 @@ class _Tile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final picture = icon;
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedScale(
-        scale: selected ? 1.0 : 0.82,
-        alignment: Alignment.center,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
-        child: AnimatedContainer(
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: game.name,
+      excludeSemantics: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedScale(
+          scale: selected ? 1.0 : 0.82,
+          alignment: Alignment.center,
           duration: const Duration(milliseconds: 220),
-          width: 92,
-          height: 92,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            color: const Color(0x22FFFFFF),
-            border: Border.all(
-              color: selected ? Colors.white : const Color(0x22FFFFFF),
-              width: selected ? 2.5 : 1,
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            width: side,
+            height: side,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(side * 0.2),
+              color: const Color(0x22FFFFFF),
+              border: Border.all(
+                color: selected ? Colors.white : const Color(0x22FFFFFF),
+                width: selected ? 2.5 : 1,
+              ),
+              boxShadow: selected
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x66000000),
+                        blurRadius: 18,
+                        offset: Offset(0, 6),
+                      ),
+                    ]
+                  : null,
             ),
-            boxShadow: selected
-                ? const [
-                    BoxShadow(
-                      color: Color(0x66000000),
-                      blurRadius: 18,
-                      offset: Offset(0, 6),
-                    ),
-                  ]
-                : null,
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              if (picture != null)
-                Image.memory(picture, fit: BoxFit.cover, gaplessPlayback: true)
-              else
-                const Icon(
-                  Icons.sports_esports_rounded,
-                  color: Colors.white38,
-                  size: 34,
-                ),
-              if (game.state == GameState.locked ||
-                  game.state == GameState.installing)
-                const ColoredBox(
-                  color: Color(0x88000000),
-                  child: Icon(
-                    Icons.lock_rounded,
-                    color: Colors.white70,
-                    size: 26,
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (picture != null)
+                  Image.memory(
+                    picture,
+                    fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                  )
+                else
+                  const Icon(
+                    Icons.sports_esports_rounded,
+                    color: Colors.white38,
+                    size: 34,
                   ),
-                ),
-            ],
+                if (game.state == GameState.locked ||
+                    game.state == GameState.installing)
+                  const ColoredBox(
+                    color: Color(0x88000000),
+                    child: Icon(
+                      Icons.lock_rounded,
+                      color: Colors.white70,
+                      size: 26,
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

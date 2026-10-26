@@ -90,50 +90,74 @@ class _FriendsPaneState extends State<FriendsPane> {
         return ListView(
           padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
           children: [
-            Row(
-              children: [
-                Text(
+            LayoutBuilder(
+              builder: (context, box) {
+                final title = Text(
                   texts.friends,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 20,
                     fontWeight: FontWeight.w600,
                   ),
-                ),
-                const Spacer(),
-                SizedBox(
-                  width: 220,
-                  child: TextField(
-                    controller: _handle,
-                    autocorrect: false,
-                    textInputAction: TextInputAction.send,
-                    style: const TextStyle(color: Colors.white, fontSize: 14.5),
-                    decoration: InputDecoration(
-                      isDense: true,
-                      prefixText: '@',
-                      prefixStyle: const TextStyle(color: Colors.white38),
-                      hintText: texts.friendsHandle,
-                      hintStyle: const TextStyle(color: Colors.white30),
-                      filled: true,
-                      fillColor: const Color(0x14FFFFFF),
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 11,
-                      ),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
+                );
+                final field = TextField(
+                  controller: _handle,
+                  autocorrect: false,
+                  textInputAction: TextInputAction.send,
+                  style: const TextStyle(color: Colors.white, fontSize: 14.5),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    prefixText: '@',
+                    prefixStyle: const TextStyle(color: Colors.white38),
+                    hintText: texts.friendsHandle,
+                    hintStyle: const TextStyle(color: Colors.white30),
+                    filled: true,
+                    fillColor: const Color(0x14FFFFFF),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 11,
                     ),
-                    onSubmitted: (_) => _add(),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton.tonal(
+                  onSubmitted: (_) => _add(),
+                );
+                final add = FilledButton.tonal(
                   onPressed: _adding ? null : _add,
                   child: Text(texts.friendsAdd),
-                ),
-              ],
+                );
+                // A small phone puts adding by handle under the title, the field taking the row.
+                if (box.maxWidth < 420) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      title,
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: field),
+                          const SizedBox(width: 8),
+                          add,
+                        ],
+                      ),
+                    ],
+                  );
+                }
+                return Row(
+                  children: [
+                    Flexible(child: title),
+                    const SizedBox(width: 12),
+                    const Spacer(),
+                    SizedBox(width: 220, child: field),
+                    const SizedBox(width: 8),
+                    add,
+                  ],
+                );
+              },
             ),
             if (_notice case (final text, final error))
               Padding(
@@ -333,46 +357,78 @@ class _PersonRow extends StatelessWidget {
   final Widget? trailing;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 6),
-    child: Row(
-      children: [
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: onTap,
-            child: Row(
-              children: [
-                Avatar(person: person, presence: presence),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        person.displayName,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, box) {
+      final who = Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onTap,
+              child: Row(
+                children: [
+                  Avatar(person: person, presence: presence),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          person.displayName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                          ),
                         ),
-                      ),
-                      Text(
-                        subtitle,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: subtitleColor, fontSize: 12.5),
-                      ),
-                    ],
+                        Text(
+                          subtitle,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: subtitleColor,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-        ),
-        ?trailing,
-      ],
-    ),
+        ],
+      );
+      final buttons = trailing;
+      // On a small phone the buttons go under the name instead of pushing it off the row.
+      final narrow = box.maxWidth < 440;
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: buttons == null
+            ? who
+            : narrow
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  who,
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: buttons,
+                    ),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  Expanded(child: who),
+                  buttons,
+                ],
+              ),
+      );
+    },
   );
 }
 

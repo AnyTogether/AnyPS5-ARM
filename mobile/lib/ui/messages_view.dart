@@ -262,13 +262,23 @@ class _MessagesPaneState extends State<MessagesPane> {
     final texts = Texts.of(context);
     return ListenableBuilder(
       listenable: _messages,
-      builder: (context, _) => Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(width: 248, child: _list(texts)),
-          const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
-          Expanded(child: _thread(texts)),
-        ],
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, box) {
+          // A small phone shows the list or the conversation open, with a way back.
+          if (box.maxWidth < 600) {
+            return _messages.openId == null
+                ? _list(texts)
+                : _thread(texts, back: true);
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(width: 248, child: _list(texts)),
+              const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
+              Expanded(child: _thread(texts)),
+            ],
+          );
+        },
       ),
     );
   }
@@ -325,7 +335,7 @@ class _MessagesPaneState extends State<MessagesPane> {
     );
   }
 
-  Widget _thread(Strings texts) {
+  Widget _thread(Strings texts, {bool back = false}) {
     final conversation = _messages.open;
     if (conversation == null) {
       return Center(
@@ -353,6 +363,17 @@ class _MessagesPaneState extends State<MessagesPane> {
           padding: const EdgeInsets.fromLTRB(18, 12, 18, 10),
           child: Row(
             children: [
+              if (back)
+                IconButton(
+                  tooltip: texts.back,
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _messages.hide,
+                  icon: const Icon(
+                    Icons.arrow_back_rounded,
+                    color: Colors.white70,
+                    size: 20,
+                  ),
+                ),
               if (others.length == 1)
                 Avatar(person: others.single, size: 32)
               else

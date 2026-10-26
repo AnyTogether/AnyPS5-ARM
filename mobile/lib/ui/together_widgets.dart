@@ -131,7 +131,7 @@ class SectionLabel extends StatelessWidget {
       children: [
         Expanded(
           child: Text(
-            text.toUpperCase(),
+            Texts.of(context).upper(text),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(

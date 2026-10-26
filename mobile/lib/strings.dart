@@ -63,6 +63,11 @@ class Strings {
   String get activityStarting => _text('activity.starting');
   String activityStep(String phase) => _text('activity.$phase');
   String get activityReady => _text('activity.ready');
+
+  /// [text] in capitals the way the language writes them: Turkish keeps the dot on İ.
+  String upper(String text) => language == 'tr'
+      ? text.replaceAll('i', 'İ').toUpperCase()
+      : text.toUpperCase();
   String percent(int value) => _text('percent').replaceAll('{n}', '$value');
   String get motionDetail => _text('motionDetail');
   String get remotePlay => _text('remotePlay');

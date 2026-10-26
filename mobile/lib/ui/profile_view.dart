@@ -273,69 +273,92 @@ class _ProfileViewState extends State<ProfileView> {
       '@${person.handle}',
       if (profile.country case final code?) '${flagOf(code)} $code',
     ].join('  ·  ');
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Avatar(
-          person: person,
-          size: 68,
-          presence: presence == null || presence.state == PresenceState.offline
-              ? null
-              : presence.state,
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                person.displayName,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 21,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: -0.2,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                where,
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
-              ),
-              if (profile.trophyLevel case final level?) ...[
-                const SizedBox(height: 8),
-                LevelLine(level: level),
-              ],
-              if (presence != null &&
-                  presence.state != PresenceState.offline) ...[
-                const SizedBox(height: 4),
-                Text(
-                  presenceText(texts, presence, widget.gameName),
-                  style: TextStyle(
-                    color: presenceColor(presence.state),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+    // On a small phone the buttons go under the bio, not beside a squeezed name.
+    return LayoutBuilder(
+      builder: (context, box) {
+        final narrow = box.maxWidth < 460;
+        final details = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Avatar(
+              person: person,
+              size: 68,
+              presence:
+                  presence == null || presence.state == PresenceState.offline
+                  ? null
+                  : presence.state,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    person.displayName,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 21,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -0.2,
+                    ),
                   ),
-                ),
-              ],
-              const SizedBox(height: 6),
-              Text(
-                profile.bio?.isNotEmpty == true ? profile.bio! : texts.noBio,
-                style: TextStyle(
-                  color: profile.bio?.isNotEmpty == true
-                      ? Colors.white70
-                      : Colors.white30,
-                  fontSize: 13.5,
-                  height: 1.35,
-                ),
+                  const SizedBox(height: 2),
+                  Text(
+                    where,
+                    style: const TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+                  if (profile.trophyLevel case final level?) ...[
+                    const SizedBox(height: 8),
+                    LevelLine(level: level),
+                  ],
+                  if (presence != null &&
+                      presence.state != PresenceState.offline) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      presenceText(texts, presence, widget.gameName),
+                      style: TextStyle(
+                        color: presenceColor(presence.state),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  Text(
+                    profile.bio?.isNotEmpty == true
+                        ? profile.bio!
+                        : texts.noBio,
+                    style: TextStyle(
+                      color: profile.bio?.isNotEmpty == true
+                          ? Colors.white70
+                          : Colors.white30,
+                      fontSize: 13.5,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
               ),
+            ),
+            if (!narrow) ...[
+              const SizedBox(width: 10),
+              _actions(texts, profile),
             ],
-          ),
-        ),
-        const SizedBox(width: 10),
-        _actions(texts, profile),
-      ],
+          ],
+        );
+        if (!narrow) return details;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            details,
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.only(left: 84),
+              child: _actions(texts, profile),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -542,13 +565,18 @@ class _Totals extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    label.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.white38,
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: 0.9,
+                  // One line, shrunk to fit: a long label never breaks inside a word.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      texts.upper(label),
+                      maxLines: 1,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.9,
+                      ),
                     ),
                   ),
                 ],

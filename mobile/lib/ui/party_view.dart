@@ -207,171 +207,182 @@ class _PartyPaneState extends State<PartyPane> {
               !party.invited.any((p) => p.id == f.person.id),
         )
         .toList();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(22, 16, 14, 18),
-            children: [
-              Row(
-                children: [
-                  Text(texts.party, style: _title),
-                  const SizedBox(width: 10),
-                  Text(
-                    '${party.members.length}/$maxPartySize',
-                    style: const TextStyle(color: Colors.white38, fontSize: 14),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  for (final member in party.members)
-                    _Member(
-                      person: member,
-                      leader: member.id == party.leaderId,
-                      inVoice:
-                          party.inCall.contains(member.id) ||
-                          (member.id == me && voice.active),
-                      muted: member.id == me
-                          ? voice.active && voice.muted
-                          : party.muted.contains(member.id),
-                      ring:
-                          (member.id == me
-                              ? voice.speaking
-                              : voice.speakingOf(member.id))
-                          ? togetherPlaying
-                          : null,
-                      onKick: leader && member.id != me
-                          ? () => _try(() => parties.kick(member.id))
-                          : null,
-                    ),
-                ],
-              ),
-              if (party.invited.isNotEmpty) ...[
-                SectionLabel(texts.partyInvited),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final person in party.invited)
-                      Chip(
-                        avatar: Avatar(person: person, size: 22),
-                        label: Text(person.displayName),
-                        backgroundColor: const Color(0x14FFFFFF),
-                        side: BorderSide.none,
-                        labelStyle: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-              if (party.requests.isNotEmpty) ...[
-                SectionLabel(texts.askingToJoin),
-                for (final person in party.requests)
-                  _Row(
-                    person: person,
-                    title: person.displayName,
-                    subtitle: '@${person.handle}',
-                    trailing: leader
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextButton(
-                                onPressed: () => _try(
-                                  () => parties.answerRequest(
-                                    person.id,
-                                    accept: false,
-                                  ),
-                                ),
-                                child: Text(
-                                  texts.decline,
-                                  style: const TextStyle(color: Colors.white60),
-                                ),
-                              ),
-                              FilledButton(
-                                onPressed: party.full
-                                    ? null
-                                    : () => _try(
-                                        () => parties.answerRequest(
-                                          person.id,
-                                          accept: true,
-                                        ),
-                                      ),
-                                child: Text(texts.accept),
-                              ),
-                            ],
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-              ],
-              if (_error != null) _errorText,
-            ],
+    final main = <Widget>[
+      Row(
+        children: [
+          Text(texts.party, style: _title),
+          const SizedBox(width: 10),
+          Text(
+            '${party.members.length}/$maxPartySize',
+            style: const TextStyle(color: Colors.white38, fontSize: 14),
           ),
-        ),
-        const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
-        SizedBox(
-          width: 262,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 4, 14, 14),
-            children: [
-              SectionLabel(texts.voice),
-              _voiceCard(texts, party, voice),
-              SectionLabel(texts.partyInviteFriends),
-              if (invitable.isEmpty)
-                Text(
-                  texts.partyNoFriends,
-                  style: const TextStyle(color: Colors.white38, fontSize: 13),
+        ],
+      ),
+      const SizedBox(height: 14),
+      Wrap(
+        spacing: 14,
+        runSpacing: 14,
+        children: [
+          for (final member in party.members)
+            _Member(
+              person: member,
+              leader: member.id == party.leaderId,
+              inVoice:
+                  party.inCall.contains(member.id) ||
+                  (member.id == me && voice.active),
+              muted: member.id == me
+                  ? voice.active && voice.muted
+                  : party.muted.contains(member.id),
+              ring:
+                  (member.id == me
+                      ? voice.speaking
+                      : voice.speakingOf(member.id))
+                  ? togetherPlaying
+                  : null,
+              onKick: leader && member.id != me
+                  ? () => _try(() => parties.kick(member.id))
+                  : null,
+            ),
+        ],
+      ),
+      if (party.invited.isNotEmpty) ...[
+        SectionLabel(texts.partyInvited),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final person in party.invited)
+              Chip(
+                avatar: Avatar(person: person, size: 22),
+                label: Text(person.displayName),
+                backgroundColor: const Color(0x14FFFFFF),
+                side: BorderSide.none,
+                labelStyle: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
                 ),
-              for (final friend in invitable)
-                _Row(
-                  person: friend.person,
-                  presence: friend.presence.state,
-                  title: friend.person.displayName,
-                  trailing: TextButton(
-                    onPressed: party.full
-                        ? null
-                        : () => _try(() => parties.invite([friend.person.id])),
-                    child: Text(texts.partyInvite),
-                  ),
-                ),
-              if (leader) ...[
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: Text(
-                    texts.partyOpen,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    texts.partyOpenDetail,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                  value: party.open,
-                  onChanged: (open) => _try(() => parties.setOpen(open)),
-                ),
-                _publicListing(texts, party),
-              ],
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: () => _try(parties.leave),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: togetherError,
-                  side: const BorderSide(color: Color(0x66FF8A80)),
-                ),
-                icon: const Icon(Icons.logout_rounded, size: 18),
-                label: Text(texts.partyLeave),
               ),
-            ],
-          ),
+          ],
         ),
       ],
+      if (party.requests.isNotEmpty) ...[
+        SectionLabel(texts.askingToJoin),
+        for (final person in party.requests)
+          _Row(
+            person: person,
+            title: person.displayName,
+            subtitle: '@${person.handle}',
+            trailing: leader
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: () => _try(
+                          () => parties.answerRequest(person.id, accept: false),
+                        ),
+                        child: Text(
+                          texts.decline,
+                          style: const TextStyle(color: Colors.white60),
+                        ),
+                      ),
+                      FilledButton(
+                        onPressed: party.full
+                            ? null
+                            : () => _try(
+                                () => parties.answerRequest(
+                                  person.id,
+                                  accept: true,
+                                ),
+                              ),
+                        child: Text(texts.accept),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
+      ],
+      if (_error != null) _errorText,
+    ];
+    final side = <Widget>[
+      SectionLabel(texts.voice),
+      _voiceCard(texts, party, voice),
+      SectionLabel(texts.partyInviteFriends),
+      if (invitable.isEmpty)
+        Text(
+          texts.partyNoFriends,
+          style: const TextStyle(color: Colors.white38, fontSize: 13),
+        ),
+      for (final friend in invitable)
+        _Row(
+          person: friend.person,
+          presence: friend.presence.state,
+          title: friend.person.displayName,
+          trailing: TextButton(
+            onPressed: party.full
+                ? null
+                : () => _try(() => parties.invite([friend.person.id])),
+            child: Text(texts.partyInvite),
+          ),
+        ),
+      if (leader) ...[
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            texts.partyOpen,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          subtitle: Text(
+            texts.partyOpenDetail,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          value: party.open,
+          onChanged: (open) => _try(() => parties.setOpen(open)),
+        ),
+        _publicListing(texts, party),
+      ],
+      const SizedBox(height: 10),
+      OutlinedButton.icon(
+        onPressed: () => _try(parties.leave),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: togetherError,
+          side: const BorderSide(color: Color(0x66FF8A80)),
+        ),
+        icon: const Icon(Icons.logout_rounded, size: 18),
+        label: Text(texts.partyLeave),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, box) {
+        // A small phone has no room for the party beside the voice and invite column: one
+        // list, the column under the members.
+        if (box.maxWidth < 600) {
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
+            children: [...main, const SizedBox(height: 6), ...side],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(22, 16, 14, 18),
+                children: main,
+              ),
+            ),
+            const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
+            SizedBox(
+              width: 262,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 14, 14),
+                children: side,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

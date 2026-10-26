@@ -84,13 +84,18 @@ class _LeaderboardPaneState extends State<LeaderboardPane> {
   @override
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        SizedBox(width: 180, child: _picker(texts)),
-        const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
-        Expanded(child: _boardView(texts)),
-      ],
+    return LayoutBuilder(
+      builder: (context, box) => Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SizedBox(
+            width: box.maxWidth < 560 ? 150 : 180,
+            child: _picker(texts),
+          ),
+          const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
+          Expanded(child: _boardView(texts)),
+        ],
+      ),
     );
   }
 
@@ -102,12 +107,17 @@ class _LeaderboardPaneState extends State<LeaderboardPane> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
-          child: Text(
-            texts.leaderboards,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              texts.leaderboards,
+              maxLines: 1,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -331,7 +341,7 @@ class _MyRank extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  texts.yourRank.toUpperCase(),
+                  texts.upper(texts.yourRank),
                   style: const TextStyle(
                     color: Colors.white38,
                     fontSize: 10.5,
@@ -458,43 +468,47 @@ class _Segments<T> extends StatelessWidget {
       color: const Color(0x0FFFFFFF),
       borderRadius: BorderRadius.circular(12),
     ),
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        for (final option in values)
-          Semantics(
-            button: true,
-            selected: option == value,
-            child: GestureDetector(
-              behavior: HitTestBehavior.opaque,
-              onTap: option == value ? null : () => onChanged(option),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 160),
-                curve: Curves.easeOut,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: option == value
-                      ? const Color(0x338AB4FF)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Text(
-                  label(option),
-                  style: TextStyle(
-                    color: option == value ? Colors.white : Colors.white54,
-                    fontSize: 13,
-                    fontWeight: option == value
-                        ? FontWeight.w600
-                        : FontWeight.w500,
+    // Scrolls sideways when a small phone has no room for every choice.
+    child: SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final option in values)
+            Semantics(
+              button: true,
+              selected: option == value,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: option == value ? null : () => onChanged(option),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOut,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: option == value
+                        ? const Color(0x338AB4FF)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  child: Text(
+                    label(option),
+                    style: TextStyle(
+                      color: option == value ? Colors.white : Colors.white54,
+                      fontSize: 13,
+                      fontWeight: option == value
+                          ? FontWeight.w600
+                          : FontWeight.w500,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     ),
   );
 }
