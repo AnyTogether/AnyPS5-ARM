@@ -97,6 +97,21 @@ std::vector<Wire::Datagram> FakeLauncher::Datagrams() {
     return datagrams;
 }
 
+void FakeLauncher::SetStreamLoopback(bool on) {
+    std::lock_guard lock(mutex);
+    streamLoopback = on;
+}
+
+bool FakeLauncher::WaitForStreams(std::size_t count, std::chrono::milliseconds timeout) {
+    std::unique_lock lock(mutex);
+    return changed.wait_for(lock, timeout, [&] { return streams.size() >= count; });
+}
+
+std::vector<Wire::Stream> FakeLauncher::Streams() {
+    std::lock_guard lock(mutex);
+    return streams;
+}
+
 void FakeLauncher::SetRefusal(std::optional<Wire::Refuse> refuse) {
     std::lock_guard lock(mutex);
     refusal = std::move(refuse);
@@ -276,6 +291,27 @@ void FakeLauncher::serve(Net::Handle socket) {
             if (handler) {
                 if (const auto reply = handler(datagram)) write(socket, Wire::Frame(Wire::Type::Datagram, 0, 0, Wire::Encode(*reply)));
             }
+            continue;
+        }
+        if (Wire::IsStream(type)) {
+            auto stream = Wire::DecodeStream(static_cast<Wire::Type>(type), frame->payload);
+            if (!stream) continue;
+            bool loopback = false;
+            {
+                std::lock_guard lock(mutex);
+                if (stream->type != Wire::Type::StreamData) streams.push_back(*stream);
+                loopback = streamLoopback;
+                changed.notify_all();
+            }
+            if (!loopback) continue;
+            // The engine's own streams cross to the ones this fake opened back to it, and the
+            // other way round.
+            stream->stream ^= Wire::LauncherStream;
+            if (stream->type == Wire::Type::StreamOpen) {
+                std::swap(stream->peerPort, stream->localPort);
+                std::swap(stream->peerVport, stream->localVport);
+            }
+            write(socket, Wire::Frame(stream->type, 0, 0, Wire::Encode(*stream)));
             continue;
         }
         if (type == static_cast<std::uint16_t>(Wire::Type::WebRequest)) {

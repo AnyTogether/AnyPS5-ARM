@@ -410,6 +410,77 @@ void datagrams() {
         "while the launcher is gone datagrams are dropped");
 }
 
+void streams() {
+    Wire::Stream open;
+    open.type = Wire::Type::StreamOpen;
+    open.stream = 5;
+    open.peer = 0xC6120002u;
+    open.peerPort = 3659;
+    open.peerVport = 1;
+    open.localPort = 3660;
+    open.localVport = 5;
+    require(hex(Wire::Frame(Wire::Type::StreamOpen, 0, 0, Wire::Encode(open))) == "10000000" "1103" "0000" "00000000" "05000000" "020012c6" "4b0e" "0100" "4c0e" "0500",
+        "stream open layout");
+    Wire::Stream data;
+    data.type = Wire::Type::StreamData;
+    data.stream = 0x80000001u;
+    data.data = {1, 2, 3};
+    require(hex(Wire::Encode(data)) == "01000080" "03000000" "010203", "stream data layout");
+    Wire::Stream close;
+    close.type = Wire::Type::StreamClose;
+    close.stream = 5;
+    close.reason = Wire::StreamCloseReason::Refused;
+    require(hex(Wire::Encode(close)) == "05000000" "01", "stream close layout");
+    Wire::Stream accept;
+    accept.type = Wire::Type::StreamAccept;
+    accept.stream = 0x80000001u;
+    require(hex(Wire::Encode(accept)) == "01000080", "stream accept layout");
+
+    const auto openBack = Wire::DecodeStream(Wire::Type::StreamOpen, Wire::Encode(open));
+    require(openBack && openBack->stream == 5 && openBack->peer == 0xC6120002u && openBack->peerPort == 3659 && openBack->peerVport == 1 && openBack->localPort == 3660 &&
+            openBack->localVport == 5,
+        "stream open round trip");
+    const auto dataBack = Wire::DecodeStream(Wire::Type::StreamData, Wire::Encode(data));
+    require(dataBack && dataBack->stream == 0x80000001u && dataBack->data == data.data, "stream data round trip");
+    const auto closeBack = Wire::DecodeStream(Wire::Type::StreamClose, Wire::Encode(close));
+    require(closeBack && closeBack->reason == Wire::StreamCloseReason::Refused, "stream close round trip");
+    require(Wire::DecodeStream(Wire::Type::StreamClose, std::vector<std::uint8_t>{5, 0, 0, 0, 9})->reason == Wire::StreamCloseReason::Reset, "an unknown reason is a break");
+    require(!Wire::DecodeStream(Wire::Type::StreamAccept, std::vector<std::uint8_t>{0, 0, 0, 0}), "stream 0 is never one");
+    require(!Wire::DecodeStream(Wire::Type::StreamClose, std::vector<std::uint8_t>{5, 0, 0}), "a short stream frame is dropped");
+    open.peer = 0x0A000001u;
+    require(!Wire::DecodeStream(Wire::Type::StreamOpen, Wire::Encode(open)), "a stream from outside the virtual network is dropped");
+    require(!Wire::DecodeStream(Wire::Type::Datagram, Wire::Encode(accept)), "only stream types decode as streams");
+
+    Testing::FakeLauncher launcher(testSecret());
+    launcher.SetAccount(signedInAccount());
+    Bridge bridge(launcher.Port(), testSecret(), fastOptions());
+    require(bridge.Account().connected, "connected");
+    std::mutex receivedMutex;
+    std::vector<Wire::Stream> received;
+    bridge.SetStreamReceiver([&](const Wire::Stream& in) {
+        std::lock_guard lock(receivedMutex);
+        received.push_back(in);
+    });
+    open.peer = 0xC6120002u;
+    require(bridge.SendStream(open) && bridge.SendStream(accept) && bridge.SendStream(close), "stream frames are queued");
+    require(launcher.WaitForStreams(3, 3000ms), "stream frames reach the launcher");
+    const auto sent = launcher.Streams();
+    require(sent[0].type == Wire::Type::StreamOpen && sent[1].type == Wire::Type::StreamAccept && sent[2].type == Wire::Type::StreamClose, "in order");
+    Wire::Stream big = data;
+    big.data.assign(Wire::MaxStreamData + 1, 0);
+    require(!bridge.SendStream(big), "stream data over 64 KiB is refused");
+    launcher.Send(Wire::Type::StreamData, 0, 0, Wire::Encode(data));
+    require(eventually([&] {
+        std::lock_guard lock(receivedMutex);
+        return received.size() == 1 && received[0].type == Wire::Type::StreamData && received[0].data == data.data;
+    }), "the launcher's stream data reaches the receiver");
+    launcher.DropClient();
+    require(eventually([&] {
+        std::lock_guard lock(receivedMutex);
+        return received.size() >= 2 && received[1].type == Wire::Type::StreamClose && received[1].stream == 0 && received[1].reason == Wire::StreamCloseReason::Reset;
+    }), "a dropped connection ends every stream");
+}
+
 std::vector<std::string> readLines(const std::string& path) {
     std::ifstream file(path);
     std::vector<std::string> lines;
@@ -518,6 +589,7 @@ int main() {
         {"no launcher", noLauncher},
         {"observer file", observerFile},
         {"datagrams", datagrams},
+        {"streams", streams},
         {"push events", pushEvents},
     };
     int failed = 0;

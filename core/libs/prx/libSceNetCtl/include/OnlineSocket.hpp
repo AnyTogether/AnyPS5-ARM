@@ -23,6 +23,7 @@
 #else
 #include <arpa/inet.h>
 #include <cerrno>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -132,6 +133,51 @@ inline std::uint32_t ProcessId() {
     return static_cast<std::uint32_t>(::GetCurrentProcessId());
 }
 
+inline std::uint16_t LocalPort(Handle handle) {
+    sockaddr_in address{};
+    int length = sizeof(address);
+    if (::getsockname(native(handle), reinterpret_cast<sockaddr*>(&address), &length) != 0 || address.sin_family != AF_INET) return 0;
+    return ntohs(address.sin_port);
+}
+
+inline std::uint16_t PeerPort(Handle handle) {
+    sockaddr_in address{};
+    int length = sizeof(address);
+    if (::getpeername(native(handle), reinterpret_cast<sockaddr*>(&address), &length) != 0 || address.sin_family != AF_INET) return 0;
+    return ntohs(address.sin_port);
+}
+
+inline bool SetBlocking(Handle handle, bool blocking) {
+    u_long mode = blocking ? 0 : 1;
+    return ::ioctlsocket(native(handle), FIONBIO, &mode) == 0;
+}
+
+inline bool WaitWritable(Handle handle, int milliseconds) {
+    WSAPOLLFD waiting{native(handle), POLLWRNORM, 0};
+    return ::WSAPoll(&waiting, 1, milliseconds) > 0 && (waiting.revents & (POLLERR | POLLHUP)) == 0;
+}
+
+inline int PendingError(Handle handle) {
+    int error = 0;
+    int length = sizeof(error);
+    if (::getsockopt(native(handle), SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&error), &length) != 0) return -1;
+    return error;
+}
+
+inline bool InProgress() {
+    return ::WSAGetLastError() == WSAEWOULDBLOCK;
+}
+
+inline void ShutdownWrite(Handle handle) {
+    ::shutdown(native(handle), SD_SEND);
+}
+
+// The next close sends a reset instead of a graceful end.
+inline void ResetOnClose(Handle handle) {
+    linger value{1, 0};
+    ::setsockopt(native(handle), SOL_SOCKET, SO_LINGER, reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
 #else
 
 #ifdef MSG_NOSIGNAL
@@ -227,7 +273,72 @@ inline std::uint32_t ProcessId() {
     return static_cast<std::uint32_t>(::getpid());
 }
 
+inline std::uint16_t LocalPort(Handle handle) {
+    sockaddr_in address{};
+    socklen_t length = sizeof(address);
+    if (::getsockname(static_cast<int>(handle), reinterpret_cast<sockaddr*>(&address), &length) != 0 || address.sin_family != AF_INET) return 0;
+    return ntohs(address.sin_port);
+}
+
+inline std::uint16_t PeerPort(Handle handle) {
+    sockaddr_in address{};
+    socklen_t length = sizeof(address);
+    if (::getpeername(static_cast<int>(handle), reinterpret_cast<sockaddr*>(&address), &length) != 0 || address.sin_family != AF_INET) return 0;
+    return ntohs(address.sin_port);
+}
+
+inline bool SetBlocking(Handle handle, bool blocking) {
+    const int flags = ::fcntl(static_cast<int>(handle), F_GETFL, 0);
+    if (flags < 0) return false;
+    return ::fcntl(static_cast<int>(handle), F_SETFL, blocking ? (flags & ~O_NONBLOCK) : (flags | O_NONBLOCK)) == 0;
+}
+
+inline bool WaitWritable(Handle handle, int milliseconds) {
+    pollfd waiting{static_cast<int>(handle), POLLOUT, 0};
+    return ::poll(&waiting, 1, milliseconds) > 0 && (waiting.revents & (POLLERR | POLLHUP)) == 0;
+}
+
+inline int PendingError(Handle handle) {
+    int error = 0;
+    socklen_t length = sizeof(error);
+    if (::getsockopt(static_cast<int>(handle), SOL_SOCKET, SO_ERROR, &error, &length) != 0) return -1;
+    return error;
+}
+
+inline bool InProgress() {
+    return errno == EINPROGRESS;
+}
+
+inline void ShutdownWrite(Handle handle) {
+    ::shutdown(static_cast<int>(handle), SHUT_WR);
+}
+
+inline void ResetOnClose(Handle handle) {
+    linger value{1, 0};
+    ::setsockopt(static_cast<int>(handle), SOL_SOCKET, SO_LINGER, &value, sizeof(value));
+}
+
 #endif
+
+// Binds to 127.0.0.1 at a port the system picks and returns it.
+inline std::optional<std::uint16_t> BindLoopback(Handle handle) {
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    if (::bind(static_cast<decltype(::socket(0, 0, 0))>(handle), reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) return std::nullopt;
+    const auto port = LocalPort(handle);
+    if (port == 0) return std::nullopt;
+    return port;
+}
+
+// Connects to 127.0.0.1:port, waiting at most `milliseconds` (a full backlog on macOS drops the
+// handshake instead of refusing it); the socket is blocking again afterwards.
+inline bool ConnectLoopbackWithin(Handle handle, std::uint16_t port, int milliseconds) {
+    if (!SetBlocking(handle, false)) return false;
+    bool connected = ConnectLoopback(handle, port);
+    if (!connected && InProgress()) connected = WaitWritable(handle, milliseconds) && PendingError(handle) == 0;
+    return SetBlocking(handle, true) && connected;
+}
 
 }
 

@@ -93,6 +93,21 @@ extern "C" void OnlineSetDatagramReceiver_nid_no_patch(void (*receiver)(const On
     }
 }
 
+extern "C" bool OnlineSendStream_nid_no_patch(const Online::Wire::Stream& stream) {
+    auto* bridge = services().bridge.get();
+    return bridge && bridge->SendStream(stream);
+}
+
+extern "C" void OnlineSetStreamReceiver_nid_no_patch(void (*receiver)(const Online::Wire::Stream& stream)) {
+    auto* bridge = services().bridge.get();
+    if (!bridge) return;
+    if (receiver) {
+        bridge->SetStreamReceiver([receiver](const Online::Wire::Stream& stream) { receiver(stream); });
+    } else {
+        bridge->SetStreamReceiver({});
+    }
+}
+
 namespace {
 std::atomic<void (*)()> pushDispatcher{nullptr};
 }

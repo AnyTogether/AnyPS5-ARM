@@ -14,6 +14,11 @@
 // "ping" sends <bytes>-byte pings (default 4) and first tries one datagram too big for UDP;
 // "pong" answers each ping to its sender with "pong" and the size it got.
 //
+// `online_probe stream <peer address> ping|pong [bytes]` plays over a stream P2P socket: "pong"
+// listens on port 3658, virtual port 1, accepts one stream, reads <bytes> bytes (default 100000)
+// and writes them back; "ping" connects to the peer (trying again while it is refused, as the
+// listener may not be up yet), writes <bytes> patterned bytes and checks that the same come back.
+//
 // `online_probe host` plays Host the way Human Fall Flat (PPSA02429) does: it asks the block list
 // and the restriction status first thing, makes a sessionManager push context, creates a Player
 // Session with it, waits up to 10 s for the launcher's news of another player joining (pushed to
@@ -68,6 +73,12 @@ std::int64_t APS5_VABI sceNetSendto(int, const void*, std::size_t, int, const vo
 std::int64_t APS5_VABI sceNetRecvfrom(int, void*, std::size_t, int, void*, std::uint32_t*);
 int APS5_VABI sceNetSocketClose(int);
 int APS5_VABI sceNetSetsockopt(int, int, int, const void*, std::uint32_t);
+int APS5_VABI sceNetListen(int, int);
+int APS5_VABI sceNetAccept(int, void*, std::uint32_t*);
+int APS5_VABI sceNetConnect(int, const void*, std::uint32_t);
+int APS5_VABI sceNetGetpeername(int, void*, std::uint32_t*);
+std::int64_t APS5_VABI sceNetSend(int, const void*, std::size_t, int);
+std::int64_t APS5_VABI sceNetRecv(int, void*, std::size_t, int);
 }
 
 namespace {
@@ -320,6 +331,109 @@ int p2p(const std::string& peerText, const std::string& role) {
     return done ? 0 : 1;
 }
 
+std::string pattern(std::size_t bytes) {
+    std::string out(bytes, '\0');
+    for (std::size_t index = 0; index < bytes; ++index) out[index] = static_cast<char>(index * 31 + index / 977);
+    return out;
+}
+
+bool readAll(int socket, std::string& out, std::size_t bytes) {
+    char buffer[8192];
+    while (out.size() < bytes) {
+        const auto got = sceNetRecv(socket, buffer, std::min(sizeof(buffer), bytes - out.size()), 0);
+        if (got <= 0) return false;
+        out.append(buffer, static_cast<std::size_t>(got));
+    }
+    return true;
+}
+
+bool writeAll(int socket, const std::string& data) {
+    std::size_t done = 0;
+    while (done < data.size()) {
+        const auto sent = sceNetSend(socket, data.data() + done, data.size() - done, 0);
+        if (sent <= 0) return false;
+        done += static_cast<std::size_t>(sent);
+    }
+    return true;
+}
+
+int stream(const std::string& peerText, const std::string& role, std::size_t bytes) {
+    using namespace std::chrono_literals;
+    in_addr peerAddress{};
+    if (inet_pton(AF_INET, peerText.c_str(), &peerAddress) != 1) {
+        std::cerr << "online probe: not an address: " << peerText << '\n';
+        return 2;
+    }
+    sceNetInit_nid_postfix();
+    if (role == "pong") {
+        const int listener = sceNetSocket("probe-listen", 2, 10, 0);
+        if (listener < 0) {
+            std::cout << "socket_error=" << hexResult(listener) << '\n';
+            return 1;
+        }
+        NetAddress bound;
+        bound.port = htons(3658);
+        bound.vport = htons(1);
+        if (const int result = sceNetBind_nid_postfix(listener, &bound, sizeof(bound)); result != 0) {
+            std::cout << "bind_error=" << hexResult(result) << '\n';
+            return 1;
+        }
+        if (const int result = sceNetListen(listener, 4); result != 0) {
+            std::cout << "listen_error=" << hexResult(result) << '\n';
+            return 1;
+        }
+        std::cout << "listening=1\n" << std::flush;
+        NetAddress from;
+        std::uint32_t fromLength = sizeof(from);
+        const int accepted = sceNetAccept(listener, &from, &fromLength);
+        if (accepted < 0) {
+            std::cout << "accept_error=" << hexResult(accepted) << '\n';
+            return 1;
+        }
+        std::cout << "from=" << dotted(from.address) << ":" << ntohs(from.port) << "/" << ntohs(from.vport) << '\n';
+        std::string got;
+        const bool read = readAll(accepted, got, bytes);
+        std::cout << "got=" << got.size() << "\nsame=" << (read && got == pattern(bytes) ? 1 : 0) << '\n';
+        writeAll(accepted, got);
+        // The pinger closes once it has everything back.
+        char end[16];
+        std::cout << "end=" << sceNetRecv(accepted, end, sizeof(end), 0) << '\n';
+        sceNetSocketClose(accepted);
+        sceNetSocketClose(listener);
+        return read ? 0 : 1;
+    }
+    NetAddress peer;
+    peer.address = peerAddress.s_addr;
+    peer.port = htons(3658);
+    peer.vport = htons(1);
+    const auto until = std::chrono::steady_clock::now() + 20s;
+    int socket = -1;
+    int result = -1;
+    while (std::chrono::steady_clock::now() < until) {
+        socket = sceNetSocket("probe-stream", 2, 10, 0);
+        result = sceNetConnect(socket, &peer, sizeof(peer));
+        if (result == 0) break;
+        sceNetSocketClose(socket);
+        socket = -1;
+        std::this_thread::sleep_for(100ms);
+    }
+    if (socket < 0) {
+        std::cout << "connect_error=" << hexResult(result) << '\n';
+        return 1;
+    }
+    NetAddress name;
+    std::uint32_t nameLength = sizeof(name);
+    sceNetGetpeername(socket, &name, &nameLength);
+    std::cout << "peer=" << dotted(name.address) << ":" << ntohs(name.port) << "/" << ntohs(name.vport) << '\n';
+    const auto sent = pattern(bytes);
+    if (!writeAll(socket, sent)) std::cout << "write_failed=1\n";
+    std::string back;
+    const bool read = readAll(socket, back, bytes);
+    std::cout << "echoed=" << back.size() << "\nsame=" << (read && back == sent ? 1 : 0) << '\n';
+    sceNetSocketClose(socket);
+    return read && back == sent ? 0 : 1;
+}
+
 int udp(const std::string& destinationText, const std::string& role, std::size_t bytes) {
     using namespace std::chrono_literals;
     in_addr destinationAddress{};
@@ -395,6 +509,7 @@ int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "host") return host();
     if (argc == 3 && std::string(argv[1]) == "join") return join(argv[2]);
     if (argc == 4 && std::string(argv[1]) == "p2p") return p2p(argv[2], argv[3]);
+    if ((argc == 4 || argc == 5) && std::string(argv[1]) == "stream") return stream(argv[2], argv[3], argc == 5 ? std::stoul(argv[4]) : 100000);
     if ((argc == 4 || argc == 5) && std::string(argv[1]) == "udp") return udp(argv[2], argv[3], argc == 5 ? std::stoul(argv[4]) : 4);
     try {
         std::uint32_t state = 0;

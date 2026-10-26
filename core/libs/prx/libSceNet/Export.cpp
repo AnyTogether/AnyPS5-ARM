@@ -30,6 +30,7 @@
 #include <map>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <random>
 #include <vector>
 #include <set>
@@ -43,6 +44,7 @@
 #include "prx/libkernel/Socket/include/SocketError.hpp"
 #include "prx/libkernel/Socket/include/SocketPoll.hpp"
 #include "prx/libSceNet/include/VirtualNet.hpp"
+#include "prx/libSceNet/include/VirtualStream.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libkernel/Pthread/include/ThreadLifecycle.hpp"
@@ -273,6 +275,7 @@ constexpr int NET_AF_INET6 = 28;
 constexpr int NET_SOCK_STREAM = 1;
 constexpr int NET_SOCK_DGRAM = 2;
 constexpr int NET_SOCK_DGRAM_P2P = 6;
+constexpr int NET_SOCK_STREAM_P2P = 10;
 constexpr int NET_SOCK_RAW = 3;
 constexpr int NET_EPOLL_CTL_ADD = 1;
 constexpr int NET_EPOLL_CTL_MOD = 2;
@@ -417,7 +420,27 @@ struct Sock {
     std::uint32_t virtualPeer = 0;
     std::uint16_t virtualPeerPort = 0;
     std::uint16_t virtualPeerVport = 0;
+    // A stream P2P socket (p2p with type NET_SOCK_STREAM) once connected or accepted: the player
+    // at the other end, as getpeername reports it.
+    std::uint32_t streamPeer = 0;
+    std::uint16_t streamPeerPort = 0;
+    std::uint16_t streamPeerVport = 0;
 };
+
+bool stream_p2p(const Sock& socket) {
+    return socket.p2p && socket.type == NET_SOCK_STREAM;
+}
+
+// Binds a stream P2P socket's host socket to 127.0.0.1 at a port the system picks, unless it has one.
+bool bind_stream_loopback(NativeSocket native) {
+    sockaddr_in local{};
+    NativeLength length = sizeof(local);
+    if (::getsockname(native, reinterpret_cast<sockaddr*>(&local), &length) == 0 && local.sin_family == AF_INET && local.sin_port != 0) return true;
+    sockaddr_in loopback{};
+    loopback.sin_family = AF_INET;
+    loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    return ::bind(native, reinterpret_cast<const sockaddr*>(&loopback), sizeof(loopback)) == 0;
+}
 
 #ifdef _WIN32
 struct HostMutex {
@@ -1127,15 +1150,18 @@ int APS5_VABI sceNetSocket(const char* name, int family, int type, int protocol)
     if (family != NET_AF_INET && family != NET_AF_INET6) {
         return fail(NET_EAFNOSUPPORT);
     }
-    const bool p2p = type == NET_SOCK_DGRAM_P2P && VirtualNet::Enabled();
+    // With online play on, the P2P types run on host sockets on 127.0.0.1: datagrams on UDP, streams
+    // on TCP (VirtualStream carries them to the launcher).
+    const bool p2p = (type == NET_SOCK_DGRAM_P2P || type == NET_SOCK_STREAM_P2P) && VirtualNet::Enabled();
     if (p2p && family != NET_AF_INET) return fail(NET_EAFNOSUPPORT);
     if (type != NET_SOCK_STREAM && type != NET_SOCK_DGRAM && type != NET_SOCK_RAW && !p2p) {
         return fail(NET_EPROTONOSUPPORT);
     }
+    const int hostType = type == NET_SOCK_STREAM_P2P ? NET_SOCK_STREAM : type == NET_SOCK_DGRAM_P2P ? NET_SOCK_DGRAM : type;
     if (!initialize_sockets()) return fail(5);
-    const NativeSocket native = ::socket(family == NET_AF_INET ? AF_INET : AF_INET6, p2p ? NET_SOCK_DGRAM : type, p2p ? 0 : protocol);
+    const NativeSocket native = ::socket(family == NET_AF_INET ? AF_INET : AF_INET6, hostType, p2p ? 0 : protocol);
     if (native == INVALID_NATIVE_SOCKET) return fail(native_error());
-    if (p2p) {
+    if (p2p && hostType == NET_SOCK_DGRAM) {
         sockaddr_in loopback{};
         loopback.sin_family = AF_INET;
         loopback.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -1162,7 +1188,7 @@ int APS5_VABI sceNetSocket(const char* name, int family, int type, int protocol)
     }
     std::shared_ptr<NativeSocketHandle> handle;
     try {
-        handle = std::make_shared<NativeSocketHandle>(native, type == NET_SOCK_STREAM);
+        handle = std::make_shared<NativeSocketHandle>(native, hostType == NET_SOCK_STREAM);
     } catch (const std::bad_alloc&) {
         close_socket(native);
         return fail(12);
@@ -1172,7 +1198,7 @@ int APS5_VABI sceNetSocket(const char* name, int family, int type, int protocol)
     std::lock_guard lk(g_mutex);
     Sock s;
     s.family = family;
-    s.type = p2p ? NET_SOCK_DGRAM : type;
+    s.type = hostType;
     s.p2p = p2p;
     s.native = std::move(handle);
     g_socks[fd] = s;
@@ -1200,6 +1226,7 @@ int APS5_VABI sceNetSocketClose(int s) {
     }
     KernelReleaseSocketNumber_nid_no_patch(s);
     VirtualNet::Forget(s);
+    VirtualStream::Forget(s);
     if (native) {
 #ifdef _WIN32
         ::shutdown(native->value, SD_BOTH);
@@ -1243,6 +1270,21 @@ int APS5_VABI sceNetBind_nid_postfix(int s, const void* addr, uint32_t addrlen) 
     NativeLength native_length = 0;
     if (!guest_to_native_address(addr, addrlen, native, native_length)) return fail(NET_EINVAL);
     if (native.ss_family != (socket.family == NET_AF_INET ? AF_INET : AF_INET6)) return fail(NET_EAFNOSUPPORT);
+    if (stream_p2p(socket)) {
+        // The port and virtual port are the game's names for the socket; the host socket gets a
+        // loopback port of its own when it listens or connects.
+        const auto port = ntohs(reinterpret_cast<const sockaddr_in&>(native).sin_port);
+        const auto vport = VirtualNet::GuestVport(addr, addrlen);
+        std::lock_guard lk(g_mutex);
+        auto it = g_socks.find(s);
+        if (it != g_socks.end()) {
+            it->second.bound = true;
+            it->second.gamePort = port;
+            it->second.gameVport = vport;
+        }
+        g_cv.NotifyAll();
+        return 0;
+    }
     if (socket.p2p) {
         const auto port = ntohs(reinterpret_cast<const sockaddr_in&>(native).sin_port);
         const auto vport = VirtualNet::GuestVport(addr, addrlen);
@@ -1281,7 +1323,12 @@ int APS5_VABI sceNetListen(int s, int backlog) {
         socket = it->second;
     }
     if (socket.type != NET_SOCK_STREAM) return fail(NET_EOPNOTSUPP);
-    if (::listen(socket.native->value, backlog) != 0) return fail(native_error());
+    if (stream_p2p(socket)) {
+        if (socket.streamPeer != 0) return fail(NET_EINVAL);
+        if (!bind_stream_loopback(socket.native->value)) return fail(native_error());
+        if (::listen(socket.native->value, backlog) != 0) return fail(native_error());
+        if (!VirtualStream::Listen(socket.gamePort, socket.gameVport, native_port(*socket.native), s)) return fail(NET_EADDRINUSE);
+    } else if (::listen(socket.native->value, backlog) != 0) return fail(native_error());
     std::lock_guard lk(g_mutex);
     auto it = g_socks.find(s);
     if (it != g_socks.end()) {
@@ -1303,12 +1350,23 @@ int APS5_VABI sceNetAccept(int s, void* addr, uint32_t* addrlen) {
     if (addr && !addrlen) return fail(NET_EINVAL);
     sockaddr_storage peer{};
     NativeLength peer_length = sizeof(peer);
-    const NativeSocket accepted = native_transfer(*listener.native, 0, false, [&](int) {
-        peer_length = sizeof(peer);
-        return ::accept(listener.native->value,
-            addr ? reinterpret_cast<sockaddr*>(&peer) : nullptr, addr ? &peer_length : nullptr);
-    }, false);
-    if (accepted == INVALID_NATIVE_SOCKET) return fail(native_error());
+    const bool streamP2p = stream_p2p(listener);
+    std::optional<VirtualNet::Source> player;
+    NativeSocket accepted = INVALID_NATIVE_SOCKET;
+    for (;;) {
+        accepted = native_transfer(*listener.native, 0, false, [&](int) {
+            peer_length = sizeof(peer);
+            return ::accept(listener.native->value,
+                addr || streamP2p ? reinterpret_cast<sockaddr*>(&peer) : nullptr, addr || streamP2p ? &peer_length : nullptr);
+        }, false);
+        if (accepted == INVALID_NATIVE_SOCKET) return fail(native_error());
+        if (!streamP2p) break;
+        // Only the engine's own connections into a stream P2P listener are players; anything else
+        // on the machine that found the loopback port is turned away.
+        if (peer.ss_family == AF_INET) player = VirtualStream::Accepted(ntohs(reinterpret_cast<const sockaddr_in&>(peer).sin_port));
+        if (player) break;
+        close_socket(accepted);
+    }
     std::shared_ptr<NativeSocketHandle> handle;
     try {
         handle = std::make_shared<NativeSocketHandle>(accepted, true);
@@ -1320,6 +1378,15 @@ int APS5_VABI sceNetAccept(int s, void* addr, uint32_t* addrlen) {
     connection.family = listener.family;
     connection.type = NET_SOCK_STREAM;
     connection.native = std::move(handle);
+    if (player) {
+        connection.p2p = true;
+        connection.bound = true;
+        connection.gamePort = listener.gamePort;
+        connection.gameVport = listener.gameVport;
+        connection.streamPeer = player->address;
+        connection.streamPeerPort = player->port;
+        connection.streamPeerVport = player->vport;
+    }
 #ifdef _WIN32
     connection.native->receiveTimeout = listener.native->receiveTimeout.load();
     connection.native->sendTimeout = listener.native->sendTimeout.load();
@@ -1338,7 +1405,9 @@ int APS5_VABI sceNetAccept(int s, void* addr, uint32_t* addrlen) {
             return fail(error);
         }
     }
-    if (addr && !native_to_guest_address(peer, addr, addrlen)) {
+    if (addr && player) {
+        VirtualNet::WriteGuestAddress(*player, addr, addrlen);
+    } else if (addr && !native_to_guest_address(peer, addr, addrlen)) {
         sceNetSocketClose(descriptor);
         return fail(NET_EAFNOSUPPORT);
     }
@@ -1416,7 +1485,46 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
     }
     sockaddr_storage native{};
     NativeLength native_length = 0;
-    if (!guest_to_native_address(addr, addrlen, native, native_length)) return fail(NET_EINVAL);
+    std::uint32_t openedStream = 0;
+    if (stream_p2p(socket)) {
+        // A stream P2P connect opens a stream to the player through the launcher (a blocking one waits
+        // for the player to accept or refuse it), then connects the host socket to the engine's relay.
+        const auto peer = VirtualNet::VirtualDestination(addr, addrlen);
+        if (!peer || Online::Wire::IsGroup(*peer)) return fail(NET_EHOSTUNREACH);
+        if (socket.streamPeer != 0) return fail(NET_EISCONN);
+        if (socket.listening) return fail(NET_EINVAL);
+        if (!bind_stream_loopback(socket.native->value)) return fail(native_error());
+        std::uint16_t port = 0;
+        std::memcpy(&port, static_cast<const std::uint8_t*>(addr) + 2, 2);
+        const auto vport = VirtualNet::GuestVport(addr, addrlen);
+        const auto opening = VirtualStream::Open(*peer, ntohs(port), vport, socket.gamePort, socket.gameVport, native_port(*socket.native));
+        if (!opening) return fail(NET_ENETUNREACH);
+        if (!socket.native->nonblock) {
+            const auto answer = VirtualStream::Wait(opening->id, std::chrono::seconds(20));
+            if (answer != VirtualStream::Answer::Accepted) {
+                VirtualStream::Abandon(opening->id);
+                return fail(answer == VirtualStream::Answer::Refused ? NET_ECONNREFUSED : answer == VirtualStream::Answer::TimedOut ? NET_ETIMEDOUT : NET_EHOSTUNREACH);
+            }
+        }
+        {
+            std::lock_guard lk(g_mutex);
+            auto it = g_socks.find(s);
+            if (it == g_socks.end()) {
+                VirtualStream::Abandon(opening->id);
+                return fail(NET_EBADF);
+            }
+            it->second.bound = true;
+            it->second.streamPeer = *peer;
+            it->second.streamPeerPort = ntohs(port);
+            it->second.streamPeerVport = vport;
+        }
+        auto& relay = reinterpret_cast<sockaddr_in&>(native);
+        relay.sin_family = AF_INET;
+        relay.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        relay.sin_port = htons(opening->relayPort);
+        native_length = sizeof(relay);
+        openedStream = opening->id;
+    } else if (!guest_to_native_address(addr, addrlen, native, native_length)) return fail(NET_EINVAL);
 #ifdef _WIN32
     if (socket.type == NET_SOCK_STREAM) RefuseClosedLoopbackAtOnce_nid_no_patch(socket.native->value, reinterpret_cast<const sockaddr*>(&native));
 #endif
@@ -1426,6 +1534,16 @@ int APS5_VABI sceNetConnect(int s, const void* addr, uint32_t addrlen) {
         note_local_address(s, socket);
 #endif
         return 0;
+    }
+#ifdef _WIN32
+    const bool pending = WSAGetLastError() == WSAEWOULDBLOCK;
+#else
+    const bool pending = errno == EINPROGRESS;
+#endif
+    if (openedStream != 0 && !pending) {
+        const int error = native_error();
+        VirtualStream::Abandon(openedStream);
+        return fail(error);
     }
 #ifdef _WIN32
     if (WSAGetLastError() == WSAEWOULDBLOCK) {
@@ -1559,6 +1677,11 @@ int64_t APS5_VABI sceNetSendto(int s, const void* buf, size_t len, int flags, co
         if (it == g_socks.end()) return fail(NET_EBADF);
         socket = it->second;
     }
+    if (stream_p2p(socket)) {
+        // A connected stream ignores the address, as TCP's does.
+        to = nullptr;
+        tolen = 0;
+    }
     if (!to && socket.virtualPeer != 0 && tolen == 0) return send_virtual(s, socket, buf, len, socket.virtualPeer, socket.virtualPeerPort, socket.virtualPeerVport);
     if (to && socket.type == NET_SOCK_DGRAM && VirtualNet::Enabled()) {
         if (const auto peer = VirtualNet::VirtualDestination(to, tolen)) {
@@ -1567,7 +1690,7 @@ int64_t APS5_VABI sceNetSendto(int s, const void* buf, size_t len, int flags, co
             return send_virtual(s, socket, buf, len, *peer, ntohs(port), VirtualNet::GuestVport(to, tolen));
         }
     }
-    if (socket.p2p) return fail(NET_EHOSTUNREACH);
+    if (socket.p2p && !stream_p2p(socket)) return fail(NET_EHOSTUNREACH);
     int result;
     if (!to) {
         if (tolen != 0) return fail(NET_EINVAL);
@@ -1895,6 +2018,11 @@ int APS5_VABI sceNetGetpeername(int s, void* addr, uint32_t* addrlen) {
         socket = it->second;
     }
     if (!addr || !addrlen) return fail(NET_EINVAL);
+    if (stream_p2p(socket)) {
+        if (socket.streamPeer == 0) return fail(NET_ENOTCONN);
+        VirtualNet::WriteGuestAddress({socket.streamPeer, socket.streamPeerPort, socket.streamPeerVport}, addr, addrlen);
+        return 0;
+    }
     sockaddr_storage native{};
     NativeLength native_length = sizeof(native);
     if (::getpeername(socket.native->value, reinterpret_cast<sockaddr*>(&native), &native_length) != 0)

@@ -249,6 +249,60 @@ std::optional<Datagram> DecodeDatagram(std::span<const std::uint8_t> payload) {
     return datagram;
 }
 
+std::vector<std::uint8_t> Encode(const Stream& message) {
+    Writer writer;
+    writer.U32(message.stream);
+    switch (message.type) {
+    case Type::StreamOpen:
+        writer.U32(message.peer).U16(message.peerPort).U16(message.peerVport).U16(message.localPort).U16(message.localVport);
+        break;
+    case Type::StreamData:
+        if (message.data.size() > MaxStreamData) throw std::length_error("online bridge: stream data is larger than 65536 bytes");
+        writer.Bytes(message.data);
+        break;
+    case Type::StreamClose:
+        writer.U8(static_cast<std::uint8_t>(message.reason));
+        break;
+    case Type::StreamAccept:
+        break;
+    default:
+        throw std::invalid_argument("online bridge: not a stream frame");
+    }
+    return writer.Take();
+}
+
+std::optional<Stream> DecodeStream(Type type, std::span<const std::uint8_t> payload) {
+    if (!IsStream(static_cast<std::uint16_t>(type))) return std::nullopt;
+    auto stream = decode<Stream>(payload, [type](Reader& reader) {
+        Stream message;
+        message.type = type;
+        message.stream = reader.U32();
+        switch (type) {
+        case Type::StreamOpen:
+            message.peer = reader.U32();
+            message.peerPort = reader.U16();
+            message.peerVport = reader.U16();
+            message.localPort = reader.U16();
+            message.localVport = reader.U16();
+            break;
+        case Type::StreamData:
+            message.data = reader.Bytes();
+            break;
+        case Type::StreamClose:
+            message.reason = static_cast<StreamCloseReason>(reader.U8());
+            break;
+        default:
+            break;
+        }
+        return message;
+    });
+    if (!stream || stream->stream == 0 || stream->data.size() > MaxStreamData) return std::nullopt;
+    if (type == Type::StreamOpen && !IsVirtual(stream->peer)) return std::nullopt;
+    // An unknown reason still ends the stream, as a break.
+    if (static_cast<std::uint8_t>(stream->reason) > static_cast<std::uint8_t>(StreamCloseReason::Reset)) stream->reason = StreamCloseReason::Reset;
+    return stream;
+}
+
 std::vector<std::uint8_t> Encode(const PushEvent& message) {
     Writer writer;
     writer.Str(message.service).U32(message.label).Str(message.pushContextId).Str(message.dataType).Bytes(message.data).PairList(message.extended)

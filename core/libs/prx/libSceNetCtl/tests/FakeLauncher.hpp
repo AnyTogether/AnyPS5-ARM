@@ -35,6 +35,12 @@ public:
     void SetDatagramHandler(DatagramHandler handler);
     bool WaitForDatagrams(std::size_t count, std::chrono::milliseconds timeout);
     std::vector<Wire::Datagram> Datagrams();
+    // Streams: every stream frame the engine sends is kept. With loopback on, the fake is both
+    // launchers and the other player's engine is this one: a stream the engine opens to a peer
+    // comes back to the engine as one from that peer, and everything after it goes across.
+    void SetStreamLoopback(bool on);
+    bool WaitForStreams(std::size_t count, std::chrono::milliseconds timeout);
+    std::vector<Wire::Stream> Streams();
     void SetRefusal(std::optional<Wire::Refuse> refuse);
     void SetProofSecret(const Wire::Secret& secret);
     void DropClient();
@@ -67,6 +73,8 @@ private:
     WebHandler webHandler;
     DatagramHandler datagramHandler;
     std::vector<Wire::Datagram> datagrams;
+    bool streamLoopback = false;
+    std::vector<Wire::Stream> streams;
     std::optional<Wire::Refuse> refusal;
     Net::Handle client = Net::None;
     int sessions = 0;

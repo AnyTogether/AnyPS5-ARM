@@ -30,7 +30,30 @@ enum class Type : std::uint16_t {
     WebRequest = 0x0201,
     PushEvent = 0x0204,
     Datagram = 0x0310,
+    StreamOpen = 0x0311,
+    StreamData = 0x0312,
+    StreamClose = 0x0313,
+    StreamAccept = 0x0314,
 };
+
+constexpr bool IsStream(std::uint16_t type) {
+    return type >= static_cast<std::uint16_t>(Type::StreamOpen) && type <= static_cast<std::uint16_t>(Type::StreamAccept);
+}
+
+// Why a stream ended: the other end closed it (its reads end once everything sent has arrived),
+// nobody listens on the port and virtual port it named, or it broke (no route to the player, the
+// player left, a connection on the way dropped).
+enum class StreamCloseReason : std::uint8_t {
+    Closed = 0,
+    Refused = 1,
+    Reset = 2,
+};
+
+// Stream numbers name a stream on one engine-launcher connection; 0 is never one. The side that
+// opens a stream picks its number: the engine's have the top bit clear, the launcher's set.
+constexpr std::uint32_t LauncherStream = 0x80000000u;
+// The most bytes one StreamData frame carries.
+constexpr std::size_t MaxStreamData = 65536;
 
 enum class DatagramKind : std::uint8_t {
     Udp = 1,
@@ -180,6 +203,25 @@ struct Datagram {
     std::vector<std::uint8_t> data;
 };
 
+// A game stream between two players (stream P2P sockets), both directions, events:
+// StreamOpen  u32 stream, u32 peer, u16 peer port, u16 peer virtual port, u16 local port, u16 local virtual port
+// StreamAccept u32 stream
+// StreamData  u32 stream, bytes data (at most MaxStreamData)
+// StreamClose u32 stream, u8 reason
+// The engine opens toward the peer's address, port and virtual port from its own port and virtual
+// port; the launcher opens toward the engine's port and virtual port from the peer's.
+struct Stream {
+    Type type = Type::StreamData;
+    std::uint32_t stream = 0;
+    std::uint32_t peer = 0;
+    std::uint16_t peerPort = 0;
+    std::uint16_t peerVport = 0;
+    std::uint16_t localPort = 0;
+    std::uint16_t localVport = 0;
+    StreamCloseReason reason = StreamCloseReason::Closed;
+    std::vector<std::uint8_t> data;
+};
+
 // Session and invitation news from the launcher (launcher -> engine, event): what the platform's
 // push events carry. An empty push context goes to the plain callbacks and every push context.
 struct PushEvent {
@@ -203,6 +245,7 @@ std::vector<std::uint8_t> Encode(const WebRequest& message);
 std::vector<std::uint8_t> Encode(const WebReply& message);
 std::vector<std::uint8_t> Encode(const Datagram& message);
 std::vector<std::uint8_t> Encode(const PushEvent& message);
+std::vector<std::uint8_t> Encode(const Stream& message);
 
 std::optional<Hello> DecodeHello(std::span<const std::uint8_t> payload);
 std::optional<Welcome> DecodeWelcome(std::span<const std::uint8_t> payload);
@@ -213,6 +256,7 @@ std::optional<WebRequest> DecodeWebRequest(std::span<const std::uint8_t> payload
 std::optional<WebReply> DecodeWebReply(std::span<const std::uint8_t> payload);
 std::optional<Datagram> DecodeDatagram(std::span<const std::uint8_t> payload);
 std::optional<PushEvent> DecodePushEvent(std::span<const std::uint8_t> payload);
+std::optional<Stream> DecodeStream(Type type, std::span<const std::uint8_t> payload);
 
 enum class Side : std::uint8_t { Launcher, Engine };
 ProofBytes MakeProof(const Secret& secret, Side side, const Nonce& engine, const Nonce& launcher);

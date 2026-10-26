@@ -18,6 +18,9 @@ extern "C" bool OnlineWeb_nid_no_patch(const Online::Wire::WebRequest& request, 
 extern "C" bool OnlineObserving_nid_no_patch();
 extern "C" bool OnlineSendDatagram_nid_no_patch(const Online::Wire::Datagram& datagram);
 extern "C" void OnlineSetDatagramReceiver_nid_no_patch(void (*receiver)(const Online::Wire::Datagram& datagram));
+// Game streams (libSceNet's stream P2P sockets); see Bridge::SendStream and SetStreamReceiver.
+extern "C" bool OnlineSendStream_nid_no_patch(const Online::Wire::Stream& stream);
+extern "C" void OnlineSetStreamReceiver_nid_no_patch(void (*receiver)(const Online::Wire::Stream& stream));
 // Push events: the receiver runs on the bridge's reader thread; the dispatcher runs on the game's
 // thread from sceNpCheckCallback, where callbacks into the game are safe.
 extern "C" void OnlineSetPushReceiver_nid_no_patch(void (*receiver)(const Online::Wire::PushEvent& event));

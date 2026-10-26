@@ -45,6 +45,13 @@ public:
     bool SendDatagram(const Wire::Datagram& datagram);
     void SetDatagramReceiver(std::function<void(const Wire::Datagram&)> receiver);
     void SetPushReceiver(std::function<void(const Wire::PushEvent&)> receiver);
+    // Stream frames keep their order with each other and with datagrams. StreamData waits while
+    // the queue to the launcher is full (the game's socket then fills up, as TCP would); the
+    // other stream frames never wait. False while no launcher is connected.
+    bool SendStream(const Wire::Stream& stream);
+    // Gets the launcher's stream frames on the reader thread, and a StreamClose (Reset) for
+    // stream 0 when the connection drops: every open stream ended with it.
+    void SetStreamReceiver(std::function<void(const Wire::Stream&)> receiver);
 
 private:
     struct Pending {
@@ -84,6 +91,7 @@ private:
     std::condition_variable outgoingChanged;
     std::function<void(const Wire::Datagram&)> datagramReceiver;
     std::function<void(const Wire::PushEvent&)> pushReceiver;
+    std::function<void(const Wire::Stream&)> streamReceiver;
 
     std::mutex writeMutex;
     std::thread worker;

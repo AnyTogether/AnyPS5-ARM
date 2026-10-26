@@ -63,9 +63,12 @@ Bridge::~Bridge() {
     if (writer.joinable()) writer.join();
 }
 
+namespace {
+constexpr std::size_t MaxQueuedFrames = 1024;
+constexpr std::size_t MaxQueuedBytes = 8u * 1024u * 1024u;
+}
+
 bool Bridge::SendDatagram(const Wire::Datagram& datagram) {
-    constexpr std::size_t MaxQueuedFrames = 1024;
-    constexpr std::size_t MaxQueuedBytes = 8u * 1024u * 1024u;
     if (datagram.data.size() > Wire::MaxDatagram) return false;
     auto frame = Wire::Frame(Wire::Type::Datagram, 0, 0, Wire::Encode(datagram));
     {
@@ -75,13 +78,35 @@ bool Bridge::SendDatagram(const Wire::Datagram& datagram) {
         outgoingBytes += frame.size();
         outgoing.push_back(std::move(frame));
     }
-    outgoingChanged.notify_one();
+    outgoingChanged.notify_all();
     return true;
 }
 
 void Bridge::SetDatagramReceiver(std::function<void(const Wire::Datagram&)> receiver) {
     std::lock_guard lock(mutex);
     datagramReceiver = std::move(receiver);
+}
+
+bool Bridge::SendStream(const Wire::Stream& stream) {
+    if (!Wire::IsStream(static_cast<std::uint16_t>(stream.type)) || stream.stream == 0 || stream.data.size() > Wire::MaxStreamData) return false;
+    auto frame = Wire::Frame(stream.type, 0, 0, Wire::Encode(stream));
+    {
+        std::unique_lock lock(mutex);
+        const auto socket = liveSocket;
+        if (stream.type == Wire::Type::StreamData) {
+            outgoingChanged.wait(lock, [&] { return stopping || !state.connected || liveSocket != socket || outgoingBytes + frame.size() <= MaxQueuedBytes; });
+        }
+        if (stopping || !state.connected || liveSocket == Net::None || liveSocket != socket) return false;
+        outgoingBytes += frame.size();
+        outgoing.push_back(std::move(frame));
+    }
+    outgoingChanged.notify_all();
+    return true;
+}
+
+void Bridge::SetStreamReceiver(std::function<void(const Wire::Stream&)> receiver) {
+    std::lock_guard lock(mutex);
+    streamReceiver = std::move(receiver);
 }
 
 void Bridge::SetPushReceiver(std::function<void(const Wire::PushEvent&)> receiver) {
@@ -102,6 +127,7 @@ void Bridge::writeLoop() {
             outgoingBytes -= frame.size();
             socket = liveSocket;
         }
+        outgoingChanged.notify_all();
         if (socket == Net::None) continue;
         std::lock_guard writing(writeMutex);
         {
@@ -252,6 +278,17 @@ void Bridge::dispatch(const Wire::Header& header, std::span<const std::uint8_t> 
         if (receiver) receiver(*datagram);
         return;
     }
+    if (Wire::IsStream(header.type)) {
+        const auto stream = Wire::DecodeStream(static_cast<Wire::Type>(header.type), payload);
+        if (!stream) return;
+        std::function<void(const Wire::Stream&)> receiver;
+        {
+            std::lock_guard lock(mutex);
+            receiver = streamReceiver;
+        }
+        if (receiver) receiver(*stream);
+        return;
+    }
     if (header.type == static_cast<std::uint16_t>(Wire::Type::PushEvent)) {
         const auto event = Wire::DecodePushEvent(payload);
         if (!event) return;
@@ -290,6 +327,7 @@ void Bridge::readLoop(Net::Handle socket) {
 }
 
 void Bridge::disconnect(Net::Handle socket) {
+    std::function<void(const Wire::Stream&)> receiver;
     {
         std::lock_guard lock(mutex);
         if (liveSocket == socket) liveSocket = Net::None;
@@ -302,6 +340,14 @@ void Bridge::disconnect(Net::Handle socket) {
         outgoing.clear();
         outgoingBytes = 0;
         changed.notify_all();
+        receiver = streamReceiver;
+    }
+    outgoingChanged.notify_all();
+    if (receiver) {
+        Wire::Stream ended;
+        ended.type = Wire::Type::StreamClose;
+        ended.reason = Wire::StreamCloseReason::Reset;
+        receiver(ended);
     }
     std::lock_guard writing(writeMutex);
     Net::Close(socket);
