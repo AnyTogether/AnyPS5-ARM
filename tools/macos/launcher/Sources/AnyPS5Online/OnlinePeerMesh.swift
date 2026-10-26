@@ -246,6 +246,27 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
         }
     }
 
+    /// How each other player is reached: a failed connection says so; the others from their
+    /// statistics (direct or relayed, and the round trip).
+    public func links(_ done: @escaping @Sendable ([OnlinePeerLinkInfo]) -> Void) {
+        let all = lock.withLock { Array(peers.values).map { ($0.userId, $0.state, $0.connection) } }
+        guard !all.isEmpty else { return done([]) }
+        let gathered = LinkGathering(count: all.count, done: done)
+        for (userId, state, connection) in all {
+            guard state != .failed && state != .closed, let connection else {
+                gathered.add(OnlinePeerLinkInfo(userId: userId, route: .failed, rttMs: nil))
+                continue
+            }
+            connection.statistics { report in
+                let entries = report.statistics.values.map { stat in
+                    OnlineStatsEntry(id: stat.id, type: stat.type, values: stat.values.mapValues { ($0 as? NSNumber)?.stringValue ?? "\($0)" })
+                }
+                let path = state == .connected ? OnlinePeerLinkInfo.route(entries) : .init(route: .connecting, rttMs: nil)
+                gathered.add(OnlinePeerLinkInfo(userId: userId, route: path.route, rttMs: path.rttMs))
+            }
+        }
+    }
+
     public func stop() {
         let all = lock.withLock { () -> [Peer] in
             stopped = true
@@ -391,5 +412,27 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
         lock.withLock { peer.state = .closed }
         peer.mesh = nil
         peer.connection.close()
+    }
+}
+
+/// Collects one answer per peer and hands them all over once the last arrives.
+private final class LinkGathering: @unchecked Sendable {
+    private let lock = NSLock()
+    private var left: Int
+    private var found: [OnlinePeerLinkInfo] = []
+    private let done: @Sendable ([OnlinePeerLinkInfo]) -> Void
+
+    init(count: Int, done: @escaping @Sendable ([OnlinePeerLinkInfo]) -> Void) {
+        left = count
+        self.done = done
+    }
+
+    func add(_ link: OnlinePeerLinkInfo) {
+        let finished = lock.withLock { () -> [OnlinePeerLinkInfo]? in
+            found.append(link)
+            left -= 1
+            return left == 0 ? found.sorted { $0.userId < $1.userId } : nil
+        }
+        if let finished { done(finished) }
     }
 }

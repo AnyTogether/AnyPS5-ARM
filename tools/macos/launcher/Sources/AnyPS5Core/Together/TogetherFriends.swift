@@ -18,21 +18,30 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
             }
         }
 
-        /// The game session they host: open to friends and not full when joinable.
+        /// The game session they host (or, Play Together, play in): open to friends and not full
+        /// when joinable.
         public struct Game: Decodable, Equatable, Sendable {
             public let sessionId: String
             public let titleId: String
             public let joinable: Bool
             public let players: Int
             public let capacity: Int
+            /// online, lan (Play Together) or local; nil from older servers.
+            public let kind: String?
+            public let hostId: String?
 
-            public init(sessionId: String, titleId: String, joinable: Bool, players: Int, capacity: Int) {
+            public init(sessionId: String, titleId: String, joinable: Bool, players: Int, capacity: Int, kind: String? = nil, hostId: String? = nil) {
                 self.sessionId = sessionId
                 self.titleId = titleId
                 self.joinable = joinable
                 self.players = players
                 self.capacity = capacity
+                self.kind = kind
+                self.hostId = hostId
             }
+
+            /// Playing together (a LAN game with their party).
+            public var together: Bool { kind == "lan" }
         }
 
         public let state: String

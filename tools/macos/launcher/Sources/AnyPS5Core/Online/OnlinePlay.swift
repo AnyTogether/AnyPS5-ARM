@@ -76,6 +76,9 @@ public final class OnlinePlay: @unchecked Sendable {
 
     public var currentSession: OnlineSessionView? { lock.withLock { session } }
 
+    /// How each other player is reached now.
+    public func links(_ done: @escaping @Sendable ([OnlinePeerLinkInfo]) -> Void) { transport.links(done) }
+
     /// The observation lines the game sent, newest last (at most 2000).
     public var observed: [String] { lock.withLock { observations } }
 
@@ -167,6 +170,20 @@ public enum OnlinePlayHost {
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
     }
 
+    nonisolated(unsafe) private static var together: String?
+
+    /// The Play Together session the next game starts in: online play is on for it whatever the
+    /// setting, until that game ends (`stop`); the setting itself is left as the user chose.
+    public static func playTogether(sessionId: String?) {
+        lock.withLock { together = sessionId }
+        follow(sessionId: sessionId)
+    }
+
+    public static var togetherSession: String? { lock.withLock { together } }
+
+    /// Online play for the next game: the setting, or a Play Together session.
+    public static var isOn: Bool { enabled || togetherSession != nil }
+
     static var platformGroups: Bool { UserDefaults.standard.object(forKey: platformGroupsKey) as? Bool ?? true }
 
     /// Where a title's observation log goes: one file per title, the last one kept as `.1`
@@ -197,7 +214,7 @@ public enum OnlinePlayHost {
 
     /// What a game is started with for online play, or nothing when it is off or fails to start.
     public static func environment(for game: Game, client: TogetherClient, engineBuild: String = "unknown") -> [String: String] {
-        guard enabled else { return [:] }
+        guard isOn else { return [:] }
         let (play, sessionId) = lock.withLock { () -> (OnlinePlay, String?) in
             current?.stop()
             let made = factory ?? { _ in OnlineNoTransport() }
@@ -240,11 +257,12 @@ public enum OnlinePlayHost {
         }
     }
 
-    /// The game ended.
+    /// The game ended; a Play Together session ends with it.
     public static func stop() {
         lock.withLock {
             current?.stop()
             current = nil
+            together = nil
         }
     }
 

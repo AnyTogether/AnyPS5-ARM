@@ -54,6 +54,66 @@ public protocol OnlinePeerTransport: AnyObject, Sendable {
     /// A signal from another player's launcher.
     func receive(_ signal: OnlinePeerSignal)
     func stop()
+    /// How each other player is reached now (direct or relayed, and the round trip), for the
+    /// party panel; none where the transport cannot say.
+    func links(_ done: @escaping @Sendable ([OnlinePeerLinkInfo]) -> Void)
+}
+
+extension OnlinePeerTransport {
+    public func links(_ done: @escaping @Sendable ([OnlinePeerLinkInfo]) -> Void) { done([]) }
+}
+
+/// One entry of a WebRTC statistics report, its values as text.
+public struct OnlineStatsEntry: Sendable, Equatable {
+    public var id: String
+    public var type: String
+    public var values: [String: String]
+
+    public init(id: String, type: String, values: [String: String]) {
+        self.id = id
+        self.type = type
+        self.values = values
+    }
+}
+
+/// How one other player is reached: still connecting, straight (host or STUN candidates), through
+/// the TURN relay, or not at all; with the round trip in milliseconds once there is one.
+public struct OnlinePeerLinkInfo: Sendable, Equatable {
+    public enum Route: String, Sendable { case connecting, direct, relay, failed }
+
+    public struct Path: Sendable, Equatable {
+        public var route: Route
+        public var rttMs: Int?
+
+        public init(route: Route, rttMs: Int?) {
+            self.route = route
+            self.rttMs = rttMs
+        }
+    }
+
+    public var userId: String
+    public var route: Route
+    public var rttMs: Int?
+
+    public init(userId: String, route: Route, rttMs: Int?) {
+        self.userId = userId
+        self.route = route
+        self.rttMs = rttMs
+    }
+
+    /// The route a statistics report shows: the transport's selected candidate pair (or the
+    /// nominated pair that succeeded), relayed when either end of it is a relay candidate.
+    public static func route(_ stats: [OnlineStatsEntry]) -> Path {
+        let byId = Dictionary(stats.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let selected = stats.first { $0.type == "transport" }?.values["selectedCandidatePairId"].flatMap { byId[$0] }
+        let truthy: Set<String> = ["1", "true", "YES"]
+        guard let pair = selected ?? stats.first(where: { $0.type == "candidate-pair" && $0.values["state"] == "succeeded" && truthy.contains($0.values["nominated"] ?? "") }) else {
+            return Path(route: .connecting, rttMs: nil)
+        }
+        let types = [pair.values["localCandidateId"], pair.values["remoteCandidateId"]].compactMap { $0.flatMap { byId[$0]?.values["candidateType"] } }
+        let rtt = pair.values["currentRoundTripTime"].flatMap(Double.init).map { Int(($0 * 1000).rounded()) }
+        return Path(route: types.contains("relay") ? .relay : .direct, rttMs: rtt)
+    }
 }
 
 /// What a transport is made with: where packets for the game go, AnyTogether (for ICE servers),
