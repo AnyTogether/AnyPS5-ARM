@@ -30,6 +30,12 @@ struct Addon {
     unsigned status() const { return hasData ? Installed : NoExtraData; }
 };
 
+// A file name as UTF-8: on Windows path::string() throws for names outside the ANSI code page.
+inline std::string NameOf(const std::filesystem::path& path) {
+    const auto name = path.filename().u8string();
+    return std::string(name.begin(), name.end());
+}
+
 inline bool ValidLabel(std::string_view label) {
     return !label.empty() && label.size() <= 16 &&
         std::all_of(label.begin(), label.end(), [](unsigned char c) { return std::isalnum(c) != 0; });
@@ -61,7 +67,7 @@ inline std::optional<std::string> LabelOf(const std::filesystem::path& folder) {
     if (const auto id = ContentIdOf(folder)) {
         if (auto label = LabelOfContentId(*id)) return label;
     }
-    const auto name = folder.filename().string();
+    const auto name = NameOf(folder);
     if (auto label = LabelOfContentId(name)) return label;
     if (ValidLabel(name)) return name;
     return std::nullopt;
@@ -71,7 +77,7 @@ inline std::optional<std::string> LabelOf(const std::filesystem::path& folder) {
 inline bool HasData(const std::filesystem::path& folder) {
     std::error_code error;
     for (std::filesystem::directory_iterator entry(folder, error), end; !error && entry != end; entry.increment(error)) {
-        auto name = entry->path().filename().string();
+        auto name = NameOf(entry->path());
         std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (name != "sce_sys" && !name.starts_with('.')) return true;
     }

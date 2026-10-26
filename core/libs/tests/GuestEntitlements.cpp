@@ -65,8 +65,9 @@ int main(int argc, char** argv) {
         std::filesystem::create_directories(license / "sce_sys");
         { std::ofstream data(expansion / "island.pak", std::ios::binary); data << "island"; }
 #ifdef _WIN32
-        const std::string folders = expansion.string() + ";" + license.string() + ";" + (directory / "MISSING000000004").string();
-        Require(_putenv_s("ANYPS5_ADDCONT_DIRS", folders.c_str()) == 0);
+        // Wide, as the folder name is not in the ANSI code page.
+        const std::wstring folders = expansion.wstring() + L";" + license.wstring() + L";" + (directory / "MISSING000000004").wstring();
+        Require(_wputenv_s(L"ANYPS5_ADDCONT_DIRS", folders.c_str()) == 0);
 #else
         const std::string folders = expansion.string() + ":" + license.string() + ":" + (directory / "MISSING000000004").string();
         Require(::setenv("ANYPS5_ADDCONT_DIRS", folders.c_str(), 1) == 0);
