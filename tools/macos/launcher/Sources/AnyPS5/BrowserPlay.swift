@@ -85,8 +85,17 @@ final class BrowserPlay: ObservableObject {
     /// Keeps the QR code's token fresh and the list of browsers current, once a second while
     /// anything is up.
     func watch(_ tick: @escaping @MainActor () -> Void) {
-        guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in Task { @MainActor in tick() } }
+        guard timer == nil, server != nil || showing else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
+            Task { @MainActor [weak self] in
+                tick()
+                // Nothing up any more: no more ticks until it is wanted again.
+                if let self, self.server == nil, !self.showing {
+                    self.timer?.invalidate()
+                    self.timer = nil
+                }
+            }
+        }
     }
 
     func refresh() {
@@ -98,7 +107,8 @@ final class BrowserPlay: ObservableObject {
         }
         let link = server.pairingURL
         if link != url { url = link }
-        expires = server.access.currentToken().expires
+        let good = server.access.currentToken().expires
+        if good != expires { expires = good }
         let now = server.connected.map { Pad(id: $0.deviceID, name: $0.name, allowed: $0.allowed) }
         if now != pads { pads = now }
     }
