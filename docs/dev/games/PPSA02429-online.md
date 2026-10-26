@@ -244,6 +244,23 @@ built from the Join fix below, Online play on, signed in, menus driven with keyb
   then on. Tests: `OnlinePlayerSessionsTests.testJoiningASessionMadeElsewhereIsTaken`, and
   `online_probe join <id>` in `OnlineEngineInteropTests.testAGameJoinsAPlayerSessionMadeElsewhere`.
 
+- **Join after a long run: "Connection Failed, Unexpected Error" (fixed in b7afa2d28).** With
+  the Join fix, the game, 25 minutes in after many list refreshes, joined a real lobby
+  ("azengizli", 1/8) and showed "Connection Failed, Unexpected Error" without a crash and without
+  any `sessionManager` request. Its log had `System.Net.Sockets.SocketException: Too many open
+  files`. The process held 1,755 descriptors, 1,422 of them direct memory backings (`PSXSHM`, one
+  POSIX shared memory object per `sceKernelAllocateDirectMemory` block on macOS). libkernel gives a
+  guest socket a host number below 1024 (the guest's descriptor set) and refuses higher ones, and
+  the backings had taken every number there. They are now kept at 4096 and above.
+
+- **Join works (08:58).** With b7afa2d28 and a launcher that also answers `getPlayerSessions`,
+  Join on a real lobby ("rakipsiz_yargic", 1/8) went through: `POST …/member/players` answered 201
+  (66 bytes, read), then `GET /v1/playerSessions?fields=…` with the session named in the
+  `X-PSN-SESSION-MANAGER-SESSION-IDS` header answered 200 (432 bytes), and the game loaded the
+  host's level and played, with UDP to two Photon game servers. Before that header was read, the
+  GET got 404 and the game crashed the same way again (+0x1b9794). In the backings fix's build,
+  the direct memory descriptors sat at 4096 and above (795 of them at the title screen).
+
 ## Imports
 
 From `relinker --registry` on the unwrapped eboot and every bundled module, classified with
@@ -266,8 +283,8 @@ From `relinker --registry` on the unwrapped eboot and every bundled module, clas
 
 ## What to try next
 
-1. Update to the nightly after 2026-10-25 that carries the Player Sessions (or build main), then
-   reinstall or re-convert the game so its bundle gets the new libraries.
+1. Update to the latest nightly (v0.2.22-arm-nightly.20261026.4 or later), and take "Update and
+   Play" for the game so its bundle gets the new libraries.
 2. Settings → AnyTogether → Online play (experimental) on, signed in.
 3. Start the game, Online, Host Public.
 4. If it still fails, send `~/Library/Logs/AnyPS5/Online/PPSA02429.jsonl` and

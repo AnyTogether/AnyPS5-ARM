@@ -102,6 +102,14 @@ public final class OnlinePlayerSessions: @unchecked Sendable {
         switch (method, parts.count) {
         case ("POST", 2):
             return create(body)
+        case ("GET", 2):
+            // getPlayerSessions names its sessions in a header, not in the path (Join reads the
+            // session it just joined this way).
+            let header = request.headers.first { $0.name.caseInsensitiveCompare("X-PSN-SESSION-MANAGER-SESSION-IDS") == .orderedSame }?.value ?? ""
+            let wanted = header.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            guard !wanted.isEmpty else { return problem(400, "X-PSN-SESSION-MANAGER-SESSION-IDS is required") }
+            let found = lock.withLock { wanted.compactMap { sessions[$0].map(view) } }
+            return found.isEmpty ? problem(404, "No such player session") : json(200, ["playerSessions": found])
         case ("GET", 3):
             let wanted = parts[2].split(separator: ",").map(String.init)
             let found = lock.withLock { wanted.compactMap { sessions[$0].map(view) } }

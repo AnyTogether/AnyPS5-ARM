@@ -130,7 +130,7 @@ final class OnlinePlayerSessionsTests: XCTestCase {
         XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions", "[1]")).status, 400)
         XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions", "{}")).status, 400)
         XCTAssertEqual(sessions.handle(request("PATCH", "/v1/playerSessions/nope", "{}")).status, 404)
-        XCTAssertEqual(sessions.handle(request("GET", "/v1/playerSessions")).status, 404)
+        XCTAssertEqual(sessions.handle(request("GET", "/v1/playerSessions")).status, 400, "getPlayerSessions needs its header")
         XCTAssertEqual(sessions.handle(request("GET", "/v1/users/123/playerSessions")).status, 403)
         XCTAssertEqual(sessions.handle(request("DELETE", "/v1/playerSessions/\(id)")).status, 204)
         XCTAssertEqual(sessions.handle(request("DELETE", "/v1/playerSessions/\(id)")).status, 404)
@@ -190,6 +190,16 @@ final class OnlinePlayerSessionsTests: XCTestCase {
         XCTAssertEqual(sessions.sessionIds, [elsewhere])
         let got = try XCTUnwrap((try body(sessions.handle(request("GET", "/v1/playerSessions/\(elsewhere)")))["playerSessions"] as? [[String: Any]])?.first)
         XCTAssertEqual(((got["member"] as? [String: Any])?["players"] as? [[String: Any]])?.map { $0["accountId"] as? String }, ["42"])
+        // What Human Fall Flat asks next: getPlayerSessions, the session named in a header.
+        var byHeader = request("GET", "/v1/playerSessions?fields=sessionId,member,leader,customData1")
+        byHeader.headers.append(.init("X-PSN-SESSION-MANAGER-SESSION-IDS", elsewhere))
+        let listed = sessions.handle(byHeader)
+        XCTAssertEqual(listed.status, 200)
+        XCTAssertEqual(((try body(listed)["playerSessions"] as? [[String: Any]])?.first)?["sessionId"] as? String, elsewhere)
+        XCTAssertEqual(sessions.handle(request("GET", "/v1/playerSessions?fields=sessionId")).status, 400, "the header is required")
+        var missing = request("GET", "/v1/playerSessions")
+        missing.headers.append(.init("x-psn-session-manager-session-ids", UUID().uuidString.lowercased()))
+        XCTAssertEqual(sessions.handle(missing).status, 404)
         XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions/not-a-session/member/players", #"{"players":[{"accountId":"42"}]}"#)).status, 404,
                        "only a session ID (a UUID) is taken")
         XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions/\(UUID().uuidString.lowercased())/member/players", #"{"players":[]}"#)).status, 400,

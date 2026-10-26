@@ -122,13 +122,15 @@ std::string request(int user, const char* name, const char* group, const std::st
 // transaction finished with no response body, and the game then reads a member of a null body
 // (SIGSEGV at address 0x10 in PostPlayerSessionsResponseBody::getPlayerSessions). Prints
 // <name>_status, the Content-Type and Content-Length headers, and <name>_response=parsed or none.
-std::string cppWebApi(int user, const char* name, const char* group, const std::string& path, const char* method, const std::string& sent, int expected) {
+std::string cppWebApi(int user, const char* name, const char* group, const std::string& path, const char* method, const std::string& sent, int expected,
+    const char* headerName = nullptr, const std::string& headerValue = {}) {
     std::int64_t request = 0;
     if (const int created = sceNpWebApi2CreateRequest(user, group, path.c_str(), method, nullptr, &request); created != 0) {
         std::cout << name << "_error=" << hexResult(created) << '\n';
         return {};
     }
     sceNpWebApi2AddHttpRequestHeader(request, "X-Psn-NpCppWebApi-Context", "PS5/2.00");
+    if (headerName) sceNpWebApi2AddHttpRequestHeader(request, headerName, headerValue.c_str());
     NpWebApi2ResponseInformationOption info{};
     const int result = sceNpWebApi2SendRequest(request, sent.data(), sent.size(), &info);
     std::string body;
@@ -250,7 +252,9 @@ int join(const std::string& sessionId) {
     sceNpWebApi2PushEventStartPushContextCallback(user, context);
     cppWebApi(user, "join", "sessionManager", "/v1/playerSessions/" + sessionId + "/member/players", "POST",
         R"({"players":[{"accountId":")" + std::to_string(accountId) + R"(","platform":"PS5","pushContexts":[{"pushContextId":")" + context + R"("}]}]})", 201);
-    request(user, "joined", "sessionManager", "/v1/playerSessions/" + sessionId);
+    // Then, as Human Fall Flat does, getPlayerSessions with the session named in a header.
+    cppWebApi(user, "joined", "sessionManager", "/v1/playerSessions?fields=sessionId,member,leader,customData1", "GET", {}, 200,
+        "X-PSN-SESSION-MANAGER-SESSION-IDS", sessionId);
     request(user, "leave", "sessionManager", "/v1/playerSessions/" + sessionId + "/members/" + std::to_string(accountId), "DELETE");
     sceNpWebApi2PushEventDeletePushContext(user, context);
     return 0;

@@ -137,7 +137,8 @@ final class OnlineEngineInteropTests: XCTestCase {
         XCTAssertEqual(seen["join_status"], "201")
         XCTAssertEqual(seen["join_response"], "parsed", "the game's web API library takes the reply")
         XCTAssertEqual(seen["join_body"], #"{"players":[{"accountId":"\#(OnlineIdentity.accountId(forUser: me.id))","platform":"PS5"}]}"#)
-        XCTAssertEqual(seen["joined_status"], "200")
+        XCTAssertEqual(seen["joined_status"], "200", "getPlayerSessions finds it by the session IDs header")
+        XCTAssertEqual(seen["joined_response"], "parsed")
         XCTAssertEqual(seen["leave_status"], "204")
         XCTAssertTrue(play.router.notOffered.isEmpty)
     }
