@@ -8,6 +8,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace RemotePad {
 
@@ -88,6 +89,17 @@ std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes) {
     return input;
 }
 
+std::optional<Press> DecodePress(std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != PressSize) return std::nullopt;
+    if (read<std::uint32_t>(bytes, 0) != PressMagic || read<std::uint16_t>(bytes, 4) != Version || read<std::uint16_t>(bytes, 6) != PressSize) return std::nullopt;
+    Press press;
+    press.id = read<std::uint32_t>(bytes, 8);
+    press.buttons = read<std::uint32_t>(bytes, 12) & KnownButtons;
+    if (press.buttons == 0) return std::nullopt;
+    press.hold = std::clamp(std::chrono::milliseconds(read<std::uint16_t>(bytes, 16)), ShortestHold, LongestHold);
+    return press;
+}
+
 std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOutputState& output) {
     std::array<std::uint8_t, OutputSize> bytes{};
     write<std::uint32_t>(bytes.data(), 0, OutputMagic);
@@ -113,6 +125,7 @@ std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player) {
     write<std::uint16_t>(bytes.data(), 4, Version);
     write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(HelloSize));
     bytes[8] = player;
+    bytes[9] = HelloTakesPresses;
     return bytes;
 }
 
@@ -168,7 +181,13 @@ std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
     while (true) {
         const auto got = Net::Receive(socket, buffer.data(), buffer.size(), arrived);
         if (!got) break;
-        auto input = DecodeInput(std::span<const std::uint8_t>(buffer.data(), *got));
+        const std::span<const std::uint8_t> bytes(buffer.data(), *got);
+        if (const auto press = DecodePress(bytes)) {
+            if (lastPress != press->id) presses.push_back(*press);
+            lastPress = press->id;
+            continue;
+        }
+        auto input = DecodeInput(bytes);
         if (!input) continue;
         if (session != input->session) {
             session = input->session;
@@ -183,6 +202,10 @@ std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
         result = input;
     }
     return result;
+}
+
+std::vector<Press> Channel::TakePresses() {
+    return std::exchange(presses, {});
 }
 
 void Channel::Answer(const Input& last, const PadOutputState& output) {
@@ -261,6 +284,19 @@ int Seats::Of(std::uint32_t device) const {
 
 bool Seats::Held(int player) const {
     return player >= 0 && player < PAD_MAX_CONTROLLERS && holders[static_cast<std::size_t>(player)].has_value();
+}
+
+void Presses::Add(const Press& press, std::chrono::steady_clock::time_point now) {
+    std::erase_if(held, [now](const Held& item) { return now >= item.until; });
+    held.push_back({press.buttons, now + press.hold});
+}
+
+std::uint32_t Presses::Buttons(std::chrono::steady_clock::time_point now) const {
+    std::uint32_t buttons = 0;
+    for (const auto& item : held) {
+        if (now < item.until) buttons |= item.buttons;
+    }
+    return buttons;
 }
 
 std::array<std::uint8_t, 3> PlayerColor(int player) {

@@ -19,7 +19,8 @@ class DisplayWindow;
 
 // The players' pads, fed by the keyboard and mouse, the Mac's game controllers and the phones the
 // launcher brings. A controller or phone becomes a player the first time it is used (RemotePad::Seats);
-// the keyboard and mouse always drive the first player.
+// the keyboard and mouse always drive the first player. A press the launcher sends (RemotePad::Press)
+// holds buttons on the first player's pad, whoever drives it, and takes no seat.
 class PadInput {
 public:
     PadInput();
@@ -70,6 +71,8 @@ private:
     std::vector<Controller> controllers;
     std::vector<Remote> remotes;
     RemotePad::Seats seats;
+    RemotePad::Presses playerOnePresses;
+    std::uint32_t playerOnePressed = 0;
     std::array<Output, PAD_MAX_CONTROLLERS> outputs{};
     std::array<bool, PAD_MAX_CONTROLLERS> published{};
     VideoOutTelemetry::PadChangeFilter telemetryFilter;

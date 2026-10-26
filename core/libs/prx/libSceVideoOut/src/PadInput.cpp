@@ -374,6 +374,10 @@ void PadInput::updateRemotes() {
             remote.channel->SetPlayer(static_cast<std::uint8_t>(player + 1));
             answer(remote, player);
         }
+        for (const auto& press : remote.channel->TakePresses()) {
+            playerOnePresses.Add(press, now);
+            APS5_LOG_OUT("Pad: channel %zu presses 0x%x on player 1 for %lld ms", channel + 1, press.buttons, static_cast<long long>(press.hold.count()));
+        }
         if (remote.last && now - remote.seen >= RemotePad::Gone) {
             remote.last.reset();
             leave(device);
@@ -398,6 +402,10 @@ void PadInput::Update(const DisplayWindow& window) {
             break;
         }
     }
+    if (const auto buttons = playerOnePresses.Buttons(std::chrono::steady_clock::now()); buttons != playerOnePressed) {
+        playerOnePressed = buttons;
+        publish(window.FrameNumber());
+    }
     static std::uint32_t scripted = 0;
     if (const auto buttons = ScriptedButtons(); buttons != scripted) {
         scripted = buttons;
@@ -415,7 +423,7 @@ void PadInput::Update(const DisplayWindow& window) {
 }
 
 // Every player's pad from the device seated there; the first player's also from the keyboard,
-// the mouse and APS5_PAD_SCRIPT, and published even with no device.
+// the mouse, the launcher's presses and APS5_PAD_SCRIPT, and published even with no device.
 void PadInput::publish(std::uint64_t frame) {
     for (int player = 0; player < PAD_MAX_CONTROLLERS; ++player) {
         std::optional<PadInputState> device;
@@ -437,7 +445,7 @@ void PadInput::publish(std::uint64_t frame) {
             continue;
         }
         auto state = keyboardMouse.Compose(device.value_or(PadInputState{}));
-        state.buttons |= ScriptedButtons();
+        state.buttons |= ScriptedButtons() | playerOnePressed;
         PadPublishInput_nid_postfix(state);
         if (auto* telemetry = VideoOutTelemetry::Instance(); telemetry != nullptr) VideoOutTelemetry::EmitPadIfChanged(*telemetry, telemetryFilter, frame, state);
     }

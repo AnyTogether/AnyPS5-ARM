@@ -17,10 +17,16 @@ namespace RemotePad {
 constexpr std::uint32_t InputMagic = 0x49525041u;
 constexpr std::uint32_t OutputMagic = 0x4F525041u;
 constexpr std::uint32_t HelloMagic = 0x48525041u;
+constexpr std::uint32_t PressMagic = 0x50525041u;
 constexpr std::uint16_t Version = 1;
 constexpr std::size_t InputSize = 80;
 constexpr std::size_t OutputSize = 32;
 constexpr std::size_t HelloSize = 16;
+constexpr std::size_t PressSize = 24;
+// Bit 0 of the hello's byte 9: this engine takes presses.
+constexpr std::uint8_t HelloTakesPresses = 1;
+constexpr auto ShortestHold = std::chrono::milliseconds(50);
+constexpr auto LongestHold = std::chrono::milliseconds(2000);
 constexpr auto Silence = std::chrono::milliseconds(500);
 // A phone silent this long has left: its player is free for another device.
 constexpr auto Gone = std::chrono::seconds(5);
@@ -36,7 +42,16 @@ struct Input {
     PadInputState state{};
 };
 
+// Buttons held on the first player's pad for a while, whoever drives it, without taking a seat:
+// how the launcher's quick menu presses Options to pause a game.
+struct Press {
+    std::uint32_t id = 0;
+    std::uint32_t buttons = 0;
+    std::chrono::milliseconds hold{};
+};
+
 std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes);
+std::optional<Press> DecodePress(std::span<const std::uint8_t> bytes);
 std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOutputState& output);
 // player is the channel's player counting from 1, or 0 while its phone is none.
 std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player = 0);
@@ -52,6 +67,8 @@ public:
     Channel& operator=(const Channel&) = delete;
 
     std::optional<Input> Poll(std::chrono::steady_clock::time_point now);
+    // The presses Poll read since the last call; a copy of the last one (the same id) is dropped.
+    std::vector<Press> TakePresses();
     void Answer(const Input& last, const PadOutputState& output);
     void Greet(std::chrono::steady_clock::time_point now);
     // Which player the phone is, from 1, or 0; a change is said in the next hello at once.
@@ -66,6 +83,8 @@ private:
     std::uint16_t launcherPort = 0;
     std::optional<std::uint32_t> newest;
     std::optional<std::uint64_t> session;
+    std::optional<std::uint32_t> lastPress;
+    std::vector<Press> presses;
     std::optional<std::chrono::steady_clock::time_point> greeted;
     std::uint8_t player = 0;
 };
@@ -97,6 +116,20 @@ private:
 };
 
 constexpr std::uint32_t RemoteDevice(std::size_t channel) { return 0x80000000u | static_cast<std::uint32_t>(channel); }
+
+// The presses being held on the first player's pad.
+class Presses {
+public:
+    void Add(const Press& press, std::chrono::steady_clock::time_point now);
+    std::uint32_t Buttons(std::chrono::steady_clock::time_point now) const;
+
+private:
+    struct Held {
+        std::uint32_t buttons;
+        std::chrono::steady_clock::time_point until;
+    };
+    std::vector<Held> held;
+};
 
 // The light a player's pad shows when the game sets none, as on the console: blue, red, green, pink.
 std::array<std::uint8_t, 3> PlayerColor(int player);

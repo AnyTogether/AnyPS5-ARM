@@ -393,6 +393,92 @@ void guestsNeverTakeTheFirstPlayer() {
     require(seats.Seat(7, true) == 0, "while a controller still takes the first player");
 }
 
+std::vector<std::uint8_t> pressPacket(std::uint32_t id, std::uint32_t buttons, std::uint16_t holdMillis) {
+    std::vector<std::uint8_t> bytes(RemotePad::PressSize, 0);
+    put<std::uint32_t>(bytes, 0, RemotePad::PressMagic);
+    put<std::uint16_t>(bytes, 4, RemotePad::Version);
+    put<std::uint16_t>(bytes, 6, static_cast<std::uint16_t>(RemotePad::PressSize));
+    put<std::uint32_t>(bytes, 8, id);
+    put<std::uint32_t>(bytes, 12, buttons);
+    put<std::uint16_t>(bytes, 16, holdMillis);
+    return bytes;
+}
+
+// A press (APRP, 24 bytes) holds buttons on the first player's pad for a while without being a
+// pad of its own: the launcher's quick menu pauses a game this way whoever holds player 1.
+void decodesAPress() {
+    const auto press = RemotePad::DecodePress(view(pressPacket(7, 0x0008u | 0x40000000u, 120)));
+    require(press.has_value(), "a press decodes");
+    require(press->id == 7 && press->buttons == 0x0008u, "its id and buttons are read, unknown bits masked off");
+    require(press->hold == std::chrono::milliseconds(120), "its hold is read");
+    require(RemotePad::DecodePress(view(pressPacket(1, 0x0008u, 0)))->hold == RemotePad::ShortestHold, "a hold too short for a frame is lengthened");
+    require(RemotePad::DecodePress(view(pressPacket(1, 0x0008u, 60000)))->hold == RemotePad::LongestHold, "a long hold is cut");
+    require(!RemotePad::DecodeInput(view(pressPacket(1, 0x0008u, 120))), "a press is no input");
+    require(!RemotePad::DecodePress(view(fullPacket(1))), "an input is no press");
+}
+
+void rejectsBadPresses() {
+    auto magic = pressPacket(1, 0x0008u, 120);
+    put<std::uint32_t>(magic, 0, RemotePad::InputMagic);
+    require(!RemotePad::DecodePress(view(magic)), "a wrong magic is dropped");
+    auto version = pressPacket(1, 0x0008u, 120);
+    put<std::uint16_t>(version, 4, 2);
+    require(!RemotePad::DecodePress(view(version)), "another version is dropped");
+    auto size = pressPacket(1, 0x0008u, 120);
+    put<std::uint16_t>(size, 6, 23);
+    require(!RemotePad::DecodePress(view(size)), "a wrong size field is dropped");
+    auto shorter = pressPacket(1, 0x0008u, 120);
+    shorter.resize(23);
+    require(!RemotePad::DecodePress(view(shorter)), "a short datagram is dropped");
+    require(!RemotePad::DecodePress(view(pressPacket(1, 0x40000000u, 120))), "a press of no known button is dropped");
+}
+
+void pressesHoldForTheirTime() {
+    RemotePad::Presses presses;
+    const auto start = std::chrono::steady_clock::now();
+    require(presses.Buttons(start) == 0, "nothing is pressed at first");
+    presses.Add({1, 0x0008u, std::chrono::milliseconds(120)}, start);
+    require(presses.Buttons(start) == 0x0008u, "a press holds its buttons at once");
+    require(presses.Buttons(start + std::chrono::milliseconds(119)) == 0x0008u, "and through its hold");
+    require(presses.Buttons(start + std::chrono::milliseconds(120)) == 0, "then lets go");
+    presses.Add({2, 0x4000u, std::chrono::milliseconds(200)}, start + std::chrono::milliseconds(50));
+    require(presses.Buttons(start + std::chrono::milliseconds(100)) == 0x4008u, "presses that overlap are held together");
+    require(presses.Buttons(start + std::chrono::milliseconds(200)) == 0x4000u, "each lets go at its own time");
+    require(presses.Buttons(start + std::chrono::milliseconds(250)) == 0, "and the last one too");
+}
+
+// A press reaches the channel beside the inputs and leaves the phone's order and player alone:
+// it is sent a few times in case one is lost, and only its first copy counts.
+void channelTakesPresses() {
+    Peer launcher;
+    RemotePad::Channel channel(launcher.port);
+    const auto now = std::chrono::steady_clock::now();
+    launcher.send(pressPacket(40, 0x0008u, 120), channel.Port());
+    std::vector<RemotePad::Press> taken;
+    for (int attempt = 0; attempt < 50 && taken.empty(); ++attempt) {
+        require(!channel.Poll(now), "a press is not an input");
+        taken = channel.TakePresses();
+        if (taken.empty()) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    require(taken.size() == 1 && taken[0].id == 40 && taken[0].buttons == 0x0008u, "the press is taken from the channel");
+    require(channel.TakePresses().empty(), "and taken once");
+    launcher.send(pressPacket(40, 0x0008u, 120), channel.Port());
+    launcher.send(fullPacket(5), channel.Port());
+    const auto input = pollFor(channel, now);
+    require(input && input->sequence == 5, "an input after a press arrives in its order");
+    require(channel.TakePresses().empty(), "a copy of the last press is dropped");
+    launcher.send(pressPacket(41, 0x0008u, 120), channel.Port());
+    launcher.send(fullPacket(6), channel.Port());
+    require(pollFor(channel, now)->sequence == 6, "the next input follows");
+    require(channel.TakePresses().size() == 1, "a new press is taken again");
+}
+
+// The hello says the engine takes presses (bit 0 of byte 9), so a launcher knows it may send them.
+void helloSaysItTakesPresses() {
+    const auto hello = RemotePad::EncodeHello(2);
+    require(hello[8] == 2 && (hello[9] & RemotePad::HelloTakesPresses) != 0, "the hello names the player and says presses are taken");
+}
+
 void environmentForMorePlayers() {
     unsetVariable("ANYPS5_REMOTE_PAD");
     setVariable("ANYPS5_REMOTE_PAD_2", "127.0.0.1:5002");
@@ -434,6 +520,11 @@ int main() try {
     seatsGoInOrderAndComeBack();
     guestsNeverTakeTheFirstPlayer();
     environmentForMorePlayers();
+    decodesAPress();
+    rejectsBadPresses();
+    pressesHoldForTheirTime();
+    channelTakesPresses();
+    helloSaysItTakesPresses();
     std::cout << "remote pad tests passed\n";
     return 0;
 } catch (const std::exception& error) {
