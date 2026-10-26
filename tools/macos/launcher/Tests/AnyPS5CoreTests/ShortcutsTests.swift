@@ -100,7 +100,7 @@ final class ShortcutMapTests: XCTestCase {
         XCTAssertEqual(map.conflicts(), [.navigationButton(.clip), .navigationKey(.fullScreen)])
         // In a chord they are fine.
         map.setPad(PadChord([.l1, .south]), for: .clip)
-        map.setKey(KeyChord(keyCode: 36, modifiers: .command, name: "Return"), for: .fullScreen)
+        map.setKey(KeyChord(keyCode: 36, modifiers: [.command, .control], name: "Return"), for: .fullScreen)
         XCTAssertEqual(map.conflicts(), [])
     }
 
@@ -115,6 +115,17 @@ final class ShortcutMapTests: XCTestCase {
         XCTAssertEqual(map.conflicts(), [])
         // The launcher's own keys may be plain.
         map.setKey(KeyChord(keyCode: 40, name: "K"), for: .fullScreen)
+        XCTAssertEqual(map.conflicts(), [])
+    }
+
+    /// ⌥V, ⌥A and ⌥D are the party's and the calls' keys; ⌘ alone is the menus'.
+    func testKeysAnyPS5OrTheMenusUseAreRefused() {
+        var map = ShortcutMap()
+        map.setKey(KeyChord(keyCode: 9, modifiers: .option, name: "V"), for: .screenshot)
+        map.setKey(KeyChord(keyCode: 12, modifiers: .command, name: "Q"), for: .fullScreen)
+        XCTAssertEqual(map.conflicts(), [.reservedKey(.screenshot), .reservedKey(.fullScreen)])
+        map.setKey(KeyChord(keyCode: 3, modifiers: [.command, .control], name: "F"), for: .fullScreen)
+        map.setKey(KeyChord(keyCode: 9, modifiers: [.option, .shift], name: "V"), for: .screenshot)
         XCTAssertEqual(map.conflicts(), [])
     }
 
@@ -262,5 +273,43 @@ final class PadShortcutReaderTests: XCTestCase {
         var pad = reader()
         _ = pad.update([.guide], at: 0)
         XCTAssertEqual(pad.update([], at: 0.9), [.hold(.home)])
+    }
+}
+
+final class ChordRecorderTests: XCTestCase {
+    func testAQuickPressIsAPressedChord() {
+        var recorder = ChordRecorder()
+        XCTAssertNil(recorder.update([.l1], at: 0))
+        XCTAssertNil(recorder.update([.l1, .r1], at: 0.05))
+        XCTAssertNil(recorder.update([.r1], at: 0.2))
+        XCTAssertEqual(recorder.update([], at: 0.25), PadChord([.l1, .r1]))
+    }
+
+    /// Held together long enough, the chord is a hold; the time counts from the last button down
+    /// to the first let go.
+    func testHeldTogetherIsAHold() {
+        var recorder = ChordRecorder()
+        _ = recorder.update([.l1], at: 0)
+        _ = recorder.update([.l1, .west], at: 1)
+        _ = recorder.update([.west], at: 1.6)
+        XCTAssertEqual(recorder.update([], at: 3), PadChord([.l1, .west], hold: true))
+    }
+
+    /// One button held long before the other came, then let go soon: a press.
+    func testLettingGoSoonAfterTheLastButtonIsAPress() {
+        var recorder = ChordRecorder()
+        _ = recorder.update([.l1], at: 0)
+        _ = recorder.update([.l1, .west], at: 1)
+        _ = recorder.update([.west], at: 1.3)
+        XCTAssertEqual(recorder.update([], at: 3), PadChord([.l1, .west]))
+    }
+
+    func testOneButtonHeldIsAHold() {
+        var recorder = ChordRecorder()
+        _ = recorder.update([.select], at: 0)
+        XCTAssertEqual(recorder.update([], at: 0.7), PadChord([.select], hold: true))
+        // It starts over for the next chord.
+        _ = recorder.update([.guide], at: 1)
+        XCTAssertEqual(recorder.update([], at: 1.1), PadChord([.guide]))
     }
 }

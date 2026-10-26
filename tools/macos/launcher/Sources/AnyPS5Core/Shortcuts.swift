@@ -94,9 +94,16 @@ public struct KeyChord: Codable, Hashable, Sendable {
     static let navigation: Set<UInt16> = [123, 124, 125, 126, 36, 76, 49, 53, 51, 31]
 
     public var isNavigation: Bool { modifiers.isEmpty && Self.navigation.contains(keyCode) }
+
+    /// Keys AnyPS5 already takes from any app (⌥V talks in a party, ⌥A and ⌥D answer and decline a
+    /// call) and ⌘ with or without ⇧, the menus' keys.
+    public var isReserved: Bool {
+        if modifiers == .option && [9, 0, 2].contains(keyCode) { return true }
+        return modifiers == .command || modifiers == [.command, .shift]
+    }
 }
 
-/// Controller buttons pressed together, and whether the chord is held (0.6 s) rather than pressed.
+/// Controller buttons pressed together, and whether the chord is held (0.5 s) rather than pressed.
 public struct PadChord: Codable, Hashable, Sendable {
     public private(set) var buttons: [PadButton]
     public var hold: Bool
@@ -167,6 +174,8 @@ public enum ShortcutConflict: Equatable, Sendable {
     case navigationKey(ShortcutAction)
     /// A button the screens move with, on its own.
     case navigationButton(ShortcutAction)
+    /// A key AnyPS5 or the menus already use (KeyChord.isReserved).
+    case reservedKey(ShortcutAction)
     /// An action that works in a game needs ⌃, ⌥ or ⌘, or a function key: otherwise every app
     /// would lose that key while the launcher runs.
     case needsModifier(ShortcutAction)
@@ -174,7 +183,7 @@ public enum ShortcutConflict: Equatable, Sendable {
     public var actions: [ShortcutAction] {
         switch self {
         case .sameKey(let a, let b), .samePad(let a, let b): return [a, b]
-        case .navigationKey(let a), .navigationButton(let a), .needsModifier(let a): return [a]
+        case .navigationKey(let a), .navigationButton(let a), .reservedKey(let a), .needsModifier(let a): return [a]
         }
     }
 }
@@ -227,6 +236,7 @@ public struct ShortcutMap: Codable, Equatable, Sendable {
             let mine = binding(action)
             if let key = mine.key {
                 if key.isNavigation { found.append(.navigationKey(action)) }
+                if key.isReserved { found.append(.reservedKey(action)) }
                 if action.worksInGame && !key.hasModifier && !key.isFunctionKey { found.append(.needsModifier(action)) }
                 for other in actions[(index + 1)...] where binding(other).key == key { found.append(.sameKey(action, other)) }
             }
@@ -294,7 +304,7 @@ extension ShortcutMap {
 public struct LongPress: Sendable {
     public enum Outcome: Equatable, Sendable { case press, hold }
 
-    public static let threshold: Double = 0.6
+    public static let threshold: Double = 0.5
 
     public let threshold: Double
     private var downAt: Double?
@@ -331,7 +341,7 @@ public struct LongPress: Sendable {
 
 /// One controller's buttons as shortcut presses and holds. A chord acts when its last button goes
 /// down (the longest chord that just completed wins: L1+R1 over R1); a chord that also means
-/// something held (PS, or Create with Screenshot on Create held) waits: let go before 0.6 s it
+/// something held (PS, or Create with Screenshot on Create held) waits: let go before 0.5 s it
 /// is a press, held that long it is the hold.
 public struct PadShortcutReader: Sendable {
     public enum Event: Equatable, Sendable {
@@ -434,5 +444,31 @@ public struct PadShortcutReader: Sendable {
     public mutating func reset() {
         pressed = []
         armed = []
+    }
+}
+
+/// A chord being set in Settings → Shortcuts: every button pressed until all are let go, held
+/// (all of them together for `LongPress.threshold`) or pressed.
+public struct ChordRecorder: Sendable {
+    public private(set) var buttons: Set<PadButton> = []
+    private var completedAt: Double?
+    private var letGoAt: Double?
+
+    public init() {}
+
+    /// The buttons held now; the chord once the last one is let go.
+    public mutating func update(_ pressed: Set<PadButton>, at time: Double) -> PadChord? {
+        if !pressed.subtracting(buttons).isEmpty {
+            buttons.formUnion(pressed)
+            completedAt = time
+            letGoAt = nil
+        } else if pressed.count < buttons.count, letGoAt == nil {
+            letGoAt = time
+        }
+        guard pressed.isEmpty, !buttons.isEmpty, let completedAt else { return nil }
+        let held = (letGoAt ?? time) - completedAt >= LongPress.threshold
+        let chord = PadChord(buttons, hold: held)
+        self = ChordRecorder()
+        return chord
     }
 }

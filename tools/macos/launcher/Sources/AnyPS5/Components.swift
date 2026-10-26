@@ -217,10 +217,20 @@ struct CircleConfirms: EnvironmentKey {
 /// its glyphs all give one command ("↩ / ✕"), each glyph on its own when they give several (the
 /// arrows, Q and E). The click goes through the same handler as the key.
 struct Hint: View {
-    let keys: String
     let label: String
     @Environment(\.scale) private var scale
     @Environment(\.circleConfirms) private var circleConfirms
+    @ObservedObject private var inputMode = InputModeState.shared
+
+    /// The keys of the input in use: a controller's glyphs or the keyboard's, never both.
+    private var keys: String { HintKeys.keys(allKeys, for: inputMode.mode) }
+
+    init(keys: String, label: String) {
+        self.allKeys = keys
+        self.label = label
+    }
+
+    private let allKeys: String
 
     var body: some View {
         if let command = HintKeys.single(keys) {

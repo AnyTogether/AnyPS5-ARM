@@ -87,6 +87,12 @@ struct Preferences: Codable, Equatable {
     var customToolkit: String?
     /// Settings → Game Library: new games unlocked in the background (PrepareQueue); nil means on.
     var prepareNewGames: Bool?
+    /// The window full screen at start (WindowStart): nil the first time, then as it was left.
+    var fullScreen: Bool?
+    /// Settings → Behaviour → Pause Game When Opening the Menu: nil means on.
+    var pauseOnMenu: Bool?
+    /// Settings → Shortcuts: what differs from the defaults; nil for none.
+    var shortcuts: ShortcutMap?
     var games: [String: GameSettings] = [:]
     var lastPlayed: [String: Date] = [:]
 
@@ -187,6 +193,12 @@ enum Overlay: Equatable {
     case compare
     /// Settings → Controllers → Test Buttons and Sticks.
     case controllerTest
+    /// PS in a game: Resume, Game Settings, Close Game, over the launcher (HomeMenus.swift).
+    case quickMenu
+    /// PS held in a game: "Close <game>?".
+    case closeGame
+    /// PS held in the launcher: Switch Profile, Quit AnyPS5.
+    case homeMenu
 }
 
 /// A newer launcher downloaded and checked, unpacked in a folder of its own, waiting for a restart.
@@ -223,6 +235,8 @@ final class AppModel: ObservableObject {
             if oldValue != overlay {
                 discoverOverlayChanged()
                 askingRow = nil
+                rowEditor.stop()
+                if shortcutCapture != nil { endShortcutCapture() }
             }
             // The controller test takes the pads' buttons: only PS acts while it is open.
             Input.shared.testing = overlay == .controllerTest
@@ -232,7 +246,10 @@ final class AppModel: ObservableObject {
     /// Controllers.shared's roster changes redraw the screens (ControllersPanel.swift).
     var controllerSink: AnyCancellable?
     @Published var panelRow = 0 {
-        didSet { if !keepingFocus { panelFocusID = nil } }
+        didSet {
+            if !keepingFocus { panelFocusID = nil }
+            if panelRow != oldValue { rowEditor.stop() }
+        }
     }
     /// The item the panel's focus is on, so rows coming in above it do not move it to another.
     var panelFocusID: String?
@@ -251,6 +268,14 @@ final class AppModel: ObservableObject {
     /// Where the focused item is in `rows` now.
     func focusedRow(in rows: [PanelRow]) -> Int { ListFocus.index(of: panelFocusID, in: rows.map(\.id), fallback: panelRow) }
     @Published var panelInRows = false
+    /// The choice row the pad is changing (✕ starts, ✕ or ○ end).
+    @Published var rowEditor = RowEditor()
+    /// The focused item of the quick menu, the close question and the home menu.
+    @Published var menuIndex = 0
+    /// The shortcut waiting for a key or a chord in Settings → Shortcuts.
+    @Published var shortcutCapture: ShortcutCapture?
+    /// The quick menu went up after the launcher pressed Options in the game.
+    @Published var pausedGame = false
     /// The pad action waiting for a key in the controls panel.
     @Published var capturing: PadAction?
     @Published var libraryIndex = 0
@@ -434,7 +459,7 @@ final class AppModel: ObservableObject {
         }
         apply()
         changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
-        if persists { loadEngines(); loadProfilePicture() }
+        if persists { loadEngines(); loadProfilePicture(); watchFullScreen() }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
             OnlinePlayHost.configure(transport: { OnlinePeerMesh(context: $0) }, signal: { [weak self] to, device, session, kind, data in
@@ -554,6 +579,7 @@ final class AppModel: ObservableObject {
         Feel.shared.vibration = preferences.controllerVibration ?? true
         ThemeMusic.shared.volume = Float(musicVolume) / 100
         Input.shared.circleConfirms = preferences.confirmCircle == true
+        if persists, Input.shared.shortcuts != shortcutMap { Input.shared.apply(shortcutMap) }
         Input.shared.deadzone = preferences.stickDeadzone ?? 0
         let controllers = Controllers.shared
         controllers.light = preferences.controllerLight.flatMap(PadLight.init(rawValue:)) ?? .theme
@@ -1620,7 +1646,22 @@ final class AppModel: ObservableObject {
     // MARK: Clips
 
     let clipRecorder = ClipRecorder()
-    var clipSeconds: Int { preferences.clipLength ?? 30 }
+    var clipSeconds: Int { ReplayBudget.length(preferences.clipLength) }
+
+    // MARK: PS, the quick menu and Settings → Shortcuts (HomeMenus.swift)
+
+    /// The last PS that switched between the game and the launcher.
+    var lastHome: Date? {
+        get { lastToggle }
+        set { lastToggle = newValue }
+    }
+    /// The remote pad channel the quick menu's Options press goes through, held a few seconds.
+    var pauseBridge: Int?
+    var pauseSequence: UInt32 = 0
+    let pauseSession = UInt64.random(in: 1 ... UInt64.max)
+    var pauseRelease: Task<Void, Never>?
+    /// The chord being recorded for a shortcut.
+    var chordRecorder: ChordRecorder?
 
     /// With clips on, the game that just showed its window is kept from now on.
     private func startClips(for app: NSRunningApplication) {
@@ -1638,6 +1679,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Settings → Behaviour → Clip Length: a game being recorded starts again at the new length.
+    func setClipLength(_ seconds: Int) {
+        guard seconds != clipSeconds else { return }
+        preferences.clipLength = seconds
+        if let app = running?.app, clipRecorder.recordingPid != nil { startClips(for: app) }
+    }
+
+    /// The buffer's memory once full at the main display's size, for the setting's line.
+    var clipMegabytes: Int {
+        let frame = NSScreen.main?.frame.size ?? CGSize(width: 1512, height: 982)
+        let scale = NSScreen.main?.backingScaleFactor ?? 2
+        return ReplayBudget.megabytes(width: Int(frame.width * scale), height: Int(frame.height * scale), seconds: clipSeconds)
+    }
+
     /// Clips turned on: macOS asks for the screen recording permission now rather than at a game.
     func clipsChanged(_ on: Bool) {
         preferences.clips = on
@@ -1652,15 +1707,11 @@ final class AppModel: ObservableObject {
     func saveClip() {
         guard let game = running?.game else { return }
         guard familyAllows(.mediaSharing) else { return TrophyBanner.shared.notice(FS.refusal(.mediaSharing), detail: "", symbol: "hand.raised.fill", sounds: preferences.sounds) }
-        guard preferences.clips == true else {
-            return TrophyBanner.shared.notice(T.text(.clipsOff), detail: T.text(.clipsOffDetail), symbol: "record.circle", sounds: preferences.sounds)
-        }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        // With the replay buffer off there is nothing kept: Create takes a screenshot instead.
+        guard preferences.clips == true else { return takeScreenshot() }
         let folder = screenshotsFolder
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let file = folder.appendingPathComponent("\(game.titleID)-\(formatter.string(from: Date())).mp4")
+        let file = folder.appendingPathComponent("\(game.titleID)-\(Self.captureStamp()).mp4")
         Task { @MainActor in
             do {
                 try await self.clipRecorder.save(to: file)
@@ -1756,6 +1807,9 @@ final class AppModel: ObservableObject {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
         defer { restartIfWaiting() }
+        // The game's own menus go with it.
+        pausedGame = false
+        if overlay == .quickMenu || overlay == .closeGame { overlay = nil }
         OnlinePlayHost.stop()
         if let start = sessionStart { recordPlay(running.game, from: start) }
         sessionStart = nil
@@ -2106,6 +2160,8 @@ final class AppModel: ObservableObject {
             // Go live and Stop broadcast in the phone's PS menu.
             phoneBroadcast(message == .command(name: "broadcastStart"))
         case .command(let name):
+            // The phone's pad is a pad: the screens show its glyphs.
+            InputModeState.shared.usedPad()
             let commands: [String: Command] = ["left": .left, "right": .right, "up": .up, "down": .down, "select": .select, "back": .back, "options": .options,
                                                "l1": .previousGame, "r1": .nextGame]
             guard let command = commands[name] else { return }
@@ -2133,7 +2189,9 @@ final class AppModel: ObservableObject {
         case .close:
             if starting != nil { cancelStart() } else { running?.app.forceTerminate() }
         case .home:
-            bringLauncherFront()
+            // The phone's PS: the quick menu over a game in front, as a controller's does.
+            InputModeState.shared.usedPad()
+            if running != nil, !NSApp.isActive { shortcut(.home, hold: false) } else { bringLauncherFront() }
         case .saveLayout(let id, let layout):
             guard let game = games.first(where: { $0.id == id }) else { return }
             update(game) { $0.phoneLayout = layout }
@@ -2166,7 +2224,7 @@ final class AppModel: ObservableObject {
     static let toggleDebounce: TimeInterval = 0.45
     private var lastToggle: Date?
 
-    private func bringLauncherFront() {
+    func bringLauncherFront() {
         guard !NSApp.isActive else { return }
         showWindows()
         NSApp.activate(ignoringOtherApps: true)

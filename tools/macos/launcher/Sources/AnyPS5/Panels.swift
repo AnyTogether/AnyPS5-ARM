@@ -30,6 +30,15 @@ struct PanelRow: Identifiable {
         if case .info = kind { return false }
         return true
     }
+
+    /// How left and right treat the row (RowEditor): a choice or a stepper steps its value.
+    var valueKind: RowValueKind {
+        switch kind {
+        case .choice, .stepper: return .choice
+        case .toggle: return .toggle
+        default: return .other
+        }
+    }
 }
 
 /// A person a row is about: avatar (or initial), and a dot for playing or online.
@@ -185,6 +194,11 @@ extension AppModel {
             PanelRow(id: "motion", title: T.text(.motion), symbol: "wind", kind: .choice(options: [T.text(.motionFull), T.text(.motionReduced)], selected: preferences.reducedMotion ? 1 : 0) { [weak self] index in
                 self?.preferences.reducedMotion = index == 1
             }),
+            PanelRow(id: "fullScreen", title: TH.text(.fullScreen), detail: TH.text(.fullScreenDetail), symbol: "arrow.up.left.and.arrow.down.right",
+                     kind: .toggle(isFullScreen) { [weak self] value in
+                         guard let self, value != self.isFullScreen else { return }
+                         self.toggleFullScreen()
+                     }),
         ]
 
         let library: [PanelRow] = [
@@ -235,10 +249,12 @@ extension AppModel {
             PanelRow(id: "clips", title: T.text(.clips), detail: T.format(.clipsDetail, clipSeconds), symbol: "record.circle", kind: .toggle(preferences.clips == true) { [weak self] value in
                 self?.clipsChanged(value)
             }),
-            PanelRow(id: "clipLength", title: T.text(.clipLength), symbol: "timer",
-                     kind: .stepper(value: clipSeconds, range: 15...120, step: 15, format: { T.format(.seconds, $0) }) { [weak self] value in
-                         self?.preferences.clipLength = value
+            PanelRow(id: "clipLength", title: T.text(.clipLength), detail: TH.format(.clipsCost, clipMegabytes), symbol: "timer",
+                     kind: .choice(options: ReplayBudget.lengths.map(TH.length), selected: ReplayBudget.lengths.firstIndex(of: clipSeconds) ?? 1) { [weak self] index in
+                         self?.setClipLength(ReplayBudget.lengths[index])
                      }),
+            PanelRow(id: "pauseOnMenu", title: TH.text(.pauseOnMenu), detail: TH.text(.pauseOnMenuDetail), symbol: "pause.circle",
+                     kind: .toggle(preferences.pauseOnMenu ?? true) { [weak self] value in self?.preferences.pauseOnMenu = value ? nil : false }),
         ] + saveSyncRows() + [
             PanelRow(id: "checkUpdates", title: T.text(.checkUpdates), detail: T.text(.checkUpdatesDetail), symbol: "arrow.down.circle", kind: .toggle(preferences.checkUpdates ?? true) { [weak self] value in
                 self?.preferences.checkUpdates = value
@@ -324,6 +340,7 @@ extension AppModel {
             PanelCategory(id: "language", title: T.text(.language), symbol: "globe", rows: [language]),
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
             PanelCategory(id: "controllers", title: TP.text(.title), symbol: "gamecontroller", rows: controllerRows()),
+            PanelCategory(id: "shortcuts", title: TH.text(.shortcuts), symbol: "command", rows: shortcutRows()),
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
             PanelCategory(id: "broadcast", title: TB.text(.title), symbol: "dot.radiowaves.left.and.right", rows: broadcastSettingsRows()),
             PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
@@ -543,29 +560,48 @@ extension AppModel {
         focusRow(focusedRow(in: rows), in: rows)
         if !rows[panelRow].focusable, let first = rows.firstIndex(where: \.focusable) { focusRow(first, in: rows) }
         let row = rows[panelRow]
-        switch command {
-        case .up: movePanelRow(-1, rows)
-        case .down: movePanelRow(1, rows)
-        case .left:
-            if !change(row, by: -1), !cancelAsk() { leaveRows(single) }
-        case .right:
-            _ = change(row, by: 1)
-        case .select:
-            activate(row)
-        case .back:
+        // △ on a shortcut's row clears it.
+        if command == .options, row.id.hasPrefix("shortcut-"), clearShortcut(row: row.id) { return true }
+        // With the pad a choice changes only while it is edited (✕ starts, ✕ or ○ end); the
+        // keyboard and the mouse change it at once.
+        switch rowEditor.intent(for: command, row: row.id, kind: row.valueKind, mode: InputModeState.shared.mode) {
+        case .move(let delta): movePanelRow(delta, rows)
+        case .change(let delta): change(row, by: delta)
+        case .activate: activate(row)
+        case .startEditing, .stopEditing: Sounds.shared.play(.select)
+        case .leaveRows:
+            // On a value with the pad, left in a panel without categories goes nowhere rather
+            // than closing it.
+            if command == .left && single && row.valueKind != .other && InputModeState.shared.mode == .pad { break }
             // A question asked in place (AskFirst.swift) is answered Cancel first.
             if !cancelAsk() { leaveRows(single) }
-        case .options:
-            closeOverlay()
-        case .previousGame, .nextGame, .home, .capture:
-            break
+        case .close: closeOverlay()
+        case .none: break
         }
+        return true
+    }
+
+    /// L1 and R1 in Settings (and the other panels with categories): the category before or after.
+    func panelCategoryStep(_ delta: Int) -> Bool {
+        let categories = panelCategories()
+        guard categories.count > 1, capturing == nil, shortcutCapture == nil else { return true }
+        let next = min(categories.count - 1, max(0, panelCategory + delta))
+        guard next != panelCategory else { return true }
+        rowEditor.stop()
+        withAnimation(Motion.focus) { panelCategory = next }
+        panelRow = 0
+        if panelInRows {
+            let rows = categories[next].rows
+            if let first = rows.firstIndex(where: \.focusable) { focusRow(first, in: rows) } else { panelInRows = false }
+        }
+        Sounds.shared.play(.move)
         return true
     }
 
     private func movePanelCategory(_ delta: Int, count: Int) {
         let next = min(count - 1, max(0, panelCategory + delta))
         guard next != panelCategory else { return }
+        rowEditor.stop()
         panelCategory = next
         panelRow = 0
         Sounds.shared.play(.move)
@@ -579,6 +615,7 @@ extension AppModel {
     }
 
     private func leaveRows(_ single: Bool) {
+        rowEditor.stop()
         if single { closeOverlay(); return }
         panelInRows = false
         Sounds.shared.play(.back)
@@ -739,12 +776,13 @@ struct RowList: View {
     private var content: some View {
         VStack(spacing: 8 * scale) {
             ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                RowView(row: row, focused: focusedRow == index)
+                RowView(row: row, focused: focusedRow == index, editing: focusedRow == index && model.rowEditor.isEditing(row.id))
                     .id(row.id)
                     .hoverTick("row-\(row.id)")
                     .onTapGesture {
                         if model.overlayHasCategories { model.panelInRows = true }
                         model.focusRow(index, in: rows)
+                        model.rowEditor.stop()
                         model.activate(row)
                     }
             }
@@ -776,7 +814,10 @@ struct RowList: View {
 struct RowView: View {
     let row: PanelRow
     let focused: Bool
+    /// The pad is changing this choice: its value wears the accent and its arrows show.
+    var editing = false
     @EnvironmentObject private var model: AppModel
+    @ObservedObject private var inputMode = InputModeState.shared
     @Environment(\.scale) private var scale
     @State private var text = ""
     @Environment(\.previewRender) private var previewRender
@@ -841,6 +882,7 @@ struct RowView: View {
                     .lineLimit(1).minimumScaleFactor(0.7).frame(minWidth: 120 * scale, maxWidth: 190 * scale)
                 chevron("chevron.right", enabled: selected < options.count - 1) { set(selected + 1) }
             }
+            .modifier(EditRing(editing: editing))
         case .toggle(let value, let set):
             Switch(on: value, accent: model.accent, focused: focused) { set(!value); Sounds.shared.play(.move) }
         case .stepper(let value, let range, let step, let format, let set):
@@ -849,12 +891,13 @@ struct RowView: View {
                 Text(format(value)).font(.display(16 * scale, .semibold)).monospacedDigit().frame(minWidth: 70 * scale)
                 chevron("plus", enabled: value < range.upperBound) { set(min(range.upperBound, value + step)) }
             }
+            .modifier(EditRing(editing: editing))
         case .action:
             Image(systemName: "chevron.right").font(.system(size: 14 * scale, weight: .semibold)).opacity(0.6)
         case .info(let value):
             Text(value).font(.display(15 * scale, .medium)).opacity(0.7).textSelection(.enabled)
         case .keys(let sources, let capturing, _):
-            KeyCaps(sources: sources, capturing: capturing, focused: focused)
+            KeyCaps(sources: sources, capturing: capturing, focused: focused, prompt: row.id.hasPrefix("shortcut-pad-") ? TH.text(.pressButtons) : nil)
         case .text(let value, let set):
             if previewRender {
                 // A text field does not draw offscreen.
@@ -872,13 +915,17 @@ struct RowView: View {
         }
     }
 
-    private func chevron(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+    /// A value's arrow for the pointer. With the pad they show only while the value is edited,
+    /// where they say left and right change it.
+    @ViewBuilder private func chevron(_ symbol: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        let shown = inputMode.mode == .keyboard || editing
         Button(action: { action(); Sounds.shared.play(.move) }) {
             Image(systemName: symbol).font(.system(size: 13 * scale, weight: .bold)).frame(width: 26 * scale, height: 26 * scale).contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .opacity(enabled ? 0.85 : 0.25)
-        .disabled(!enabled)
+        .opacity(shown ? (enabled ? 0.85 : 0.25) : 0)
+        .disabled(!enabled || !shown)
+        .animation(Motion.focus, value: shown)
     }
 }
 
@@ -907,13 +954,15 @@ struct KeyCaps: View {
     let sources: [String]
     let capturing: Bool
     let focused: Bool
+    /// What the row waits for, if not a key (Settings → Shortcuts: buttons).
+    var prompt: String?
     @Environment(\.scale) private var scale
     @State private var pulse = false
 
     var body: some View {
         HStack(spacing: 6 * scale) {
             if capturing {
-                Text(T.text(.pressKey)).font(.display(15 * scale, .semibold))
+                Text(prompt ?? T.text(.pressKey)).font(.display(15 * scale, .semibold))
                     .opacity(pulse ? 0.45 : 1)
                     .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever()) { pulse = true } }
             } else if sources.allSatisfy({ $0 == Controls.unbound }) {
@@ -1027,5 +1076,26 @@ extension PadAction {
         case .rightStickUp, .rightStickDown, .rightStickLeft, .rightStickRight: return "r.joystick"
         case .stickModifier: return "tortoise"
         }
+    }
+}
+
+/// The value of a choice the pad is changing: an accent ring around it, as the console marks a
+/// value being set.
+struct EditRing: ViewModifier {
+    let editing: Bool
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 6 * scale)
+            .padding(.vertical, 3 * scale)
+            .background {
+                Capsule().fill(model.accent.opacity(editing ? 0.22 : 0))
+            }
+            .overlay {
+                Capsule().strokeBorder(model.accent, lineWidth: 2 * scale).opacity(editing ? 1 : 0)
+            }
+            .animation(Motion.focus, value: editing)
     }
 }

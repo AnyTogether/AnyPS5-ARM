@@ -774,14 +774,17 @@ extension AppModel {
             return true
         }
         if command == .home {
-            togglePlaying()
+            homeButton(hold: false)
             return true
         }
         if command == .capture {
             saveClip()
             return true
         }
+        if let handled = gameMenuCommandIfOpen(command) { return handled }
         if command == .previousGame || command == .nextGame {
+            // In panels with categories L1 and R1 change the category, wherever the focus is.
+            if overlayHasCategories { return panelCategoryStep(command == .nextGame ? 1 : -1) }
             switchGame(command == .nextGame ? 1 : -1)
             return true
         }
@@ -867,6 +870,8 @@ extension AppModel {
             return crashReportCommand(command)
         case .controllerTest:
             return controllerTestCommand(command)
+        case .quickMenu, .closeGame, .homeMenu:
+            return gameMenuCommand(command)
         case .gallery:
             galleryCommand(command)
             return true

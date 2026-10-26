@@ -589,6 +589,11 @@ extension RemoteServer: SharePadBridges {
         queue.sync { _ = reservedBridges.remove(bridge) }
     }
 
+    /// The game started with this bridge's channel and said hello on it, so a pad packet reaches it.
+    public func padChannelOpen(bridge: Int) -> Bool {
+        queue.sync { gameAddresses.indices.contains(bridge) && gameAddresses[bridge] != nil }
+    }
+
     /// The player the game says a bridge's pad is, from 1; nil while it is none.
     public func padPlayer(bridge: Int) -> Int? {
         queue.sync { gamePlayers.indices.contains(bridge) ? gamePlayers[bridge] : nil }

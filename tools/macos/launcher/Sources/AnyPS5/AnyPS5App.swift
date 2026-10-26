@@ -73,11 +73,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.titlebarAppearsTransparent = true
             window.isMovableByWindowBackground = true
             window.collectionBehavior.insert(.fullScreenPrimary)
+            // The pointer's moves tell the screens the mouse is in use (InputModeState).
+            window.acceptsMouseMovedEvents = true
             if let screen = window.screen ?? NSScreen.main {
                 window.setFrame(screen.visibleFrame, display: true)
             }
-            // A Steam shortcut's --fullscreen (Big Picture): the whole screen from the start.
-            if MainActor.assumeIsolated({ AppModel.steamLaunch.fullscreen }), !window.styleMask.contains(.fullScreen) {
+            // Full screen the first time and then as it was left (WindowStart); a Steam shortcut's
+            // --fullscreen (Big Picture) always.
+            let fullScreen = WindowStart.fullScreen(saved: Preferences.load().fullScreen, steamFullScreen: MainActor.assumeIsolated { AppModel.steamLaunch.fullscreen })
+            if fullScreen, !window.styleMask.contains(.fullScreen) {
                 window.toggleFullScreen(nil)
             }
         }
@@ -177,6 +181,7 @@ struct RootView: View {
         .onChange(of: look, initial: true) { _, now in Look.current = now }
         .onAppear {
             Input.shared.handler = { [weak model] command in model?.handle(command) ?? false }
+            Input.shared.shortcutHandler = { [weak model] action, hold in model?.shortcut(action, hold: hold) }
             Input.shared.activity = { [weak model] in (model?.changeCount ?? 0) &+ Sounds.shared.requests }
             Input.shared.scrollHandler = { [weak model] command in
                 guard let model, model.preferences.onboarded, model.overlay == nil else { return false }
@@ -266,6 +271,8 @@ struct RootView: View {
             if let game = model.selectedGame {
                 Gallery(game: game, shots: model.galleryShots).transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
+        case .quickMenu, .closeGame, .homeMenu:
+            GameMenuCard().id(model.overlay == .homeMenu ? "home" : "game").transition(.opacity)
         case nil:
             EmptyView()
         }

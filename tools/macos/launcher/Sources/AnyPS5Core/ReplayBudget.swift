@@ -7,7 +7,7 @@ import Foundation
 public enum ReplayBudget {
     /// Settings → Behaviour → Clip Length.
     public static let lengths = [30, 60, 180, 300]
-    public static let defaultLength = 30
+    public static let defaultLength = 60
     public static let videoBudget = 256 * 1024 * 1024
     /// The sound as ScreenCaptureKit hands it over: 48 kHz stereo, 32-bit float.
     public static let audioBytesPerSecond = 48000 * 2 * 4

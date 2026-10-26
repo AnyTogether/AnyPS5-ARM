@@ -4,7 +4,7 @@ import XCTest
 final class ReplayBudgetTests: XCTestCase {
     func testTheLengthsOnOffer() {
         XCTAssertEqual(ReplayBudget.lengths, [30, 60, 180, 300])
-        XCTAssertEqual(ReplayBudget.length(nil), 30)
+        XCTAssertEqual(ReplayBudget.length(nil), 60)
     }
 
     /// A length saved before the choices (15 to 120 s) is the nearest choice now.

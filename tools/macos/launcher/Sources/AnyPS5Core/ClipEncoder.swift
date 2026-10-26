@@ -2,8 +2,8 @@ import AVFoundation
 import CoreMedia
 import VideoToolbox
 
-/// Encodes frames as they come (H.264 on the Mac's media engine, a key frame each second) and
-/// keeps them with the sound in a ClipBuffer, a few megabytes a second; writes what is kept as an
+/// Encodes frames as they come (H.264 on the Mac's media engine, a key frame each second, at
+/// ReplayBudget's bit rate) and keeps them with the sound in a ClipBuffer, a few megabytes a second; writes what is kept as an
 /// MP4 with AAC sound. Frames and sound arrive on one queue; saving can come from any.
 public final class ClipEncoder: @unchecked Sendable {
     public struct Failure: Error, CustomStringConvertible {
@@ -15,7 +15,10 @@ public final class ClipEncoder: @unchecked Sendable {
     private var session: VTCompressionSession?
     private var sessionSize: (Int32, Int32) = (0, 0)
 
+    private let length: Double
+
     public init(length: Double) {
+        self.length = length
         kept = Locked(ClipBuffer(length: length))
     }
 
@@ -39,7 +42,7 @@ public final class ClipEncoder: @unchecked Sendable {
                 VTCompressionSessionCompleteFrames(session, untilPresentationTimeStamp: .invalid)
                 VTCompressionSessionInvalidate(session)
             }
-            session = ClipEncoder.makeSession(width: width, height: height)
+            session = ClipEncoder.makeSession(width: width, height: height, bitRate: ReplayBudget.bitRate(width: Int(width), height: Int(height), seconds: Int(length.rounded())))
             sessionSize = (width, height)
         }
         guard let session else { return }
@@ -102,14 +105,13 @@ public final class ClipEncoder: @unchecked Sendable {
         if writer.status != .completed { throw writer.error ?? Failure(description: "the clip could not be finished") }
     }
 
-    private static func makeSession(width: Int32, height: Int32) -> VTCompressionSession? {
+    /// `bitRate` from ReplayBudget: the clip quality, lower for the longest buffers.
+    private static func makeSession(width: Int32, height: Int32, bitRate: Int) -> VTCompressionSession? {
         var made: VTCompressionSession?
         let encoder = [kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: true] as CFDictionary
         guard VTCompressionSessionCreate(allocator: nil, width: width, height: height, codecType: kCMVideoCodecType_H264, encoderSpecification: encoder,
                                          imageBufferAttributes: nil, compressedDataAllocator: nil, outputCallback: nil, refcon: nil, compressionSessionOut: &made) == noErr,
               let session = made else { return nil }
-        // About 0.15 bit a pixel at 60 fps: 20 Mbit/s for 1920 x 1200.
-        let bitRate = Int(Double(width) * Double(height) * 60 * 0.15)
         let properties: [CFString: Any] = [
             kVTCompressionPropertyKey_RealTime: true,
             kVTCompressionPropertyKey_AllowFrameReordering: false,
