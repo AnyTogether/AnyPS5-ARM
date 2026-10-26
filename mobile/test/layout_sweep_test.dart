@@ -15,6 +15,7 @@ import 'package:anyps5_remote/ui/profile_edit.dart';
 import 'package:anyps5_remote/ui/setup_screen.dart';
 import 'package:anyps5_remote/ui/share_watch_screen.dart';
 import 'package:anyps5_remote/ui/together_screen.dart';
+import 'package:anyps5_remote/ui/together_sheet.dart';
 import 'package:anyps5_remote/ui/welcome_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -114,6 +115,26 @@ final Map<String, Future<Widget> Function(TogetherHub hub)> _screens = {
     profiles: Profiles(hub.account),
     pickPhoto: () async => null,
   ),
+  'sign in': (hub) async {
+    final signedOut = DemoAccount(hub.account.preferences)..user = null;
+    return _Opener(
+      (context) => showTogether(
+        context,
+        account: signedOut,
+        macName: 'Robin’s MacBook Pro',
+        onUseMac: () async {},
+      ),
+    );
+  },
+  'account sheet': (hub) async => _Opener(
+    (context) => showTogether(
+      context,
+      account: hub.account,
+      macName: 'Robin’s MacBook Pro',
+      onUseMac: null,
+      onOpen: (_) {},
+    ),
+  ),
   'about': (hub) async => _Opener(
     (context) => showAbout(
       context,
@@ -164,7 +185,11 @@ void main() {
             final home = await screen(h);
             final layout = await _errors(tester, language, scale, home);
             expect(layout, isEmpty, reason: layout.join('\n\n'));
-            if (name == 'about') expect(find.byType(BottomSheet), findsOne);
+            if (name == 'about' ||
+                name.contains('sheet') ||
+                name == 'sign in') {
+              expect(find.byType(BottomSheet), findsOne);
+            }
             await tester.pumpWidget(const SizedBox());
             h.dispose();
             await tester.pump(const Duration(seconds: 1));

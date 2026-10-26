@@ -198,6 +198,9 @@ class Strings {
   String get done => _text('done');
   String get editHint => _text('editHint');
   String get resetAll => _text('resetAll');
+  String get smaller => _text('smaller');
+  String get larger => _text('larger');
+  String get opacity => _text('opacity');
   String get reset => _text('reset');
   String get hide => _text('hide');
   String behavior(ButtonBehavior behavior) =>
@@ -376,6 +379,9 @@ class Strings {
     'done': 'Done',
     'editHint': 'Drag a control to move it, tap it to change it',
     'resetAll': 'Reset All',
+    'smaller': 'Smaller',
+    'larger': 'Larger',
+    'opacity': 'Opacity',
     'reset': 'Reset',
     'hide': 'Hide',
     'behavior.normal': 'Normal',
@@ -554,6 +560,9 @@ class Strings {
     'done': 'Bitti',
     'editHint': 'Taşımak için sürükle, değiştirmek için dokun',
     'resetAll': 'Hepsini Sıfırla',
+    'smaller': 'Küçült',
+    'larger': 'Büyüt',
+    'opacity': 'Saydamlık',
     'reset': 'Sıfırla',
     'hide': 'Gizle',
     'behavior.normal': 'Normal',
