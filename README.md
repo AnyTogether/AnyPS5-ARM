@@ -237,7 +237,7 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - The QR code's link works once and for two minutes; it turns into a cookie for that browser alone. The page is served on the Mac's local network address only, to the local network only, and refuses other sites and hosts; too many requests or wrong codes are slowed down.
 - The server runs only while the QR code is shown and while browsers it let in are connected (two more minutes for a reload or a locked screen), or always with **Keep browser play on**. Turning **Play from a browser** off stops it.
 - Plain HTTP on the local network: tilt (motion sensors), keeping the screen awake and vibration on iPhones need HTTPS or Safari support the page does not have. For those, use the app.
-- The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop)) serves the same page ([`tools/macos/launcher/BrowserPad/index.html`](tools/macos/launcher/BrowserPad/index.html)). The idea of an app-free browser pad was seen in AnyPlay's launcher; nothing of theirs is used.
+- The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop)) serves the same page ([`tools/macos/launcher/BrowserPad/index.html`](tools/macos/launcher/BrowserPad/index.html)).
 
 | The QR code on the Mac | The pad in a phone's browser |
 |---|---|
