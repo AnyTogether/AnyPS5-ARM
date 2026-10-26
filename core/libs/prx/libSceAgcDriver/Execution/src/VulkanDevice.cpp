@@ -272,6 +272,10 @@ private:
 
 // The [present] line's counters (see the header); mutated under State::presentMutex.
 VulkanDevice::PresentStatistics presentCounters{};
+// Presents the swapchain took (vkQueuePresentKHR succeeded), the game's frames and generated ones,
+// and the generated ones among them, for the overlay to show what went to the window.
+std::atomic<std::uint64_t> framesPresented{0};
+std::atomic<std::uint64_t> generatedPresented{0};
 
 }
 
@@ -370,6 +374,8 @@ struct VulkanDevice::State {
     bool frameGenerationShown = false;
     bool frameGenerationPaused = false;
     bool realPending = false;
+    // Whether the presentation QueuePresent hands over next carries a generated frame.
+    bool queueGenerated = false;
     VkFence realFence = VK_NULL_HANDLE;
     bool realAcquired = false;
     std::uint32_t realIndex = 0;
@@ -3746,6 +3752,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         pipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         Graphics::Recorder::CountBarriers(CommandClass::PresentBlit);
     }
+    bool generated = false;
     if (state->frameGeneration && !clearOnly && !state->frameGenerationFailed) {
         // The frame as it goes to the window is kept for the frame generated before the next one.
         // A changed window or format makes a new generator; Resize waited for the device first.
@@ -3777,7 +3784,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
             if (generate && state->frameGenerator->Kept() >= 2) {
                 state->frameGenerator->RecordBetween(commands, barrier.image);
                 state->realPending = true;
-                ++presentCounters.generated;
+                generated = true;
             }
         } catch (const std::exception& error) {
             state->frameGenerationFailed = true;
@@ -3819,6 +3826,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         state->presentCursor = (state->presentCursor + 1) % state->presentSlots.size();
         state->queuePending = true;
         state->queueIndex = index;
+        state->queueGenerated = generated;
         ++presentCounters.presents;
         if (auto* frame = PerformanceContext::Current()) {
             frame->NoteBlit(batchesAtBlit, lastSubmittedAt, submittedAt);
@@ -3853,9 +3861,15 @@ VulkanDevice::PresentStatistics VulkanDevice::PresentCounts() {
     return presentCounters;
 }
 
-// Frames generated so far (FrameGeneration.hpp), for the overlay to count beside the game's.
+// Generated frames presented so far (FrameGeneration.hpp), for the overlay to count beside the
+// game's: counted when the swapchain took them, not when they were drawn.
 extern "C" std::uint64_t AgcDriverGeneratedFrames_nid_postfix() {
-    return presentCounters.generated;
+    return generatedPresented.load(std::memory_order_relaxed);
+}
+
+// Every frame the swapchain took so far, the game's and generated ones: what went to the window.
+extern "C" std::uint64_t AgcDriverPresentedFrames_nid_postfix() {
+    return framesPresented.load(std::memory_order_relaxed);
 }
 
 bool VulkanDevice::PresentWaitsForSlots(const DisplayBuffer* buffer) const {
@@ -3928,7 +3942,9 @@ bool VulkanDevice::AcquireRealImage() {
     }
     check(state->DeviceFunction<PFN_vkResetFences>("vkResetFences")(state->device, 1, &state->realFence), "vkResetFences frame");
     std::uint32_t index = 0;
-    // The image the generated frame took is queued; the next one frees at the next vertical blank.
+    // The image the generated frame took is queued; with three images another is usually free at
+    // once, so this does not wait for a vertical blank: the caller paces the present
+    // (FrameGenerationPacing.hpp).
     const auto waitStart = std::chrono::steady_clock::now();
     const auto acquired = state->DeviceFunction<PFN_vkAcquireNextImageKHR>("vkAcquireNextImageKHR")(state->device, state->swapchain, std::numeric_limits<std::uint64_t>::max(), VK_NULL_HANDLE, state->realFence, &index);
     const auto acquiredAt = std::chrono::steady_clock::now();
@@ -3973,6 +3989,7 @@ void VulkanDevice::QueueRealFrame() {
     present.pSwapchains = &state->swapchain;
     present.pImageIndices = &index;
     const auto presented = state->DeviceFunction<PFN_vkQueuePresentKHR>("vkQueuePresentKHR")(state->queue, &present);
+    if (presented == VK_SUCCESS || presented == VK_SUBOPTIMAL_KHR) framesPresented.fetch_add(1, std::memory_order_relaxed);
     if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) state->extent = {0, 0};
     else check(presented, "vkQueuePresentKHR frame");
 }
@@ -3990,6 +4007,11 @@ void VulkanDevice::QueuePresent() {
     present.pSwapchains = &state->swapchain;
     present.pImageIndices = &index;
     const auto presented = state->DeviceFunction<PFN_vkQueuePresentKHR>("vkQueuePresentKHR")(state->queue, &present);
+    if (presented == VK_SUCCESS || presented == VK_SUBOPTIMAL_KHR) {
+        framesPresented.fetch_add(1, std::memory_order_relaxed);
+        if (state->queueGenerated) generatedPresented.fetch_add(1, std::memory_order_relaxed);
+    }
+    state->queueGenerated = false;
     if (presented == VK_ERROR_OUT_OF_DATE_KHR || presented == VK_SUBOPTIMAL_KHR) state->extent = {0, 0};
     else check(presented, "vkQueuePresentKHR");
     timing.Mark("queue_present");

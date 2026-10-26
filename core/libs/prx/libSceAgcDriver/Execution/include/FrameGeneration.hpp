@@ -15,7 +15,8 @@ namespace AgcDriver {
 // before the second. Every presented frame is kept as it went to the window (two at a time); the
 // motion between the last two is found on the GPU, block by block, from their brightness at 1/16
 // and 1/4 of their size, and the frame halfway along it is drawn over the game's swapchain image,
-// which is presented; the game's frame follows in the next image, copied from the one kept.
+// which is presented; the game's frame follows in the next image, copied from the one kept, half
+// the game's frame interval later (FrameGenerationPacing.hpp).
 // Nothing comes from the game but its frames, and one swapchain image is held at a time, all a
 // three-image swapchain allows.
 bool FrameGenerationRequested(const char* value);

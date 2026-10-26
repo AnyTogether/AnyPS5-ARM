@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 extern "C" std::uint64_t AgcDriverGeneratedFrames_nid_postfix();
+extern "C" std::uint64_t AgcDriverPresentedFrames_nid_postfix();
 extern "C" bool AgcDriverMinimalOverlayShown_nid_postfix();
 extern "C" int AgcDriverOverlayCorner_nid_postfix();
 extern "C" std::uint64_t AgcDriverProcessFootprint_nid_postfix();
@@ -58,8 +59,10 @@ double CpuSeconds() {
 }
 
 struct Figures {
+    // Frames the window was given per second: the game's and generated ones, as presented.
     double fps = 0;
-    // Frames generated between the game's, per second (frame generation); fps counts them too.
+    // Generated frames presented between the game's, per second (frame generation); fps counts
+    // them too.
     double generated = 0;
     double frameMs = 0;
     std::optional<double> gpu;
@@ -72,6 +75,7 @@ struct Sampler {
     std::uint64_t frames = 0;
     double cpuSince = CpuSeconds();
     std::uint64_t generatedSince = AgcDriverGeneratedFrames_nid_postfix();
+    std::uint64_t presentedSince = AgcDriverPresentedFrames_nid_postfix();
 
     // Counts a present; every Interval, the figures since the last ones.
     std::optional<Figures> Present() {
@@ -83,10 +87,14 @@ struct Sampler {
         static const double cores = static_cast<double>(std::max(1L, sysconf(_SC_NPROCESSORS_ONLN)));
         Figures figures;
         const auto generated = AgcDriverGeneratedFrames_nid_postfix();
+        const auto presented = AgcDriverPresentedFrames_nid_postfix();
         figures.generated = static_cast<double>(generated - generatedSince) / seconds;
-        figures.fps = static_cast<double>(frames) / seconds + figures.generated;
+        // The presents the swapchain took; the game's flips plus the generated ones where none
+        // were counted (a window the driver does not present to).
+        figures.fps = presented != presentedSince ? static_cast<double>(presented - presentedSince) / seconds : static_cast<double>(frames) / seconds + figures.generated;
         figures.frameMs = frames > 0 ? seconds * 1000.0 / static_cast<double>(frames) : 0;
         generatedSince = generated;
+        presentedSince = presented;
         figures.gpu = GpuPercent();
         figures.cpu = std::clamp((cpu - cpuSince) / seconds / cores * 100.0, 0.0, 100.0);
         if (const auto footprint = AgcDriverProcessFootprint_nid_postfix(); footprint != 0) figures.memory = footprint;
@@ -101,6 +109,7 @@ struct Sampler {
         frames = 0;
         cpuSince = CpuSeconds();
         generatedSince = AgcDriverGeneratedFrames_nid_postfix();
+        presentedSince = AgcDriverPresentedFrames_nid_postfix();
     }
 };
 

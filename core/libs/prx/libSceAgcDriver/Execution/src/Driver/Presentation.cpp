@@ -2,6 +2,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Driver/Driver.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Diagnostics.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver/Queues/WorkerAffinity.hpp"
+#include "prx/libSceAgcDriver/Execution/include/FrameGenerationPacing.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include <algorithm>
@@ -19,33 +20,52 @@ namespace AgcDriver::DriverDetail {
 
 namespace {
 
-// Frame generation: the game's frame that follows a generated one waits for the next vertical
-// blank before its swapchain image is free. This thread waits for it instead of the flip, so the
-// game goes on to its next frame meanwhile; the next flip waits for it before acquiring, as only
-// one swapchain image is held at a time.
+// Frame generation: the game's frame that follows a generated one goes half the game's frame
+// interval after it (FrameGenerationPacing.hpp). This thread acquires its image, waits for that
+// time and presents it, so the game goes on to its next frame meanwhile; the next flip waits for
+// it before acquiring, as only one swapchain image is held at a time, and a flip that comes
+// sooner has it presented at once.
 class FollowingFrame {
 public:
-    void Start(std::shared_ptr<VulkanDevice> device) {
+    void Start(std::shared_ptr<VulkanDevice> device, std::chrono::steady_clock::time_point at) {
         std::lock_guard lock(mutex);
         if (!thread.joinable()) thread = std::thread([this] { run(); });
         job = std::move(device);
+        due = at;
+        hurry = false;
         changed.notify_all();
     }
 
     void Wait() {
         std::unique_lock lock(mutex);
+        if (job != nullptr) {
+            hurry = true;
+            changed.notify_all();
+        }
         changed.wait(lock, [this] { return job == nullptr; });
     }
 
 private:
     void run() {
+        static const bool trace = std::getenv("APS5_FG_TRACE") != nullptr;
+        static int traced = 0;
         std::unique_lock lock(mutex);
         while (true) {
             changed.wait(lock, [this] { return job != nullptr; });
             auto device = job;
+            const auto at = due;
             lock.unlock();
             try {
                 if (device->AcquireRealImage()) {
+                    lock.lock();
+                    changed.wait_until(lock, at, [this] { return hurry; });
+                    const bool hurried = hurry;
+                    lock.unlock();
+                    if (trace && traced < 400) {
+                        ++traced;
+                        const double late = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - at).count();
+                        std::fprintf(stderr, "[fg] game's frame %s, %.1f ms from its time\n", hurried ? "hurried by the next flip" : "on time", late);
+                    }
                     GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Present);
                     std::lock_guard gpu(GuestMemory::GpuMutex());
                     device->QueueRealFrame();
@@ -56,6 +76,7 @@ private:
             device.reset();
             lock.lock();
             job.reset();
+            hurry = false;
             changed.notify_all();
         }
     }
@@ -63,6 +84,8 @@ private:
     std::mutex mutex;
     std::condition_variable changed;
     std::shared_ptr<VulkanDevice> job;
+    std::chrono::steady_clock::time_point due{};
+    bool hurry = false;
     std::thread thread;
 };
 
@@ -233,7 +256,10 @@ void Driver::Present(const PresentationWindow& window, const DisplayBuffer* buff
             presenting->QueuePresent();
             timing.Mark("queue_present");
         }
-        if (presenting != nullptr && presenting->RealFramePending()) followingFrame().Start(presenting);
+        // A generated frame just went: the game's own follows half a frame interval later.
+        static FrameGenerationPacer pacer;
+        if (presenting != nullptr && presenting->RealFramePending()) followingFrame().Start(presenting, pacer.FollowAt(std::chrono::steady_clock::now()));
+        else pacer.Skip();
         gpuReady(context);
         timing.Mark("release_and_callback");
         TracyZone::MarkFrame();
