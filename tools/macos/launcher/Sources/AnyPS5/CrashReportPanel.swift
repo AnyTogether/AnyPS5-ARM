@@ -58,13 +58,14 @@ extension AppModel {
         let controllers = Controllers.shared.reportLines
         // The computer's name from SystemConfiguration: Host.current() can wait on the network.
         let names = [SCDynamicStoreCopyComputerName(nil, nil) as String?, togetherUser?.handle, togetherUser?.displayName].compactMap { $0 }
+        let secrets = allSecrets
         Task.detached(priority: .userInitiated) {
             let session = Diagnosis.lastSession(GameLog.tail(GameLog.file(titleID: game.titleID), bytes: 32 << 20))
             let since = facts?.started ?? Date().addingTimeInterval(-86_400)
             let crash = Diagnosis.crashReport(since: since, bundleIdentifier: game.bundleIdentifier, pid: facts?.pid)
             var report = SessionReport(gameName: game.name, titleID: game.titleID, gameVersion: game.version, settings: settings,
                                        system: .current(displayHz: display), launcherVersion: AppModel.launcherVersion, session: session,
-                                       privacy: .current(names: names, secrets: TokenStore().secrets))
+                                       privacy: .current(names: names, secrets: secrets))
             report.updateChannel = channel
             report.unlockedWith = unlockedWith
             report.engineNow = engineNow

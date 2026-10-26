@@ -29,7 +29,8 @@ enum LevelPreviews {
             }
         }
         let ago = { (hours: Double) in Date().addingTimeInterval(-hours * 3600) }
-        let names = found.prefix(4).map { ($0.titleID, $0.name) } + [("PPSA09999", "Astro Bot"), ("PPSA08888", "Stray")]
+        // Five names at least, a library with fewer games (or none) filled up with made-up ones.
+        let names = found.prefix(4).map { ($0.titleID, $0.name) } + [("PPSA09999", "Astro Bot"), ("PPSA08888", "Stray"), ("PPSA07777", "Returnal"), ("PPSA06666", "Sackboy"), ("PPSA05555", "Kena")]
         let library: [TogetherPlayedGame] = names.prefix(4).enumerated().map { index, game in
             TogetherPlayedGame(titleId: game.0, names: ["en": game.1], iconUrl: nil, lastPlayedAt: ago(Double(index * 30 + 2)), secondsPlayed: [151_200, 26_100, 2_700, 72_000][index],
                                trophiesEarned: [31, 9, 1, 12][index], trophiesTotal: [48, 40, nil, 41][index], progress: [64, 22, nil, 29][index], points: [1_830, 420, 15, 600][index])

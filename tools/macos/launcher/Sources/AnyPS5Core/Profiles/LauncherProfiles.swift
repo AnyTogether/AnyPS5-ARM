@@ -153,11 +153,14 @@ public final class ProfileStore: @unchecked Sendable {
 
     /// A new profile; the first one also owns the saves already in the games' folders.
     @discardableResult
-    public func add(name: String, mode: LauncherProfile.Mode, account: LauncherProfile.Account? = nil) -> LauncherProfile {
+    /// `id` is the one a profile signing in was given before it was made.
+    public func add(name: String, mode: LauncherProfile.Mode, account: LauncherProfile.Account? = nil, id: String? = nil) -> LauncherProfile {
         let used = Set(book.profiles.map(\.avatar.color))
         let color = (0 ..< LauncherProfile.paletteSize).first { !used.contains($0) } ?? book.profiles.count % LauncherProfile.paletteSize
         let first = book.profiles.isEmpty
-        let profile = LauncherProfile(id: first && book.legacyOwner == nil ? LauncherProfile.legacyID : UUID().uuidString.lowercased(), name: name, avatar: .init(color: color), mode: mode, account: account)
+        let made = id.flatMap { candidate in profile(candidate) == nil ? candidate : nil }
+            ?? (first && book.legacyOwner == nil ? LauncherProfile.legacyID : UUID().uuidString.lowercased())
+        let profile = LauncherProfile(id: made, name: name, avatar: .init(color: color), mode: mode, account: account)
         book.profiles.append(profile)
         if first {
             book.current = profile.id

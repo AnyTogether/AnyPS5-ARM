@@ -183,6 +183,7 @@ struct RootView: View {
             Input.shared.handler = { [weak model] command in model?.handle(command) ?? false }
             Input.shared.shortcutHandler = { [weak model] action, hold in model?.shortcut(action, hold: hold) }
             Input.shared.activity = { [weak model] in (model?.changeCount ?? 0) &+ Sounds.shared.requests }
+            Input.shared.rightClickHandler = { [weak model] in model?.homeRightClick() ?? false }
             Input.shared.scrollHandler = { [weak model] command in
                 guard let model, model.preferences.onboarded, model.overlay == nil else { return false }
                 model.moveSelection(command == .left ? -1 : 1)
@@ -271,8 +272,14 @@ struct RootView: View {
             if let game = model.selectedGame {
                 Gallery(game: game, shots: model.galleryShots).transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
-        case .quickMenu, .closeGame, .homeMenu:
-            GameMenuCard().id(model.overlay == .homeMenu ? "home" : "game").transition(.opacity)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu:
+            GameMenuCard().id(model.overlay == .homeMenu ? "home" : model.overlay == .profileMenu ? "options" : "game").transition(.opacity)
+        case .profilePicker:
+            ProfilePickerView().transition(.opacity.combined(with: .scale(scale: 1.02)))
+        case .addProfile:
+            AddProfileView().transition(.opacity)
+        case .signIn:
+            ProfileSignInView().transition(.opacity.combined(with: .scale(scale: 1.02)))
         case nil:
             EmptyView()
         }

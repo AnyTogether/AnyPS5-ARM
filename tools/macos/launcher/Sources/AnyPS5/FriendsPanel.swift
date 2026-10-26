@@ -39,17 +39,19 @@ extension AppModel {
             rows.append(PanelRow(id: "friends-none", title: T.text(.friendsNone), detail: T.format(.friendsYourHandle, togetherUser?.handle ?? ""), symbol: "person.2", kind: .info("")))
         }
         for friend in togetherFriends {
-            rows.append(PanelRow(id: "friend-\(friend.userId)", title: friend.displayName, detail: "@\(friend.handle) · \(presenceText(friend.presence))",
+            // Their friends-only name and picture when they set them, the handle always beside.
+            let identity = shown(friend)
+            rows.append(PanelRow(id: "friend-\(friend.userId)", title: identity.name, detail: "\(handleLine(friend)) · \(presenceText(friend.presence))",
                                  symbol: friend.presence?.playing == true ? "gamecontroller.fill" : friend.presence?.online == true ? "circle.fill" : "circle",
                                  kind: .action(destructive: false) { [weak self] in
-                                     self?.openProfile(friend.handle, card: TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar))
+                                     self?.openProfile(friend.handle, card: TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar,
+                                                                                           privateName: friend.privateName, privateAvatar: friend.privateAvatar))
                                  },
-                                 person: PanelPerson(name: friend.displayName, avatar: friend.avatar,
-                                                     status: friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline, level: friend.level)))
+                                 person: panelPerson(friend, status: friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline, level: friend.level)))
             // Online friends can be called, unless the user is in a call with them already.
             if friend.presence?.online == true, callFriend?.userId != friend.userId, familyAllows(.voiceChat) {
                 let person = TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar)
-                rows.append(PanelRow(id: "friend-call-\(friend.userId)", title: T.format(.callFriend, friend.displayName), symbol: "phone",
+                rows.append(PanelRow(id: "friend-call-\(friend.userId)", title: T.format(.callFriend, identity.name), symbol: "phone",
                                      kind: .action(destructive: false) { [weak self] in self?.startCall(with: person) }))
             }
         }

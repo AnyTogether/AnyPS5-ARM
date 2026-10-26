@@ -870,8 +870,14 @@ extension AppModel {
             return crashReportCommand(command)
         case .controllerTest:
             return controllerTestCommand(command)
-        case .quickMenu, .closeGame, .homeMenu:
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu:
             return gameMenuCommand(command)
+        case .profilePicker:
+            return pickerCommand(command)
+        case .addProfile:
+            return modeChoiceCommand(command)
+        case .signIn:
+            return signInCommand(command)
         case .gallery:
             galleryCommand(command)
             return true
@@ -899,6 +905,11 @@ extension AppModel {
             return true
         case nil:
             break
+        }
+        // Options (Start, △, O) on Home: the game's settings, Switch Profile, online or offline.
+        if command == .options {
+            openProfileMenu()
+            return true
         }
         guard let game = selectedGame else {
             if command == .select { pickGamesFolder() }
@@ -936,7 +947,7 @@ extension AppModel {
         case (.actions(0), .select): primaryAction(game)
         case (.actions(1), .select) where actionCount == 3: open(.trophies)
         case (.actions, .select): open(.gameSettings)
-        case (_, .options): open(.gameSettings)
+        case (_, .options): openProfileMenu()
         default: break
         }
         return true

@@ -500,6 +500,7 @@ enum PreviewRenderer {
         UpdatePreviews.run(preferences, found, root, still, output)
         ControllerPreviews.run(preferences, found, root, still, output)
         HomeMenuPreviews.run(preferences, found, root, still, output)
+        ProfilePreviews.run(preferences, found, root, still, output)
         print("rendered into \(output.path)")
     }
 

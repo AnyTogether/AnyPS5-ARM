@@ -25,7 +25,7 @@ extension AppModel {
     /// The party's Play Together game as an offer to join.
     func togetherOffer(_ together: TogetherPartyTogether, in party: TogetherParty) -> PlayTogetherOffer {
         let host = party.members.first { $0.userId == together.hostId }
-        return PlayTogetherOffer(sessionId: together.sessionId, hostId: together.hostId, hostName: host?.displayName ?? "", titleId: together.titleId,
+        return PlayTogetherOffer(sessionId: together.sessionId, hostId: together.hostId, hostName: host.map { shown($0).name } ?? "", titleId: together.titleId,
                                  gameVersion: together.gameVersion, engineBuild: together.engineBuild, versionRule: together.versionRule,
                                  players: together.players.count, capacity: together.capacity)
     }
@@ -259,8 +259,11 @@ extension AppModel {
             if userId == together.hostId { details.append(PT.text(.host)) }
             details.append(userId == me ? PT.text(.you) : mine ? linkText(userId) : PT.text(.inGame))
             if together.versionOverrides.contains(userId) { details.append(PT.text(.triedAnyway)) }
-            rows.append(PanelRow(id: "together-player-\(userId)", title: person.displayName, detail: details.joined(separator: " · "), symbol: "gamecontroller",
-                                 kind: .info(""), person: PanelPerson(name: person.displayName, avatar: person.avatar, status: .playing)))
+            // A friend's private name with their handle; the user's own and strangers' public ones.
+            let identity = userId == me ? nil : shown(person)
+            if let identity { details.insert(handleLine(person), at: 0) }
+            rows.append(PanelRow(id: "together-player-\(userId)", title: identity?.name ?? person.displayName, detail: details.joined(separator: " · "), symbol: "gamecontroller",
+                                 kind: .info(""), person: identity == nil ? PanelPerson(name: person.displayName, avatar: person.avatar, status: .playing) : panelPerson(person, status: .playing)))
         }
         if !mine {
             let verdict = PlayTogetherCheck.verdict(offer, signedIn: true, copies: togetherCopies(), running: running?.game.name)

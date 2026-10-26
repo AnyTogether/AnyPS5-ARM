@@ -12,6 +12,8 @@ final class Input {
     var handler: ((Command) -> Bool)?
     /// Scroll wheel turns as left and right moves, where the screen wants them.
     var scrollHandler: ((Command) -> Bool)?
+    /// A right click on Home opens the Options menu; true when it took the click.
+    var rightClickHandler: (() -> Bool)?
     /// Takes every key while a binding waits for one (the controls panel); returns whether it used it.
     var capture: ((NSEvent) -> Bool)? {
         didSet { if capture != nil { hold(nil) } }
@@ -81,7 +83,12 @@ final class Input {
             }
             return self.dispatch(command, repeat: false) ? nil : event
         }
-        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .mouseMoved]) { event in
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .mouseMoved]) { [weak self] event in
+            if event.type == .rightMouseDown, !Input.belongsToPanel(event), self?.rightClickHandler?() == true {
+                Feel.shared.usedKeyboard()
+                InputModeState.shared.usedKeyboard()
+                return nil
+            }
             if event.type == .mouseMoved {
                 InputModeState.shared.pointerMoved(hypot(event.deltaX, event.deltaY))
             } else {

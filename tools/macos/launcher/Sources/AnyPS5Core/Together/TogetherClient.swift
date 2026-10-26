@@ -151,6 +151,9 @@ public final class TokenStore: @unchecked Sendable {
         return data.flatMap { try? JSONDecoder.together.decode(Saved.self, from: $0) }
     }
 
+    /// Whom the kept session is for.
+    public var user: TogetherUser? { load()?.user }
+
     /// The tokens kept now, for a crash report to take out wherever they appear.
     public var secrets: [String] {
         load().map { [$0.accessToken, $0.refreshToken] } ?? []

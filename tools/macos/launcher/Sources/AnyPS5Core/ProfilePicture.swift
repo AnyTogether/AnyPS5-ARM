@@ -8,7 +8,8 @@ import UniformTypeIdentifiers
 /// as the account's avatar.
 public enum ProfilePicture {
     public static let side = 512
-    public static let file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    /// The playing launcher profile's picture (each profile has its own; the first keeps this one).
+    nonisolated(unsafe) public static var file = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("AnyPS5/profile.png")
 
     /// AnyTogether's limits for PUT /me/avatar.
