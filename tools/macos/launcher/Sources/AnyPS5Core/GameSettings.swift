@@ -50,6 +50,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var engine: String?
     /// Detailed logging (TraceMode) on every start; nil is off.
     public var trace: Bool?
+    /// Gyro aiming (Controls → Gyro Aiming, ANYPS5_GYRO_AIM); nil is off.
+    public var gyro: GyroAiming?
 
     public init() {}
 
@@ -81,6 +83,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         if let fonts { environment["ANYPS5_SYSTEM_FONTS"] = fonts.path }
         if shaderCache == false { environment["ANYPS5_NO_SHADER_CACHE"] = "1" }
         if frameGeneration == true { environment["ANYPS5_FRAME_GEN"] = "1" }
+        if let aim = gyro?.environment { environment["ANYPS5_GYRO_AIM"] = aim }
         if trace || self.trace == true { environment.merge(TraceMode.environment) { own, _ in own } }
         return environment
     }

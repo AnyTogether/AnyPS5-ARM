@@ -87,7 +87,11 @@ std::uint32_t ScriptedButtons() {
 PadInput::PadInput() : PadInput(Pad::LoadInputMapping()) {
 }
 
-PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)) {
+PadInput::PadInput(Pad::InputConfiguration configuration) : keyboardMouse(std::move(configuration)), gyro(GyroAim::FromEnvironment()) {
+    if (gyro) {
+        APS5_LOG_OUT("Pad: gyro aiming on (sensitivity %.1f, deadzone %.0f deg/s, %s)", gyro->sensitivity, gyro->deadzone,
+            gyro->activation == GyroAim::Activation::Always ? "always" : gyro->activation == GyroAim::Activation::WhileL2 ? "while L2 is held" : "while touching");
+    }
     for (auto& channel : RemotePad::OpenAllFromEnvironment()) remotes.push_back(Remote{std::move(channel)});
     openAvailableControllers();
 }
@@ -153,9 +157,20 @@ void PadInput::leave(std::uint32_t device) {
     APS5_LOG_OUT("Pad: player %d left", player + 1);
 }
 
+// Gyro aiming: the device's turn on its right stick, each device with its own gravity.
+PadInputState PadInput::aimed(std::optional<GyroAim::Aim>& aim, std::chrono::steady_clock::time_point& at, const PadInputState& state) {
+    if (!gyro) return state;
+    if (!aim) aim.emplace(*gyro);
+    const auto now = std::chrono::steady_clock::now();
+    const double seconds = at == std::chrono::steady_clock::time_point{} ? 0.0 : std::chrono::duration<double>(now - at).count();
+    at = now;
+    return aim->Apply(state, std::min(seconds, 0.25));
+}
+
 void PadInput::sampleControllers() {
     for (auto& controller : controllers) {
         controller.state = sampleController(controller.handle);
+        controller.aimed = aimed(controller.aim, controller.aimedAt, controller.state);
         if (controller.helping) continue;
         const auto id = static_cast<std::uint32_t>(controller.id);
         const bool seated = seats.Of(id) >= 0;
@@ -223,7 +238,7 @@ void PadInput::applyOutput() {
         for (auto& controller : controllers) {
             if (playerOf(controller) != player) continue;
             controller.outputPending = true;
-            if (motionChanged) enableSensors(controller, fetched.motionEnabled);
+            if (motionChanged) enableSensors(controller, sensorsWanted(fetched.motionEnabled));
         }
         for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
             const bool helps = player == 0 && remotes[channel].helping;
@@ -232,8 +247,8 @@ void PadInput::applyOutput() {
     }
     for (auto& controller : controllers) {
         const int player = playerOf(controller);
-        if (player >= 0 && controller.sensors != outputs[static_cast<std::size_t>(player)].state.motionEnabled) {
-            enableSensors(controller, outputs[static_cast<std::size_t>(player)].state.motionEnabled);
+        if (player >= 0 && controller.sensors != sensorsWanted(outputs[static_cast<std::size_t>(player)].state.motionEnabled)) {
+            enableSensors(controller, sensorsWanted(outputs[static_cast<std::size_t>(player)].state.motionEnabled));
         }
         applyOutput(controller, player >= 0 ? outputs[static_cast<std::size_t>(player)].state : PadOutputState{}, player);
     }
@@ -438,6 +453,7 @@ void PadInput::updateRemotes() {
             remote.channel->SetPlayer(0);
         }
         remote.state = RemotePad::Current(remote.last, remote.seen, now);
+        remote.aimed = aimed(remote.aim, remote.aimedAt, remote.state);
     }
 }
 
@@ -531,18 +547,18 @@ void PadInput::publish(std::uint64_t frame) {
     for (int player = 0; player < PAD_MAX_CONTROLLERS; ++player) {
         std::optional<PadInputState> device;
         for (const auto& controller : controllers) {
-            if (!controller.helping && seats.Of(static_cast<std::uint32_t>(controller.id)) == player) device = controller.state;
+            if (!controller.helping && seats.Of(static_cast<std::uint32_t>(controller.id)) == player) device = controller.aimed;
         }
         for (std::size_t channel = 0; channel < remotes.size(); ++channel) {
-            if (!remotes[channel].helping && seats.Of(RemotePad::RemoteDevice(channel)) == player) device = RemotePad::Merge(device.value_or(PadInputState{}), remotes[channel].state);
+            if (!remotes[channel].helping && seats.Of(RemotePad::RemoteDevice(channel)) == player) device = RemotePad::Merge(device.value_or(PadInputState{}), remotes[channel].aimed);
         }
         if (player == 0) {
             // Assist: every helper's input joins the first player's.
             for (const auto& controller : controllers) {
-                if (controller.helping) device = RemotePad::Assisted(device.value_or(PadInputState{}), controller.state);
+                if (controller.helping) device = RemotePad::Assisted(device.value_or(PadInputState{}), controller.aimed);
             }
             for (const auto& remote : remotes) {
-                if (remote.helping) device = RemotePad::Assisted(device.value_or(PadInputState{}), remote.state);
+                if (remote.helping) device = RemotePad::Assisted(device.value_or(PadInputState{}), remote.aimed);
             }
         }
         if (player != 0) {

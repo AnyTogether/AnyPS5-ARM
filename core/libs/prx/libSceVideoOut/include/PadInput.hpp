@@ -7,6 +7,7 @@
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libSceVideoOut/include/PadOutputPacing.hpp"
+#include "prx/libSceVideoOut/include/GyroAim.hpp"
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
 #include <array>
 #include <chrono>
@@ -43,6 +44,10 @@ private:
         TriggerEffectCache triggerEffect;
         // Helps the first player (assist) rather than holding a seat.
         bool helping = false;
+        // What the game reads: the state with gyro aiming's turn on the right stick.
+        PadInputState aimed{};
+        std::optional<GyroAim::Aim> aim;
+        std::chrono::steady_clock::time_point aimedAt{};
     };
     struct Remote {
         std::unique_ptr<RemotePad::Channel> channel;
@@ -51,6 +56,9 @@ private:
         PadInputState state{};
         // The launcher marks it as helping the first player (byte 13 = AssistSeat).
         bool helping = false;
+        PadInputState aimed{};
+        std::optional<GyroAim::Aim> aim;
+        std::chrono::steady_clock::time_point aimedAt{};
     };
     struct Output {
         std::uint32_t sequence = 0;
@@ -73,6 +81,8 @@ private:
     void leave(std::uint32_t device);
     void updatePrompt(std::chrono::steady_clock::time_point now);
     void setControllersHelp(bool help);
+    PadInputState aimed(std::optional<GyroAim::Aim>& aim, std::chrono::steady_clock::time_point& at, const PadInputState& state);
+    bool sensorsWanted(bool motionEnabled) const { return motionEnabled || gyro.has_value(); }
     int playerOf(const Controller& controller) const;
     void type(const RemotePad::TypedText& text);
 
@@ -90,6 +100,8 @@ private:
     std::chrono::steady_clock::time_point promptSent{};
     // The launcher's assist flags (RemotePad::AssistControllers).
     bool controllersHelp = false;
+    // Gyro aiming for every device (ANYPS5_GYRO_AIM), nil while off.
+    std::optional<GyroAim::Settings> gyro;
     VideoOutTelemetry::PadChangeFilter telemetryFilter;
 };
 

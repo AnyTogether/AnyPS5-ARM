@@ -12,6 +12,7 @@ add_library(libSceVideoOut SHARED EXCLUDE_FROM_ALL
         ${CMAKE_CURRENT_SOURCE_DIR}/src/ImeTextInput.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/InputMapping.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/RemotePad.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/GyroAim.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/KeyboardMouse.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/HostHdrProbe.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/../libkernel/Time/TimedWait.cpp
@@ -178,6 +179,18 @@ if(BUILD_TESTING)
         configure_windows_unwind(remote_pad_tests)
     endif()
     add_test(NAME remote_pad COMMAND remote_pad_tests)
+    add_test_executable(gyro_aim_tests tests/GyroAim.cpp src/GyroAim.cpp)
+    target_include_directories(gyro_aim_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    set_target_properties(gyro_aim_tests PROPERTIES CXX_EXTENSIONS OFF)
+    if(WIN32)
+        target_link_libraries(gyro_aim_tests PRIVATE libc)
+        configure_windows_unwind(gyro_aim_tests)
+    endif()
+    add_test(NAME gyro_aim COMMAND gyro_aim_tests)
+    set_tests_properties(gyro_aim PROPERTIES TIMEOUT 30)
+    if(WIN32)
+        set_tests_properties(gyro_aim PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
     set_tests_properties(remote_pad PROPERTIES TIMEOUT 30)
     if(WIN32)
         set_tests_properties(pad_input_mapping remote_pad PROPERTIES ENVIRONMENT_MODIFICATION

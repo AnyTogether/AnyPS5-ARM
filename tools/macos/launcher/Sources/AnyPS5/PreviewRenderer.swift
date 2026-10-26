@@ -104,6 +104,17 @@ enum PreviewRenderer {
         }
         render(preferences, found, root, still, output.appendingPathComponent("game-settings.png")) { model in signedIn(model); model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("controls.png")) { model in signedIn(model); model.overlay = .controls; model.panelInRows = true; model.panelRow = 1 }
+        render(preferences, found, root, still, output.appendingPathComponent("controls-gyro.png")) { model in
+            signedIn(model)
+            if let game = model.selectedGame {
+                var aim = GyroAiming()
+                aim.enabled = true
+                aim.sensitivity = 15
+                aim.activation = .l2
+                model.update(game) { $0.gyro = aim }
+            }
+            model.overlay = .controls; model.panelInRows = true; model.panelRow = 1
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls-game.png")) { model in
             model.previewGameControls([.cross: ["Jump"], .circle: ["Cancel", "Drop"], .square: ["Interact primary"], .triangle: ["Meow"], .r2: ["Sprint"],
                                        .leftStickUp: ["Move forward"], .options: ["Open menu"]])
