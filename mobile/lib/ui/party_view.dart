@@ -1,21 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../discover_strings.dart';
+import '../join_strings.dart';
 import '../strings.dart';
+import '../together/join_codes.dart';
 import '../together/parties.dart';
 import '../together/people.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
 import '../together/voice.dart';
 import 'find_players_view.dart';
+import 'join_code_view.dart';
 import 'together_widgets.dart';
 
 /// The party: without one, a way to start one and the invites and friends' open parties to
 /// join; in one, everyone in it on the left, inviting friends and leaving on the right.
 class PartyPane extends StatefulWidget {
-  const PartyPane({super.key, required this.hub});
+  const PartyPane({super.key, required this.hub, this.gameName});
 
   final TogetherHub hub;
+  final String? Function(String titleId)? gameName;
 
   @override
   State<PartyPane> createState() => _PartyPaneState();
@@ -24,6 +28,7 @@ class PartyPane extends StatefulWidget {
 class _PartyPaneState extends State<PartyPane> {
   String? _error;
   bool _busy = false;
+  late final _codes = JoinCodes(widget.hub.account);
 
   @override
   void initState() {
@@ -85,101 +90,109 @@ class _PartyPaneState extends State<PartyPane> {
     final open = widget.hub.friends.friends
         .where((f) => f.presence.partyId != null && f.presence.partyOpen)
         .toList();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(texts.party, style: _title),
-                const SizedBox(height: 6),
-                Text(
-                  texts.partyIntro,
-                  style: const TextStyle(color: Colors.white60, fontSize: 14),
-                ),
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed: _busy ? null : () => _try(parties.create),
-                  icon: const Icon(Icons.celebration_rounded, size: 18),
-                  label: Text(texts.partyStart),
-                ),
-                if (parties.kicked)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      texts.partyKicked,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 13,
-                      ),
-                    ),
+    final start = <Widget>[
+      Text(texts.party, style: _title),
+      const SizedBox(height: 6),
+      Text(
+        texts.partyIntro,
+        style: const TextStyle(color: Colors.white60, fontSize: 14),
+      ),
+      const SizedBox(height: 18),
+      FilledButton.icon(
+        onPressed: _busy ? null : () => _try(parties.create),
+        icon: const Icon(Icons.celebration_rounded, size: 18),
+        label: Text(texts.partyStart),
+      ),
+      if (parties.kicked)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Text(
+            texts.partyKicked,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
+          ),
+        ),
+      if (_error != null) _errorText,
+    ];
+    final join = <Widget>[
+      if (parties.invites.isNotEmpty) ...[
+        SectionLabel(texts.partyInvites),
+        for (final invite in parties.invites)
+          _Row(
+            person: invite.from,
+            title: invite.from?.displayName ?? texts.party,
+            subtitle: invite.size == null
+                ? null
+                : texts.partyInviteFrom(
+                    '@${invite.from?.handle ?? ''}',
+                    invite.size!,
                   ),
-                if (_error != null) _errorText,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: () => _try(() => parties.decline(invite.partyId)),
+                  child: Text(
+                    texts.decline,
+                    style: const TextStyle(color: Colors.white60),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _try(() => parties.join(invite.partyId)),
+                  child: Text(texts.partyJoin),
+                ),
               ],
             ),
           ),
-        ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(4, 0, 18, 18),
-            children: [
-              if (parties.invites.isNotEmpty) ...[
-                SectionLabel(texts.partyInvites),
-                for (final invite in parties.invites)
-                  _Row(
-                    person: invite.from,
-                    title: invite.from?.displayName ?? texts.party,
-                    subtitle: invite.size == null
-                        ? null
-                        : texts.partyInviteFrom(
-                            '@${invite.from?.handle ?? ''}',
-                            invite.size!,
-                          ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () =>
-                              _try(() => parties.decline(invite.partyId)),
-                          child: Text(
-                            texts.decline,
-                            style: const TextStyle(color: Colors.white60),
-                          ),
-                        ),
-                        FilledButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _try(() => parties.join(invite.partyId)),
-                          child: Text(texts.partyJoin),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-              if (open.isNotEmpty) ...[
-                SectionLabel(texts.partyFriendsParties),
-                for (final friend in open)
-                  _Row(
-                    person: friend.person,
-                    title: friend.person.displayName,
-                    subtitle: '@${friend.person.handle}',
-                    trailing: OutlinedButton(
-                      onPressed: _busy
-                          ? null
-                          : () => _try(
-                              () => parties.join(friend.presence.partyId!),
-                            ),
-                      child: Text(texts.partyJoin),
-                    ),
-                  ),
-              ],
-            ],
-          ),
-        ),
       ],
+      if (open.isNotEmpty) ...[
+        SectionLabel(texts.partyFriendsParties),
+        for (final friend in open)
+          _Row(
+            person: friend.person,
+            title: friend.person.displayName,
+            subtitle: '@${friend.person.handle}',
+            trailing: OutlinedButton(
+              onPressed: _busy
+                  ? null
+                  : () => _try(() => parties.join(friend.presence.partyId!)),
+              child: Text(texts.partyJoin),
+            ),
+          ),
+      ],
+      JoinWithCode(codes: _codes, gameName: widget.gameName),
+    ];
+    return LayoutBuilder(
+      builder: (context, box) {
+        // A small phone: starting a party, then the invites and codes under it.
+        if (box.maxWidth < 600) {
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
+            children: [...start, ...join],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: start,
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(4, 0, 18, 18),
+                children: join,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -207,171 +220,187 @@ class _PartyPaneState extends State<PartyPane> {
               !party.invited.any((p) => p.id == f.person.id),
         )
         .toList();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(22, 16, 14, 18),
-            children: [
-              Row(
-                children: [
-                  Text(texts.party, style: _title),
-                  const SizedBox(width: 10),
-                  Text(
-                    '${party.members.length}/$maxPartySize',
-                    style: const TextStyle(color: Colors.white38, fontSize: 14),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 14,
-                runSpacing: 14,
-                children: [
-                  for (final member in party.members)
-                    _Member(
-                      person: member,
-                      leader: member.id == party.leaderId,
-                      inVoice:
-                          party.inCall.contains(member.id) ||
-                          (member.id == me && voice.active),
-                      muted: member.id == me
-                          ? voice.active && voice.muted
-                          : party.muted.contains(member.id),
-                      ring:
-                          (member.id == me
-                              ? voice.speaking
-                              : voice.speakingOf(member.id))
-                          ? togetherPlaying
-                          : null,
-                      onKick: leader && member.id != me
-                          ? () => _try(() => parties.kick(member.id))
-                          : null,
-                    ),
-                ],
-              ),
-              if (party.invited.isNotEmpty) ...[
-                SectionLabel(texts.partyInvited),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final person in party.invited)
-                      Chip(
-                        avatar: Avatar(person: person, size: 22),
-                        label: Text(person.displayName),
-                        backgroundColor: const Color(0x14FFFFFF),
-                        side: BorderSide.none,
-                        labelStyle: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 13,
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-              if (party.requests.isNotEmpty) ...[
-                SectionLabel(texts.askingToJoin),
-                for (final person in party.requests)
-                  _Row(
-                    person: person,
-                    title: person.displayName,
-                    subtitle: '@${person.handle}',
-                    trailing: leader
-                        ? Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              TextButton(
-                                onPressed: () => _try(
-                                  () => parties.answerRequest(
-                                    person.id,
-                                    accept: false,
-                                  ),
-                                ),
-                                child: Text(
-                                  texts.decline,
-                                  style: const TextStyle(color: Colors.white60),
-                                ),
-                              ),
-                              FilledButton(
-                                onPressed: party.full
-                                    ? null
-                                    : () => _try(
-                                        () => parties.answerRequest(
-                                          person.id,
-                                          accept: true,
-                                        ),
-                                      ),
-                                child: Text(texts.accept),
-                              ),
-                            ],
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-              ],
-              if (_error != null) _errorText,
-            ],
+    final main = <Widget>[
+      Row(
+        children: [
+          Text(texts.party, style: _title),
+          const SizedBox(width: 10),
+          Text(
+            '${party.members.length}/$maxPartySize',
+            style: const TextStyle(color: Colors.white38, fontSize: 14),
           ),
-        ),
-        const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
-        SizedBox(
-          width: 262,
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 4, 14, 14),
-            children: [
-              SectionLabel(texts.voice),
-              _voiceCard(texts, party, voice),
-              SectionLabel(texts.partyInviteFriends),
-              if (invitable.isEmpty)
-                Text(
-                  texts.partyNoFriends,
-                  style: const TextStyle(color: Colors.white38, fontSize: 13),
+        ],
+      ),
+      const SizedBox(height: 14),
+      Wrap(
+        spacing: 14,
+        runSpacing: 14,
+        children: [
+          for (final member in party.members)
+            _Member(
+              person: member,
+              leader: member.id == party.leaderId,
+              inVoice:
+                  party.inCall.contains(member.id) ||
+                  (member.id == me && voice.active),
+              muted: member.id == me
+                  ? voice.active && (voice.muted || voice.deafened)
+                  : party.muted.contains(member.id),
+              deafened: member.id == me
+                  ? voice.active && voice.deafened
+                  : party.deafened.contains(member.id),
+              ring:
+                  (member.id == me
+                      ? voice.speaking
+                      : voice.speakingOf(member.id))
+                  ? togetherPlaying
+                  : null,
+              onKick: leader && member.id != me
+                  ? () => _try(() => parties.kick(member.id))
+                  : null,
+            ),
+        ],
+      ),
+      if (party.invited.isNotEmpty) ...[
+        SectionLabel(texts.partyInvited),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final person in party.invited)
+              Chip(
+                avatar: Avatar(person: person, size: 22),
+                label: Text(person.displayName),
+                backgroundColor: const Color(0x14FFFFFF),
+                side: BorderSide.none,
+                labelStyle: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
                 ),
-              for (final friend in invitable)
-                _Row(
-                  person: friend.person,
-                  presence: friend.presence.state,
-                  title: friend.person.displayName,
-                  trailing: TextButton(
-                    onPressed: party.full
-                        ? null
-                        : () => _try(() => parties.invite([friend.person.id])),
-                    child: Text(texts.partyInvite),
-                  ),
-                ),
-              if (leader) ...[
-                const SizedBox(height: 8),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  dense: true,
-                  title: Text(
-                    texts.partyOpen,
-                    style: const TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                  subtitle: Text(
-                    texts.partyOpenDetail,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
-                  ),
-                  value: party.open,
-                  onChanged: (open) => _try(() => parties.setOpen(open)),
-                ),
-                _publicListing(texts, party),
-              ],
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: () => _try(parties.leave),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: togetherError,
-                  side: const BorderSide(color: Color(0x66FF8A80)),
-                ),
-                icon: const Icon(Icons.logout_rounded, size: 18),
-                label: Text(texts.partyLeave),
               ),
-            ],
-          ),
+          ],
         ),
       ],
+      if (party.requests.isNotEmpty) ...[
+        SectionLabel(texts.askingToJoin),
+        for (final person in party.requests)
+          _Row(
+            person: person,
+            title: person.displayName,
+            subtitle: '@${person.handle}',
+            trailing: leader
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextButton(
+                        onPressed: () => _try(
+                          () => parties.answerRequest(person.id, accept: false),
+                        ),
+                        child: Text(
+                          texts.decline,
+                          style: const TextStyle(color: Colors.white60),
+                        ),
+                      ),
+                      FilledButton(
+                        onPressed: party.full
+                            ? null
+                            : () => _try(
+                                () => parties.answerRequest(
+                                  person.id,
+                                  accept: true,
+                                ),
+                              ),
+                        child: Text(texts.accept),
+                      ),
+                    ],
+                  )
+                : const SizedBox.shrink(),
+          ),
+      ],
+      if (_error != null) _errorText,
+    ];
+    final side = <Widget>[
+      SectionLabel(texts.voice),
+      _voiceCard(texts, party, voice),
+      SectionLabel(texts.partyInviteFriends),
+      if (invitable.isEmpty)
+        Text(
+          texts.partyNoFriends,
+          style: const TextStyle(color: Colors.white38, fontSize: 13),
+        ),
+      for (final friend in invitable)
+        _Row(
+          person: friend.person,
+          presence: friend.presence.state,
+          title: friend.person.displayName,
+          trailing: TextButton(
+            onPressed: party.full
+                ? null
+                : () => _try(() => parties.invite([friend.person.id])),
+            child: Text(texts.partyInvite),
+          ),
+        ),
+      if (leader) ...[
+        const SizedBox(height: 8),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          title: Text(
+            texts.partyOpen,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+          ),
+          subtitle: Text(
+            texts.partyOpenDetail,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+          value: party.open,
+          onChanged: (open) => _try(() => parties.setOpen(open)),
+        ),
+        _publicListing(texts, party),
+      ],
+      PartyCode(parties: parties, party: party, leader: leader, run: _try),
+      PartyDiscord(parties: parties, party: party, leader: leader, run: _try),
+      const SizedBox(height: 10),
+      OutlinedButton.icon(
+        onPressed: () => _try(parties.leave),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: togetherError,
+          side: const BorderSide(color: Color(0x66FF8A80)),
+        ),
+        icon: const Icon(Icons.logout_rounded, size: 18),
+        label: Text(texts.partyLeave),
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, box) {
+        // A small phone has no room for the party beside the voice and invite column: one
+        // list, the column under the members.
+        if (box.maxWidth < 600) {
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
+            children: [...main, const SizedBox(height: 6), ...side],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(22, 16, 14, 18),
+                children: main,
+              ),
+            ),
+            const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
+            SizedBox(
+              width: 262,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 4, 14, 14),
+                children: side,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -518,6 +547,7 @@ Widget _voiceCardBody(
     );
   }
   final peers = voice.peers;
+  final silent = voice.muted || voice.deafened;
   final connected = peers.where((p) => p.state == 'connected').length;
   final connecting = peers.length - connected;
   return Column(
@@ -536,18 +566,36 @@ Widget _voiceCardBody(
         children: [
           Expanded(
             child: FilledButton.tonalIcon(
-              onPressed: () => voice.setMuted(!voice.muted),
-              style: voice.muted
+              onPressed: () => voice.setMuted(!silent),
+              style: silent
                   ? FilledButton.styleFrom(
                       backgroundColor: const Color(0x33FF8A80),
                       foregroundColor: togetherError,
                     )
                   : null,
               icon: Icon(
-                voice.muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                silent ? Icons.mic_off_rounded : Icons.mic_rounded,
                 size: 18,
               ),
-              label: Text(voice.muted ? texts.voiceUnmute : texts.voiceMute),
+              label: Text(silent ? texts.voiceUnmute : texts.voiceMute),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            tooltip: voice.deafened ? texts.undeafen : texts.deafen,
+            isSelected: voice.deafened,
+            onPressed: () => voice.setDeafened(!voice.deafened),
+            style: voice.deafened
+                ? IconButton.styleFrom(
+                    backgroundColor: const Color(0x33FF8A80),
+                    foregroundColor: togetherError,
+                  )
+                : null,
+            icon: Icon(
+              voice.deafened
+                  ? Icons.headset_off_rounded
+                  : Icons.headset_rounded,
+              size: 18,
             ),
           ),
           const SizedBox(width: 8),
@@ -572,6 +620,7 @@ class _Member extends StatelessWidget {
     required this.inVoice,
     this.ring,
     this.muted = false,
+    this.deafened = false,
     this.onKick,
   });
 
@@ -582,6 +631,7 @@ class _Member extends StatelessWidget {
   /// Green while they speak.
   final Color? ring;
   final bool muted;
+  final bool deafened;
   final VoidCallback? onKick;
 
   @override
@@ -606,9 +656,16 @@ class _Member extends StatelessWidget {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      muted ? Icons.mic_off_rounded : Icons.headset_mic_rounded,
+                      deafened
+                          ? Icons.headset_off_rounded
+                          : muted
+                          ? Icons.mic_off_rounded
+                          : Icons.headset_mic_rounded,
                       size: 15,
-                      color: muted ? togetherError : togetherPlaying,
+                      color: muted || deafened
+                          ? togetherError
+                          : togetherPlaying,
+                      semanticLabel: deafened ? texts.deafened : null,
                     ),
                   ),
                 ),

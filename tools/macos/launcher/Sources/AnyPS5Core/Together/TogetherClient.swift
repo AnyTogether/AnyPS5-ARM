@@ -40,7 +40,21 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var latest: TogetherSaveVersion? = nil
     /// With "conflict" on completing an upload: the parts that have not arrived.
     public var missing: [Int]? = nil
+    /// With "version_mismatch" on joining a game: game_version or engine, the host's and this
+    /// copy's, and who is behind ("you" or "host").
+    public var reason: String? = nil
+    public var expected: String? = nil
+    public var actual: String? = nil
+    public var update: String? = nil
+    /// With "conflict" on starting Play Together: the party's game already running.
+    public var sessionId: String? = nil
     public var description: String { title }
+
+    /// Why a join was refused, when it was for the versions.
+    public var joinRefusal: TogetherJoinRefusal? {
+        guard code == "version_mismatch", let reason = reason.flatMap(TogetherJoinRefusal.Reason.init(rawValue:)), let expected, let actual else { return nil }
+        return TogetherJoinRefusal(reason: reason, expected: expected, actual: actual, youUpdate: update != "host")
+    }
 }
 
 /// A sign-in that waits for someone to approve it: a hand-off to the phone or a device code.

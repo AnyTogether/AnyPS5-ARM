@@ -350,12 +350,16 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       color: Colors.white70,
                     ),
                   ),
-                  Text(
-                    texts.editProfile,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
+                  Flexible(
+                    child: Text(
+                      texts.editProfile,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 16),

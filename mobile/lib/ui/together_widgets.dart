@@ -131,7 +131,7 @@ class SectionLabel extends StatelessWidget {
       children: [
         Expanded(
           child: Text(
-            text.toUpperCase(),
+            Texts.of(context).upper(text),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
@@ -171,3 +171,42 @@ String togetherFailure(Strings texts, Object error) => switch (error) {
   TogetherProblem(:final title) when title.isNotEmpty => title,
   _ => texts.togetherUnreachable,
 };
+
+/// A list not loaded yet: a spinner while it loads, or why it did not with Retry.
+class LoadingOrFailed extends StatelessWidget {
+  const LoadingOrFailed({super.key, required this.error, required this.retry});
+
+  final Object? error;
+  final VoidCallback retry;
+
+  @override
+  Widget build(BuildContext context) {
+    final problem = error;
+    if (problem == null) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 28),
+        child: Center(
+          child: SizedBox.square(
+            dimension: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    final texts = Texts.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              togetherFailure(texts, problem),
+              style: const TextStyle(color: Colors.white54, fontSize: 13.5),
+            ),
+          ),
+          TextButton(onPressed: retry, child: Text(texts.retry)),
+        ],
+      ),
+    );
+  }
+}

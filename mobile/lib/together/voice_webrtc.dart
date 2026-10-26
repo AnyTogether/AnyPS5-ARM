@@ -119,7 +119,13 @@ class WebRtcVoice implements VoiceEngine {
 class _Link implements VoiceLink {
   _Link(this.pc) {
     pc.onConnectionState = (_) => _onState?.call();
+    // A voice that arrives while deafened stays silent.
+    pc.onTrack = (event) {
+      if (event.track.kind == 'audio') event.track.enabled = _hearing;
+    };
   }
+
+  bool _hearing = true;
 
   final RTCPeerConnection pc;
   void Function()? _onState;
@@ -220,6 +226,15 @@ class _Link implements VoiceLink {
       }
     }
     return (incoming: incoming, outgoing: outgoing);
+  }
+
+  @override
+  Future<void> setHearing(bool on) async {
+    _hearing = on;
+    for (final receiver in await pc.getReceivers()) {
+      final track = receiver.track;
+      if (track != null && track.kind == 'audio') track.enabled = on;
+    }
   }
 
   @override

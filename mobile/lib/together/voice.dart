@@ -40,12 +40,15 @@ class Voice extends ChangeNotifier {
   String? _partyId;
   bool joining = false;
   bool muted = false;
+
+  /// Hears nobody and sends nothing, as Discord's deafen does.
+  bool deafened = false;
   VoiceProblem? problem;
 
   bool get active => _mesh != null;
 
   /// This phone's microphone is heard right now.
-  bool get speaking => !muted && (_mesh?.speaking ?? false);
+  bool get speaking => !muted && !deafened && (_mesh?.speaking ?? false);
 
   List<PeerVoice> get peers => _mesh?.peers ?? const [];
 
@@ -89,14 +92,15 @@ class Voice extends ChangeNotifier {
           'data': data,
         }),
         onChange: notifyListeners,
-      )..talking = !muted;
+      )..talking = !muted && !deafened;
+      if (deafened) mesh.hearing = false;
       _mesh = mesh;
       callId = id;
       _partyId = party.id;
       _levels = Timer.periodic(measureEvery, (_) => mesh.measure());
       _renewBefore(joined['expiresAt']);
       // Muted before joining: the others see it from the start.
-      if (muted) _tellMuted(id, true);
+      if (muted || deafened) _tellMuted(id);
       // The newcomer calls everyone already in.
       for (final peer in (call['in'] as List? ?? const [])) {
         final userId = (peer as Map)['userId'] as String;
@@ -147,17 +151,36 @@ class Voice extends ChangeNotifier {
     });
   }
 
-  /// Muted or not; the others in the call are told, and see it on the party.
+  /// Muted or not; the others in the call are told, and see it on the party. Unmuting while
+  /// deafened undeafens too.
   void setMuted(bool on) {
     muted = on;
-    _mesh?.talking = !on;
+    if (!on && deafened) {
+      deafened = false;
+      _mesh?.hearing = true;
+    }
+    _mesh?.talking = !on && !deafened;
     notifyListeners();
     final id = callId;
-    if (id != null) _tellMuted(id, on);
+    if (id != null) _tellMuted(id);
   }
 
-  void _tellMuted(String id, bool on) => account
-      .call('POST', 'calls/$id/mute', {'muted': on})
+  /// Deafened or not: nobody heard and the microphone off; undeafening gives the microphone back
+  /// as it was before.
+  void setDeafened(bool on) {
+    deafened = on;
+    _mesh?.hearing = !on;
+    _mesh?.talking = !on && !muted;
+    notifyListeners();
+    final id = callId;
+    if (id != null) _tellMuted(id);
+  }
+
+  void _tellMuted(String id) => account
+      .call('POST', 'calls/$id/mute', {
+        'muted': muted || deafened,
+        'deafened': deafened,
+      })
       .catchError((_) => <String, dynamic>{});
 
   Future<void> _stop() async {

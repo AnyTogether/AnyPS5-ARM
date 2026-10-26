@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../join_strings.dart';
 import '../strings.dart';
 import '../together/together_account.dart';
 import 'together_screen.dart';
@@ -13,6 +14,7 @@ Future<void> showAbout(
   BuildContext context, {
   bool? vibration,
   ValueChanged<bool>? onVibration,
+  VoidCallback? onTestVibration,
   bool? motion,
   ValueChanged<bool>? onMotion,
   bool? remotePlay,
@@ -34,6 +36,7 @@ Future<void> showAbout(
   builder: (context) => _About(
     vibration: vibration,
     onVibration: onVibration,
+    onTestVibration: onTestVibration,
     motion: motion,
     onMotion: onMotion,
     remotePlay: remotePlay,
@@ -49,6 +52,7 @@ Future<void> showAbout(
 class _About extends StatefulWidget {
   const _About({
     this.vibration,
+    this.onTestVibration,
     this.onVibration,
     this.motion,
     this.onMotion,
@@ -62,6 +66,9 @@ class _About extends StatefulWidget {
   });
 
   final bool? vibration;
+
+  /// Plays a short pattern of both motors and a trigger's pulses.
+  final VoidCallback? onTestVibration;
   final ValueChanged<bool>? onVibration;
   final bool? motion;
   final ValueChanged<bool>? onMotion;
@@ -180,6 +187,16 @@ class _AboutState extends State<_About> {
                           setState(() => _vibration = value);
                           widget.onVibration?.call(value);
                         },
+                      ),
+                    if (_vibration != null && widget.onTestVibration != null)
+                      TextButton.icon(
+                        onPressed: _vibration! ? widget.onTestVibration : null,
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                        ),
+                        icon: const Icon(Icons.vibration_rounded, size: 18),
+                        label: Text(texts.vibrationTest),
                       ),
                     if (_motion != null)
                       SwitchListTile(

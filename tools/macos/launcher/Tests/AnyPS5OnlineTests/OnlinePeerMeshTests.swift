@@ -170,6 +170,13 @@ final class OnlinePeerMeshTests: XCTestCase {
         XCTAssertTrue(waitUntil { aliceMesh.states[bob] == .connected && bobMesh.states[alice] == .connected }, "the data channel connects: \(together.signals)")
         XCTAssertTrue(together.signals.contains("\(alice)>\(bob) offer"), "the smaller user ID offers")
         XCTAssertFalse(together.signals.contains("\(bob)>\(alice) offer"))
+        // The party panel's line for Bob: reached straight (host candidates only here), with a round trip.
+        let seen = Box<[OnlinePeerLinkInfo]>()
+        XCTAssertTrue(waitUntil {
+            aliceMesh.links { seen.value = $0 }
+            return seen.value?.first?.route == .direct && seen.value?.first?.rttMs != nil
+        }, "links: \(String(describing: seen.value))")
+        XCTAssertEqual(seen.value?.first?.userId, bob)
 
         // The channel opens a moment after the connection.
         let ping = OnlineWire.Datagram(peer: b, peerPort: 3658, peerVport: 1, localPort: 3658, localVport: 2, kind: .p2p, data: Data("ping".utf8))
@@ -324,5 +331,15 @@ final class OnlineEngineP2pTests: XCTestCase {
             XCTAssertEqual(pinged["from"], "\(OnlineEngineP2pTests.dotted(b)):3659")
             XCTAssertEqual(pinged["size"], String(size))
         }
+    }
+}
+
+/// A value set from another thread, for polling in a test.
+final class Box<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value?
+    var value: Value? {
+        get { lock.withLock { stored } }
+        set { lock.withLock { stored = newValue } }
     }
 }

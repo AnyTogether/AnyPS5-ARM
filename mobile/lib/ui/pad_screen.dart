@@ -502,6 +502,7 @@ class _PadScreenState extends State<PadScreen> {
                 ),
                 const SizedBox(width: 10),
                 IconButton(
+                  tooltip: texts.smaller,
                   visualDensity: VisualDensity.compact,
                   onPressed: () => _change(
                     control.id,
@@ -516,6 +517,7 @@ class _PadScreenState extends State<PadScreen> {
                   style: const TextStyle(color: Colors.white, fontSize: 13),
                 ),
                 IconButton(
+                  tooltip: texts.larger,
                   visualDensity: VisualDensity.compact,
                   onPressed: () => _change(
                     control.id,
@@ -528,6 +530,8 @@ class _PadScreenState extends State<PadScreen> {
                 SizedBox(
                   width: 110,
                   child: Slider(
+                    semanticFormatterCallback: (value) =>
+                        '${texts.opacity} ${(value * 100).round()}%',
                     value: tweak.opacity,
                     min: 0.2,
                     onChanged: (value) =>

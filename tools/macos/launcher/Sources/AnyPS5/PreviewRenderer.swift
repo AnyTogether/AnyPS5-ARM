@@ -261,6 +261,27 @@ enum PreviewRenderer {
             model.previewVoice(call: "call1", speaking: ["f1"])
             model.overlay = .party; model.panelInRows = true; model.panelRow = 0
         }
+        // Play Together: Mira started a game for the party (Join), and playing it with her.
+        let lanTitle = found.first?.titleID ?? "PPSA17221"
+        let lanVersion = found.first.map { TogetherGameSession.gameVersion($0.version) } ?? "01.044.000"
+        let lan = TogetherPartyTogether(sessionId: "gs1", hostId: "f1", titleId: lanTitle, gameVersion: lanVersion, engineBuild: "0.2.21-4194", players: ["f1"], capacity: 8)
+        render(preferences, found, root, still, output.appendingPathComponent("party-together.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewParty(TogetherParty(id: "p1", leaderId: "f1", privacy: "invite", members: [people[0], robin, people[1]], invited: [], call: nil, together: lan))
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("party-together-playing.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.togetherFriends = partyFriends
+            let playing = TogetherPartyTogether(sessionId: "gs1", hostId: "f1", titleId: lanTitle, gameVersion: lanVersion, engineBuild: "0.2.21-4194",
+                                                players: ["f1", "u1", "f2"], capacity: 8)
+            model.previewParty(TogetherParty(id: "p1", leaderId: "f1", privacy: "invite", members: [people[0], robin, people[1]], invited: [], call: nil, together: playing))
+            model.previewGameSession(TogetherGameSession(id: "gs1", kind: .lan, partyId: "p1", host: people[0], titleId: lanTitle, gameVersion: lanVersion,
+                                                         engineBuild: "0.2.21-4194", capacity: 8, joinable: true, players: [people[0], robin, people[1]]), invites: [])
+            model.peerLinks = ["f1": OnlinePeerLinkInfo(userId: "f1", route: .direct, rttMs: 23), "f2": OnlinePeerLinkInfo(userId: "f2", route: .relay, rttMs: 81)]
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+        }
         render(preferences, found, root, still, output.appendingPathComponent("call-ringing.png")) { model in
             model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
             model.previewRinging(TogetherRinging(callId: "call2", from: people[0], device: "sess-f1"))

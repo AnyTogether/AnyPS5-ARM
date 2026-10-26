@@ -38,4 +38,7 @@ for file in "$icons"/Icon-App-*.png; do
     side=$(echo "$points * $factor" | bc | cut -d. -f1)
     sips -z "$side" "$side" "$work/full.png" --out "$file" >/dev/null
 done
+# The About sheet shows the icon itself.
+mkdir -p assets
+sips -z 256 256 "$work/full.png" --out assets/icon.png >/dev/null
 echo "icons written"

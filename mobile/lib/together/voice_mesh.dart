@@ -21,6 +21,9 @@ abstract class VoiceLink {
 
   set onCandidate(void Function(Map<String, dynamic> candidate) handler);
   set onState(void Function() handler);
+
+  /// Plays the peer's voice or not (deafened).
+  Future<void> setHearing(bool on);
   Future<void> close();
 }
 
@@ -89,6 +92,7 @@ class VoiceMesh {
   final _peers = <String, _Peer>{};
   Future<void> _queue = Future.value();
   bool _talking = true;
+  bool _hearing = true;
   bool _closed = false;
   bool speaking = false;
   DateTime _quietSince = DateTime.fromMillisecondsSinceEpoch(0);
@@ -104,6 +108,17 @@ class VoiceMesh {
     _talking = on;
     engine.setTalking(on);
     if (!on) speaking = false;
+    onChange();
+  }
+
+  bool get hearing => _hearing;
+
+  /// Hears the others or nobody (deafened), on every connection and the ones made later.
+  set hearing(bool on) {
+    _hearing = on;
+    for (final peer in _peers.values) {
+      peer.link.setHearing(on).catchError((_) {});
+    }
     onChange();
   }
 
@@ -246,6 +261,7 @@ class VoiceMesh {
   Future<_Peer> _open(String userId, String device) async {
     final link = await engine.link(iceServers);
     final peer = _Peer(userId, device, link);
+    if (!_hearing) link.setHearing(false).catchError((_) {});
     link.onCandidate = (candidate) => _send(peer, 'candidate', candidate);
     link.onState = () {
       // When a path breaks, the impolite side restarts ICE (through the relay if it must).

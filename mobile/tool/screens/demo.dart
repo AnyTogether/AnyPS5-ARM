@@ -416,8 +416,15 @@ Map<String, dynamic> get partyJson => {
   'call': {
     'id': 'call-party',
     'in': ['mira', 'kenji', 'theo'],
-    'muted': ['theo'],
+    'muted': ['theo', 'kenji'],
+    'deafened': ['kenji'],
   },
+  'joinCode': {
+    'code': 'K7QM3XPA',
+    'url': 'https://anytogether.kodla.agency/join/K7QM3XPA',
+    'expiresAt': _ago(const Duration(hours: -20)).toUtc().toIso8601String(),
+  },
+  'discord': 'https://discord.gg/anyps5',
 };
 
 Map<String, dynamic> _library(
@@ -672,6 +679,9 @@ class DemoVoiceLink implements VoiceLink {
 
   @override
   set onState(void Function() handler) {}
+
+  @override
+  Future<void> setHearing(bool on) async {}
 
   @override
   Future<void> close() async {}

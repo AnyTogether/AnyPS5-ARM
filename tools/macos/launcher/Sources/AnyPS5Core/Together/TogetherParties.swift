@@ -46,14 +46,17 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
     public let joinCode: TogetherJoinCode?
     /// The party's Discord server or channel, set by the leader.
     public let discord: String?
+    /// The party's Play Together game while one runs (older servers never say).
+    public let together: TogetherPartyTogether?
 
     enum CodingKeys: String, CodingKey {
-        case id, leaderId, privacy, members, invited, call, requests, joinCode, discord
+        case id, leaderId, privacy, members, invited, call, requests, joinCode, discord, together
         case listing = "public"
     }
 
     public init(id: String, leaderId: String, privacy: String, members: [TogetherPerson], invited: [TogetherPerson], call: Call?,
-                listing: TogetherPartyListing? = nil, requests: [TogetherPerson]? = nil, joinCode: TogetherJoinCode? = nil, discord: String? = nil) {
+                listing: TogetherPartyListing? = nil, requests: [TogetherPerson]? = nil, joinCode: TogetherJoinCode? = nil, discord: String? = nil,
+                together: TogetherPartyTogether? = nil) {
         self.id = id
         self.leaderId = leaderId
         self.privacy = privacy
@@ -64,18 +67,19 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
         self.requests = requests
         self.joinCode = joinCode
         self.discord = discord
+        self.together = together
     }
 
     /// The same party with these members and call (someone taken out here before the server says).
     public func with(members: [TogetherPerson], call: Call?) -> TogetherParty {
         TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests,
-                      joinCode: joinCode, discord: discord)
+                      joinCode: joinCode, discord: discord, together: together)
     }
 
     /// The same party with a new code, or none (made or stopped here before the server says).
     public func with(joinCode: TogetherJoinCode?) -> TogetherParty {
         TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests,
-                      joinCode: joinCode, discord: discord)
+                      joinCode: joinCode, discord: discord, together: together)
     }
 
     public var open: Bool { privacy == "friends" }

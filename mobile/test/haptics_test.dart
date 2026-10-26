@@ -121,4 +121,21 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 400));
     expect(out.sent, isEmpty);
   });
+
+  test(
+    'testing from About: the large motor, the small one, then pulses',
+    () async {
+      driver.test();
+      await Future<void>.delayed(const Duration(milliseconds: 1600));
+      final felt = out.sent.where((r) => r.strength > 0).toList();
+      expect(
+        felt.first.sharpness,
+        lessThan(0.5),
+        reason: 'the dull large motor',
+      );
+      expect(felt[1].sharpness, 1, reason: 'the crisp small motor');
+      expect(felt, hasLength(6));
+      expect(out.sent.last, Rumble.off);
+    },
+  );
 }

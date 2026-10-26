@@ -143,10 +143,16 @@ class _NotificationsPaneState extends State<NotificationsPane> {
                 ),
               ),
               if (!_settingsShown && _notes.unread > 0)
-                TextButton(
-                  onPressed: () =>
-                      _notes.readAll().catchError((Object e) => _failed(e)),
-                  child: Text(texts.markAllRead),
+                Flexible(
+                  child: TextButton(
+                    onPressed: () =>
+                        _notes.readAll().catchError((Object e) => _failed(e)),
+                    child: Text(
+                      texts.markAllRead,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
               IconButton(
                 tooltip: _settingsShown

@@ -850,6 +850,12 @@ final class AppModel: ObservableObject {
     @Published var gameSession: TogetherGameSession?
     @Published var gameInvites: [TogetherGameInvite] = []
     var openingSession = false
+    /// Play Together: party members' games to join, how each other player is reached (by user
+    /// ID), a join waiting for its game to unlock, and the poll of the links.
+    @Published var playTogetherOffers: [PlayTogetherOffer] = []
+    @Published var peerLinks: [String: OnlinePeerLinkInfo] = [:]
+    var togetherAfterUnlock: (String, PlayTogetherOffer)?
+    var togetherLinkPoll: Task<Void, Never>?
     /// Find players, Live now, public parties, discovery and game hubs.
     @Published var discover = DiscoverState()
     /// Share play: what the friends panel shows, and the running share play's pieces.
@@ -1143,12 +1149,14 @@ final class AppModel: ObservableObject {
                     self.playAfterUnlock = nil
                     self.play(game)
                 }
+                self.togetherUnlockDone(id, succeeded: true)
             case .failure(let error) where error is CancellationError:
-                break
+                self.togetherUnlockDone(id, succeeded: false)
             case .failure(let shortage as SpaceShortage):
                 self.tellShortage(shortage, for: game)
             case .failure(let error):
                 self.failures[id] = error.localizedDescription
+                self.togetherUnlockDone(id, succeeded: false)
                 self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
             }
             self.startNext(root: root)

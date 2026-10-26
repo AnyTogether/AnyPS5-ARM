@@ -82,6 +82,30 @@ class HapticsDriver {
     }
   }
 
+  /// Testing the vibration from About: the large motor (dull), then the small one (crisp),
+  /// then a trigger's pulses, so each can be told apart.
+  void test() {
+    const large = Rumble(200, 0.25);
+    const small = Rumble(200, 1);
+    const pulse = Rumble(255, 1);
+    final steps = <(int, Rumble)>[
+      (0, large),
+      (350, Rumble.off),
+      (550, small),
+      (900, Rumble.off),
+      for (var i = 0; i < 4; i++) ...[
+        (1100 + i * 100, pulse),
+        (1140 + i * 100, Rumble.off),
+      ],
+    ];
+    for (final (at, rumble) in steps) {
+      Timer(Duration(milliseconds: at), () {
+        _last = rumble;
+        output.set(rumble);
+      });
+    }
+  }
+
   void _send(int strength, double sharpness) {
     final quantized = strength == 0
         ? 0
