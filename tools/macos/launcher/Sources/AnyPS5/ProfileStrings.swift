@@ -9,7 +9,7 @@ enum TPro {
         case offlineTitle, offlineLead, offlineFact1, offlineFact2, offlineFact3, offlineTag
         case onlineTitle, onlineLead, onlineFact1, onlineFact2, onlineFact3, onlineTag
         case signInTitleNew, signInTitleOnline, signInTitleAgain, signInSubtitle
-        case menuKicker, otherProfiles, addSomeone, goOffline, goOnline, goOfflineDetail, goOnlineDetail, manageProfiles
+        case menuKicker, otherProfiles, otherProfile, addSomeone, goOffline, goOnline, goOfflineDetail, goOnlineDetail, manageProfiles
         case closeGameFirst, waitForSync, welcomeBack, nowOffline, savesNotSwapped
         case onlineAs, onlineSignedOut, offlineDetail, tileColour, tileColourDetail, askEveryTime, askEveryTimeDetail
         case otherProfilesTitle, switchTo, deleteProfile, deleteQuestion, addProfile, addProfileDetail, backupFolder, cannotDelete, deleted
@@ -18,6 +18,11 @@ enum TPro {
         case friendsOnlyNameSaved, friendsOnlyNameCleared, friendsOnlyPicture, friendsOnlyPictureDetail, friendsOnlyPictureRemove
         case friendsOnlyPictureSaved, friendsOnlyPictureRemoved, friendsOnlyBadge
         case colourIndigo, colourTeal, colourCoral, colourAmber, colourViolet, colourGreen, colourPink, colourSky
+    }
+
+    /// "1 other profile", "3 other profiles", or the way to add one when there is none.
+    static func others(_ count: Int) -> String {
+        count > 1 ? format(.otherProfiles, count) : count == 1 ? text(.otherProfile) : text(.addSomeone)
     }
 
     static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
@@ -61,6 +66,7 @@ enum TPro {
         .signInSubtitle: "New to AnyTogether? The email code makes your account as it signs you in.",
         .menuKicker: "Options",
         .otherProfiles: "%d other profiles on this Mac",
+        .otherProfile: "1 other profile on this Mac",
         .addSomeone: "Add someone who plays here",
         .goOffline: "Go Offline",
         .goOnline: "Go Online",
@@ -141,6 +147,7 @@ enum TPro {
         .signInSubtitle: "AnyTogether'da yeni misin? E-posta kodu seni giriş yaptırırken hesabını da oluşturur.",
         .menuKicker: "Seçenekler",
         .otherProfiles: "Bu Mac'te %d profil daha",
+        .otherProfile: "Bu Mac'te 1 profil daha",
         .addSomeone: "Burada oynayan birini ekle",
         .goOffline: "Çevrimdışı Ol",
         .goOnline: "Çevrimiçi Ol",

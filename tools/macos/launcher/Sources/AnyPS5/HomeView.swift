@@ -906,11 +906,6 @@ extension AppModel {
         case nil:
             break
         }
-        // Options (Start, △, O) on Home: the game's settings, Switch Profile, online or offline.
-        if command == .options {
-            openProfileMenu()
-            return true
-        }
         guard let game = selectedGame else {
             if command == .select { pickGamesFolder() }
             return true
@@ -947,7 +942,7 @@ extension AppModel {
         case (.actions(0), .select): primaryAction(game)
         case (.actions(1), .select) where actionCount == 3: open(.trophies)
         case (.actions, .select): open(.gameSettings)
-        case (_, .options): openProfileMenu()
+        case (_, .options): open(.gameSettings)
         default: break
         }
         return true

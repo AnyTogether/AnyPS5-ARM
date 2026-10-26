@@ -184,6 +184,7 @@ struct RootView: View {
             Input.shared.shortcutHandler = { [weak model] action, hold in model?.shortcut(action, hold: hold) }
             Input.shared.activity = { [weak model] in (model?.changeCount ?? 0) &+ Sounds.shared.requests }
             Input.shared.rightClickHandler = { [weak model] in model?.homeRightClick() ?? false }
+            Input.shared.menuHandler = { [weak model] in model?.homeRightClick() ?? false }
             Input.shared.scrollHandler = { [weak model] command in
                 guard let model, model.preferences.onboarded, model.overlay == nil else { return false }
                 model.moveSelection(command == .left ? -1 : 1)

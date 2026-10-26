@@ -581,7 +581,7 @@ struct GameMenuCard: View {
                     Item(id: 1, title: TH.text(.closeGame), symbol: "xmark.circle.fill", destructive: true)]
         case .homeMenu:
             let others = model.profileBook.profiles.count - 1
-            return [Item(id: 0, title: TH.text(.switchProfile), detail: others > 0 ? TPro.format(.otherProfiles, others) : TPro.text(.addSomeone), symbol: "person.2.circle"),
+            return [Item(id: 0, title: TH.text(.switchProfile), detail: TPro.others(others), symbol: "person.2.circle"),
                     Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }

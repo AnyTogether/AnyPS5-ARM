@@ -14,6 +14,9 @@ final class Input {
     var scrollHandler: ((Command) -> Bool)?
     /// A right click on Home opens the Options menu; true when it took the click.
     var rightClickHandler: (() -> Bool)?
+    /// Options/Start on Home opens the same menu (△ stays the game's settings); true when it
+    /// took the press, else it is Options as ever.
+    var menuHandler: (() -> Bool)?
     /// Takes every key while a binding waits for one (the controls panel); returns whether it used it.
     var capture: ((NSEvent) -> Bool)? {
         didSet { if capture != nil { hold(nil) } }
@@ -194,7 +197,17 @@ final class Input {
         button(pad.buttonA, .select)
         button(pad.buttonB, .back)
         button(pad.buttonY, .options)
-        button(pad.buttonMenu, .options)
+        // Options/Start: on Home the Options menu (Switch Profile, online or offline), else Options.
+        pad.buttonMenu.pressedChangedHandler = { [weak self, weak controller, weak pad] _, _, pressed in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                if let pad { self.padButtons(id, Input.shortcutButtons(of: pad), controller) }
+                guard pressed else { return }
+                if NSApp.isActive, let controller { self.usedPad(controller) }
+                if self.takesMenu() { return }
+                self.controller(.options, from: controller)
+            }
+        }
         for input in [pad.buttonX, pad.leftShoulder, pad.rightShoulder, pad.leftTrigger, pad.rightTrigger, pad.buttonHome, pad.buttonOptions,
                       pad.leftThumbstickButton, pad.rightThumbstickButton] {
             button(input, nil)
@@ -400,6 +413,11 @@ final class Input {
 
     /// A controller command; while the launcher is behind a game only PS is acted on. Cross and
     /// Circle change places when Circle confirms.
+    /// Options/Start pressed: the Options menu when Home takes it.
+    private func takesMenu() -> Bool {
+        NSApp.isActive && padCapture == nil && !testing && menuHandler?() == true
+    }
+
     private func controller(_ command: Command, from controller: GCController?) {
         if NSApp.isActive, let controller { usedPad(controller) }
         guard padCapture == nil else { return }
@@ -424,6 +442,7 @@ final class Input {
         }
         for (button, command) in buttons where state.pressed.contains(button) && !previous.pressed.contains(button) {
             guard padCapture == nil else { continue }
+            if button == .start, takesMenu() { continue }
             guard NSApp.isActive || command == .home || command == .capture else { continue }
             guard !testing || command == .home else { continue }
             _ = dispatch(ConfirmButton.command(command, circleConfirms: circleConfirms), repeat: false)

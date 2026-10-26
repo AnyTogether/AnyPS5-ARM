@@ -414,7 +414,7 @@ extension AppModel {
         if let game = selectedGame { items.append(ProfileMenuItem(id: 0, action: .gameSettings, title: T.text(.gameSettings), detail: game.name, symbol: "slider.horizontal.3")) }
         let others = profileBook.profiles.count - 1
         items.append(ProfileMenuItem(id: items.count, action: .switchProfile, title: TH.text(.switchProfile),
-                                     detail: others > 0 ? TPro.format(.otherProfiles, others) : TPro.text(.addSomeone), symbol: "person.2.circle"))
+                                     detail: TPro.others(others), symbol: "person.2.circle"))
         let online = currentProfile?.mode == .online
         items.append(ProfileMenuItem(id: items.count, action: .toggleMode, title: TPro.text(online ? .goOffline : .goOnline),
                                      detail: TPro.text(online ? .goOfflineDetail : .goOnlineDetail), symbol: online ? "wifi.slash" : "wifi"))
