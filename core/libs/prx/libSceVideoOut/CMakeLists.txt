@@ -192,6 +192,16 @@ if(BUILD_TESTING)
         set_tests_properties(pad_output_pacing PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
+    # The launcher's battery and heat profiles: the control file and the frame cap's pacing.
+    add_test_executable(power_control_tests tests/PowerControl.cpp)
+    target_include_directories(power_control_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(power_control_tests PRIVATE libc)
+    configure_windows_unwind(power_control_tests)
+    add_test(NAME power_control COMMAND power_control_tests)
+    if(WIN32)
+        set_tests_properties(power_control PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
 endif()
 
 if(BUILD_TESTING)
