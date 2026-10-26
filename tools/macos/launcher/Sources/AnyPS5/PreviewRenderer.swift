@@ -466,9 +466,10 @@ enum PreviewRenderer {
                 model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: "https://anytogether.test/api/v1/avatars/0.jpg")
                 model.profilePicture = picture
                 model.overlay = .settings
-                model.panelCategory = model.panelCategories().firstIndex { $0.id == "behaviour" } ?? 0
+                // The picture is the profile's: Settings → Profiles.
+                model.panelCategory = model.panelCategories().firstIndex { $0.id == "profiles" } ?? 0
                 model.panelInRows = true
-                model.panelRow = 1
+                model.panelRow = model.panelCategories()[model.panelCategory].rows.firstIndex { $0.id == "picture" } ?? 1
             }
             render(preferences, found, root, still, output.appendingPathComponent("profile-crop.png")) { model in
                 signedIn(model)
