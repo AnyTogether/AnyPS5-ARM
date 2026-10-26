@@ -20,7 +20,8 @@ class DisplayWindow;
 // The players' pads, fed by the keyboard and mouse, the Mac's game controllers and the phones the
 // launcher brings. A controller or phone becomes a player the first time it is used (RemotePad::Seats);
 // the keyboard and mouse always drive the first player. A press the launcher sends (RemotePad::Press)
-// holds buttons on the first player's pad, whoever drives it, and takes no seat.
+// holds buttons on the first player's pad, whoever drives it, and takes no seat. A device the
+// launcher marks as helping (assist) adds its input to the first player's and takes no seat either.
 class PadInput {
 public:
     PadInput();
@@ -40,12 +41,16 @@ private:
         std::chrono::steady_clock::time_point nextRumbleRefresh{};
         LightBarPacer lightBar;
         TriggerEffectCache triggerEffect;
+        // Helps the first player (assist) rather than holding a seat.
+        bool helping = false;
     };
     struct Remote {
         std::unique_ptr<RemotePad::Channel> channel;
         std::optional<RemotePad::Input> last;
         std::chrono::steady_clock::time_point seen{};
         PadInputState state{};
+        // The launcher marks it as helping the first player (byte 13 = AssistSeat).
+        bool helping = false;
     };
     struct Output {
         std::uint32_t sequence = 0;
@@ -67,6 +72,8 @@ private:
     void answer(Remote& remote, int player);
     void leave(std::uint32_t device);
     void updatePrompt(std::chrono::steady_clock::time_point now);
+    void setControllersHelp(bool help);
+    int playerOf(const Controller& controller) const;
     void type(const RemotePad::TypedText& text);
 
     Pad::KeyboardMouse keyboardMouse;
@@ -81,6 +88,8 @@ private:
     RemotePad::Prompt prompt;
     std::uint32_t promptRevision = 0;
     std::chrono::steady_clock::time_point promptSent{};
+    // The launcher's assist flags (RemotePad::AssistControllers).
+    bool controllersHelp = false;
     VideoOutTelemetry::PadChangeFilter telemetryFilter;
 };
 

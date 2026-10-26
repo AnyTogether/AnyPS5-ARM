@@ -315,6 +315,7 @@ extension AppModel {
                 let player = bridge.flatMap { remote?.padPlayer(bridge: $0) }
                 rows.append(PanelRow(id: "share-stop-\(viewer.user.userId)", title: SP.format(.stopPlaying, name), detail: SP.linkText(link, pad: player ?? pad, seated: player != nil),
                                      symbol: "gamecontroller.fill", kind: .action(destructive: false) { [weak self] in self?.stopPlaying(viewer) }, person: person))
+                if let assist = shareAssistRow(viewer.user.userId, name: name) { rows.append(assist) }
             } else {
                 rows.append(PanelRow(id: "share-play-\(viewer.user.userId)", title: SP.format(.letPlay, name, SharePlayRoster.freePad(hosting.viewers) ?? 0),
                                      detail: SP.linkText(link, pad: nil, seated: false), symbol: "gamecontroller",

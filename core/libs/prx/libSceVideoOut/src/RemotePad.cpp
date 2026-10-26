@@ -214,7 +214,7 @@ std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes) {
     input.sequence = read<std::uint32_t>(bytes, 8);
     input.sentMicros = read<std::uint64_t>(bytes, 16);
     input.session = read<std::uint64_t>(bytes, 24);
-    if (const auto seat = bytes[13]; seat >= 2 && seat <= PAD_MAX_CONTROLLERS) input.seat = seat;
+    if (const auto seat = bytes[13]; seat == AssistSeat || (seat >= 2 && seat <= PAD_MAX_CONTROLLERS)) input.seat = seat;
     auto& state = input.state;
     state.buttons = read<std::uint32_t>(bytes, 32) & KnownButtons;
     for (std::size_t axis = 0; axis < 4; ++axis) state.sticks[axis] = bytes[36 + axis];
@@ -241,6 +241,21 @@ std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes) {
         state.gyro = PadInputState{}.gyro;
     }
     return input;
+}
+
+std::optional<std::uint32_t> DecodeAssist(std::span<const std::uint8_t> bytes) {
+    if (bytes.size() != AssistSize) return std::nullopt;
+    if (read<std::uint32_t>(bytes, 0) != AssistMagic || read<std::uint16_t>(bytes, 4) != Version || read<std::uint16_t>(bytes, 6) != AssistSize) return std::nullopt;
+    return read<std::uint32_t>(bytes, 8) & AssistControllers;
+}
+
+std::array<std::uint8_t, AssistSize> EncodeAssist(std::uint32_t flags) {
+    std::array<std::uint8_t, AssistSize> bytes{};
+    write<std::uint32_t>(bytes.data(), 0, AssistMagic);
+    write<std::uint16_t>(bytes.data(), 4, Version);
+    write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(AssistSize));
+    write<std::uint32_t>(bytes.data(), 8, flags);
+    return bytes;
 }
 
 std::optional<Press> DecodePress(std::span<const std::uint8_t> bytes) {
@@ -279,7 +294,7 @@ std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player) {
     write<std::uint16_t>(bytes.data(), 4, Version);
     write<std::uint16_t>(bytes.data(), 6, static_cast<std::uint16_t>(HelloSize));
     bytes[8] = player;
-    bytes[9] = HelloTakesPresses | HelloTakesText;
+    bytes[9] = HelloTakesPresses | HelloTakesText | HelloTakesAssist;
     return bytes;
 }
 
@@ -305,6 +320,19 @@ PadInputState Merge(const PadInputState& controller, const PadInputState& remote
         merged.gyro = remote.gyro;
     }
     return merged;
+}
+
+PadInputState Assisted(const PadInputState& player, const PadInputState& helper) {
+    auto merged = Merge(player, helper);
+    if (player.hasMotion) {
+        merged.accel = player.accel;
+        merged.gyro = player.gyro;
+    }
+    return merged;
+}
+
+bool Helps(bool controllersHelp, bool playerOneHeld) {
+    return controllersHelp && playerOneHeld;
 }
 
 PadInputState Current(const std::optional<Input>& last, std::chrono::steady_clock::time_point seen, std::chrono::steady_clock::time_point now) {
@@ -341,6 +369,10 @@ std::optional<Input> Channel::Poll(std::chrono::steady_clock::time_point) {
             lastPress = press->id;
             continue;
         }
+        if (const auto flags = DecodeAssist(bytes)) {
+            assist = *flags;
+            continue;
+        }
         if (auto text = DecodeText(bytes)) {
             const auto id = text->id;
             if (lastText != id) texts.push_back(std::move(*text));
@@ -370,6 +402,10 @@ std::vector<Press> Channel::TakePresses() {
 
 std::vector<TypedText> Channel::TakeTexts() {
     return std::exchange(texts, {});
+}
+
+std::optional<std::uint32_t> Channel::TakeAssist() {
+    return std::exchange(assist, std::nullopt);
 }
 
 void Channel::SendPrompt(const Prompt& prompt) {

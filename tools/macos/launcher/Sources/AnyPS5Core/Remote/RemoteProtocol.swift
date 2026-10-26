@@ -403,6 +403,13 @@ public enum RemotePacket {
     public static let pressMagic: UInt32 = 0x5052_5041
     public static let promptMagic: UInt32 = 0x4B52_5041
     public static let textMagic: UInt32 = 0x5452_5041
+    public static let assistMagic: UInt32 = 0x4152_5041
+    public static let assistSize = 16
+    /// Byte 13 of an input: 1 marks a device that helps the first player (assist).
+    public static let seatByte = 13
+    public static let assistSeat: UInt8 = 1
+    /// The assist datagram's flag: the Mac's other controllers help the first player.
+    public static let assistControllers: UInt32 = 1
     public static let version: UInt16 = 1
     public static let promptHeaderSize = 24
     public static let textHeaderSize = 20
@@ -439,6 +446,34 @@ public enum RemotePacket {
     /// text typed for it (bit 1 of byte 9).
     public static func helloTakesText(_ data: Data) -> Bool {
         isHello(data) && data[data.startIndex + 9] & 2 != 0
+    }
+
+    /// Whether a game's hello says its engine takes assist (bit 2 of byte 9): the assist datagram
+    /// and inputs marked as helping the first player.
+    public static func helloTakesAssist(_ data: Data) -> Bool {
+        isHello(data) && data[data.startIndex + 9] & 4 != 0
+    }
+
+    /// The assist datagram (APRA): whether the Mac's controllers after the first player's help
+    /// the first player instead of being players of their own.
+    public static func assist(controllers: Bool) -> Data {
+        var bytes = [UInt8](repeating: 0, count: assistSize)
+        func put<T: FixedWidthInteger>(_ value: T, at offset: Int) {
+            withUnsafeBytes(of: value.littleEndian) { bytes.replaceSubrange(offset..<(offset + $0.count), with: $0) }
+        }
+        put(assistMagic, at: 0)
+        put(version, at: 4)
+        put(UInt16(assistSize), at: 6)
+        put(controllers ? assistControllers : 0, at: 8)
+        return Data(bytes)
+    }
+
+    /// An input packet marked as helping the first player (byte 13 = 1); anything else unchanged.
+    public static func helping(_ data: Data) -> Data {
+        guard inputSession(data) != nil else { return data }
+        var marked = data
+        marked[marked.startIndex + seatByte] = assistSeat
+        return marked
     }
 
     /// A game's prompt (APRK): `.some(nil)` when it says no text is asked for any more, nil for

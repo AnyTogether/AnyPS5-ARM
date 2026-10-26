@@ -291,6 +291,8 @@ public final class SharePadRouter: @unchecked Sendable {
     private var last: [String: Data] = [:]
     /// The pad (2-4) each viewer was given.
     private var pads: [String: Int] = [:]
+    /// The viewers the host set to help player 1 (assist): their packets say so instead of their pad.
+    private var helpers: Set<String> = []
 
     /// Where a packet carries the player the launcher holds for a share play guest (2-4); the
     /// engine never seats such a pad as player 1. Phones leave it 0.
@@ -327,7 +329,7 @@ public final class SharePadRouter: @unchecked Sendable {
         var packet = Data(data)
         guard let bridge: Int = lock.withLock({
             guard let bridge = held[userId], let pad = pads[userId] else { return nil }
-            packet[packet.startIndex + SharePadRouter.seatByte] = UInt8(clamping: pad)
+            packet[packet.startIndex + SharePadRouter.seatByte] = helpers.contains(userId) ? RemotePacket.assistSeat : UInt8(clamping: pad)
             last[userId] = packet
             return bridge
         }) else { return false }
@@ -336,6 +338,12 @@ public final class SharePadRouter: @unchecked Sendable {
     }
 
     public func bridge(of userId: String) -> Int? { lock.withLock { held[userId] } }
+
+    /// The viewers with a pad who help player 1 rather than play their own (assist).
+    public var assist: Set<String> {
+        get { lock.withLock { helpers } }
+        set { lock.withLock { helpers = newValue } }
+    }
 
     /// Whose pad a bridge carries, for the game's answers on it.
     public func viewer(onBridge bridge: Int) -> String? { lock.withLock { held.first { $0.value == bridge }?.key } }

@@ -380,7 +380,7 @@ void guestsNeverTakeTheFirstPlayer() {
     const auto guest = RemotePad::DecodeInput(view(packet));
     require(guest.has_value() && guest->seat == 2 && guest->state.hasMotion, "a guest's packet names its player and keeps its motion flag");
     packet[13] = 1;
-    require(RemotePad::DecodeInput(view(packet))->seat == 0, "the first player is no seat to hold");
+    require(RemotePad::DecodeInput(view(packet))->seat == RemotePad::AssistSeat, "the first player is no seat to hold: 1 marks a helper of it (assist)");
     packet[13] = 5;
     require(RemotePad::DecodeInput(view(packet))->seat == 0, "nor is a fifth");
 
@@ -615,6 +615,83 @@ void helloSaysItTakesText() {
     require((RemotePad::EncodeHello(1)[9] & RemotePad::HelloTakesText) != 0, "the hello says the engine takes text");
 }
 
+// Assist: a device marked in byte 13 helps the first player, and the assist datagram (APRA)
+// says whether the Mac's other controllers do.
+void anInputCanHelpTheFirstPlayer() {
+    auto bytes = fullPacket(1);
+    bytes[13] = RemotePad::AssistSeat;
+    const auto input = RemotePad::DecodeInput(view(bytes));
+    require(input && input->seat == RemotePad::AssistSeat, "byte 13 = 1 marks a helper of the first player");
+    bytes[13] = 5;
+    require(RemotePad::DecodeInput(view(bytes))->seat == 0, "a seat past the fourth player is none");
+}
+
+void assistDatagram() {
+    const auto bytes = RemotePad::EncodeAssist(RemotePad::AssistControllers);
+    require(bytes.size() == 16 && get<std::uint32_t>(bytes.data(), 0) == RemotePad::AssistMagic, "assist magic and size");
+    require(get<std::uint16_t>(bytes.data(), 4) == 1 && get<std::uint16_t>(bytes.data(), 6) == 16, "assist version and size field");
+    require(RemotePad::DecodeAssist(std::span<const std::uint8_t>(bytes.data(), bytes.size())) == RemotePad::AssistControllers, "the flags come back");
+    auto unknown = std::vector<std::uint8_t>(bytes.begin(), bytes.end());
+    put<std::uint32_t>(unknown, 8, 0xF0u);
+    require(RemotePad::DecodeAssist(view(unknown)) == 0u, "unknown flags are dropped");
+    auto wrong = std::vector<std::uint8_t>(bytes.begin(), bytes.end());
+    put<std::uint16_t>(wrong, 6, 15);
+    require(!RemotePad::DecodeAssist(view(wrong)), "a wrong size field is dropped");
+    require(!RemotePad::DecodeInput(view(unknown)) && !RemotePad::DecodePress(view(unknown)), "an assist datagram is no input and no press");
+    require((RemotePad::EncodeHello(1)[9] & RemotePad::HelloTakesAssist) != 0, "the hello says the engine takes assist");
+}
+
+void assistedKeepsThePlayersMotion() {
+    PadInputState player;
+    player.buttons = 0x4000;
+    player.sticks = {128, 128, 40, 128};
+    player.analogButtonsR2 = 30;
+    player.hasMotion = true;
+    player.gyro = {1.0f, 2.0f, 3.0f};
+    PadInputState helper;
+    helper.buttons = 0x0010;
+    helper.sticks = {250, 128, 120, 128};
+    helper.analogButtonsR2 = 200;
+    helper.hasMotion = true;
+    helper.gyro = {9.0f, 9.0f, 9.0f};
+    helper.touch[0] = {true, 100, 200, 7};
+    const auto both = RemotePad::Assisted(player, helper);
+    require(both.buttons == 0x4010u, "both press");
+    require(both.sticks[0] == 250 && both.sticks[2] == 40, "each stick from whoever pushes it further");
+    require(both.analogButtonsR2 == 200, "the stronger trigger");
+    require(both.touch[0].active && both.touch[0].x == 100, "the helper's touch counts");
+    require(both.gyro[0] == 1.0f, "the player's own motion stays");
+    player.hasMotion = false;
+    require(RemotePad::Assisted(player, helper).gyro[0] == 9.0f, "the helper's motion only when the player has none");
+    require(RemotePad::Assisted(PadInputState{}, PadInputState{}).buttons == 0, "nothing pressed, nothing held");
+}
+
+void controllersHelpOnlyWhenAskedAndPlayerOneIsTaken() {
+    require(!RemotePad::Helps(false, true), "controllers are players unless the launcher says they help");
+    require(!RemotePad::Helps(true, false), "with no one on player 1, a controller takes it");
+    require(RemotePad::Helps(true, true), "with player 1 taken, the next controller helps it");
+}
+
+void channelTakesTheNewestAssist() {
+    Peer launcher;
+    RemotePad::Channel channel(launcher.port);
+    const auto now = std::chrono::steady_clock::now();
+    const auto on = RemotePad::EncodeAssist(RemotePad::AssistControllers);
+    const auto off = RemotePad::EncodeAssist(0);
+    launcher.send(std::vector<std::uint8_t>(on.begin(), on.end()), channel.Port());
+    launcher.send(std::vector<std::uint8_t>(off.begin(), off.end()), channel.Port());
+    launcher.send(std::vector<std::uint8_t>(on.begin(), on.end()), channel.Port());
+    std::optional<std::uint32_t> flags;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        channel.Poll(now);
+        if (const auto taken = channel.TakeAssist()) flags = taken;
+        if (flags == RemotePad::AssistControllers) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    require(flags == RemotePad::AssistControllers, "the newest assist flags are taken");
+    require(!channel.TakeAssist(), "and taken once");
+}
+
 void environmentForMorePlayers() {
     unsetVariable("ANYPS5_REMOTE_PAD");
     setVariable("ANYPS5_REMOTE_PAD_2", "127.0.0.1:5002");
@@ -667,6 +744,11 @@ int main() try {
     validUtf8AndPieces();
     channelCarriesPromptsAndTexts();
     helloSaysItTakesText();
+    anInputCanHelpTheFirstPlayer();
+    assistDatagram();
+    assistedKeepsThePlayersMotion();
+    controllersHelpOnlyWhenAskedAndPlayerOneIsTaken();
+    channelTakesTheNewestAssist();
     std::cout << "remote pad tests passed\n";
     return 0;
 } catch (const std::exception& error) {

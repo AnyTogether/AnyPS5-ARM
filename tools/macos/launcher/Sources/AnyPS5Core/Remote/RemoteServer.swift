@@ -488,8 +488,14 @@ public final class RemoteServer: @unchecked Sendable {
         while let (data, source) = RemoteServer.receive(phoneSocket) {
             guard let session = RemotePacket.inputSession(data), let client = phones.first(where: { $0.session == session }), let slot = client.slot else { continue }
             client.address = source
-            if var game = gameAddresses[slot] { RemoteServer.send(data, from: bridgeSockets[slot], to: &game) }
+            if var game = gameAddresses[slot] { RemoteServer.send(assisted(data, client), from: bridgeSockets[slot], to: &game) }
         }
+    }
+
+    /// A pad packet from a phone the launcher set to help the first player is marked so.
+    private func assisted(_ data: Data, _ client: Client) -> Data {
+        guard let id = client.deviceID, assistDevices.contains(id) else { return data }
+        return RemotePacket.helping(data)
     }
 
     /// A pad packet on a welcomed phone's own control channel goes to the game as if it had
@@ -497,7 +503,7 @@ public final class RemoteServer: @unchecked Sendable {
     private func padFromChannel(_ data: Data, session: UInt64, client: Client) {
         guard client.session == session, phones.contains(where: { $0 === client }), let slot = client.slot, gameAddresses.indices.contains(slot) else { return }
         client.padOnChannel = true
-        if var game = gameAddresses[slot] { RemoteServer.send(data, from: bridgeSockets[slot], to: &game) }
+        if var game = gameAddresses[slot] { RemoteServer.send(assisted(data, client), from: bridgeSockets[slot], to: &game) }
     }
 
     /// A hello names the game to send to on that bridge; its answers go back to the slot's phone.
@@ -507,6 +513,12 @@ public final class RemoteServer: @unchecked Sendable {
                 gameAddresses[slot] = source
                 gamePresses[slot] = RemotePacket.helloTakesPresses(data)
                 gameTexts[slot] = RemotePacket.helloTakesText(data)
+                // The engine hears whether controllers help with every hello: a game started later
+                // or again learns it within a second.
+                if RemotePacket.helloTakesAssist(data) {
+                    var game = source
+                    RemoteServer.send(RemotePacket.assist(controllers: assistControllers), from: bridgeSockets[slot], to: &game)
+                }
                 let player = RemotePacket.helloPlayer(data)
                 if gamePlayers[slot] != player {
                     gamePlayers[slot] = player
@@ -524,6 +536,25 @@ public final class RemoteServer: @unchecked Sendable {
                 } else if var phone = client.address {
                     RemoteServer.send(data, from: phoneSocket, to: &phone)
                 }
+            }
+        }
+    }
+
+    // MARK: Assist
+
+    /// The phones and browser pads (by device ID) that help the first player, and whether the
+    /// Mac's other controllers do.
+    private var assistDevices: Set<String> = []
+    private var assistControllers = false
+
+    public func setAssist(devices: Set<String>, controllers: Bool) {
+        queue.async { [self] in
+            assistDevices = devices
+            guard controllers != assistControllers else { return }
+            assistControllers = controllers
+            let packet = RemotePacket.assist(controllers: controllers)
+            for slot in bridgeSockets.indices {
+                if var game = gameAddresses[slot] { RemoteServer.send(packet, from: bridgeSockets[slot], to: &game) }
             }
         }
     }

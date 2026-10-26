@@ -22,6 +22,14 @@ constexpr std::uint32_t HelloMagic = 0x48525041u;
 constexpr std::uint32_t PressMagic = 0x50525041u;
 constexpr std::uint32_t PromptMagic = 0x4B525041u;
 constexpr std::uint32_t TextMagic = 0x54525041u;
+constexpr std::uint32_t AssistMagic = 0x41525041u;
+constexpr std::size_t AssistSize = 16;
+// An input whose byte 13 is this helps the first player (assist): the launcher marks a phone,
+// a browser pad or a share play guest so; it takes no seat of its own.
+constexpr std::uint8_t AssistSeat = 1;
+// Bit 0 of an assist datagram's flags: the Mac's game controllers after the first player's help
+// the first player instead of becoming players 2 to 4.
+constexpr std::uint32_t AssistControllers = 1;
 constexpr std::uint16_t Version = 1;
 constexpr std::size_t InputSize = 80;
 constexpr std::size_t OutputSize = 32;
@@ -36,6 +44,8 @@ constexpr std::size_t LargestPromptTitle = 255;
 // text (APRK) and takes the text typed for it (APRT).
 constexpr std::uint8_t HelloTakesPresses = 1;
 constexpr std::uint8_t HelloTakesText = 2;
+// Bit 2: it takes assist datagrams (APRA) and inputs that help the first player (byte 13 = 1).
+constexpr std::uint8_t HelloTakesAssist = 4;
 constexpr auto ShortestHold = std::chrono::milliseconds(50);
 constexpr auto LongestHold = std::chrono::milliseconds(2000);
 constexpr auto Silence = std::chrono::milliseconds(500);
@@ -48,7 +58,7 @@ struct Input {
     std::uint32_t waitMicros = 0;
     std::uint64_t session = 0;
     // The player (2 to 4) the launcher holds for a share play guest, from byte 13; 0 for a phone,
-    // which may be any player.
+    // which may be any player; AssistSeat for a device that helps the first player.
     std::uint8_t seat = 0;
     PadInputState state{};
 };
@@ -104,12 +114,23 @@ std::vector<std::string> TextPieces(std::string_view text, std::size_t bytes);
 std::string Utf8(std::u16string_view units);
 
 std::optional<Input> DecodeInput(std::span<const std::uint8_t> bytes);
+// The assist datagram (APRA, launcher to engine): its flags (AssistControllers), nil when it is
+// not one.
+std::optional<std::uint32_t> DecodeAssist(std::span<const std::uint8_t> bytes);
+std::array<std::uint8_t, AssistSize> EncodeAssist(std::uint32_t flags);
 std::optional<Press> DecodePress(std::span<const std::uint8_t> bytes);
 std::array<std::uint8_t, OutputSize> EncodeOutput(const Input& last, const PadOutputState& output);
 // player is the channel's player counting from 1, or 0 while its phone is none.
 std::array<std::uint8_t, HelloSize> EncodeHello(std::uint8_t player = 0);
 bool IsNewer(std::uint32_t sequence, std::uint32_t than);
 PadInputState Merge(const PadInputState& controller, const PadInputState& remote);
+// The first player's pad with a helper's added (assist): buttons from both, the stick furthest
+// from the centre and the stronger trigger win, the helper's touch counts, and the player's own
+// motion stays (the helper's is taken only when the player's pad has none).
+PadInputState Assisted(const PadInputState& player, const PadInputState& helper);
+// Whether a device that asks for a player helps the first player instead: only when controllers
+// help (AssistControllers) and another device holds the first player already.
+bool Helps(bool controllersHelp, bool playerOneHeld);
 PadInputState Current(const std::optional<Input>& last, std::chrono::steady_clock::time_point seen, std::chrono::steady_clock::time_point now);
 
 class Channel {
@@ -124,6 +145,8 @@ public:
     std::vector<Press> TakePresses();
     // The texts Poll read since the last call; a copy of the last one (the same id) is dropped.
     std::vector<TypedText> TakeTexts();
+    // The newest assist flags Poll read since the last call, if any came.
+    std::optional<std::uint32_t> TakeAssist();
     // Tells the launcher what text the game asks for (id 0: none).
     void SendPrompt(const Prompt& prompt);
     void Answer(const Input& last, const PadOutputState& output);
@@ -144,6 +167,7 @@ private:
     std::vector<Press> presses;
     std::optional<std::uint32_t> lastText;
     std::vector<TypedText> texts;
+    std::optional<std::uint32_t> assist;
     std::optional<std::chrono::steady_clock::time_point> greeted;
     std::uint8_t player = 0;
 };

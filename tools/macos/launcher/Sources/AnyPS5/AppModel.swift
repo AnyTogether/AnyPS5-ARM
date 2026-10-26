@@ -83,6 +83,9 @@ struct Preferences: Codable, Equatable {
     var controllerLight: String?
     var confirmCircle: Bool?
     var stickDeadzone: Int?
+    /// Settings → Controllers → Assist Player 1 (AssistTarget): nil off, "controllers", or the
+    /// device ID of the phone or browser pad that helps.
+    var assistPlayerOne: String?
     /// The engine toolkit that unlocks games without one of their own (EngineChoice: nil is
     /// the built-in one, "custom" the folder below, else a downloaded version).
     var engine: String?
@@ -624,6 +627,7 @@ final class AppModel: ObservableObject {
         Input.shared.circleConfirms = preferences.confirmCircle == true
         if persists, Input.shared.shortcuts != shortcutMap { Input.shared.apply(shortcutMap) }
         Input.shared.deadzone = preferences.stickDeadzone ?? 0
+        applyAssist()
         let controllers = Controllers.shared
         controllers.light = preferences.controllerLight.flatMap(PadLight.init(rawValue:)) ?? .theme
         if let rgb = NSColor(accent).usingColorSpace(.sRGB) {
@@ -1972,6 +1976,7 @@ final class AppModel: ObservableObject {
             server.togetherServer = together.base.absoluteString
             if (try? server.start()) != nil {
                 remote = server
+                applyAssist()
                 updateBrowserPlay()
                 if let port = server.controlPort {
                     cable = UsbTunnel(targetPort: port)
