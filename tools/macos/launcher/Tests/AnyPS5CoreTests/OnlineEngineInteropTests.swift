@@ -123,6 +123,25 @@ final class OnlineEngineInteropTests: XCTestCase {
         XCTAssertTrue(lines.contains { $0.contains("PushEventDelivered") && $0.contains(#""callbacks":1"#) })
     }
 
+    /// Join as Human Fall Flat does it: the room comes from Photon, its Player Session from the
+    /// host's console, so the launcher has never seen it. The game's libSceNpCppWebApi must still
+    /// get a 201 with the players, or the game crashes reading a body that is not there.
+    func testAGameJoinsAPlayerSessionMadeElsewhere() throws {
+        guard let probe = OnlineEngineInteropTests.probe else { throw XCTSkip("online_probe is not built") }
+        let me = TogetherUser(id: "0190a0b1-0000-7000-8000-00000000000a", handle: "alice", displayName: "Alice", avatar: nil)
+        let play = OnlinePlay(service: FakeOnlineTogether(), user: me, game: .init(titleId: "PPSA02429", gameVersion: "01.017", engineBuild: "x"),
+                              transport: { _ in OnlineNoTransport() })
+        let environment = try play.start()
+        defer { play.stop() }
+        let seen = try run(probe, environment: environment, arguments: ["join", "e12bb290-d6fc-4027-aac1-2bfb09fbe59b"])
+        XCTAssertEqual(seen["join_status"], "201")
+        XCTAssertEqual(seen["join_response"], "parsed", "the game's web API library takes the reply")
+        XCTAssertEqual(seen["join_body"], #"{"players":[{"accountId":"\#(OnlineIdentity.accountId(forUser: me.id))","platform":"PS5"}]}"#)
+        XCTAssertEqual(seen["joined_status"], "200")
+        XCTAssertEqual(seen["leave_status"], "204")
+        XCTAssertTrue(play.router.notOffered.isEmpty)
+    }
+
     func testWithoutTheLauncherTheGameStaysSignedOut() throws {
         guard let probe = OnlineEngineInteropTests.probe else { throw XCTSkip("online_probe is not built") }
         let seen = try run(probe, environment: [:])

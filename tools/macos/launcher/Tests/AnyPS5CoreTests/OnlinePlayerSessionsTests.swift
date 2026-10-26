@@ -174,6 +174,31 @@ final class OnlinePlayerSessionsTests: XCTestCase {
         XCTAssertEqual(missing.status, 404)
         XCTAssertEqual(missing.headers, [.init("Content-Type", "application/json"), .init("Content-Length", String(missing.body.count))])
     }
+
+    /// Join in Human Fall Flat: the room comes from Photon's public list, and its Player Session
+    /// was made by the host's own console (or launcher), so it is not here. The platform would let
+    /// the player in; a 404 makes the game's libSceNpCppWebApi finish without a body and the game
+    /// crashes reading it (SIGSEGV at 0x10, libSceNpCppWebApi.prx +0x1daa84). So joining a session
+    /// made elsewhere is taken: 201 with the players, and the session is kept from then on.
+    func testJoiningASessionMadeElsewhereIsTaken() throws {
+        let sessions = OnlinePlayerSessions(account: 42, onlineId: "alice")
+        let elsewhere = "e12bb290-d6fc-4027-aac1-2bfb09fbe59b"
+        let joined = sessions.handle(request("POST", "/v1/playerSessions/\(elsewhere)/member/players",
+                                             #"{"players":[{"accountId":"42","platform":"PS5","pushContexts":[{"pushContextId":"\#(context)"}]}]}"#))
+        XCTAssertEqual(joined.status, 201)
+        XCTAssertEqual(String(decoding: joined.body, as: UTF8.self), #"{"players":[{"accountId":"42","platform":"PS5"}]}"#)
+        XCTAssertEqual(sessions.sessionIds, [elsewhere])
+        let got = try XCTUnwrap((try body(sessions.handle(request("GET", "/v1/playerSessions/\(elsewhere)")))["playerSessions"] as? [[String: Any]])?.first)
+        XCTAssertEqual(((got["member"] as? [String: Any])?["players"] as? [[String: Any]])?.map { $0["accountId"] as? String }, ["42"])
+        XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions/not-a-session/member/players", #"{"players":[{"accountId":"42"}]}"#)).status, 404,
+                       "only a session ID (a UUID) is taken")
+        XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions/\(UUID().uuidString.lowercased())/member/players", #"{"players":[]}"#)).status, 400,
+                       "joining needs a player")
+        XCTAssertEqual(sessions.handle(request("DELETE", "/v1/playerSessions/\(elsewhere)/members/me")).status, 204)
+        XCTAssertTrue(sessions.sessionIds.isEmpty, "leaving it closes it here")
+        XCTAssertEqual(sessions.handle(request("POST", "/v1/playerSessions/\(UUID().uuidString)/invitations", #"{"invitations":[]}"#)).status, 404,
+                       "other calls on an unknown session still find nothing")
+    }
 }
 
 final class PushRecorder: @unchecked Sendable {

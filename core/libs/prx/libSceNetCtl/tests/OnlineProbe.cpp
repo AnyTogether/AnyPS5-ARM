@@ -20,6 +20,9 @@
 // the context, delivered through sceNpCheckCallback), then leaves the session and a stale one.
 // Creating the session and inviting to it go the way the game's own libSceNpCppWebApi.prx sends
 // them (cppWebApi below), so a reply it would not take shows here as <name>_response=none.
+//
+// `online_probe join <session ID>` plays Join the same way: a push context, then joining the
+// Player Session of a room found elsewhere (Photon's list), which the launcher has never seen.
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "SceTypes.hpp"
 #include <algorithm>
@@ -218,6 +221,30 @@ int host() {
     return 0;
 }
 
+int join(const std::string& sessionId) {
+    std::uint64_t accountId = 0;
+    if (const int result = sceNpGetAccountIdA(InitialUser, &accountId); result != 0) {
+        std::cout << "account_id_error=" << hexResult(result) << '\n';
+        return 1;
+    }
+    const int library = sceNpWebApi2Initialize(1, 0x80000);
+    const int user = library > 0 ? sceNpWebApi2CreateUserContext(library, InitialUser) : library;
+    const int handle = sceNpWebApi2PushEventCreateHandle(library);
+    PushFilterParameter parameters[1] = {};
+    std::strncpy(parameters[0].dataType, "psn:sessionManager:ps:m:players:created", sizeof(parameters[0].dataType) - 1);
+    const int filter = sceNpWebApi2PushEventCreateFilter(library, handle, "sessionManager", 0, parameters, 1);
+    sceNpWebApi2PushEventRegisterPushContextCallback(user, filter, reinterpret_cast<void*>(onPush), nullptr);
+    char context[37] = {};
+    if (sceNpWebApi2PushEventCreatePushContext(user, context) != 0) return 1;
+    sceNpWebApi2PushEventStartPushContextCallback(user, context);
+    cppWebApi(user, "join", "sessionManager", "/v1/playerSessions/" + sessionId + "/member/players", "POST",
+        R"({"players":[{"accountId":")" + std::to_string(accountId) + R"(","platform":"PS5","pushContexts":[{"pushContextId":")" + context + R"("}]}]})", 201);
+    request(user, "joined", "sessionManager", "/v1/playerSessions/" + sessionId);
+    request(user, "leave", "sessionManager", "/v1/playerSessions/" + sessionId + "/members/" + std::to_string(accountId), "DELETE");
+    sceNpWebApi2PushEventDeletePushContext(user, context);
+    return 0;
+}
+
 // The platform's socket address: the virtual port sits where IPv4 has zeros.
 struct NetAddress {
     std::uint8_t length = 16;
@@ -366,6 +393,7 @@ int udp(const std::string& destinationText, const std::string& role, std::size_t
 
 int main(int argc, char** argv) {
     if (argc == 2 && std::string(argv[1]) == "host") return host();
+    if (argc == 3 && std::string(argv[1]) == "join") return join(argv[2]);
     if (argc == 4 && std::string(argv[1]) == "p2p") return p2p(argv[2], argv[3]);
     if ((argc == 4 || argc == 5) && std::string(argv[1]) == "udp") return udp(argv[2], argv[3], argc == 5 ? std::stoul(argv[4]) : 4);
     try {

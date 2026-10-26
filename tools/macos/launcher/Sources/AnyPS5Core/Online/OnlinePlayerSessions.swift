@@ -16,6 +16,10 @@ import Foundation
 /// GETs. With 200 for a POST it finishes the request "successfully" with no body, and Human Fall
 /// Flat then crashes reading it (SIGSEGV at 0x10 in `PostPlayerSessionsResponseBody::getPlayerSessions`).
 ///
+/// Joining a session that is not here (made by another player's console or launcher; Join in
+/// Human Fall Flat finds the room through Photon) is taken as the platform would take it, and the
+/// session is kept from then on.
+///
 /// Changes the game makes itself bring it no push events (the platform does not tell a member
 /// about its own change). Changes from elsewhere (`playerJoined`, `playerLeft`) are pushed to
 /// every push context the session's players registered, with the data types the game listens
@@ -123,6 +127,18 @@ public final class OnlinePlayerSessions: @unchecked Sendable {
         case ("POST", 5, "member") where parts[4] == "players" || parts[4] == "spectators":
             let spectators = parts[4] == "spectators"
             let joining = players(body[parts[4]])
+            guard !joining.isEmpty else { return problem(400, "\(parts[4]) is required") }
+            // A session made elsewhere (Join in a room from the game's own matchmaking, whose host
+            // made the Player Session on their console): the platform would let the player in, and
+            // a 404 crashes Human Fall Flat. It is kept here from now on, with the joining players.
+            if UUID(uuidString: id) != nil {
+                lock.withLock {
+                    guard sessions[id] == nil, sessions.count < OnlinePlayerSessions.maxSessions else { return }
+                    sessions[id] = Session(id: id, created: millis(), settings: ["maxPlayers": max(joining.count, 1), "maxSpectators": 0], players: [], spectators: [],
+                                           leader: joining.first?.accountId ?? me, joinableSpecifiedUsers: [], invitations: [])
+                    order.append(id)
+                }
+            }
             return change(id) { session in
                 for player in joining {
                     session.players.removeAll { $0.accountId == player.accountId }

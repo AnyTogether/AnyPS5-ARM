@@ -215,6 +215,35 @@ What changed:
   `create_response=parsed` or `none`. `OnlineEngineInteropTests` runs it against the launcher's
   service. `OnlinePlayerSessionsTests` and `online_web_api2` check statuses, headers and shape.
 
+## Test runs on this Mac (2026-10-26, 05:30-06:20)
+
+Run with the nightly v0.2.22-arm-nightly.20261026.1 (main 4fdd12ba9) and later with a launcher
+built from the Join fix below, Online play on, signed in, menus driven with keyboard events
+(Return = Cross, arrows, I = Triangle), screenshots of the game window.
+
+- **Host Public works.** `POST /v1/playerSessions` was answered 201 with 149 bytes, the library
+  read the body (`ReadData`, then 0), and the game showed "Host a Public Game" (Mansion, Max 8,
+  Join Game). START loaded Mansion and the player could walk (about 4 fps while it loaded). The
+  game then sent `PATCH /v1/playerSessions/<id>` (`joinableUserType`), answered 204. While hosting,
+  the game held a UDP connection to a Photon game server (port 5056), so its room was up on Photon.
+- **The public list works.** In another run the list showed a real player's lobby
+  ("terrific_nave74", 1/2, Mansion, In Lobby). At other times it said "No games found": at 6 in the
+  morning there were no public rooms. A second copy of the game on the same Mac, signed in as the
+  same player, did not list our own hosted room either. That copy started without the launcher
+  (same bridge address), and the host was killed without a log line when it loaded its level while
+  both ran. Two copies of a 4.5 GB game on one Mac is not a fair test, so whether the hosted room
+  shows to other players still needs a second player.
+- **Join crashed (found here, fixed below).** Joining "terrific_nave74" sent
+  `POST /v1/playerSessions/e12bb290-…/member/players` with our push context. That session was made
+  by the host's console, so the launcher did not have it and answered 404. The game then died:
+  `SIGSEGV at 0x10, libSceNpCppWebApi.prx.guest.prx+0x1daa84`. ELF 0x1caa84 is the same pattern as
+  the Host crash, a 24-byte member copied from offset 0x10 of a null response body. Join "worked"
+  in the 0.2.20 nightly only because the push context failed then, so the game never sent the join.
+  The platform lets a player join a session that exists. Now the launcher does the same: it takes a
+  join into a session ID it has not seen, answers 201 with the players, and keeps the session from
+  then on. Tests: `OnlinePlayerSessionsTests.testJoiningASessionMadeElsewhereIsTaken`, and
+  `online_probe join <id>` in `OnlineEngineInteropTests.testAGameJoinsAPlayerSessionMadeElsewhere`.
+
 ## Imports
 
 From `relinker --registry` on the unwrapped eboot and every bundled module, classified with
