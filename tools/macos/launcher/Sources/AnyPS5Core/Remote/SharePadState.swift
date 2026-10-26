@@ -18,6 +18,20 @@ public struct SharePadState: Equatable, Sendable {
     public var sticks: [UInt8] = [128, 128, 128, 128]
     public var l2: UInt8 = 0
     public var r2: UInt8 = 0
+    /// Fingers on the touchpad, at most two, in its 1920 x 1080 space.
+    public var touches: [Touch] = []
+
+    public struct Touch: Equatable, Sendable {
+        public var id: UInt8
+        public var x: UInt16
+        public var y: UInt16
+
+        public init(id: UInt8, x: UInt16, y: UInt16) {
+            self.id = id
+            self.x = min(x, 1919)
+            self.y = min(y, 1079)
+        }
+    }
 
     public init() {}
 
@@ -44,6 +58,13 @@ public struct SharePadState: Equatable, Sendable {
         for (index, value) in sticks.prefix(4).enumerated() { bytes[36 + index] = value }
         bytes[40] = l2
         bytes[41] = r2
+        for (index, touch) in touches.prefix(2).enumerated() {
+            let offset = 44 + index * 6
+            bytes[offset] = 1
+            bytes[offset + 1] = touch.id
+            put(touch.x, offset + 2)
+            put(touch.y, offset + 4)
+        }
         // No motion: gravity straight down, as the phone sends it.
         put(Float(9.80665).bitPattern, 60)
         return Data(bytes)
