@@ -78,6 +78,22 @@ With the zip from the [latest release](https://github.com/utkuhalis/AnyPS5-ARM/r
 
 **Playing.** **Play** starts the game. **⋯** (or `O` / △) opens its settings: output resolution (for titles with a resolution patch, such as Stray), window or full screen, window size, vertical sync, the performance overlay, the game's language, **Controls**, and Show in Finder, the log, clearing the shader cache, unlocking again or removing the installation.
 
+**Updates and add-ons (DLC).** Put the dumps of a game's update and add-ons next to the game, in the same layout shadPS4 uses:
+
+```
+Games/
+  PPSA01234/                              the game
+  PPSA01234-UPDATE/                       its update (PPSA01234-patch works too)
+  PPSA01234-DLC/
+    EXPANSION0000001/                     one folder per add-on, named by its label
+    UP0000-PPSA01234_00-COSTUMEPACK00002/ or by its content ID
+  UP0000-PPSA01234_00-SOUNDTRACK000003/   an add-on can also sit next to the game, named by its content ID
+```
+
+The game's folder name or its title ID goes before `-UPDATE`, `-patch` and `-DLC`, in any case. An add-on's label is the last part of its content ID, which comes from its `sce_sys/param.json` or from the folder name. The game's page shows **DLC (n)** with their names, and **Update v01.004 applied** once the game is unlocked with it. An update dumped after the unlock says **unlock to apply**, because the update's `eboot.bin` and modules have to be converted again (saves and trophies stay). The engine then reads the update's files in place of the game's and mounts each add-on the game asks for. Only the add-ons that are on the disk are reported to the game: nothing you did not dump is unlocked, and nothing is asked of PlayStation servers.
+
+**Game Presets.** **Settings → Game Presets** sets, once for every game, what the PS5 keeps under the same name: the difficulty, Performance Mode or Resolution Mode, inverting the vertical and horizontal view for first-person and third-person games, subtitles and the audio language. Games that read the console's presets start with them; a game that keeps its own settings uses those once you change them in it, and games that do not ask ignore them. The presets are kept in `~/Library/Application Support/AnyPS5/GamePresets.json` and reach the game as `ANYPS5_GAME_PRESETS` ([format](USAGE.md#game-presets)). There is one set for now; with profiles each profile will get its own.
+
 **Controls.** The keyboard and mouse layout for each game. Pick a pad button or stick direction, then press the key you want for it; Esc cancels. A key you give to one button leaves the button that had it, and mouse buttons stay where they were. The default layout:
 
 | Pad | Keys |
@@ -329,6 +345,22 @@ curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/inst
 **Kilidi açmak.** Henüz dönüştürülmemiş oyunlarda kilit işareti olur. **Kilidi Aç**, `eboot.bin` ve modüller hâlâ SELF kabı olsa bile açar, macOS için relink eder ve oyun uygulamasını hazırlar; ilerleme PS5'teki gibi bir çubukla görünür. Oyun dosyaları dump'ın APFS klonlarıdır, kilidi açılan oyun ek yer kaplamaz. Hâlâ şifreli bir dump dönüştürülmez, bildirilir.
 
 **Oynamak.** **Oyna** oyunu başlatır. **⋯** (ya da `O` / △) oyunun ayarlarını açar: çıkış çözünürlüğü (Stray gibi çözünürlük yaması olan oyunlarda), pencere ya da tam ekran, pencere boyutu, dikey senkronizasyon, performans göstergesi, oyun dili, **Tuş Atamaları**, **Kupalar**; ayrıca Finder'da göster, günlük, shader önbelleğini temizleme, kilidi yeniden açma ya da kurulumu kaldırma.
+
+**Güncellemeler ve eklentiler (DLC).** Bir oyunun güncellemesinin ve eklentilerinin dump'larını, shadPS4'ün kullandığı düzende oyunun yanına koy:
+
+```
+Oyunlar/
+  PPSA01234/                              oyun
+  PPSA01234-UPDATE/                       güncellemesi (PPSA01234-patch de olur)
+  PPSA01234-DLC/
+    EXPANSION0000001/                     her eklenti için bir klasör, etiketinin adıyla
+    UP0000-PPSA01234_00-COSTUMEPACK00002/ ya da içerik kimliğinin adıyla
+  UP0000-PPSA01234_00-SOUNDTRACK000003/   eklenti, içerik kimliği adıyla oyunun yanında da durabilir
+```
+
+`-UPDATE`, `-patch` ve `-DLC`'nin önüne oyunun klasör adı ya da başlık kimliği gelir; büyük-küçük harf fark etmez. Eklentinin etiketi, içerik kimliğinin son parçasıdır; `sce_sys/param.json`'dan ya da klasör adından okunur. Oyunun sayfası eklentileri adlarıyla **DLC (n)** altında gösterir; oyunun kilidi güncellemeyle açıldıysa **v01.004 güncellemesi uygulandı** yazar. Kilit açıldıktan sonra eklenen bir güncelleme **uygulamak için kilidi aç** der, çünkü güncellemenin `eboot.bin`'i ve modülleri yeniden dönüştürülmelidir (kayıtlar ve kupalar kalır). Motor bundan sonra oyunun dosyaları yerine güncellemeninkileri okur ve oyunun istediği her eklentiyi bağlar. Oyuna yalnızca diskteki eklentiler bildirilir: dump'lamadığın hiçbir şeyin kilidi açılmaz, PlayStation sunucularına hiçbir şey sorulmaz.
+
+**Oyun Ön Ayarları.** **Ayarlar → Oyun Ön Ayarları**, PS5'in aynı adla tuttuğu ayarları her oyun için bir kerede belirler: zorluk, Performans Modu ya da Çözünürlük Modu, birinci ve üçüncü şahıs oyunlarda dikey ve yatay bakışı ters çevirme, altyazılar ve ses dili. Konsolun ön ayarlarını okuyan oyunlar bunlarla başlar; kendi ayarlarını saklayan bir oyun, onları oyunda değiştirdiğinde kendininkileri kullanır, sormayan oyunlar ise yok sayar. Ön ayarlar `~/Library/Application Support/AnyPS5/GamePresets.json` dosyasında tutulur ve oyuna `ANYPS5_GAME_PRESETS` olarak geçer ([biçim](USAGE.md#game-presets)). Şimdilik tek bir takım var; profiller gelince her profilin kendi takımı olacak.
 
 **Kupalar.** Kupa listesi olan oyunlarda **Oyna**'nın yanında kaç kupa kazandığını gösteren bir 🏆 düğmesi çıkar. Liste konsoldaki gibi açılır: yüzde, derece başına sayı (platin, altın, gümüş, bronz) ve her kupanın ikonu, açıklaması, kazandığın gün. Gizli kupalar kazanılana kadar gizli kalır, bir şey sayan kupalar (*Tüm aletleri edin* gibi) ne kadar kaldığını gösterir. Liste ve metinler oyunun kendi `sce_sys/trophy2` paketinden, varsa oyunun dilinde gelir; motor her kazanılan kupayı kurulu oyunun `_trophy` klasörüne kaydeder. Kilidi yeniden açmak kayıtları ve kupaları korur. Oynarken bir kupa kazanınca ekranın en üstünde, oyunun üstünde (tam ekranda da) bir kart belirir; oyunun klavyesini ya da faresini almaz.
 

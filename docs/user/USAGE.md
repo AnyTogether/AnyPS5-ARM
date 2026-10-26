@@ -291,6 +291,26 @@ Games that open the console's system font sets (`sceFontOpenFontSet`) need font 
 
 Games ask for the console's language with `sceSystemServiceParamGetInt` and show their text in it when they have it. It is English (United States) unless `ANYPS5_LANGUAGE` is set to another console language number: 0 Japanese, 1 English (United States), 2 French, 3 Spanish, 4 German, 5 Italian, 6 Dutch, 7 Portuguese (Portugal), 8 Russian, 9 Korean, 10 Chinese (Traditional), 11 Chinese (Simplified), 12 Finnish, 13 Swedish, 14 Danish, 15 Norwegian, 16 Polish, 17 Portuguese (Brazil), 18 English (United Kingdom), 19 Turkish, 20 Spanish (Latin America), 21 Arabic, 22 French (Canada), 23 Czech, 24 Hungarian, 25 Greek, 26 Romanian, 27 Thai, 28 Vietnamese, 29 Indonesian, 30 Ukrainian. For example, `ANYPS5_LANGUAGE=21` selects Arabic. An empty value is the same as an unset one; any other value stops the game at its first language query with an error that names the variable.
 
+### Add-on content and game updates
+
+`ANYPS5_ADDCONT_DIRS` lists the folders of the add-ons (DLC) the player dumped, separated like `PATH` (`:`, or `;` on Windows). Each folder is one add-on. Its entitlement label is the last part of the content ID in its `sce_sys/param.json` (`UP0000-PPSA01234_00-EXPANSION0000001` is `EXPANSION0000001`), else its folder name when that is a content ID or a label of up to 16 letters and digits. A folder that is missing or has no label is left out. `sceAppContentGetAddcontInfoList`, `sceAppContentGetAddcontInfo` and `sceNpEntitlementAccessGetAddcontEntitlementInfoList` report these add-ons and nothing else: one with files besides `sce_sys` as installed (status 4), one with only `sce_sys` as a license without extra data (status 0). `sceAppContentAddcontMount` maps the next free `/addcont0`, `/addcont1`, ... onto an installed add-on's folder, and mounting it again returns the same mount point; `sceAppContentAddcontUnmount` closes it. An add-on that is not listed answers as before: no entitlement, not found. Nothing contacts a server.
+
+`ANYPS5_UPDATE_DIR` names the folder of a game update dumped beside the game (a patch package's files). A file under `/app0` that the update has is read from the update, the rest from the game. A folder both have is listed with the game's files, so a file only the update has is found by its path but not in a listing of that folder. Modules (`.prx`, `.sprx`) are always the relinked ones in `app0`: relink the update's `eboot.bin` and modules, as the launchers do when they unlock a game that has an update.
+
+### Game presets
+
+`sceUserServiceGetGamePresets` answers with the console's Game Presets. Without `ANYPS5_GAME_PRESETS` every field is 0, "not set", and the game uses its own defaults. The variable holds comma-separated `key=value` parts, as the launchers' **Settings → Game Presets** write it, for every signed-in user:
+
+| Key | Values (field value) |
+|-----|----------------------|
+| `difficulty` | `default` (0), `easiest` (1), `easy` (2), `normal` (3), `hard` (4), `hardest` (5) |
+| `priority` | `default` (0), `performance` (1), `resolution` (2) |
+| `invert_1st_v`, `invert_1st_h`, `invert_3rd_v`, `invert_3rd_h` | `0` normal, `1` inverted: the vertical and horizontal view in first-person and third-person games |
+| `subtitles` | `default` (0), `on` (1), `off` (2) |
+| `audio_language` | `default` (0), or a console language number as for `ANYPS5_LANGUAGE` (the number + 1) |
+
+For example `ANYPS5_GAME_PRESETS=difficulty=hard,priority=performance,invert_3rd_v=1`. A key left out is not set, and an unknown key is passed over; a known key with another value stops the game at its first presets query with an error that names the variable. Titles have been seen to honour `priority=performance` (1); the other field values follow the order of the console's menus and have not been checked against a console.
+
 ### Trophies
 
 A game unlocks a trophy by posting a `_UnlockTrophy` event with an int32 `_trophy_id` property to `libSceNpUniversalDataSystem`, or through the statistics rules described below. The unlock is stored in `_trophy/<user id>_<service label>.txt` in the directory the game runs in (the one that holds `app0/`), one `<trophy id> <unlock time>` line per trophy; the time is an RTC tick, microseconds since 0001-01-01 UTC. Delete the file before starting the game to lock its trophies again. Each new unlock prints one line, such as `[trophy] PPSA01556 unlocked trophy 12 for user 268435456`; unlocking a trophy again prints nothing. `sceNpTrophy2GetTrophyInfo`, `sceNpTrophy2GetTrophyInfoArray` and `sceNpTrophy2GetGameInfo` report the stored unlocks and their times to the game. When the game's trophy data is loaded (see below), a posted unlock of a trophy that the data does not have, of the platinum, or of a progressive trophy is not stored and prints the reason, such as `[trophy] ignored the posted unlock of trophy 0 for user 268435456: it is the platinum, which unlocks with the last trophy that names it`; the platinum unlocks with the last trophy that names it, and a progressive trophy through its statistic. Without trophy data every posted id of 0 or more is stored, and the platinum is not unlocked when the other trophies are.
