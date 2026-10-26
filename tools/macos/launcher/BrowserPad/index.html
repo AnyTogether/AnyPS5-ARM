@@ -474,6 +474,8 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
     }
     pointers.set(event.pointerId, p);
     move(event);
+    // A press goes out at once, not with the next frame: no waiting, and no tap too short to send.
+    flush();
   }
   let nextTouchId = 0;
 
@@ -515,6 +517,7 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
       }
     }
     dirty = true;
+    flush();
   }
   let tapUntil = 0;
 
@@ -567,14 +570,16 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
     lastBits = b;
   }
 
+  function flush() {
+    dirty = false;
+    const state = current();
+    paint(state);
+    const text = JSON.stringify(state);
+    if (text !== lastSent && welcomed) { send(state); lastSent = text; sentAt = performance.now(); }
+  }
+  // Moves are sent once a frame, whatever the touch rate.
   function frame() {
-    if (dirty) {
-      dirty = false;
-      const state = current();
-      paint(state);
-      const text = JSON.stringify(state);
-      if (text !== lastSent && welcomed) { send(state); lastSent = text; sentAt = performance.now(); }
-    }
+    if (dirty) flush();
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

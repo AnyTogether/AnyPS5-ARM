@@ -405,3 +405,46 @@ final class BrowserPadPageTests: XCTestCase {
         XCTAssertLessThan(page.utf8.count, 64 * 1024)
     }
 }
+
+/// A real browser against the real servers, run by hand: `ANYPS5_BROWSER_PAD_E2E=<folder> swift
+/// test --filter BrowserPadRealBrowser` writes the QR code's link to <folder>/url, lets the first
+/// browser in, and waits up to a minute for its ✕ to reach a game's channel; drive the page
+/// meanwhile with a headless browser (it presses ✕ once welcomed).
+final class BrowserPadRealBrowserTests: XCTestCase {
+    func testARealBrowserReachesTheGame() throws {
+        guard let folder = ProcessInfo.processInfo.environment["ANYPS5_BROWSER_PAD_E2E"] else { throw XCTSkip("set ANYPS5_BROWSER_PAD_E2E to run") }
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("real-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let devices = PairedDevices(file: file)
+        let log = EventLog()
+        let remote = RemoteServer(name: "Test Mac", devices: devices, events: log.events, advertise: false)
+        try remote.start()
+        defer { remote.stop() }
+        let control = remote.controlPort!
+        let pads = BrowserPadServer(host: "127.0.0.1", page: try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../BrowserPad/index.html")),
+                                    controlPort: control, devices: devices, players: { remote.phonePlayers })
+        try pads.start()
+        defer { pads.stop() }
+        try pads.pairingURL!.absoluteString.write(toFile: folder + "/url", atomically: true, encoding: .utf8)
+        let game = UDPPeer()
+        let deadline = Date().addingTimeInterval(60)
+        var allowed = false
+        var crossed = false
+        while Date() < deadline, !crossed {
+            if !allowed, let request = log.pairings.first {
+                remote.respond(to: request.id, allow: true)
+                allowed = true
+            }
+            game.send(Data([0x41, 0x50, 0x52, 0x48, 1, 0, 16, 0, 1] + [UInt8](repeating: 0, count: 7)), to: remote.bridgePorts[0])
+            while let packet = game.receive() {
+                if RemotePacket.inputSession(packet) != nil, (UInt32(packet[32]) | UInt32(packet[33]) << 8) & SharePadState.Button.cross != 0 {
+                    crossed = true
+                    break
+                }
+            }
+        }
+        try "done \(crossed)".write(toFile: folder + "/result", atomically: true, encoding: .utf8)
+        XCTAssertTrue(allowed, "the browser asked to pair")
+        XCTAssertTrue(crossed, "its cross reached the game")
+    }
+}
