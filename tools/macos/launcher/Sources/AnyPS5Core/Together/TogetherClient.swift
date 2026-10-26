@@ -109,8 +109,9 @@ public struct TogetherMe: Decodable, Sendable {
     public let profile: Profile
 }
 
-/// The session kept between launches: in a file only this user can read until the launcher has a
-/// stable signature (a Keychain item would ask again after every ad hoc signed update).
+/// The session kept between launches: each launcher profile's in its own Keychain item
+/// (ProfileSessions), or in a file only this user can read (tests, and the launcher before
+/// profiles, whose file moves into the first profile's item once).
 public final class TokenStore: @unchecked Sendable {
     struct Saved: Codable {
         var accessToken: String
@@ -119,15 +120,35 @@ public final class TokenStore: @unchecked Sendable {
         var user: TogetherUser
     }
 
-    let file: URL
+    enum Backing {
+        case file(URL)
+        case vault(SecretVault, String)
+    }
+
+    let backing: Backing
     private let lock = NSLock()
 
-    public init(file: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AnyPS5/Together/session.json")) {
-        self.file = file
+    public static let legacyFile = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AnyPS5/Together/session.json")
+
+    public init(file: URL = TokenStore.legacyFile) {
+        backing = .file(file)
+    }
+
+    public init(vault: SecretVault, account: String) {
+        backing = .vault(vault, account)
     }
 
     func load() -> Saved? {
-        lock.withLock { (try? Data(contentsOf: file)).flatMap { try? JSONDecoder.together.decode(Saved.self, from: $0) } }
+        lock.withLock { read() }
+    }
+
+    private func read() -> Saved? {
+        let data: Data?
+        switch backing {
+        case .file(let file): data = try? Data(contentsOf: file)
+        case .vault(let vault, let account): data = vault.read(account)
+        }
+        return data.flatMap { try? JSONDecoder.together.decode(Saved.self, from: $0) }
     }
 
     /// The tokens kept now, for a crash report to take out wherever they appear.
@@ -142,17 +163,37 @@ public final class TokenStore: @unchecked Sendable {
         save(saved)
     }
 
-    func save(_ saved: Saved?) {
+    @discardableResult
+    func save(_ saved: Saved?) -> Bool {
         lock.withLock {
-            guard let saved else {
-                try? FileManager.default.removeItem(at: file)
-                return
+            switch backing {
+            case .vault(let vault, let account):
+                guard let saved else { return vault.write(nil, for: account) }
+                guard let data = try? JSONEncoder.together.encode(saved) else { return false }
+                return vault.write(data, for: account)
+            case .file(let file):
+                guard let saved else {
+                    try? FileManager.default.removeItem(at: file)
+                    return true
+                }
+                try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+                guard let data = try? JSONEncoder.together.encode(saved) else { return false }
+                FileManager.default.createFile(atPath: file.path, contents: data, attributes: [.posixPermissions: 0o600])
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+                return true
             }
-            try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            guard let data = try? JSONEncoder.together.encode(saved) else { return }
-            FileManager.default.createFile(atPath: file.path, contents: data, attributes: [.posixPermissions: 0o600])
-            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
         }
+    }
+
+    /// The session kept in `file` (before profiles) moves into the vault: read back from it
+    /// before the file goes, and the file stays where the vault said no. True when one moved.
+    public static func migrate(file: URL, into vault: SecretVault, account: String) -> Bool {
+        let old = TokenStore(file: file)
+        guard let saved = old.load() else { return false }
+        let new = TokenStore(vault: vault, account: account)
+        guard new.save(saved), new.load()?.refreshToken == saved.refreshToken else { return false }
+        old.save(nil)
+        return true
     }
 }
 
@@ -175,6 +216,9 @@ public final class TogetherClient: @unchecked Sendable {
     }
 
     public var user: TogetherUser? { store.load()?.user }
+
+    /// The tokens of this client's session, for a crash report to take out.
+    public var secrets: [String] { store.secrets }
 
     // MARK: Signing in
 

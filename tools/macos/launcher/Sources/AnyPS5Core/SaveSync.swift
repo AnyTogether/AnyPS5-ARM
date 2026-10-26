@@ -33,19 +33,25 @@ public struct SaveSync: Sendable {
     public let cloud: URL
     public let backups: URL
     public let mac: String
+    /// The launcher profile whose saves these are; nil for the first one (the saves from before
+    /// profiles), which keeps the folder and the record it had.
+    public let profile: String?
 
     /// `game` is the game folder (its saves in _sd, _sd_mem, _trophy), `cloud` the game's folder
     /// in the sync folder, `backups` where this Mac's saves go before a download replaces them.
-    public init(game: URL, cloud: URL, backups: URL, mac: String) {
+    public init(game: URL, cloud: URL, backups: URL, mac: String, profile: String? = nil) {
         self.game = game
         self.cloud = cloud
         self.backups = backups
         self.mac = mac
+        self.profile = profile
     }
 
-    /// The game's folder in a sync folder: <sync>/AnyPS5/Saves/<title ID>.
-    public static func folder(in sync: URL, titleID: String) -> URL {
-        sync.appendingPathComponent("AnyPS5/Saves/\(titleID)")
+    /// The game's folder in a sync folder: <sync>/AnyPS5/Saves/<title ID>, or for a profile
+    /// after the first <sync>/AnyPS5/Profiles/<profile>/Saves/<title ID>.
+    public static func folder(in sync: URL, titleID: String, profile: String? = nil) -> URL {
+        guard let profile else { return sync.appendingPathComponent("AnyPS5/Saves/\(titleID)") }
+        return sync.appendingPathComponent("AnyPS5/Profiles/\(profile)/Saves/\(titleID)")
     }
 
     /// iCloud Drive's folder, where it is set up on this Mac.
@@ -57,7 +63,7 @@ public struct SaveSync: Sendable {
     var zip: URL { cloud.appendingPathComponent("saves.zip") }
     var infoFile: URL { cloud.appendingPathComponent("info.json") }
     var older: URL { cloud.appendingPathComponent("Older") }
-    var stateFile: URL { game.deletingLastPathComponent().appendingPathComponent("anyps5-sync.json") }
+    var stateFile: URL { game.deletingLastPathComponent().appendingPathComponent(profile.map { "anyps5-sync-\($0).json" } ?? "anyps5-sync.json") }
 
     public func sync(date: Date) throws -> Outcome {
         let local = SaveSync.digest(of: game)
