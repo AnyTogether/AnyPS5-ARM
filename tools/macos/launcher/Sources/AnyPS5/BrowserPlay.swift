@@ -29,6 +29,7 @@ final class BrowserPlay: ObservableObject {
     private var server: BrowserPadServer?
     private var timer: Timer?
     private var quietSince: Date?
+    private var hadPads = false
     /// After the last browser leaves, how long the server stays up for it to come back.
     static let grace: TimeInterval = 120
 
@@ -42,13 +43,21 @@ final class BrowserPlay: ObservableObject {
     /// Starts or stops the server for what is wanted now.
     func update(remote: RemoteServer?, devices: PairedDevices, enabled: Bool, keepOn: Bool) {
         let connected = !pads.isEmpty
-        if connected { quietSince = nil } else if quietSince == nil { quietSince = Date() }
-        let recent = quietSince.map { Date().timeIntervalSince($0) < Self.grace } ?? true
+        // The grace is for a browser that was here: with none ever, closing the code stops it.
+        if connected {
+            quietSince = nil
+            hadPads = true
+        } else if hadPads, quietSince == nil {
+            quietSince = Date()
+        }
+        let recent = quietSince.map { Date().timeIntervalSince($0) < Self.grace } ?? false
         let wanted = enabled && remote?.controlPort != nil && (showing || keepOn || connected || (server != nil && recent))
         let host = wanted ? BrowserPadServer.lanAddress() : nil
         if let server, !wanted || host != server.host {
             server.stop()
             self.server = nil
+            hadPads = false
+            quietSince = nil
             refresh()
         }
         guard wanted, server == nil, let remote else {
