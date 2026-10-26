@@ -108,7 +108,10 @@ enum ProfilePreviews {
             model.focusRow(rows.firstIndex { $0.id == "profile-delete-\(deniz)-cancel" } ?? 0, in: rows)
         }
         render("settings-together-offline", .keyboard) { model in
-            if let robin = model.currentProfile { model.profiles.setMode(robin.id, .offline) }
+            if let robin = model.currentProfile {
+                model.profiles.setMode(robin.id, .offline)
+                model.profiles.setAccount(robin.id, .init(userId: "u1", handle: "robin"))
+            }
             model.profilesChanged()
             settings(model, "together", row: "together-go-online")
         }

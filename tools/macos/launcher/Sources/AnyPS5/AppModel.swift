@@ -243,6 +243,8 @@ final class AppModel: ObservableObject {
         didSet {
             if oldValue != overlay {
                 discoverOverlayChanged()
+                // Friends' private picture links run out (6 to 12 hours): the list is read again.
+                if let overlay, [.friends, .party, .profile].contains(overlay), togetherUser != nil, identityBook.learnedAt != nil, identityBook.stale() { refreshFriends() }
                 askingRow = nil
                 if rowEditor.editing != nil { rowEditor.stop() }
                 if shortcutCapture != nil { endShortcutCapture() }

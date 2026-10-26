@@ -62,8 +62,9 @@ extension AppModel {
     // MARK: Rows
 
     func togetherRows() -> [PanelRow] {
-        // An offline profile uses no account: going online is the way in.
-        if currentProfile?.mode == .offline && profileFlow.pendingID == nil && overlay != .signIn {
+        // An offline profile that had an account (it went offline, its session kept): going online
+        // is the way in. One that never had one signs in here as ever, and is online then.
+        if togetherUser == nil, let profile = currentProfile, profile.mode == .offline, profile.account != nil, profileFlow.pendingID == nil, overlay != .signIn {
             return [
                 PanelRow(id: "together-offline", title: TPro.text(.offlineTogether), detail: TPro.text(.offlineTogetherDetail), symbol: "wifi.slash", kind: .info(""), wraps: true),
                 PanelRow(id: "together-go-online", title: TPro.text(.goOnline), detail: TPro.text(.goOnlineDetail), symbol: "wifi",
