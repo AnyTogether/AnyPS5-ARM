@@ -231,6 +231,14 @@ final class AppModel: ObservableObject {
     }
     /// Off for the offscreen previews, which must not touch the user's settings.
     let persists: Bool
+    /// Settings → Game Presets, in a file of their own (GamePresetsStore): every game starts with
+    /// them. One set for now; a profile can own its own file once there are profiles.
+    @Published var gamePresets: GamePresets {
+        didSet {
+            guard gamePresets != oldValue, persists else { return }
+            try? GamePresetsStore().save(gamePresets)
+        }
+    }
     @Published private(set) var games: [Game] = []
     @Published private(set) var scanning = false
     @Published var selected = 0
@@ -452,6 +460,7 @@ final class AppModel: ObservableObject {
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
         self.preferences = preferences ?? Preferences.load()
+        self.gamePresets = preferences == nil ? GamePresetsStore().load() : GamePresets()
         toolkitStore = preferences == nil ? ToolkitStore() : ToolkitStore(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-toolkits-\(UUID().uuidString)"))
         themes = preferences == nil ? ThemeLibrary() : ThemeLibrary(folder: FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-themes"))
         let fonts = preferences == nil ? FontDownloads.root : FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-fonts-\(UUID().uuidString)")
@@ -1066,7 +1075,8 @@ final class AppModel: ObservableObject {
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
-        if let record = installedRecords[game.id] { return .installed(outdated: engineVersion(for: game).map { $0 != record.toolkit } ?? false) }
+        // An update dumped (or removed) since the unlock needs its executable relinked: unlocking again applies it.
+        if let record = installedRecords[game.id], record.update == game.update?.version { return .installed(outdated: engineVersion(for: game).map { $0 != record.toolkit } ?? false) }
         if game.executable == .unreadable { return .unreadable }
         return .locked
     }
@@ -1459,6 +1469,10 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: gameFontsFolder(), trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
+            // The update and add-ons dumped beside the game.
+            .merging(GameAddons.environment(for: game)) { own, _ in own }
+            // Settings → Game Presets, for the games that ask the console for them.
+            .merging(gamePresets.environment) { own, _ in own }
             .merging(OnlinePlayHost.environment(for: game, client: together, engineBuild: engineBuild(for: game))) { _, online in online }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }

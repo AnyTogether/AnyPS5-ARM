@@ -417,6 +417,15 @@ enum PreviewRenderer {
         }
         render(preferences, found, root, still, output.appendingPathComponent("game-settings-r1.png")) { model in model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1; model.switchGame(1) }
         render(preferences, found, root, still, output.appendingPathComponent("settings.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 0 }
+        render(preferences, found, root, still, output.appendingPathComponent("settings-presets.png")) { model in
+            model.gamePresets.difficulty = .hard
+            model.gamePresets.priority = .performance
+            model.gamePresets.invertVerticalThirdPerson = true
+            model.gamePresets.subtitles = .on
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "presets" } ?? 0
+            model.panelInRows = true; model.panelRow = 1
+        }
         if theme.isGlass {
             // Appearance's Glass Transparency row.
             render(preferences, found, root, still, output.appendingPathComponent("settings-glass.png")) { model in model.overlay = .settings; model.panelInRows = true; model.panelRow = 5 }
