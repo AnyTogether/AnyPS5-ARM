@@ -1,7 +1,11 @@
 #include "FakeLauncher.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <algorithm>
+#ifdef _WIN32
+#include <winsock2.h>
+#else
 #include <arpa/inet.h>
+#endif
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -96,8 +100,8 @@ int main() {
             hex += digits[byte & 15];
         }
         const std::string endpoint = "127.0.0.1:" + std::to_string(launcher.Port());
-        ::setenv("ANYPS5_ONLINE", endpoint.c_str(), 1);
-        ::setenv("ANYPS5_ONLINE_SECRET", hex.c_str(), 1);
+        Online::Testing::SetEnvironment("ANYPS5_ONLINE", endpoint);
+        Online::Testing::SetEnvironment("ANYPS5_ONLINE_SECRET", hex);
         sceNetInit_nid_postfix();
 
         require(sceNetSocket("stream", AfInet, SockStreamP2p, 0) == (ErrorBase | 43), "stream P2P sockets are still refused");

@@ -51,6 +51,23 @@ if(BUILD_TESTING)
     add_test(NAME online_probe_offline COMMAND online_probe)
     set_tests_properties(online_probe_offline PROPERTIES TIMEOUT 30
         PASS_REGULAR_EXPRESSION "state=1\nonline_id_error=0x80550006\n.*friends_error=0x80553406\n")
+
+    if(WIN32)
+        # Winsock for the bridge and the fake launcher; the libraries' objects use DWARF
+        # unwinding, so the C++ personality comes from libc, as for the other tests.
+        target_link_libraries(online_bridge_tests PRIVATE ws2_32 libc)
+        foreach(onlineTest IN ITEMS online_np_manager_tests online_web_api2_tests online_net_p2p_tests online_probe)
+            target_link_libraries(${onlineTest} PRIVATE ws2_32)
+        endforeach()
+        foreach(onlineTest IN ITEMS online_bridge_tests online_observation_tests online_np_manager_tests online_web_api2_tests online_net_p2p_tests online_probe)
+            configure_windows_unwind(${onlineTest})
+        endforeach()
+        set_tests_properties(online_bridge online_np_manager online_web_api2 online_net_p2p online_probe_offline PROPERTIES
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNetCtl>")
+        set_tests_properties(online_observation PROPERTIES
+            ENVIRONMENT "ANYPS5_ONLINE_LOG=${CMAKE_CURRENT_BINARY_DIR}/online_observation.jsonl"
+            ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceNetCtl>")
+    endif()
 endif()
 
 if(BUILD_TESTING)

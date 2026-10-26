@@ -1,26 +1,26 @@
 #include "FakeLauncher.hpp"
-#include <arpa/inet.h>
-#include <cerrno>
-#include <netinet/in.h>
-#include <poll.h>
+#include "prx/libSceNetCtl/include/OnlineSocket.hpp"
+#include <cstdlib>
 #include <stdexcept>
-#include <sys/socket.h>
-#include <unistd.h>
 
 namespace Online::Testing {
 
+void SetEnvironment(const char* name, const std::string& value) {
+#ifdef _WIN32
+    ::_putenv_s(name, value.c_str());
+#else
+    ::setenv(name, value.c_str(), 1);
+#endif
+}
+
 namespace {
 
-bool readExact(int socket, std::uint8_t* out, std::size_t size) {
+bool readExact(Net::Handle socket, std::uint8_t* out, std::size_t size) {
     std::size_t done = 0;
     while (done < size) {
-        const auto got = ::recv(socket, out + done, size - done, 0);
-        if (got > 0) {
-            done += static_cast<std::size_t>(got);
-            continue;
-        }
-        if (got < 0 && errno == EINTR) continue;
-        return false;
+        const auto got = Net::Receive(socket, out + done, size - done);
+        if (got <= 0) return false;
+        done += static_cast<std::size_t>(got);
     }
     return true;
 }
@@ -30,7 +30,7 @@ struct Frame {
     std::vector<std::uint8_t> payload;
 };
 
-std::optional<Frame> readFrame(int socket) {
+std::optional<Frame> readFrame(Net::Handle socket) {
     std::array<std::uint8_t, Wire::HeaderSize> head{};
     if (!readExact(socket, head.data(), head.size())) return std::nullopt;
     const auto header = Wire::DecodeHeader(head);
@@ -43,20 +43,14 @@ std::optional<Frame> readFrame(int socket) {
 }
 
 FakeLauncher::FakeLauncher(const Wire::Secret& secret) : secret(secret), proofSecret(secret) {
-    listener = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (listener < 0) throw std::runtime_error("fake launcher: no socket");
-    const int one = 1;
-    ::setsockopt(listener, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
-    sockaddr_in address{};
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    socklen_t length = sizeof(address);
-    if (::bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0 || ::listen(listener, 4) != 0 ||
-        ::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
-        ::close(listener);
+    listener = Net::OpenTcp();
+    if (listener == Net::None) throw std::runtime_error("fake launcher: no socket");
+    const auto listening = Net::ListenLoopback(listener, 4);
+    if (!listening) {
+        Net::Close(listener);
         throw std::runtime_error("fake launcher: cannot listen on 127.0.0.1");
     }
-    port = ntohs(address.sin_port);
+    port = *listening;
     acceptor = std::thread([this] { acceptLoop(); });
 }
 
@@ -70,17 +64,17 @@ FakeLauncher::~FakeLauncher() {
         threads.swap(answering);
     }
     for (auto& thread : threads) thread.join();
-    ::close(listener);
+    Net::Close(listener);
 }
 
 void FakeLauncher::SetAccount(const Wire::Account& value) {
-    int live = -1;
+    Net::Handle live = Net::None;
     {
         std::lock_guard lock(mutex);
         account = value;
         if (provenSessions > 0) live = client;
     }
-    if (live >= 0) write(live, Wire::Frame(Wire::Type::Account, 0, 0, Wire::Encode(value)));
+    if (live != Net::None) write(live, Wire::Frame(Wire::Type::Account, 0, 0, Wire::Encode(value)));
 }
 
 void FakeLauncher::SetWebHandler(WebHandler handler) {
@@ -115,27 +109,27 @@ void FakeLauncher::SetProofSecret(const Wire::Secret& value) {
 
 void FakeLauncher::DropClient() {
     std::lock_guard lock(mutex);
-    if (client >= 0) ::shutdown(client, SHUT_RDWR);
+    if (client != Net::None) Net::ShutdownBoth(client);
 }
 
 void FakeLauncher::SendRaw(const std::vector<std::uint8_t>& bytes) {
-    int live = -1;
+    Net::Handle live = Net::None;
     {
         std::lock_guard lock(mutex);
         live = client;
     }
-    if (live >= 0) write(live, bytes);
+    if (live != Net::None) write(live, bytes);
 }
 
 void FakeLauncher::Send(Wire::Type type, std::uint16_t flags, std::uint32_t call, const std::vector<std::uint8_t>& payload) {
     SendRaw(Wire::Frame(type, flags, call, payload));
 }
 
-bool FakeLauncher::write(int socket, const std::vector<std::uint8_t>& frame) {
+bool FakeLauncher::write(Net::Handle socket, const std::vector<std::uint8_t>& frame) {
     std::lock_guard lock(writeMutex);
     std::size_t done = 0;
     while (done < frame.size()) {
-        const auto sent = ::send(socket, frame.data() + done, frame.size() - done, 0);
+        const auto sent = Net::Send(socket, frame.data() + done, frame.size() - done);
         if (sent <= 0) return false;
         done += static_cast<std::size_t>(sent);
     }
@@ -184,10 +178,9 @@ std::vector<std::string> FakeLauncher::Observations() {
 
 void FakeLauncher::acceptLoop() {
     while (!stopping) {
-        pollfd waiting{listener, POLLIN, 0};
-        if (::poll(&waiting, 1, 20) <= 0) continue;
-        const int accepted = ::accept(listener, nullptr, nullptr);
-        if (accepted < 0) continue;
+        if (!Net::WaitReadable(listener, 20)) continue;
+        const auto accepted = Net::Accept(listener);
+        if (accepted == Net::None) continue;
         {
             std::lock_guard lock(mutex);
             client = accepted;
@@ -195,13 +188,13 @@ void FakeLauncher::acceptLoop() {
         serve(accepted);
         {
             std::lock_guard lock(mutex);
-            client = -1;
+            client = Net::None;
         }
-        ::close(accepted);
+        Net::Close(accepted);
     }
 }
 
-void FakeLauncher::serve(int socket) {
+void FakeLauncher::serve(Net::Handle socket) {
     const auto first = readFrame(socket);
     if (!first || first->header.type != static_cast<std::uint16_t>(Wire::Type::Hello)) return;
     const auto hello = Wire::DecodeHello(first->payload);
@@ -295,7 +288,7 @@ void FakeLauncher::serve(int socket) {
     }
 }
 
-void FakeLauncher::answer(int socket, Wire::WebRequest request, std::uint32_t call) {
+void FakeLauncher::answer(Net::Handle socket, Wire::WebRequest request, std::uint32_t call) {
     WebHandler handler;
     {
         std::lock_guard lock(mutex);

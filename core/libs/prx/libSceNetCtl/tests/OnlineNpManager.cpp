@@ -112,8 +112,8 @@ int main() {
             hex += digits[byte >> 4];
             hex += digits[byte & 15];
         }
-        ::setenv("ANYPS5_ONLINE", endpoint.c_str(), 1);
-        ::setenv("ANYPS5_ONLINE_SECRET", hex.c_str(), 1);
+        Online::Testing::SetEnvironment("ANYPS5_ONLINE", endpoint);
+        Online::Testing::SetEnvironment("ANYPS5_ONLINE_SECRET", hex);
 
         require(sceNpRegisterStateCallbackA(reinterpret_cast<void*>(&onState), nullptr) > 0, "a state callback registers");
         require(sceNpCheckCallback() == 0 && lastState == 2, "the callback reports signed in");

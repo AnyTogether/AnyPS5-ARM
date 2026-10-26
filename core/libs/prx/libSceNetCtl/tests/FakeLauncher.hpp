@@ -2,6 +2,7 @@
 #define CORE_LIBS_PRX_LIBSCENETCTL_TESTS_FAKELAUNCHER_HPP
 
 #include "prx/libSceNetCtl/include/OnlineWire.hpp"
+#include "prx/libSceNetCtl/include/OnlineSocketHandle.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -14,6 +15,9 @@
 #include <vector>
 
 namespace Online::Testing {
+
+// setenv, and _putenv_s on Windows, which has no setenv.
+void SetEnvironment(const char* name, const std::string& value);
 
 class FakeLauncher {
 public:
@@ -47,13 +51,13 @@ public:
 
 private:
     void acceptLoop();
-    void serve(int client);
-    void answer(int client, Wire::WebRequest request, std::uint32_t call);
-    bool write(int client, const std::vector<std::uint8_t>& frame);
+    void serve(Net::Handle client);
+    void answer(Net::Handle client, Wire::WebRequest request, std::uint32_t call);
+    bool write(Net::Handle client, const std::vector<std::uint8_t>& frame);
 
     Wire::Secret secret;
     Wire::Secret proofSecret;
-    int listener = -1;
+    Net::Handle listener = Net::None;
     std::uint16_t port = 0;
     std::atomic<bool> stopping{false};
 
@@ -64,7 +68,7 @@ private:
     DatagramHandler datagramHandler;
     std::vector<Wire::Datagram> datagrams;
     std::optional<Wire::Refuse> refusal;
-    int client = -1;
+    Net::Handle client = Net::None;
     int sessions = 0;
     int provenSessions = 0;
     std::optional<Wire::Hello> lastHello;

@@ -2,6 +2,7 @@
 #define CORE_LIBS_PRX_LIBSCENETCTL_ONLINEBRIDGE_HPP
 
 #include "prx/libSceNetCtl/include/OnlineWire.hpp"
+#include "prx/libSceNetCtl/include/OnlineSocketHandle.hpp"
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -52,12 +53,12 @@ private:
     };
 
     void run();
-    int connectToLauncher();
-    bool handshake(int socket);
-    void readLoop(int socket);
-    void dispatch(const Wire::Header& header, std::span<const std::uint8_t> payload, int socket);
-    void disconnect(int socket);
-    bool send(int socket, Wire::Type type, std::uint16_t flags, std::uint32_t call, std::span<const std::uint8_t> payload);
+    Net::Handle connectToLauncher();
+    bool handshake(Net::Handle socket);
+    void readLoop(Net::Handle socket);
+    void dispatch(const Wire::Header& header, std::span<const std::uint8_t> payload, Net::Handle socket);
+    void disconnect(Net::Handle socket);
+    bool send(Net::Handle socket, Wire::Type type, std::uint16_t flags, std::uint32_t call, std::span<const std::uint8_t> payload);
     void waitForFirstAccount(std::unique_lock<std::mutex>& lock);
     void writeLoop();
 
@@ -73,7 +74,7 @@ private:
     bool stopping = false;
     bool gaveUp = false;
     bool warnedImpostor = false;
-    int liveSocket = -1;
+    Net::Handle liveSocket = Net::None;
     std::optional<Wire::Refuse> refusal;
     std::uint32_t lastCall = 0;
     std::map<std::uint32_t, Pending*> pending;

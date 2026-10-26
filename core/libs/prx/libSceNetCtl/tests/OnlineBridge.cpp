@@ -2,6 +2,7 @@
 #include "prx/libSceNetCtl/include/OnlineBridge.hpp"
 #include "prx/libSceNetCtl/include/OnlineEnvironment.hpp"
 #include "prx/libSceNetCtl/include/OnlineObserver.hpp"
+#include "prx/libSceNetCtl/include/OnlineSocket.hpp"
 #include "prx/libSceNetCtl/include/OnlineWire.hpp"
 #include <algorithm>
 #include <chrono>
@@ -9,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -16,7 +18,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <unistd.h>
 #include <vector>
 
 using namespace Online;
@@ -210,7 +211,7 @@ void handshakeAndAccount() {
     require(state.generation == 1, "the first account is generation 1");
     require(launcher.ProvenSessions() == 1, "the launcher accepted the engine's proof");
     const auto hello = launcher.LastHello();
-    require(hello && hello->protocol == Wire::Protocol && hello->build == "test-build" && hello->pid == static_cast<std::uint32_t>(::getpid()),
+    require(hello && hello->protocol == Wire::Protocol && hello->build == "test-build" && hello->pid == Online::Net::ProcessId(),
         "hello carries protocol, build and process");
 
     auto changed = signedInAccount();
@@ -417,11 +418,10 @@ std::vector<std::string> readLines(const std::string& path) {
 }
 
 void observerFile() {
-    char pattern[] = "/tmp/online-observer-XXXXXX";
-    const int descriptor = ::mkstemp(pattern);
-    require(descriptor >= 0, "temporary file");
-    ::close(descriptor);
-    const std::string path = pattern;
+    const auto path = (std::filesystem::temp_directory_path() /
+        ("online-observer-" + std::to_string(Online::Net::ProcessId()) + "-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()))).string();
+    { std::ofstream create(path); require(create.good(), "temporary file"); }
     {
         Observer observer(path, 1000ms);
         std::vector<std::string> forwarded;

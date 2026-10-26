@@ -173,8 +173,8 @@ int main() {
             hex += digits[byte & 15];
         }
         const std::string endpoint = "127.0.0.1:" + std::to_string(launcher.Port());
-        ::setenv("ANYPS5_ONLINE", endpoint.c_str(), 1);
-        ::setenv("ANYPS5_ONLINE_SECRET", hex.c_str(), 1);
+        Online::Testing::SetEnvironment("ANYPS5_ONLINE", endpoint);
+        Online::Testing::SetEnvironment("ANYPS5_ONLINE_SECRET", hex);
 
         const int library = sceNpWebApi2Initialize(1, 0x10000);
         require(library > 0, "the library initializes");

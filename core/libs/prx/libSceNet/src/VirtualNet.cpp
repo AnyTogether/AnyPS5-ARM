@@ -4,15 +4,28 @@
 #include <atomic>
 #include <cerrno>
 #include <cstdio>
-#include <arpa/inet.h>
 #include <cstring>
 #include <map>
 #include <mutex>
+#include <string>
+#include <tuple>
+#include <vector>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <system_error>
+#else
+#include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
-#include <tuple>
 #include <unistd.h>
-#include <vector>
+#endif
 
 namespace VirtualNet {
 
@@ -27,7 +40,30 @@ struct Route {
 
 std::mutex routesMutex;
 std::map<Key, Route> routes;
-int relay = -1;
+
+// The loopback UDP socket that hands the launcher's datagrams to the game's sockets: a
+// descriptor on POSIX, a SOCKET on Windows.
+#ifdef _WIN32
+using RelaySocket = SOCKET;
+constexpr RelaySocket NoRelay = INVALID_SOCKET;
+std::string lastSocketError() {
+    return std::system_category().message(::WSAGetLastError());
+}
+void closeRelay(RelaySocket socket) {
+    ::closesocket(socket);
+}
+#else
+using RelaySocket = int;
+constexpr RelaySocket NoRelay = -1;
+std::string lastSocketError() {
+    return std::strerror(errno);
+}
+void closeRelay(RelaySocket socket) {
+    ::close(socket);
+}
+#endif
+
+RelaySocket relay = NoRelay;
 std::uint16_t relayPort = 0;
 std::atomic<std::uint64_t> undelivered{0};
 
@@ -40,11 +76,11 @@ void dropped(const char* why) {
 
 void deliver(const Online::Wire::Datagram& datagram) {
     std::uint16_t nativePort = 0;
-    int socket = -1;
+    RelaySocket socket = NoRelay;
     {
         std::lock_guard lock(routesMutex);
         const auto found = routes.find({static_cast<std::uint8_t>(datagram.kind), datagram.localPort, datagram.localVport});
-        if (found == routes.end() || relay < 0) {
+        if (found == routes.end() || relay == NoRelay) {
             dropped("no socket on its port");
             return;
         }
@@ -65,13 +101,22 @@ void deliver(const Online::Wire::Datagram& datagram) {
     target.sin_family = AF_INET;
     target.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     target.sin_port = htons(nativePort);
-    if (::sendto(socket, packet.data(), packet.size(), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target)) < 0) dropped(std::strerror(errno));
+    if (::sendto(socket, reinterpret_cast<const char*>(packet.data()), static_cast<int>(packet.size()), 0, reinterpret_cast<const sockaddr*>(&target), sizeof(target)) < 0) {
+        dropped(lastSocketError().c_str());
+    }
 }
 
 bool openRelay() {
-    if (relay >= 0) return true;
-    const int socket = ::socket(AF_INET, SOCK_DGRAM, 0);
-    if (socket < 0) return false;
+    if (relay != NoRelay) return true;
+#ifdef _WIN32
+    static const bool started = [] {
+        WSADATA data{};
+        return ::WSAStartup(MAKEWORD(2, 2), &data) == 0;
+    }();
+    if (!started) return false;
+#endif
+    const RelaySocket socket = ::socket(AF_INET, SOCK_DGRAM, 0);
+    if (socket == NoRelay) return false;
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -79,10 +124,10 @@ bool openRelay() {
     // macOS caps a UDP send at the socket's send buffer (9216 bytes by default), and the hop to the
     // game's socket carries datagrams up to 65535 bytes plus the header.
     const int sendBuffer = static_cast<int>(Online::Wire::MaxDatagram + HeaderSize) * 4;
-    ::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, &sendBuffer, sizeof(sendBuffer));
+    ::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&sendBuffer), sizeof(sendBuffer));
     if (::bind(socket, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
         ::getsockname(socket, reinterpret_cast<sockaddr*>(&address), &length) != 0) {
-        ::close(socket);
+        closeRelay(socket);
         return false;
     }
     relay = socket;
@@ -143,7 +188,7 @@ bool FromRelay(const sockaddr_storage& peer) {
     if (peer.ss_family != AF_INET) return false;
     const auto& v4 = reinterpret_cast<const sockaddr_in&>(peer);
     std::lock_guard lock(routesMutex);
-    return relay >= 0 && v4.sin_addr.s_addr == htonl(INADDR_LOOPBACK) && v4.sin_port == htons(relayPort);
+    return relay != NoRelay && v4.sin_addr.s_addr == htonl(INADDR_LOOPBACK) && v4.sin_port == htons(relayPort);
 }
 
 std::optional<Source> ReadHeader(std::span<const std::uint8_t> bytes) {
