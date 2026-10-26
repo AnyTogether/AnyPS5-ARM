@@ -559,15 +559,20 @@ struct HeroInfo: View {
                 }
                 InfoCard(title: T.text(.version), symbol: "tag") {
                     VStack(alignment: .leading, spacing: 1 * scale) {
-                        Text(game.version).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
-                        // The engine that unlocked it.
-                        if let record = model.installedRecords[game.id] {
+                        Text(game.update?.version ?? game.version).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
+                        // The update dumped beside it, else the engine that unlocked it.
+                        if let update = game.update {
+                            let applied = model.installedRecords[game.id]?.update == update.version
+                            Text(TAddons.format(applied ? .updateApplied : .updateToApply, update.shortVersion))
+                                .font(.display(12 * scale, .medium)).foregroundStyle(applied ? .white.opacity(0.5) : model.accent).lineLimit(1).truncationMode(.middle)
+                        } else if let record = model.installedRecords[game.id] {
                             Text(TE.text(.engineTitle) + " " + Toolkit.shortVersion(record.toolkit))
                                 .font(.display(12 * scale, .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(1).truncationMode(.middle)
                         }
                     }
                 }
                 CommunityCard(game: game)
+                if !game.addons.isEmpty { AddonsCard(addons: game.addons) }
             }
         }
         .onAppear { model.measureSelected() }
@@ -592,6 +597,25 @@ struct HeroInfo: View {
         case .installing, .queued: return "xmark"
         case .starting: return "hourglass"
         case .running: return "play.circle"
+        }
+    }
+}
+
+/// The add-ons dumped beside the game: the engine mounts each one the game asks for.
+struct AddonsCard: View {
+    let addons: [GameAddon]
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        InfoCard(title: TAddons.format(.addons, addons.count), symbol: "shippingbox") {
+            VStack(alignment: .leading, spacing: 2 * scale) {
+                ForEach(addons.prefix(addons.count > 2 ? 1 : 2), id: \.label) { addon in
+                    Text(addon.name).font(.display(14 * scale, .semibold)).foregroundStyle(.white).lineLimit(1).truncationMode(.tail)
+                }
+                if addons.count > 2 {
+                    Text(TAddons.format(.addonsMore, addons.count - 1)).font(.display(12 * scale, .medium)).foregroundStyle(.white.opacity(0.5))
+                }
+            }
         }
     }
 }
@@ -825,6 +849,9 @@ extension AppModel {
         case .feed:
             feedCommand(command)
             return true
+        case .captures:
+            capturesCommand(command)
+            return true
         case .leaderboard:
             leaderboardCommand(command)
             return true
@@ -951,6 +978,7 @@ extension AppModel {
     }
 
     private func galleryCommand(_ command: Command) {
+        if captures.draft != nil { return postDraftCommand(command) }
         if cloud.sharing { return shareCommand(command) }
         let count = galleryShots.count
         func move(_ delta: Int) {

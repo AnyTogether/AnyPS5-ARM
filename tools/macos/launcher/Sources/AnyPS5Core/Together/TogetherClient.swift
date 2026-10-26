@@ -40,6 +40,8 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var latest: TogetherSaveVersion? = nil
     /// With "conflict" on completing an upload: the parts that have not arrived.
     public var missing: [Int]? = nil
+    /// With "bad_media" on a post: the longest clip it takes, in milliseconds.
+    public var maxMs: Int? = nil
     /// With "version_mismatch" on joining a game: game_version or engine, the host's and this
     /// copy's, and who is behind ("you" or "host").
     public var reason: String? = nil

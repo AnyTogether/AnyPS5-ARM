@@ -43,6 +43,8 @@ public struct InstallRecord: Codable, Sendable {
     public let titleID: String
     public let toolkit: String
     public let date: Date
+    /// The version of the update the bundle was made with (GameUpdate), nil without one.
+    public var update: String? = nil
 }
 
 public struct InstallError: LocalizedError {
@@ -218,14 +220,35 @@ public final class Installer: @unchecked Sendable {
     static func relinkKey(game: Game, toolkit: Toolkit, modules: [URL]) -> String {
         var lines = ["toolkit \(toolkit.version)", "arguments --macos --to-rosetta " + moduleDirectories(modules).joined(separator: " ")]
         for relative in [URL(fileURLWithPath: "eboot.bin")] + modules {
-            let file = game.folder.appendingPathComponent(relative.relativePath)
+            let file = Installer.source(relative, of: game)
             var info = stat()
             guard stat(file.path, &info) == 0 else { return "" }
             lines.append("\(relative.relativePath) \(info.st_size) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)")
             let backup = file.appendingPathExtension("esbak")
             if stat(backup.path, &info) == 0 { lines.append("\(relative.relativePath).esbak \(info.st_size) \(info.st_mtimespec.tv_sec).\(info.st_mtimespec.tv_nsec)") }
         }
+        if let update = game.update { lines.append("update \(update.folder.path) \(update.version)") }
         return lines.joined(separator: "\n")
+    }
+
+    /// Where the file at `relative` in the game comes from: the update's copy when the game has
+    /// an update that has it, else the game's.
+    static func source(_ relative: URL, of game: Game) -> URL {
+        if let update = game.update {
+            let updated = update.folder.appendingPathComponent(relative.relativePath)
+            if FileManager.default.fileExists(atPath: updated.path) { return updated }
+        }
+        return game.folder.appendingPathComponent(relative.relativePath)
+    }
+
+    /// The game's modules and its update's, each once: the relinker converts the update's copy
+    /// of one both have (source), and the engine loads the relinked ones from app0.
+    static func modules(of game: Game) -> [URL] {
+        var found = modules(in: game.folder)
+        if let update = game.update {
+            for module in modules(in: update.folder) where !found.contains(where: { $0.relativePath == module.relativePath }) { found.append(module) }
+        }
+        return found.sorted { $0.relativePath < $1.relativePath }
     }
 
     /// The kept relinker output of `game` when its key is `key`, nil when there is none or it was
@@ -247,8 +270,8 @@ public final class Installer: @unchecked Sendable {
     public static func plan(game: Game, toolkit: Toolkit, root: URL) -> UnlockSpace {
         let fileManager = FileManager.default
         func size(_ url: URL) -> Int64 { ((try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0 }
-        let modules = Installer.modules(in: game.folder)
-        let executables = ([URL(fileURLWithPath: "eboot.bin")] + modules).reduce(Int64(0)) { $0 + size(game.folder.appendingPathComponent($1.relativePath)) }
+        let modules = Installer.modules(of: game)
+        let executables = ([URL(fileURLWithPath: "eboot.bin")] + modules).reduce(Int64(0)) { $0 + size(Installer.source($1, of: game)) }
         let clones = keepsRelinks(root: root)
         // The toolkit's files go in as clones from the same APFS drive, else as copies.
         var libraries: Int64 = 0
@@ -279,7 +302,7 @@ public final class Installer: @unchecked Sendable {
         let space = Installer.plan(game: game, toolkit: toolkit, root: root)
         if let shortage = space.shortage(free: freeSpace(root), volume: FreeSpace.volumeName(at: root)) { throw shortage }
 
-        let modules = Installer.modules(in: game.folder)
+        let modules = Installer.modules(of: game)
         let key = Installer.relinkKey(game: game, toolkit: toolkit, modules: modules)
         let keeps = Installer.keepsRelinks(root: root)
         let relinked: URL
@@ -297,7 +320,7 @@ public final class Installer: @unchecked Sendable {
             let inputs = [URL(fileURLWithPath: "eboot.bin")] + modules
             for (index, relative) in inputs.enumerated() {
                 try checkCancelled()
-                let original = game.folder.appendingPathComponent(relative.relativePath)
+                let original = Installer.source(relative, of: game)
                 let target = source.appendingPathComponent(relative.relativePath)
                 try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try unwrap(original, to: target)
@@ -371,8 +394,8 @@ public final class Installer: @unchecked Sendable {
             "CFBundleIdentifier": game.bundleIdentifier,
             "CFBundleExecutable": "launch",
             "CFBundlePackageType": "APPL",
-            "CFBundleShortVersionString": game.version,
-            "CFBundleVersion": game.version,
+            "CFBundleShortVersionString": game.update?.version ?? game.version,
+            "CFBundleVersion": game.update?.version ?? game.version,
             "LSMinimumSystemVersion": "11.0",
             "LSApplicationCategoryType": "public.app-category.games",
             "NSHighResolutionCapable": true,
@@ -382,7 +405,7 @@ public final class Installer: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(InstallRecord(source: game.folder.path, titleID: game.titleID, toolkit: toolkit.version, date: Date())).write(to: resources.appendingPathComponent("anyps5-install.json"))
+        try encoder.encode(InstallRecord(source: game.folder.path, titleID: game.titleID, toolkit: toolkit.version, date: Date(), update: game.update?.version)).write(to: resources.appendingPathComponent("anyps5-install.json"))
 
         // 5. Nothing in the bundle keeps a download's marks, then it takes the old one's place.
         progress(.finish, 0)

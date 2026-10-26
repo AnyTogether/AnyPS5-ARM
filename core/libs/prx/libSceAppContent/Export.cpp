@@ -5,6 +5,7 @@
 #include "prx/libc/include/RemoveTree.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libkernel/AppMetadata/include/AppMetadata.hpp"
+#include "prx/libSceAppContent/include/DiskAddons.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -12,6 +13,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 static constexpr int SCE_APP_CONTENT_ERROR_NOT_INITIALIZED = static_cast<int>(0x80D90001);
 static constexpr int SCE_APP_CONTENT_ERROR_PARAMETER = static_cast<int>(0x80D90002);
@@ -64,6 +66,27 @@ bool IsTemporaryMountPoint(const AppContentMountPoint* mountPoint) {
     return std::strncmp(mountPoint->data, TEMPORARY_MOUNT_POINT, sizeof(mountPoint->data)) == 0;
 }
 
+// The add-ons on the disk that the title has mounted, by mount point index (/addcont0, ...).
+struct AddcontMounts {
+    std::mutex mutex;
+    std::vector<const DiskAddons::Addon*> slots;
+};
+
+AddcontMounts& Mounts() {
+    static AddcontMounts mounts;
+    return mounts;
+}
+
+std::string AddcontMountPoint(std::size_t index) {
+    return "/addcont" + std::to_string(index);
+}
+
+void FillAddcontInfo(const DiskAddons::Addon& addon, AppContentAddcontInfo& info) {
+    std::memset(&info, 0, sizeof(info));
+    std::memcpy(info.entitlement_label.data, addon.label.data(), std::min(addon.label.size(), sizeof(info.entitlement_label.data) - 1));
+    info.status = addon.status();
+}
+
 }
 
 static void ClearDirectory(const std::filesystem::path& directory) {
@@ -78,13 +101,36 @@ int APS5_VABI sceAppContentAddcontMount(uint32_t service_label, const NpUnifiedE
  (void)service_label;
  if (!entitlement_label || !mount_point) return SCE_APP_CONTENT_ERROR_PARAMETER;
     if (!validEntitlementLabel(*entitlement_label, 0x01500000)) return SCE_APP_CONTENT_ERROR_PARAMETER;
- return SCE_APP_CONTENT_ERROR_NOT_FOUND;
+    const auto* addon = DiskAddons::Find(entitlement_label->data);
+    if (addon == nullptr || !addon->hasData) return SCE_APP_CONTENT_ERROR_NOT_FOUND;
+    auto& mounts = Mounts();
+    std::lock_guard lock(mounts.mutex);
+    auto slot = std::find(mounts.slots.begin(), mounts.slots.end(), addon);
+    if (slot == mounts.slots.end()) {
+        slot = std::find(mounts.slots.begin(), mounts.slots.end(), nullptr);
+        if (slot == mounts.slots.end()) slot = mounts.slots.insert(mounts.slots.end(), nullptr);
+        *slot = addon;
+        AddPathAlias_nid_no_patch(AddcontMountPoint(static_cast<std::size_t>(slot - mounts.slots.begin())).c_str(), addon->folder.string().c_str());
+    }
+    const auto point = AddcontMountPoint(static_cast<std::size_t>(slot - mounts.slots.begin()));
+    std::memset(mount_point->data, 0, sizeof(mount_point->data));
+    std::memcpy(mount_point->data, point.c_str(), std::min(point.size(), sizeof(mount_point->data) - 1));
+    return 0;
 }
 
 int APS5_VABI sceAppContentAddcontUnmount(const AppContentMountPoint* mount_point) {
     if (!initialized.load()) return SCE_APP_CONTENT_ERROR_NOT_INITIALIZED;
- if (!mount_point) return SCE_APP_CONTENT_ERROR_PARAMETER;
- return SCE_APP_CONTENT_ERROR_NOT_FOUND;
+    if (!mount_point) return SCE_APP_CONTENT_ERROR_PARAMETER;
+    auto& mounts = Mounts();
+    std::lock_guard lock(mounts.mutex);
+    for (std::size_t index = 0; index < mounts.slots.size(); ++index) {
+        const auto point = AddcontMountPoint(index);
+        if (mounts.slots[index] == nullptr || std::strncmp(mount_point->data, point.c_str(), sizeof(mount_point->data)) != 0) continue;
+        BlockPathAlias_nid_no_patch(point.c_str());
+        mounts.slots[index] = nullptr;
+        return 0;
+    }
+    return SCE_APP_CONTENT_ERROR_NOT_FOUND;
 }
 
 int APS5_VABI sceAppContentGetAddcontInfo(uint32_t service_label, const NpUnifiedEntitlementLabel* entitlement_label, AppContentAddcontInfo* info) {
@@ -92,14 +138,25 @@ int APS5_VABI sceAppContentGetAddcontInfo(uint32_t service_label, const NpUnifie
     (void)service_label;
     if (!entitlement_label || !info) return SCE_APP_CONTENT_ERROR_PARAMETER;
     if (!validEntitlementLabel(*entitlement_label, 0x01500000)) return SCE_APP_CONTENT_ERROR_PARAMETER;
-    return SCE_APP_CONTENT_ERROR_DRM_NO_ENTITLEMENT;
+    const auto* addon = DiskAddons::Find(entitlement_label->data);
+    if (addon == nullptr) return SCE_APP_CONTENT_ERROR_DRM_NO_ENTITLEMENT;
+    FillAddcontInfo(*addon, *info);
+    return 0;
 }
 
 int APS5_VABI sceAppContentGetAddcontInfoList(uint32_t serviceLabel, AppContentAddcontInfo* list, uint32_t listNum, uint32_t* hitNum) {
     if (!initialized.load()) return SCE_APP_CONTENT_ERROR_NOT_INITIALIZED;
     (void)serviceLabel;
     if (!hitNum) return SCE_APP_CONTENT_ERROR_PARAMETER;
-    *hitNum = 0;
+    const auto& addons = DiskAddons::InstalledAddons();
+    // Without room for entries the call counts them; with room it fills what fits.
+    if (list == nullptr || listNum == 0) {
+        *hitNum = static_cast<uint32_t>(addons.size());
+        return 0;
+    }
+    const auto count = std::min<std::size_t>(listNum, addons.size());
+    for (std::size_t index = 0; index < count; ++index) FillAddcontInfo(addons[index], list[index]);
+    *hitNum = static_cast<uint32_t>(count);
     return 0;
 }
 

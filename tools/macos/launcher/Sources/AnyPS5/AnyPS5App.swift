@@ -241,6 +241,8 @@ struct RootView: View {
             CompareView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .feed:
             FeedView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .captures:
+            CapturesView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .leaderboard:
             LeaderboardView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .notifications:

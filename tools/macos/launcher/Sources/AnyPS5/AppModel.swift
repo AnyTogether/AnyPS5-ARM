@@ -141,7 +141,7 @@ extension Overlay {
     /// Panels drawn over the whole screen rather than sliding in at its side.
     var coversScreen: Bool {
         switch self {
-        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
+        case .settings, .library, .log, .messages, .profile, .compare, .feed, .captures, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
              .profilePicker, .addProfile, .signIn:
             return true
         default:
@@ -180,6 +180,8 @@ enum Overlay: Equatable {
     case party
     /// Friends' activity on AnyTogether.
     case feed
+    /// Screenshots and clips posted on AnyTogether, their likes and comments (CapturesView.swift).
+    case captures
     /// A game's leaderboard, or overall trophy points.
     case leaderboard
     /// AnyTogether's notifications, from the bell.
@@ -245,6 +247,25 @@ final class AppModel: ObservableObject {
     }
     /// Off for the offscreen previews, which must not touch the user's settings.
     let persists: Bool
+    /// Settings → Game Presets of the profile playing, in a file of their own in its folder
+    /// (GamePresetsStore): every game it starts begins with them.
+    @Published var gamePresets = GamePresets() {
+        didSet {
+            guard gamePresets != oldValue, persists, !loadingGamePresets else { return }
+            try? gamePresetsStore.save(gamePresets)
+        }
+    }
+    private var loadingGamePresets = false
+    var gamePresetsStore: GamePresetsStore {
+        GamePresetsStore(file: profiles.gamePresetsFile(for: profileBook.currentProfile?.id ?? LauncherProfile.legacyID))
+    }
+
+    /// The current profile's presets; the previews start with none.
+    func loadGamePresets() {
+        loadingGamePresets = true
+        gamePresets = persists ? gamePresetsStore.load() : GamePresets()
+        loadingGamePresets = false
+    }
     @Published private(set) var games: [Game] = []
     @Published private(set) var scanning = false
     @Published var selected = 0
@@ -490,6 +511,8 @@ final class AppModel: ObservableObject {
         cjkInstalled = fontDownloads.installed
         designs = themes.all
         profileBook = profiles.book
+        // Settings → Game Presets of the profile playing.
+        loadGamePresets()
         if persists {
             // An offline profile keeps its session (if it has one) unused.
             togetherUser = currentProfile?.mode == .offline ? nil : together.user
@@ -854,7 +877,12 @@ final class AppModel: ObservableObject {
     /// Who plays on this Mac (Profiles.swift), their sessions in the Keychain.
     let profiles: ProfileStore
     let vault: SecretVault
-    @Published var profileBook = ProfileBook()
+    @Published var profileBook = ProfileBook() {
+        didSet {
+            // Another profile plays: its own Game Presets come.
+            if profileBook.currentProfile?.id != oldValue.currentProfile?.id { loadGamePresets() }
+        }
+    }
     @Published var profileFlow = ProfileFlow()
     /// The friends' private names and pictures as the friends list last said.
     @Published var identityBook = TogetherIdentityBook()
@@ -872,6 +900,8 @@ final class AppModel: ObservableObject {
     lazy var social = SocialState(owner: self)
     /// Cloud saves and media: whether the server keeps files, Settings → Cloud Storage.
     lazy var cloud = CloudState(owner: self)
+    /// Captures: the post written over the gallery, the Captures feed and its comments.
+    lazy var captures = CapturesState(owner: self)
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?
@@ -1117,7 +1147,8 @@ final class AppModel: ObservableObject {
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
-        if let record = installedRecords[game.id] { return .installed(outdated: engineVersion(for: game).map { $0 != record.toolkit } ?? false) }
+        // An update dumped (or removed) since the unlock needs its executable relinked: unlocking again applies it.
+        if let record = installedRecords[game.id], record.update == game.update?.version { return .installed(outdated: engineVersion(for: game).map { $0 != record.toolkit } ?? false) }
         if game.executable == .unreadable { return .unreadable }
         return .locked
     }
@@ -1520,6 +1551,10 @@ final class AppModel: ObservableObject {
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
         configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: gameFontsFolder(), trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
+            // The update and add-ons dumped beside the game.
+            .merging(GameAddons.environment(for: game)) { own, _ in own }
+            // Settings → Game Presets, for the games that ask the console for them.
+            .merging(gamePresets.environment) { own, _ in own }
             .merging(OnlinePlayHost.environment(for: game, client: together, engineBuild: engineBuild(for: game))) { _, online in online }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
