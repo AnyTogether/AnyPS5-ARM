@@ -34,7 +34,7 @@ target_include_directories(libSceVideoOut PRIVATE
 add_dependencies(libSceVideoOut agc_trace_revision)
 target_link_libraries(libSceVideoOut PRIVATE libSceAgcDriver libScePad libSceUserService libSceMouse libSceKeyboard libSceIme libc libkernel decoder_png SDL2-static)
 if(WIN32)
-    target_link_libraries(libSceVideoOut PRIVATE comctl32 dxgi)
+    target_link_libraries(libSceVideoOut PRIVATE comctl32 dxgi ws2_32)
 endif()
 set_target_properties(libSceVideoOut PROPERTIES CXX_EXTENSIONS OFF)
 configure_windows_unwind(libSceVideoOut)
@@ -171,10 +171,16 @@ if(BUILD_TESTING)
     add_test_executable(remote_pad_tests tests/RemotePad.cpp src/RemotePad.cpp)
     target_include_directories(remote_pad_tests PRIVATE ${LIBS_INCLUDE_DIR})
     set_target_properties(remote_pad_tests PROPERTIES CXX_EXTENSIONS OFF)
+    if(WIN32)
+        # The libraries' objects use DWARF unwinding (-fno-asynchronous-unwind-tables): the C++
+        # personality comes from libc, as for the other tests.
+        target_link_libraries(remote_pad_tests PRIVATE ws2_32 libc)
+        configure_windows_unwind(remote_pad_tests)
+    endif()
     add_test(NAME remote_pad COMMAND remote_pad_tests)
     set_tests_properties(remote_pad PROPERTIES TIMEOUT 30)
     if(WIN32)
-        set_tests_properties(pad_input_mapping PROPERTIES ENVIRONMENT_MODIFICATION
+        set_tests_properties(pad_input_mapping remote_pad PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
     endif()
     add_test_executable(pad_output_pacing_tests tests/PadOutputPacing.cpp)

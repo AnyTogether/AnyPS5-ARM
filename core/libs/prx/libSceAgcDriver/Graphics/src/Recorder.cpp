@@ -18,7 +18,9 @@
 #include "prx/libc/include/CpuTopology.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libc/include/GuestArena.hpp"
+#ifndef _WIN32
 #include <dlfcn.h>
+#endif
 #include "prx/libSceAgcDriver/Graphics/shaders/DispatchArguments_spv.h"
 #include <algorithm>
 #include <array>
@@ -631,8 +633,13 @@ void CountPassEnd(PassEnd reason, const void* caller = nullptr) {
     auto& stats = PassEnds();
     ++stats.reasons[static_cast<std::size_t>(reason)];
     if (caller != nullptr) {
+#ifdef _WIN32
+        // No dladdr on Windows: the profile lists absolute caller addresses there.
+        const std::uintptr_t base = 0;
+#else
         Dl_info info{};
         const auto base = dladdr(caller, &info) != 0 ? reinterpret_cast<std::uintptr_t>(info.dli_fbase) : 0;
+#endif
         ++stats.callers[reinterpret_cast<std::uintptr_t>(caller) - base];
     }
     const auto now = std::chrono::steady_clock::now();

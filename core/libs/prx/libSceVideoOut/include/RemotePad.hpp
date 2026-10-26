@@ -61,7 +61,7 @@ public:
 private:
     void send(const std::uint8_t* bytes, std::size_t size);
 
-    int socket = -1;
+    std::intptr_t socket = -1;
     std::uint16_t port = 0;
     std::uint16_t launcherPort = 0;
     std::optional<std::uint32_t> newest;
