@@ -138,7 +138,7 @@ extension Overlay {
     /// Panels drawn over the whole screen rather than sliding in at its side.
     var coversScreen: Bool {
         switch self {
-        case .settings, .library, .log, .messages, .profile, .compare, .feed, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
+        case .settings, .library, .log, .messages, .profile, .compare, .feed, .captures, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
              .profilePicker, .addProfile, .signIn:
             return true
         default:
@@ -177,6 +177,8 @@ enum Overlay: Equatable {
     case party
     /// Friends' activity on AnyTogether.
     case feed
+    /// Screenshots and clips posted on AnyTogether, their likes and comments (CapturesView.swift).
+    case captures
     /// A game's leaderboard, or overall trophy points.
     case leaderboard
     /// AnyTogether's notifications, from the bell.
@@ -894,6 +896,8 @@ final class AppModel: ObservableObject {
     lazy var social = SocialState(owner: self)
     /// Cloud saves and media: whether the server keeps files, Settings → Cloud Storage.
     lazy var cloud = CloudState(owner: self)
+    /// Captures: the post written over the gallery, the Captures feed and its comments.
+    lazy var captures = CapturesState(owner: self)
     lazy var togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
     /// When the running game started, for the play session AnyTogether keeps.
     var sessionStart: Date?

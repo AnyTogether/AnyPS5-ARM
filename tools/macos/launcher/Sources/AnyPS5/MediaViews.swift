@@ -9,12 +9,15 @@ import SwiftUI
 extension AppModel {
     /// Where the share list sends the gallery's focused screenshot or clip.
     enum ShareTarget: Identifiable {
+        /// A post on AnyTogether's Captures (CaptureShare.swift).
+        case post
         case conversation(TogetherConversation)
         case gallery
         case finder
 
         var id: String {
             switch self {
+            case .post: return "post"
             case .conversation(let conversation): return "chat-" + conversation.id
             case .gallery: return "gallery"
             case .finder: return "finder"
@@ -24,7 +27,7 @@ extension AppModel {
 
     var shareTargets: [ShareTarget] {
         let chats = (inbox?.conversations ?? []).prefix(6).map(ShareTarget.conversation)
-        return chats + [.gallery, .finder]
+        return [.post] + chats + [.gallery, .finder]
     }
 
     /// The words a message shows in a list or a notice: its text, or what its media is.
@@ -75,11 +78,13 @@ extension AppModel {
     func share(_ target: ShareTarget) {
         guard galleryShots.indices.contains(galleryIndex) else { return }
         let shot = galleryShots[galleryIndex]
+        if case .post = target { return openPostDraft() }
         withAnimation(Motion.overlay) { cloud.sharing = false }
         switch target {
         case .conversation(let conversation): sendShot(shot, to: conversation)
         case .gallery: shareShotToGallery(shot)
         case .finder: NSWorkspace.shared.activateFileViewerSelecting([shot])
+        case .post: break
         }
     }
 
@@ -456,6 +461,12 @@ struct ShareMenu: View {
                 let other = conversation.others(than: me).first
                 ProfileAvatar(url: conversation.kind == "direct" ? other?.avatar : nil, name: conversation.name(for: me), size: 36 * scale, glow: false)
                 Text(TCloud.format(.sendToChat, conversation.name(for: me))).font(.display(16 * scale, .medium)).lineLimit(1)
+            case .post:
+                Image(systemName: "photo.on.rectangle.angled").font(.system(size: 17 * scale, weight: .medium)).frame(width: 36 * scale)
+                VStack(alignment: .leading, spacing: 2 * scale) {
+                    Text(TCap.text(.shareToTogether)).font(.display(16 * scale, .semibold))
+                    Text(TCap.text(.shareToTogetherDetail)).font(.display(12 * scale)).opacity(0.6).lineLimit(1)
+                }
             case .gallery:
                 Image(systemName: "photo.stack").font(.system(size: 17 * scale, weight: .medium)).frame(width: 36 * scale)
                 Text(TCloud.text(.shareToGallery)).font(.display(16 * scale, .medium))

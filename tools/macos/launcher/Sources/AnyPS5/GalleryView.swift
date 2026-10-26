@@ -44,6 +44,13 @@ struct Gallery: View {
                 }
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+            if model.captures.draft != nil {
+                HStack(spacing: 0) {
+                    Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture { model.closePostDraft() }
+                    PostComposer()
+                }
+                .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
     }
 

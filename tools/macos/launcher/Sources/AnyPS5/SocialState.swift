@@ -100,7 +100,7 @@ final class SocialState: ObservableObject {
 extension AppModel {
     /// The Friends panel's ways into the social screens.
     func socialRows() -> [PanelRow] {
-        [
+        var rows = [
             PanelRow(id: "friends-feed", title: TS.text(.feedRow), detail: TS.text(.feedRowDetail), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in
                 self?.openFeed()
             }),
@@ -108,6 +108,12 @@ extension AppModel {
                 self?.openLeaderboard(nil)
             }),
         ]
+        // Captures need a server that keeps files.
+        if cloud.info?.enabled != false {
+            rows.insert(PanelRow(id: "friends-captures", title: TCap.text(.row), detail: TCap.text(.rowDetail), symbol: "photo.on.rectangle.angled",
+                                 kind: .action(destructive: false) { [weak self] in self?.openCaptures() }), at: 1)
+        }
+        return rows
     }
 
     /// The game panel's social rows, signed in: the game's leaderboard.
