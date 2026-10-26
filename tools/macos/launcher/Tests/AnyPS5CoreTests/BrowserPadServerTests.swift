@@ -388,3 +388,20 @@ final class BrowserPadServerTests: XCTestCase {
         XCTAssertFalse(address.hasPrefix("127."))
     }
 }
+
+/// The page in the repository (BrowserPad/index.html, which the app bundle and AnyPS5-Desktop
+/// carry) speaks the messages the server reads.
+final class BrowserPadPageTests: XCTestCase {
+    func testThePageSpeaksTheServersProtocol() throws {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../BrowserPad/index.html").standardized
+        let page = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(page.contains(#"<meta name="anyps5-browser-pad" content="1">"#))
+        for sent in [#"t: "pad""#, #"t: "btn""#, #"t: "ping""#, #"t: "lat""#] { XCTAssertTrue(page.contains(sent), sent) }
+        for heard in ["\"wait\"", "\"pairing\"", "\"busy\"", "\"welcome\"", "\"rejected\"", "\"out\"", "\"player\"", "\"look\"", "\"pong\""] {
+            XCTAssertTrue(page.contains("case \(heard)"), heard)
+        }
+        XCTAssertTrue(page.contains("ws://${location.host}/ws"))
+        XCTAssertFalse(page.contains("https://"), "no outside requests")
+        XCTAssertLessThan(page.utf8.count, 64 * 1024)
+    }
+}

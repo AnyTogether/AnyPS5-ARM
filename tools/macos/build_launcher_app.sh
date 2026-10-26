@@ -51,6 +51,10 @@ cp "$vulkan/../Licenses/LICENSE.txt" "$app/Contents/Resources/licenses/VulkanSDK
 mkdir -p "$app/Contents/Resources/fonts"
 cp "$source"/Fonts/*.ttf "$source/Fonts/OFL.txt" "$app/Contents/Resources/fonts/"
 cp "$source/Fonts/OFL.txt" "$app/Contents/Resources/licenses/Noto-OFL.txt"
+# Play from a browser: the pad page the launcher serves to phones (BrowserPadServer.swift);
+# AnyPS5-Desktop serves a copy of the same file.
+mkdir -p "$app/Contents/Resources/browser-pad"
+cp "$source/BrowserPad/index.html" "$app/Contents/Resources/browser-pad/index.html"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
