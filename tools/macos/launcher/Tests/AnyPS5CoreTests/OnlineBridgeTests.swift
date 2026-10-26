@@ -84,6 +84,20 @@ final class FakeEngine {
         return nil
     }
 
+    func send(_ stream: OnlineWire.Stream) { write(stream.frame) }
+
+    /// The next stream frame, taking account changes on the way.
+    func nextStream() -> OnlineWire.Stream? {
+        while let frame = readFrame() {
+            if frame.header.kind == OnlineWire.Kind.account.rawValue {
+                account = FakeEngine.decodeAccount(frame.payload)
+                continue
+            }
+            if let kind = OnlineWire.Kind(rawValue: frame.header.kind), kind.isStream { return OnlineWire.Stream(kind: kind, frame.payload) }
+        }
+        return nil
+    }
+
     func nextPushEvent() -> OnlineWire.PushEvent? {
         while let frame = readFrame() {
             if frame.header.kind == OnlineWire.Kind.pushEvent.rawValue { return OnlineWire.PushEvent(frame.payload) }

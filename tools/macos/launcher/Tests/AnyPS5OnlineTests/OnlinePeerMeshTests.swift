@@ -51,6 +51,17 @@ final class MiniEngine {
         return nil
     }
 
+    func send(_ stream: OnlineWire.Stream) { write(stream.frame) }
+
+    /// The next stream frame, skipping datagrams and taking account changes on the way.
+    func nextStream() -> OnlineWire.Stream? {
+        while let frame = readFrame() {
+            if frame.header.kind == OnlineWire.Kind.account.rawValue { account = MiniEngine.account(frame.payload) }
+            if let kind = OnlineWire.Kind(rawValue: frame.header.kind), kind.isStream { return OnlineWire.Stream(kind: kind, frame.payload) }
+        }
+        return nil
+    }
+
     func addressSoon(_ wanted: UInt32) -> Bool {
         while account?.address != wanted {
             guard let frame = readFrame() else { return false }
@@ -224,6 +235,85 @@ final class OnlinePeerMeshTests: XCTestCase {
     }
 }
 
+extension OnlinePeerMeshTests {
+    /// A game stream between two launchers over the reliable `stream` channel: open, accept, bytes
+    /// both ways (more than one channel message), a half close, the end; then a refusal, and a
+    /// player leaving breaks the streams with them.
+    func testTwoLaunchersCarryAGameStream() async throws {
+        let together = OneSession()
+        let users = ["0190a0b1-0000-7000-8000-00000000000a", "0190a0b1-0000-7000-8000-00000000000b"]
+        let (alice, bob) = (users[0], users[1])
+        together.add(alice, device: "dev-a")
+        together.add(bob, device: "dev-b")
+        let game = OnlineWebRouter.Game(titleId: "PPSA00000", gameVersion: "01.000", engineBuild: "mesh-test")
+        let meshes = Box<[String: OnlinePeerMesh]>()
+        meshes.value = [:]
+        func play(_ userId: String, device: String) -> OnlinePlay {
+            let made = OnlinePlay(service: together, user: TogetherUser(id: userId, handle: String(userId.suffix(1)), displayName: userId, avatar: nil), game: game,
+                                  signal: together.relay(from: userId, fromDevice: device), transport: { context in
+                                      let mesh = OnlinePeerMesh(context: context, iceServers: [])
+                                      meshes.value?[userId] = mesh
+                                      return mesh
+                                  })
+            together.attach(made, as: userId)
+            return made
+        }
+        let alicePlay = play(alice, device: "dev-a"), bobPlay = play(bob, device: "dev-b")
+        let aliceEngine = try XCTUnwrap(MiniEngine(environment: try alicePlay.start()))
+        let bobEngine = try XCTUnwrap(MiniEngine(environment: try bobPlay.start()))
+        defer {
+            alicePlay.stop()
+            bobPlay.stop()
+        }
+        let addresses = OnlineIdentity.addresses(for: users)
+        let (a, b) = (try XCTUnwrap(addresses[alice]), try XCTUnwrap(addresses[bob]))
+        await bobPlay.follow(sessionId: together.id)
+        await alicePlay.follow(sessionId: together.id)
+        XCTAssertTrue(aliceEngine.addressSoon(a) && bobEngine.addressSoon(b))
+        let aliceMesh = try XCTUnwrap(meshes.value?[alice]), bobMesh = try XCTUnwrap(meshes.value?[bob])
+        // Bob followed later and asked for a fresh offer, which replaces the first connection:
+        // open the stream once the connection has settled.
+        XCTAssertTrue(waitUntil { aliceMesh.canStream(to: b) && bobMesh.canStream(to: a) }, "the stream channel opens: \(together.signals)")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(waitUntil { aliceMesh.canStream(to: b) && bobMesh.canStream(to: a) })
+        let stream: UInt32 = 1
+        aliceEngine.send(.open(stream: stream, peer: b, peerPort: 3659, peerVport: 1, localPort: 3660, localVport: 5))
+        let opened = bobEngine.nextStream()
+        guard case .open(let id, let peer, let peerPort, let peerVport, let localPort, let localVport)? = opened else { return XCTFail("\(String(describing: opened))") }
+        XCTAssertTrue(id & OnlineWire.launcherStream != 0)
+        XCTAssertEqual([peer, UInt32(peerPort), UInt32(peerVport), UInt32(localPort), UInt32(localVport)], [a, 3660, 5, 3659, 1],
+                       "the other game is asked for its port 3659/1 by Alice's address and port")
+        bobEngine.send(.accept(stream: id))
+        XCTAssertEqual(aliceEngine.nextStream(), .accept(stream: stream))
+
+        let big = Data((0 ..< 60000).map { UInt8(truncatingIfNeeded: $0 * 13) })
+        aliceEngine.send(.data(stream: stream, big))
+        var received = Data()
+        while received.count < big.count, case .data(id, let data)? = bobEngine.nextStream() { received.append(data) }
+        XCTAssertEqual(received, big, "the bytes arrive whole and in order")
+        bobEngine.send(.data(stream: id, Data("pong".utf8)))
+        XCTAssertEqual(aliceEngine.nextStream(), .data(stream: stream, Data("pong".utf8)))
+        aliceEngine.send(.close(stream: stream, .closed))
+        XCTAssertEqual(bobEngine.nextStream(), .close(stream: id, .closed))
+        bobEngine.send(.data(stream: id, Data("late".utf8)))
+        XCTAssertEqual(aliceEngine.nextStream(), .data(stream: stream, Data("late".utf8)), "a half-closed stream still carries the other way")
+        bobEngine.send(.close(stream: id, .closed))
+        XCTAssertEqual(aliceEngine.nextStream(), .close(stream: stream, .closed))
+
+        aliceEngine.send(.open(stream: 100, peer: b, peerPort: 4000, peerVport: 1, localPort: 0, localVport: 0))
+        guard case .open(let refusedId, _, _, _, _, _)? = bobEngine.nextStream() else { return XCTFail() }
+        bobEngine.send(.close(stream: refusedId, .refused))
+        XCTAssertEqual(aliceEngine.nextStream(), .close(stream: 100, .refused), "a refusal reaches the opener")
+
+        aliceEngine.send(.open(stream: 101, peer: b, peerPort: 3659, peerVport: 1, localPort: 0, localVport: 0))
+        guard case .open(let lastId, _, _, _, _, _)? = bobEngine.nextStream() else { return XCTFail() }
+        bobEngine.send(.accept(stream: lastId))
+        XCTAssertEqual(aliceEngine.nextStream(), .accept(stream: 101))
+        await bobPlay.follow(sessionId: nil)
+        XCTAssertEqual(aliceEngine.nextStream(), .close(stream: 101, .reset), "a player who leaves breaks the streams with them")
+    }
+}
+
 /// Phase 1 end to end: two real engines (the engine's `online_probe` stand-in game, each in its
 /// own process with its own bridge) behind two launchers, a datagram P2P socket on each side,
 /// packets over WebRTC data channels. Skipped when the probe is not built (ANYPS5_ONLINE_PROBE, or
@@ -235,6 +325,15 @@ final class OnlineEngineP2pTests: XCTestCase {
         for _ in 0 ..< 6 { folder.deleteLastPathComponent() }
         let built = folder.appendingPathComponent("build-mac/tests/online_probe")
         return FileManager.default.isExecutableFile(atPath: built.path) ? built : nil
+    }
+
+    func waitUntil(_ seconds: Double = 20, _ condition: () -> Bool) -> Bool {
+        let end = Date().addingTimeInterval(seconds)
+        while !condition() {
+            if Date() > end { return false }
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        return true
     }
 
     static func dotted(_ address: UInt32) -> String { "\(address >> 24).\(address >> 16 & 0xFF).\(address >> 8 & 0xFF).\(address & 0xFF)" }
@@ -293,6 +392,54 @@ final class OnlineEngineP2pTests: XCTestCase {
         XCTAssertEqual(pinged["from"], "\(OnlineEngineP2pTests.dotted(b)):3658/1", "the answer comes from the other game's virtual address, port and virtual port")
         XCTAssertEqual(ponged["got"], "ping", "\(ponged)")
         XCTAssertEqual(ponged["from"], "\(OnlineEngineP2pTests.dotted(a)):3658/1")
+    }
+
+    /// Stream P2P end to end: one game listens on 3658/1, the other connects through both
+    /// launchers and the `stream` channel, writes 300 KB and reads it back.
+    func testTwoGamesStreamThroughTwoLaunchers() async throws {
+        guard let probe = OnlineEngineP2pTests.probe else { throw XCTSkip("online_probe is not built") }
+        let together = OneSession()
+        let users = ["0190a0b1-0000-7000-8000-00000000000a", "0190a0b1-0000-7000-8000-00000000000b"]
+        together.add(users[0], device: "dev-a")
+        together.add(users[1], device: "dev-b")
+        let game = OnlineWebRouter.Game(titleId: "PPSA00000", gameVersion: "01.000", engineBuild: "mesh-test")
+        let meshes = Box<[String: OnlinePeerMesh]>()
+        meshes.value = [:]
+        let plays = users.enumerated().map { index, userId in
+            let device = index == 0 ? "dev-a" : "dev-b"
+            let play = OnlinePlay(service: together, user: TogetherUser(id: userId, handle: index == 0 ? "alice" : "bob", displayName: userId, avatar: nil), game: game,
+                                  signal: together.relay(from: userId, fromDevice: device), transport: { context in
+                                      let mesh = OnlinePeerMesh(context: context, iceServers: [])
+                                      meshes.value?[userId] = mesh
+                                      return mesh
+                                  })
+            together.attach(play, as: userId)
+            return play
+        }
+        let environments = try plays.map { try $0.start() }
+        defer { plays.forEach { $0.stop() } }
+        for play in plays { await play.follow(sessionId: together.id) }
+        let addresses = OnlineIdentity.addresses(for: users)
+        let (a, b) = (try XCTUnwrap(addresses[users[0]]), try XCTUnwrap(addresses[users[1]]))
+        // Bob followed later, so he asked for a fresh offer, which replaces the first connection
+        // (and would break a stream opened on it): start once the connection has settled.
+        let aliceMesh = try XCTUnwrap(meshes.value?[users[0]]), bobMesh = try XCTUnwrap(meshes.value?[users[1]])
+        let settled = { aliceMesh.canStream(to: b) && bobMesh.canStream(to: a) }
+        XCTAssertTrue(waitUntil { settled() }, "the stream channel opens: \(together.signals)")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(waitUntil { settled() })
+
+        let pong = try start(probe, environment: environments[1], arguments: ["stream", OnlineEngineP2pTests.dotted(a), "pong", "300000"])
+        let ping = try start(probe, environment: environments[0], arguments: ["stream", OnlineEngineP2pTests.dotted(b), "ping", "300000"])
+        let pinged = finish(ping)
+        let ponged = finish(pong)
+        XCTAssertEqual(pinged["peer"], "\(OnlineEngineP2pTests.dotted(b)):3658/1", "\(pinged) \(together.signals)")
+        XCTAssertEqual(pinged["echoed"], "300000", "\(pinged)")
+        XCTAssertEqual(pinged["same"], "1")
+        XCTAssertEqual(ponged["from"]?.hasPrefix("\(OnlineEngineP2pTests.dotted(a)):"), true, "the stream comes from the other game's virtual address: \(ponged)")
+        XCTAssertEqual(ponged["got"], "300000")
+        XCTAssertEqual(ponged["same"], "1")
+        XCTAssertEqual(ponged["end"], "0", "the pinger's close ends the stream")
     }
 
     /// LAN-style discovery: a game broadcasts on its UDP socket, the other game hears it from the

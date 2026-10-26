@@ -9,15 +9,19 @@ public final class OnlineBridgeServer: @unchecked Sendable {
     public struct Handlers: Sendable {
         public var web: @Sendable (OnlineWire.WebRequest) async -> OnlineWire.WebReply
         public var datagram: @Sendable (OnlineWire.Datagram) -> Void
+        /// The game's stream frames, in the order the engine sent them.
+        public var stream: @Sendable (OnlineWire.Stream) -> Void
         public var observation: @Sendable (String) -> Void
         public var engine: @Sendable (OnlineWire.Hello?) -> Void
 
         public init(web: @escaping @Sendable (OnlineWire.WebRequest) async -> OnlineWire.WebReply = { _ in .notOffered },
                     datagram: @escaping @Sendable (OnlineWire.Datagram) -> Void = { _ in },
+                    stream: @escaping @Sendable (OnlineWire.Stream) -> Void = { _ in },
                     observation: @escaping @Sendable (String) -> Void = { _ in },
                     engine: @escaping @Sendable (OnlineWire.Hello?) -> Void = { _ in }) {
             self.web = web
             self.datagram = datagram
+            self.stream = stream
             self.observation = observation
             self.engine = engine
         }
@@ -111,6 +115,15 @@ public final class OnlineBridgeServer: @unchecked Sendable {
         return write(socket, OnlineWire.frame(.datagram, datagram.payload))
     }
 
+    /// Hands a stream frame from a peer to the game; false while no game is connected.
+    @discardableResult
+    public func deliver(_ stream: OnlineWire.Stream) -> Bool {
+        let socket = lock.withLock { engineSocket }
+        if case .data(_, let data) = stream, data.count > OnlineWire.maxStreamData { return false }
+        guard socket >= 0 else { return false }
+        return write(socket, stream.frame)
+    }
+
     /// Hands a push event (session news) to the game; false while no game is connected or when
     /// the event is not one the engine accepts.
     @discardableResult
@@ -190,6 +203,8 @@ public final class OnlineBridgeServer: @unchecked Sendable {
             }
         case .datagram:
             if let datagram = OnlineWire.Datagram(frame.payload) { handlers.datagram(datagram) }
+        case let kind? where kind.isStream:
+            if let stream = OnlineWire.Stream(kind: kind, frame.payload) { handlers.stream(stream) }
         case .observation:
             var reader = OnlineWire.Reader(frame.payload)
             let line = reader.str()

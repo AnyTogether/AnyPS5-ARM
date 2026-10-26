@@ -12,10 +12,12 @@ import WebRTC
 ///
 /// One unordered channel without resends (`game`) carries datagrams: a 9-byte header (source
 /// port, source virtual port, destination port, destination virtual port, kind; little-endian)
-/// and the game's bytes. The sender's virtual address is not in the packet: it is the address of
+/// and the game's bytes. A second, reliable and ordered channel (`stream`) carries the game's
+/// streams as `OnlineStreamRelay` messages. The sender's virtual address is not in the packet: it is the address of
 /// whoever the connection is with, so nobody can speak for another player.
 public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sendable {
     public static let label = "game"
+    public static let streamLabel = "stream"
     static let headerSize = 9
 
     /// Its own factory, apart from share play's and the party voice's; its audio device is never
@@ -39,6 +41,7 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
         /// the mesh holds the peer).
         var connection: RTCPeerConnection!
         var channel: RTCDataChannel?
+        var streamChannel: RTCDataChannel?
         /// Candidates wait until the other side's description is set.
         var queued: [RTCIceCandidate] = []
         var haveRemote = false
@@ -69,7 +72,7 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
         }
 
         func peerConnection(_ peerConnection: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
-            guard dataChannel.label == OnlinePeerMesh.label else { return }
+            guard dataChannel.label == OnlinePeerMesh.label || dataChannel.label == OnlinePeerMesh.streamLabel else { return }
             dataChannel.delegate = self
             mesh?.opened(self, dataChannel)
         }
@@ -81,7 +84,11 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
 
         func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
             guard buffer.isBinary else { return }
-            mesh?.received(buffer.data, from: self)
+            if dataChannel.label == OnlinePeerMesh.streamLabel {
+                mesh?.receivedStream(buffer.data, from: self)
+            } else {
+                mesh?.received(buffer.data, from: self)
+            }
         }
     }
 
@@ -185,6 +192,19 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
             counters.dropped += dropped
         }
         return sent > 0
+    }
+
+    /// Sends a stream message to its player over the reliable channel; false when that channel is
+    /// not open (or its buffer is full).
+    @discardableResult
+    public func sendStream(_ message: Data, to peer: UInt32) -> Bool {
+        guard let channel = lock.withLock({ byAddress[peer]?.streamChannel }), channel.readyState == .open else { return false }
+        return channel.sendData(RTCDataBuffer(data: message, isBinary: true))
+    }
+
+    /// Whether the reliable channel to the player at a virtual address is open.
+    public func canStream(to peer: UInt32) -> Bool {
+        lock.withLock { byAddress[peer]?.streamChannel }?.readyState == .open
     }
 
     public func receive(_ signal: OnlinePeerSignal) {
@@ -324,7 +344,12 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
         options.maxRetransmits = 0
         let channel = peer.connection.dataChannel(forLabel: OnlinePeerMesh.label, configuration: options)
         channel?.delegate = peer
-        lock.withLock { peer.channel = channel }
+        let streamChannel = peer.connection.dataChannel(forLabel: OnlinePeerMesh.streamLabel, configuration: RTCDataChannelConfiguration())
+        streamChannel?.delegate = peer
+        lock.withLock {
+            peer.channel = channel
+            peer.streamChannel = streamChannel
+        }
         Task {
             do {
                 let made = try await peer.connection.offer(for: OnlinePeerMesh.noConstraints)
@@ -374,18 +399,22 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
     }
 
     fileprivate func opened(_ peer: Peer, _ channel: RTCDataChannel) {
-        lock.withLock { peer.channel = channel }
+        lock.withLock {
+            if channel.label == OnlinePeerMesh.streamLabel { peer.streamChannel = channel } else { peer.channel = channel }
+        }
     }
 
     fileprivate func connectionChanged(_ peer: Peer, _ state: RTCPeerConnectionState) {
-        lock.withLock {
+        let broke = lock.withLock { () -> Bool in
             switch state {
             case .connected: peer.state = .connected
             case .failed: peer.state = .failed
             case .closed: peer.state = .closed
             default: break
             }
+            return (state == .failed || state == .closed) && byAddress[peer.address] === peer
         }
+        if broke { context.peerGone(peer.address) }
     }
 
     private func failed(_ peer: Peer) {
@@ -407,11 +436,18 @@ public final class OnlinePeerMesh: NSObject, OnlinePeerTransport, @unchecked Sen
                                             kind: kind, data: Data(data.dropFirst(OnlinePeerMesh.headerSize))))
     }
 
+    fileprivate func receivedStream(_ data: Data, from peer: Peer) {
+        guard lock.withLock({ byAddress[peer.address] === peer }) else { return }
+        context.deliverStream(peer.address, data)
+    }
+
     private func close(_ peer: Peer, sayBye: Bool, in sessionId: String? = nil) {
         if sayBye, let sessionId = sessionId ?? lock.withLock({ session?.id }) { context.signal(peer.userId, peer.device, sessionId, "bye", Data("null".utf8)) }
         lock.withLock { peer.state = .closed }
         peer.mesh = nil
         peer.connection.close()
+        // The game's streams with this player end with the connection.
+        context.peerGone(peer.address)
     }
 }
 

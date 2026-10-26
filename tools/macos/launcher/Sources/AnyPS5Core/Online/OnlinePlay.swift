@@ -10,6 +10,8 @@ public final class OnlinePlay: @unchecked Sendable {
     public let bridge: OnlineBridgeServer
     public let router: OnlineWebRouter
     public let transport: OnlinePeerTransport
+    /// The game's streams between the bridge and the transport.
+    public let streams: OnlineStreamRelay
     /// Where the engine writes its observation log (ANYPS5_ONLINE_LOG), when one was asked for.
     public let observationLog: URL?
     private let service: OnlineSessionService
@@ -31,7 +33,9 @@ public final class OnlinePlay: @unchecked Sendable {
         self.service = service
         self.observationLog = observationLog
         let refs = References()
-        let context = OnlinePeerContext(deliver: { refs.bridge?.deliver($0) }, service: service, signal: signal)
+        let context = OnlinePeerContext(deliver: { refs.bridge?.deliver($0) }, service: service, signal: signal,
+                                        deliverStream: { refs.streams?.fromPeer($0, $1) }, peerGone: { refs.streams?.peerGone($0) })
+        let streams = OnlineStreamRelay(toEngine: { refs.bridge?.deliver($0) }, toPeer: { refs.transport?.sendStream($1, to: $0) ?? false })
         let made = transport?(context) ?? OnlinePeerLink(sessionKey: sessionKey, ownAddress: 0) { refs.bridge?.deliver($0) }
         let profile = user.map { OnlineUserProfile(service: service, me: $0, language: account.language) }
         let playerSessions = user.map { _ in
@@ -45,11 +49,18 @@ public final class OnlinePlay: @unchecked Sendable {
         let bridge = OnlineBridgeServer(account: account, handlers: .init(
             web: { request in await refs.router?.handle(request) ?? .notOffered },
             datagram: { _ = refs.transport?.send($0) },
+            stream: { refs.streams?.fromEngine($0) },
             observation: { line in refs.play?.keep(line) },
-            engine: { hello in if let hello { refs.router?.setEngineBuild(hello.build) } }))
+            engine: { hello in
+                // A game that connects (again) or goes starts with no streams.
+                refs.streams?.engineGone()
+                if let hello { refs.router?.setEngineBuild(hello.build) }
+            }))
         self.bridge = bridge
         self.router = router
         self.transport = made
+        self.streams = streams
+        refs.streams = streams
         refs.bridge = bridge
         refs.transport = made
         refs.router = router
@@ -148,6 +159,7 @@ public final class OnlinePlay: @unchecked Sendable {
 private final class References: @unchecked Sendable {
     weak var bridge: OnlineBridgeServer?
     weak var transport: OnlinePeerTransport?
+    weak var streams: OnlineStreamRelay?
     weak var router: OnlineWebRouter?
     weak var play: OnlinePlay?
 }

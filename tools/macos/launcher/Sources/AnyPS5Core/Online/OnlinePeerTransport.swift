@@ -51,6 +51,9 @@ public protocol OnlinePeerTransport: AnyObject, Sendable {
     func update(_ session: OnlinePeerSession?)
     /// A packet from the engine to another player; false when they cannot be reached now.
     @discardableResult func send(_ datagram: OnlineWire.Datagram) -> Bool
+    /// A message of the game's streams (`OnlineStreamRelay`) to another player, carried reliably
+    /// and in order; false when they cannot be reached that way now.
+    @discardableResult func sendStream(_ message: Data, to peer: UInt32) -> Bool
     /// A signal from another player's launcher.
     func receive(_ signal: OnlinePeerSignal)
     func stop()
@@ -60,6 +63,8 @@ public protocol OnlinePeerTransport: AnyObject, Sendable {
 }
 
 extension OnlinePeerTransport {
+    /// A transport without a reliable channel carries no streams.
+    @discardableResult public func sendStream(_ message: Data, to peer: UInt32) -> Bool { false }
     public func links(_ done: @escaping @Sendable ([OnlinePeerLinkInfo]) -> Void) { done([]) }
 }
 
@@ -123,12 +128,19 @@ public struct OnlinePeerContext: Sendable {
     public var service: OnlineSessionService
     /// (to user, their device, session ID, kind, data as JSON)
     public var signal: @Sendable (String, String, String, String, Data) -> Void
+    /// A stream message from the player at a virtual address.
+    public var deliverStream: @Sendable (UInt32, Data) -> Void
+    /// The connection to the player at a virtual address is gone (their streams break).
+    public var peerGone: @Sendable (UInt32) -> Void
 
     public init(deliver: @escaping @Sendable (OnlineWire.Datagram) -> Void, service: OnlineSessionService,
-                signal: @escaping @Sendable (String, String, String, String, Data) -> Void) {
+                signal: @escaping @Sendable (String, String, String, String, Data) -> Void,
+                deliverStream: @escaping @Sendable (UInt32, Data) -> Void = { _, _ in }, peerGone: @escaping @Sendable (UInt32) -> Void = { _ in }) {
         self.deliver = deliver
         self.service = service
         self.signal = signal
+        self.deliverStream = deliverStream
+        self.peerGone = peerGone
     }
 }
 

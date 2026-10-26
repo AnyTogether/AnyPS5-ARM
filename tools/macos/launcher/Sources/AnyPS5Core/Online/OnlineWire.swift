@@ -22,6 +22,12 @@ public enum OnlineWire {
         case webRequest = 0x0201
         case pushEvent = 0x0204
         case datagram = 0x0310
+        case streamOpen = 0x0311
+        case streamData = 0x0312
+        case streamClose = 0x0313
+        case streamAccept = 0x0314
+
+        public var isStream: Bool { (Kind.streamOpen.rawValue ... Kind.streamAccept.rawValue).contains(rawValue) }
     }
 
     public static let flagReply: UInt16 = 0x0001
@@ -336,6 +342,82 @@ public enum OnlineWire {
             self.kind = kind
             data = reader.bytes()
             guard reader.ok, OnlineWire.isVirtual(peer) || OnlineWire.isGroup(peer), data.count <= OnlineWire.maxDatagram else { return nil }
+        }
+    }
+
+    /// Why a stream ended: the other end closed it, nobody listens on the port and virtual port it
+    /// named, or it broke (no route to the player, the player left, a connection dropped).
+    public enum StreamCloseReason: UInt8, Sendable { case closed = 0, refused = 1, reset = 2 }
+
+    /// Stream numbers name a stream on one engine-launcher connection (0 is never one); whoever
+    /// opens a stream picks its number, the engine's with the top bit clear, the launcher's set.
+    public static let launcherStream: UInt32 = 0x8000_0000
+    public static let maxStreamData = 65536
+
+    /// A game stream between two players (stream P2P sockets), both directions, events:
+    /// StreamOpen u32 stream, u32 peer, u16 peer port, u16 peer virtual port, u16 local port, u16
+    /// local virtual port; StreamAccept u32 stream; StreamData u32 stream, bytes data (≤ 64 KiB);
+    /// StreamClose u32 stream, u8 reason.
+    public enum Stream: Equatable, Sendable {
+        case open(stream: UInt32, peer: UInt32, peerPort: UInt16, peerVport: UInt16, localPort: UInt16, localVport: UInt16)
+        case accept(stream: UInt32)
+        case data(stream: UInt32, Data)
+        case close(stream: UInt32, StreamCloseReason)
+
+        public var stream: UInt32 {
+            switch self {
+            case .open(let stream, _, _, _, _, _), .accept(let stream), .data(let stream, _), .close(let stream, _): return stream
+            }
+        }
+
+        public var kind: Kind {
+            switch self {
+            case .open: return .streamOpen
+            case .accept: return .streamAccept
+            case .data: return .streamData
+            case .close: return .streamClose
+            }
+        }
+
+        public var payload: Data {
+            let writer = Writer()
+            writer.u32(stream)
+            switch self {
+            case .open(_, let peer, let peerPort, let peerVport, let localPort, let localVport):
+                writer.u32(peer).u16(peerPort).u16(peerVport).u16(localPort).u16(localVport)
+            case .data(_, let data):
+                writer.bytes(data)
+            case .close(_, let reason):
+                writer.u8(reason.rawValue)
+            case .accept:
+                break
+            }
+            return writer.data
+        }
+
+        public var frame: Data { OnlineWire.frame(kind, payload) }
+
+        public init?(kind: Kind, _ payload: Data) {
+            var reader = Reader(payload)
+            let stream = reader.u32()
+            switch kind {
+            case .streamOpen:
+                let peer = reader.u32(), peerPort = reader.u16(), peerVport = reader.u16(), localPort = reader.u16(), localVport = reader.u16()
+                guard OnlineWire.isVirtual(peer) else { return nil }
+                self = .open(stream: stream, peer: peer, peerPort: peerPort, peerVport: peerVport, localPort: localPort, localVport: localVport)
+            case .streamAccept:
+                self = .accept(stream: stream)
+            case .streamData:
+                let data = reader.bytes()
+                guard data.count <= OnlineWire.maxStreamData else { return nil }
+                self = .data(stream: stream, data)
+            case .streamClose:
+                // An unknown reason still ends the stream, as a break.
+                self = .close(stream: stream, StreamCloseReason(rawValue: reader.u8()) ?? .reset)
+            default:
+                return nil
+            }
+            guard reader.ok, stream != 0 else { return nil }
         }
     }
 
