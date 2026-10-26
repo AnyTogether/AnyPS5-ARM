@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
 import '../discover_strings.dart';
+import '../safety_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
 import '../together/people.dart';
 import '../together/together_hub.dart';
+import 'ask_first.dart';
 import 'share_watch_screen.dart';
 import 'together_widgets.dart';
 
@@ -321,16 +323,28 @@ class _FriendsPaneState extends State<FriendsPane> {
                           color: togetherAccent,
                         ),
                       ),
-                    PopupMenuButton<void>(
+                    PopupMenuButton<bool>(
                       icon: const Icon(
                         Icons.more_horiz_rounded,
                         color: Colors.white38,
                       ),
                       color: const Color(0xFF1A1D27),
+                      // Asked once the menu is gone: removing a friend cannot be taken back.
+                      onSelected: (_) async {
+                        final sure = await askFirst(
+                          context,
+                          question: texts.askRemoveFriend(
+                            friend.person.displayName,
+                          ),
+                          action: texts.friendsRemove,
+                        );
+                        if (sure && mounted) {
+                          await _try(() => friends.remove(friend.person.id));
+                        }
+                      },
                       itemBuilder: (context) => [
                         PopupMenuItem(
-                          onTap: () =>
-                              _try(() => friends.remove(friend.person.id)),
+                          value: true,
                           child: Text(texts.friendsRemove),
                         ),
                       ],
