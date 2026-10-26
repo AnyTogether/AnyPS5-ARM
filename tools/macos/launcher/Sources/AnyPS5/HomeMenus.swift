@@ -71,7 +71,8 @@ extension AppModel {
     /// the screen to see it.
     func openGameMenu(_ next: Overlay) {
         guard running != nil, starting == nil else { return }
-        let paused = next == .quickMenu && pauseGame()
+        let settle = next == .quickMenu ? pauseGame() : nil
+        let paused = settle != nil
         let show = { [weak self] in
             guard let self, let game = self.running?.game else { return }
             if let index = self.games.firstIndex(where: { $0.id == game.id }) { self.selected = index }
@@ -81,8 +82,8 @@ extension AppModel {
             withAnimation(Motion.overlay) { self.overlay = next }
             Sounds.shared.play(.select)
         }
-        if paused {
-            DispatchQueue.main.asyncAfter(deadline: .now() + GamePause.press.last!.at + 0.05) { show() }
+        if let settle {
+            DispatchQueue.main.asyncAfter(deadline: .now() + settle) { show() }
         } else {
             show()
         }
@@ -173,22 +174,31 @@ extension AppModel {
 
     // MARK: Pausing the game
 
-    /// One Options press through the engine's remote pad (GamePause); whether it went.
-    private func pauseGame() -> Bool {
-        guard let remote else { return false }
+    /// One Options press on the game's first player (GamePause); the seconds until the game has
+    /// seen it, nil when none went.
+    private func pauseGame() -> Double? {
+        guard let remote else { return nil }
+        let pressBridge = remote.pressBridge
         let free = pauseBridge.map { remote.padChannelOpen(bridge: $0) } ?? true
-        let route = GamePause.route(enabled: preferences.pauseOnMenu ?? true, controllers: Controllers.shared.pads.count,
+        let route = GamePause.route(enabled: preferences.pauseOnMenu ?? true, takesPresses: pressBridge != nil, controllers: Controllers.shared.pads.count,
                                     phonePlayers: Array(phonePlayers.values), channelFree: free)
+        if route == .press, let pressBridge {
+            pausePress &+= 1
+            for (packet, at) in zip(GamePause.pressPackets(id: pausePress), GamePause.pressRepeats) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + at) { remote.sendPress(packet, bridge: pressBridge) }
+            }
+            return GamePause.settle(.press)
+        }
         guard route == .send else {
             RemoteServer.log.info("pause before the quick menu: \(String(describing: route), privacy: .public)")
-            return false
+            return nil
         }
-        guard let bridge = pauseBridge ?? remote.reservePadBridge() else { return false }
+        guard let bridge = pauseBridge ?? remote.reservePadBridge() else { return nil }
         guard remote.padChannelOpen(bridge: bridge) else {
             remote.releasePadBridge(bridge)
             pauseBridge = nil
             RemoteServer.log.info("pause before the quick menu: the game has no remote pad channel")
-            return false
+            return nil
         }
         pauseBridge = bridge
         let packets = GamePause.packets(session: pauseSession, firstSequence: pauseSequence)
@@ -204,7 +214,7 @@ extension AppModel {
             self.remote?.releasePadBridge(bridge)
             self.pauseBridge = nil
         }
-        return true
+        return GamePause.settle(.send)
     }
 
     // MARK: Create: clips and screenshots

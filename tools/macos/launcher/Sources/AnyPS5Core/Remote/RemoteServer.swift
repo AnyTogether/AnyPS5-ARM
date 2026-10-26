@@ -382,6 +382,8 @@ public final class RemoteServer: @unchecked Sendable {
     private var gameAddresses: [sockaddr_storage?] = []
     /// The player the game last said each slot's phone is.
     private var gamePlayers: [Int?] = []
+    /// Whether the game's hello on each bridge says its engine takes presses.
+    private var gamePresses: [Bool] = []
 
     /// The UDP port the phone sends its pad to, on every interface.
     public var udpPort: UInt16? { queue.sync { relayPort } }
@@ -435,6 +437,7 @@ public final class RemoteServer: @unchecked Sendable {
             bridgeSockets = bridges
             gameAddresses = Array(repeating: nil, count: bridges.count)
             gamePlayers = Array(repeating: nil, count: bridges.count)
+            gamePresses = Array(repeating: false, count: bridges.count)
             sources = [watch(phone) { [weak self] in self?.fromPhone() }]
                 + bridges.indices.map { slot in watch(bridges[slot]) { [weak self] in self?.fromGame(slot) } }
         }
@@ -447,6 +450,7 @@ public final class RemoteServer: @unchecked Sendable {
         bridgeSockets = []
         gameAddresses = []
         gamePlayers = []
+        gamePresses = []
     }
 
     private func watch(_ socket: Int32, _ handler: @escaping () -> Void) -> DispatchSourceRead {
@@ -480,6 +484,7 @@ public final class RemoteServer: @unchecked Sendable {
         while let (data, source) = RemoteServer.receive(bridgeSockets[slot]) {
             if RemotePacket.isHello(data) {
                 gameAddresses[slot] = source
+                gamePresses[slot] = RemotePacket.helloTakesPresses(data)
                 let player = RemotePacket.helloPlayer(data)
                 if gamePlayers[slot] != player {
                     gamePlayers[slot] = player
@@ -597,6 +602,19 @@ extension RemoteServer: SharePadBridges {
     /// The player the game says a bridge's pad is, from 1; nil while it is none.
     public func padPlayer(bridge: Int) -> Int? {
         queue.sync { gamePlayers.indices.contains(bridge) ? gamePlayers[bridge] : nil }
+    }
+
+    /// A bridge whose game takes presses (RemotePacket.press), any one: a press takes no seat.
+    public var pressBridge: Int? {
+        queue.sync { gamePresses.indices.first { gamePresses[$0] && gameAddresses[$0] != nil } }
+    }
+
+    /// A press to the game through `bridge`, whoever uses that bridge.
+    public func sendPress(_ data: Data, bridge: Int) {
+        queue.async { [self] in
+            guard gameAddresses.indices.contains(bridge), var game = gameAddresses[bridge] else { return }
+            RemoteServer.send(data, from: bridgeSockets[bridge], to: &game)
+        }
     }
 
     /// A share play viewer's pad packet to the game through the bridge held for them.

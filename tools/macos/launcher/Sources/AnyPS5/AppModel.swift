@@ -1655,11 +1655,14 @@ final class AppModel: ObservableObject {
         get { lastToggle }
         set { lastToggle = newValue }
     }
-    /// The remote pad channel the quick menu's Options press goes through, held a few seconds.
+    /// The remote pad channel the quick menu's Options press goes through on an engine without
+    /// presses, held a few seconds.
     var pauseBridge: Int?
     var pauseSequence: UInt32 = 0
     let pauseSession = UInt64.random(in: 1 ... UInt64.max)
     var pauseRelease: Task<Void, Never>?
+    /// The id of the last press (GamePause.pressPackets); the engine counts copies of one once.
+    var pausePress = UInt32.random(in: 1 ... UInt32.max)
     /// The chord being recorded for a shortcut.
     var chordRecorder: ChordRecorder?
 

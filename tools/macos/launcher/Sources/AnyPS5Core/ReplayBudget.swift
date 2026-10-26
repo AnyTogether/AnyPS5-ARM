@@ -36,12 +36,17 @@ public enum ReplayBudget {
     }
 }
 
-/// Pausing the game before the launcher's quick menu covers it: one Options press sent through
-/// the engine's remote pad (the phone's way in). The engine seats such a pad as the lowest free
-/// player, so the press reaches the game's first player only while no controller or phone holds
-/// that seat; otherwise it would sign in a second player, and nothing is sent.
+/// Pausing the game before the launcher's quick menu covers it: one Options press on the game's
+/// first player. An engine whose hello says it takes presses holds Options on player 1's pad
+/// whoever drives it (RemotePacket.press). An older one only has the phone's way in, an Options
+/// press through a remote pad, which the engine seats as the lowest free player: it reaches the
+/// first player only while no controller or phone holds that seat; otherwise it would sign in a
+/// second player, and nothing is sent.
 public enum GamePause {
     public enum Route: Equatable, Sendable {
+        /// Options held on player 1's pad by a press, whoever holds player 1.
+        case press
+        /// Options pressed through a remote pad that becomes player 1.
         case send
         case off
         /// A controller (or a phone as player 1) holds the first player.
@@ -50,10 +55,22 @@ public enum GamePause {
         case noChannel
     }
 
-    public static func route(enabled: Bool, controllers: Int, phonePlayers: [Int], channelFree: Bool) -> Route {
+    public static func route(enabled: Bool, takesPresses: Bool, controllers: Int, phonePlayers: [Int], channelFree: Bool) -> Route {
         guard enabled else { return .off }
+        if takesPresses { return .press }
         guard controllers == 0, !phonePlayers.contains(1) else { return .playerOneTaken }
         return channelFree ? .send : .noChannel
+    }
+
+    /// How long a press holds Options, as a thumb does (a game samples its pad once a frame).
+    public static let holdMillis: UInt16 = 160
+    /// When each copy of a press goes, in seconds from the first, in case one is lost.
+    public static let pressRepeats: [Double] = [0, 0.04, 0.08]
+
+    /// The copies of one press of Options, all with the same id.
+    public static func pressPackets(id: UInt32) -> [Data] {
+        let packet = RemotePacket.press(id: id, buttons: SharePadState.Button.options, holdMillis: holdMillis)
+        return pressRepeats.map { _ in packet }
     }
 
     /// When each packet of a press goes, in seconds from the first, and whether Options is down:
@@ -68,6 +85,12 @@ public enum GamePause {
             state.buttons = step.down ? SharePadState.Button.options : 0
             return state.packet(sequence: firstSequence &+ UInt32(index), sentMicros: sentMicros, session: session)
         }
+    }
+
+    /// The seconds from the first packet until the quick menu covers the game: Options has been
+    /// let go by then, so the game has seen the whole press.
+    public static func settle(_ route: Route) -> Double {
+        (route == .press ? Double(holdMillis) / 1000 : press.last!.at) + 0.05
     }
 }
 

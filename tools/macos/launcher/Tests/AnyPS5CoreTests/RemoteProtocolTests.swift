@@ -162,6 +162,28 @@ final class RemoteProtocolTests: XCTestCase {
         XCTAssertNil(RemotePacket.inputSession(Self.input(session: 42, length: 79)))
     }
 
+    /// The engine's press (APRP): buttons held on player 1's pad for a while, taking no seat.
+    func testThePressPacketIsTheEnginesFormat() {
+        let press = RemotePacket.press(id: 0x0102_0304, buttons: SharePadState.Button.options, holdMillis: 160)
+        XCTAssertEqual(press.count, 24)
+        XCTAssertEqual([UInt8](press.prefix(8)), [0x41, 0x50, 0x52, 0x50, 1, 0, 24, 0])
+        XCTAssertEqual(RemotePacket.read(press, at: 8) as UInt32, 0x0102_0304)
+        XCTAssertEqual(RemotePacket.read(press, at: 12) as UInt32, SharePadState.Button.options)
+        XCTAssertEqual(RemotePacket.read(press, at: 16) as UInt16, 160)
+        XCTAssertEqual([UInt8](press.suffix(6)), [0, 0, 0, 0, 0, 0])
+        XCTAssertNil(RemotePacket.inputSession(press), "a press is no phone input")
+    }
+
+    /// Bit 0 of the hello's byte 9: the engine takes presses; an older engine leaves it 0.
+    func testTheHelloSaysWhetherTheEngineTakesPresses() {
+        var hello = [UInt8](repeating: 0, count: 16)
+        hello.replaceSubrange(0..<8, with: [0x41, 0x50, 0x52, 0x48, 1, 0, 16, 0])
+        XCTAssertFalse(RemotePacket.helloTakesPresses(Data(hello)))
+        hello[9] = 1
+        XCTAssertTrue(RemotePacket.helloTakesPresses(Data(hello)))
+        XCTAssertFalse(RemotePacket.helloTakesPresses(Data(hello.prefix(15))))
+    }
+
     func testOutputAndHelloAreRecognised() {
         var output = [UInt8](repeating: 0, count: 32)
         output.replaceSubrange(0..<4, with: [0x41, 0x50, 0x52, 0x4F])

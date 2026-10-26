@@ -89,22 +89,45 @@ final class ReplayTrimTests: XCTestCase {
 
 final class GamePauseTests: XCTestCase {
     func testThePressGoesWhenNobodyHoldsPlayerOne() {
-        XCTAssertEqual(GamePause.route(enabled: true, controllers: 0, phonePlayers: [], channelFree: true), .send)
-        XCTAssertEqual(GamePause.route(enabled: true, controllers: 0, phonePlayers: [2], channelFree: true), .send)
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: false, controllers: 0, phonePlayers: [], channelFree: true), .send)
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: false, controllers: 0, phonePlayers: [2], channelFree: true), .send)
     }
 
     func testOffSendsNothing() {
-        XCTAssertEqual(GamePause.route(enabled: false, controllers: 0, phonePlayers: [], channelFree: true), .off)
+        XCTAssertEqual(GamePause.route(enabled: false, takesPresses: false, controllers: 0, phonePlayers: [], channelFree: true), .off)
     }
 
     /// A controller or a phone as player 1: the press would sign in a second player instead.
     func testATakenFirstPlayerSendsNothing() {
-        XCTAssertEqual(GamePause.route(enabled: true, controllers: 1, phonePlayers: [], channelFree: true), .playerOneTaken)
-        XCTAssertEqual(GamePause.route(enabled: true, controllers: 0, phonePlayers: [1], channelFree: true), .playerOneTaken)
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: false, controllers: 1, phonePlayers: [], channelFree: true), .playerOneTaken)
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: false, controllers: 0, phonePlayers: [1], channelFree: true), .playerOneTaken)
     }
 
     func testNoChannelSendsNothing() {
-        XCTAssertEqual(GamePause.route(enabled: true, controllers: 0, phonePlayers: [], channelFree: false), .noChannel)
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: false, controllers: 0, phonePlayers: [], channelFree: false), .noChannel)
+    }
+
+    /// An engine that takes presses holds Options on player 1's pad whoever drives it: a
+    /// controller, a phone or the keyboard, and no remote pad channel is held for it.
+    func testAnEngineThatTakesPressesPausesWhoeverHoldsPlayerOne() {
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: true, controllers: 1, phonePlayers: [], channelFree: false), .press)
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: true, controllers: 0, phonePlayers: [1], channelFree: true), .press)
+        XCTAssertEqual(GamePause.route(enabled: true, takesPresses: true, controllers: 0, phonePlayers: [], channelFree: true), .press)
+        XCTAssertEqual(GamePause.route(enabled: false, takesPresses: true, controllers: 1, phonePlayers: [], channelFree: true), .off)
+    }
+
+    /// One press of Options, sent again in case one is lost: every copy has the same id, so the
+    /// engine holds it once.
+    func testThePressIsOptionsHeldOnceAndSentAgain() {
+        let packets = GamePause.pressPackets(id: 77)
+        XCTAssertEqual(packets.count, GamePause.pressRepeats.count)
+        XCTAssertGreaterThanOrEqual(packets.count, 2)
+        XCTAssertEqual(Set(packets).count, 1)
+        XCTAssertEqual(packets[0], RemotePacket.press(id: 77, buttons: SharePadState.Button.options, holdMillis: GamePause.holdMillis))
+        XCTAssertGreaterThanOrEqual(GamePause.holdMillis, 100, "a press shorter than a few frames may be missed")
+        XCTAssertLessThan(GamePause.pressRepeats.last!, Double(GamePause.holdMillis) / 1000, "the copies arrive while the first is held")
+        XCTAssertGreaterThan(GamePause.settle(.press), Double(GamePause.holdMillis) / 1000, "the menu covers the game once Options is let go")
+        XCTAssertGreaterThan(GamePause.settle(.send), GamePause.press.last!.at)
     }
 
     /// One press: Options down in the first packets, up in the last, in sequence, the engine's format.

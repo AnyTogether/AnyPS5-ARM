@@ -152,6 +152,24 @@ final class RemoteRelayTests: XCTestCase {
         XCTAssertEqual(server.phonePlayers, [:])
     }
 
+    /// A press goes to a game whose hello says it takes them, on any bridge, the phone's too: it
+    /// takes no seat, so it needs no bridge of its own.
+    func testAPressGoesToAGameThatTakesThem() async throws {
+        XCTAssertNil(server.pressBridge)
+        let game = UDPPeer()
+        game.send(Self.hello, to: server.bridgePorts[0])
+        Thread.sleep(forTimeInterval: 0.05)
+        XCTAssertNil(server.pressBridge, "an older engine's hello does not say it takes presses")
+        var takes = Self.hello
+        takes[9] = 1
+        game.send(takes, to: server.bridgePorts[0])
+        for _ in 0..<50 where server.pressBridge == nil { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(server.pressBridge, 0)
+        let press = RemotePacket.press(id: 3, buttons: SharePadState.Button.options, holdMillis: 160)
+        server.sendPress(press, bridge: 0)
+        XCTAssertEqual(game.receive(), press)
+    }
+
     /// Remote Play: a phone that asks for the picture gets the stream's packets where it sends
     /// its pad from, and a phone that did not ask gets none.
     func testTheStreamGoesToThePhoneThatAskedForIt() async throws {

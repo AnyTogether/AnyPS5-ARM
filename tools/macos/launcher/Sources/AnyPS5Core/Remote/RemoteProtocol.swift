@@ -329,10 +329,12 @@ public enum RemotePacket {
     public static let inputMagic: UInt32 = 0x4952_5041
     public static let outputMagic: UInt32 = 0x4F52_5041
     public static let helloMagic: UInt32 = 0x4852_5041
+    public static let pressMagic: UInt32 = 0x5052_5041
     public static let version: UInt16 = 1
     public static let inputSize = 80
     public static let outputSize = 32
     public static let helloSize = 16
+    public static let pressSize = 24
 
     /// The session of a well-formed input packet, nil for anything else.
     public static func inputSession(_ data: Data) -> UInt64? {
@@ -349,6 +351,27 @@ public enum RemotePacket {
         guard isHello(data) else { return nil }
         let player = data[data.startIndex + 8]
         return player == 0 ? nil : Int(player)
+    }
+
+    /// Whether a game's hello says its engine takes presses (bit 0 of byte 9).
+    public static func helloTakesPresses(_ data: Data) -> Bool {
+        isHello(data) && data[data.startIndex + 9] & 1 != 0
+    }
+
+    /// A press (APRP): `buttons` held on the game's first player's pad for `holdMillis`, whoever
+    /// drives it, without taking a seat. A copy with the same `id` counts once.
+    public static func press(id: UInt32, buttons: UInt32, holdMillis: UInt16) -> Data {
+        var bytes = [UInt8](repeating: 0, count: pressSize)
+        func put<T: FixedWidthInteger>(_ value: T, at offset: Int) {
+            withUnsafeBytes(of: value.littleEndian) { bytes.replaceSubrange(offset..<(offset + $0.count), with: $0) }
+        }
+        put(pressMagic, at: 0)
+        put(version, at: 4)
+        put(UInt16(pressSize), at: 6)
+        put(id, at: 8)
+        put(buttons, at: 12)
+        put(holdMillis, at: 16)
+        return Data(bytes)
     }
 
     static func header(_ data: Data, magic: UInt32, size: Int) -> Bool {
