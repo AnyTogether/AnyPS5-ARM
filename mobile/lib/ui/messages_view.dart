@@ -50,11 +50,22 @@ class _MessagesPaneState extends State<MessagesPane> {
   @override
   void initState() {
     super.initState();
-    if (!_messages.loaded) _messages.refresh().catchError((_) {});
+    if (!_messages.loaded) _loadList();
     _scroll.addListener(_nearTop);
     widget.hub.account.storageEnabled().then((on) {
       if (mounted && on != _storage) setState(() => _storage = on);
     });
+  }
+
+  Object? _listError;
+
+  Future<void> _loadList() async {
+    if (_listError != null) setState(() => _listError = null);
+    try {
+      await _messages.refresh();
+    } on Object catch (error) {
+      if (mounted) setState(() => _listError = error);
+    }
   }
 
   /// A photo from the library to the open conversation, with what is typed as its caption.
@@ -315,6 +326,11 @@ class _MessagesPaneState extends State<MessagesPane> {
             ],
           ),
         ),
+        if (!_messages.loaded)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            child: LoadingOrFailed(error: _listError, retry: _loadList),
+          ),
         if (_messages.loaded && list.isEmpty)
           Padding(
             padding: const EdgeInsets.all(10),

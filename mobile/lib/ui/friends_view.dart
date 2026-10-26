@@ -40,6 +40,22 @@ class _FriendsPaneState extends State<FriendsPane> {
   final _handle = TextEditingController();
   bool _adding = false;
   (String, bool)? _notice;
+  Object? _loadError;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!widget.hub.friends.loaded) _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loadError = null);
+    try {
+      await widget.hub.friends.refresh();
+    } on Object catch (error) {
+      if (mounted) setState(() => _loadError = error);
+    }
+  }
 
   @override
   void dispose() {
@@ -239,6 +255,8 @@ class _FriendsPaneState extends State<FriendsPane> {
                 ),
             ],
             SectionLabel(texts.friends),
+            if (!friends.loaded)
+              LoadingOrFailed(error: _loadError, retry: _load),
             if (friends.loaded && friends.friends.isEmpty)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 10),
