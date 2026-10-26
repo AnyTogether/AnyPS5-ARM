@@ -103,6 +103,7 @@ downloads/
 
 !/assets/*.jpg
 !/assets/*.png
+!mobile/assets/*.png
 
 .DS_Store
 Thumbs.db
