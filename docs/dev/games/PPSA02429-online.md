@@ -140,6 +140,81 @@ Tests: `online_web_api2` (push contexts and delivery through the real exports an
 `OnlineEngineInteropTests.testAGameHostsAPlayerSessionWithAPushContext` (`online_probe host` plays this
 flow through the real engine libraries against the launcher's service).
 
+## Host Public: crash after the Player Session is made (2026-10-26)
+
+With 0.2.21-arm and Online play on, Host Public got further: the push context was made,
+`POST /v1/playerSessions` was sent with the push context in it and the launcher answered 200 with
+165 bytes. Then the game died at once:
+
+```
+[fatal] host signal 11 (SIGSEGV) that no handler takes ends the game: address 0x10,
+instruction 0x14d3ff1c4 (libSceNpCppWebApi.prx.guest.prx+0x1d81c4)
+```
+
+No `ReadData` followed the send in the observation log.
+
+`libSceNpCppWebApi.prx` is the game's own module (`app0/sce_module`), relinked at start into
+`libSceNpCppWebApi.prx.guest.prx` next to it. The image starts at Mach-O 0x140000000 and the ELF's
+first segment at +0x10000, so +0x1d81c4 is ELF address 0x1c81c4. The module has no symbols, but its
+dynamic symbol table names every export by NID, and the NIDs of the mangled names in our own
+`libSceNpCppWebApi` stubs identify about 650 of them. Disassembled from raw bytes with
+`llvm-objdump`:
+
+```
+1c81c0: push %rbp; mov %rsp,%rbp
+1c81c4: mov (%rsi),%rax          <- fault: %rsi = 0x10
+        ... copies three quadwords from %rsi to %rdi, then adds a reference
+1eedc0: PostPlayerSessionsResponseBody::getPlayerSessions()  (export JFkvxXYRVS0)
+        mov %rdi,%rbx; add $0x10,%rsi; call 0x1c81f0 -> 0x1c81c0
+```
+
+So the game called `getPlayerSessions()` on a null response body (`this` = 0, member at 0x10).
+The body is filled by the executor that `createPlayerSessions` queues (ELF 0x1dbfb0, found through
+its job's vtable at 0x478750). After `sceNpWebApi2SendRequest` it takes the status from the
+response information option:
+
+```
+1dc224: lea -0x190(%rax),%ecx    ; status - 400
+        cmp $4,%ecx / cmp $2,%ecx  ; 400..404 skip the body
+        cmp $0xc9,%eax; jne 1dc3cf ; anything but 201: no body
+        ... ReadData(id, buf, 0xff) loop, Json::Parser::parse, factory, set response
+1dc3cf: xor %eax,%eax            ; finish with success and no response
+```
+
+The library reads and parses the body only from a **201** reply. For 200 it finishes the
+transaction with success and no response. The game does not check for that and crashes. The same
+check is in every Player Sessions call that makes something:
+
+| Call (executor) | Body read on |
+|---|---|
+| `createPlayerSessions` (0x1dbfb0) | 201 |
+| `joinPlayerSessionAsPlayer` (0x1e0610), and an unnamed join that follows it (0x1e1900, likely the spectator one) | 201 (409, 412 and 400-404 read as an error body) |
+| `sendPlayerSessionInvitations` (0x1e30e0) | 201 |
+| `addPlayerSessionJoinableSpecifiedUsers` (0x1da620) | 201 |
+| `getPlayerSessions` (0x1df550), `getPlayerSessionInvitations` (0x1de5f0) | 200 |
+| `leavePlayerSession`, `setPlayerSessionProperties`, `changePlayerSessionLeader` | any status (no body) |
+
+The JSON the parser wants: `playerSessions[]`, each with `sessionId` (string) and `member`
+(`players[]` with `accountId` and `platform`). Other keys are ignored.
+
+What changed:
+
+- **Launcher (`OnlinePlayerSessions`):** create, join (players and spectators), invitations and
+  joinable specified users answer 201. The created session's reply has the platform's shape:
+  `{"playerSessions":[{"member":{"players":[{"accountId":"…","platform":"PS5"}]},"sessionId":"…"}]}`,
+  with spectators only when there are any. Every reply carries `Content-Type` and `Content-Length`.
+- **Engine (NpWebApi2):** `GetHttpResponseHeaderValue(Length)` gives `Content-Length` (the body's
+  size) when the launcher sent none. For an HTTP error, `SendRequest` copies the error body into
+  the error object the game passes in the response information option. The libSceNpWebApi2
+  imports of this game's modules are `CreateRequest`, `AddHttpRequestHeader`, `SendRequest`,
+  `ReadData`, `GetHttpResponseHeaderValue(Length)`, `AbortRequest`, `DeleteRequest` (the C++ web API
+  library) and `Initialize`, `Terminate`, `Create/DeleteUserContext` (the eboot). All are
+  implemented and all are in the observation log.
+- **Tests:** `online_probe host` makes the session and the invitation the way the library does
+  (status checked before reading, 255-byte reads, header lookups) and prints
+  `create_response=parsed` or `none`. `OnlineEngineInteropTests` runs it against the launcher's
+  service. `OnlinePlayerSessionsTests` and `online_web_api2` check statuses, headers and shape.
+
 ## Imports
 
 From `relinker --registry` on the unwrapped eboot and every bundled module, classified with
