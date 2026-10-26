@@ -2,7 +2,12 @@
 #include <cstdint>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
+#include <algorithm>
 #include <atomic>
+#include <cstdlib>
+#include <initializer_list>
+#include <stdexcept>
+#include <string>
 #include <array>
 #include <cstring>
 #include <deque>
@@ -27,6 +32,68 @@ int UserIndex(int userId) {
         return userId - USER_SERVICE_INITIAL_USER_ID;
     }
     return -1;
+}
+
+// ANYPS5_GAME_PRESETS: comma-separated key=value parts, read at the first query. Keys a newer
+// launcher may add are passed over; a known key with a value outside its list stops the title
+// with an error that names the variable. The numbers follow the console's order of each setting
+// with 0 for "game default": priority 1 (performance) is seen honoured by titles; the others
+// have not been checked against a console.
+//   difficulty     default easiest easy normal hard hardest   0 1 2 3 4 5
+//   priority       default performance resolution             0 1 2
+//   invert_1st_v, invert_1st_h, invert_3rd_v, invert_3rd_h    0 normal, 1 inverted
+//   subtitles      default on off                             0 1 2
+//   audio_language default, or a console language number      0, the number + 1
+std::uint32_t PresetChoice(const std::string& key, const std::string& value, std::initializer_list<const char*> names) {
+ std::uint32_t index = 0;
+ for (const char* name : names) {
+  if (value == name) return index;
+  ++index;
+ }
+ throw std::runtime_error("ANYPS5_GAME_PRESETS: '" + value + "' is not a value of " + key);
+}
+
+UserServiceGamePresets ParseGamePresets(const std::string& text) {
+ UserServiceGamePresets presets{};
+ presets.this_size = sizeof(UserServiceGamePresets);
+ std::size_t start = 0;
+ while (start <= text.size()) {
+  const auto end = std::min(text.find(',', start), text.size());
+  auto part = text.substr(start, end - start);
+  start = end + 1;
+  const auto first = part.find_first_not_of(" \t");
+  if (first == std::string::npos) continue;
+  part = part.substr(first, part.find_last_not_of(" \t") + 1 - first);
+  const auto equals = part.find('=');
+  if (equals == std::string::npos) throw std::runtime_error("ANYPS5_GAME_PRESETS: '" + part + "' is not a key=value pair");
+  const auto key = part.substr(0, equals);
+  const auto value = part.substr(equals + 1);
+  if (key == "difficulty") presets.difficulty = PresetChoice(key, value, {"default", "easiest", "easy", "normal", "hard", "hardest"});
+  else if (key == "priority") presets.priority = PresetChoice(key, value, {"default", "performance", "resolution"});
+  else if (key == "invert_1st_v") presets.invert_vertical_view_for_1st_person_view = PresetChoice(key, value, {"0", "1"});
+  else if (key == "invert_1st_h") presets.invert_horizontal_view_for_1st_person_view = PresetChoice(key, value, {"0", "1"});
+  else if (key == "invert_3rd_v") presets.invert_vertical_view_for_3rd_person_view = PresetChoice(key, value, {"0", "1"});
+  else if (key == "invert_3rd_h") presets.invert_horizontal_view_for_3rd_person_view = PresetChoice(key, value, {"0", "1"});
+  else if (key == "subtitles") presets.display_sub_titles = PresetChoice(key, value, {"default", "on", "off"});
+  else if (key == "audio_language") {
+   if (value == "default") {
+    presets.audio_language = 0;
+   } else {
+    const bool digits = !value.empty() && value.size() <= 2 && std::all_of(value.begin(), value.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+    if (!digits || std::stoi(value) > 30) throw std::runtime_error("ANYPS5_GAME_PRESETS: '" + value + "' is not a console language number");
+    presets.audio_language = static_cast<std::uint32_t>(std::stoi(value)) + 1;
+   }
+  }
+ }
+ return presets;
+}
+
+const UserServiceGamePresets& ConfiguredGamePresets() {
+ static const auto presets = [] {
+  const char* value = std::getenv("ANYPS5_GAME_PRESETS");
+  return ParseGamePresets(value == nullptr ? std::string() : std::string(value));
+ }();
+ return presets;
 }
 
 int ReportAccessibilitySetting(int user_id, int32_t* setting, int32_t value) {
@@ -183,21 +250,23 @@ int APS5_VABI sceUserServiceGetEvent(SceUserServiceEvent* event) {
 }
 
 int APS5_VABI sceUserServiceGetGamePresets(int user_id, UserServiceGamePresets* presets) {
- // System-wide game presets (difficulty, view inversion, subtitles, audio language) of the user's
- // profile. A fresh console has none set: every field is 0, "not specified", and the title falls
- // back to its own defaults. this_size is the caller's.
+ // System-wide game presets (difficulty, performance or resolution, view inversion, subtitles,
+ // audio language). A fresh console has none set: every field is 0, "not specified", and the
+ // title falls back to its own defaults. The launcher's Settings → Game Presets set them through
+ // ANYPS5_GAME_PRESETS. this_size is the caller's.
  const int index = UserIndex(user_id);
  if (presets == nullptr || index < 0) {
   return USER_SERVICE_ERROR_INVALID_ARGUMENT;
  }
- presets->difficulty = 0;
- presets->priority = 0;
- presets->invert_vertical_view_for_1st_person_view = 0;
- presets->invert_horizontal_view_for_1st_person_view = 0;
- presets->invert_vertical_view_for_3rd_person_view = 0;
- presets->invert_horizontal_view_for_3rd_person_view = 0;
- presets->display_sub_titles = 0;
- presets->audio_language = 0;
+ const auto& configured = ConfiguredGamePresets();
+ presets->difficulty = configured.difficulty;
+ presets->priority = configured.priority;
+ presets->invert_vertical_view_for_1st_person_view = configured.invert_vertical_view_for_1st_person_view;
+ presets->invert_horizontal_view_for_1st_person_view = configured.invert_horizontal_view_for_1st_person_view;
+ presets->invert_vertical_view_for_3rd_person_view = configured.invert_vertical_view_for_3rd_person_view;
+ presets->invert_horizontal_view_for_3rd_person_view = configured.invert_horizontal_view_for_3rd_person_view;
+ presets->display_sub_titles = configured.display_sub_titles;
+ presets->audio_language = configured.audio_language;
  return USER_SERVICE_OK;
 }
 
