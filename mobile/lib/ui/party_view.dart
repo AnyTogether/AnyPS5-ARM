@@ -1,21 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../discover_strings.dart';
+import '../join_strings.dart';
 import '../strings.dart';
+import '../together/join_codes.dart';
 import '../together/parties.dart';
 import '../together/people.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
 import '../together/voice.dart';
 import 'find_players_view.dart';
+import 'join_code_view.dart';
 import 'together_widgets.dart';
 
 /// The party: without one, a way to start one and the invites and friends' open parties to
 /// join; in one, everyone in it on the left, inviting friends and leaving on the right.
 class PartyPane extends StatefulWidget {
-  const PartyPane({super.key, required this.hub});
+  const PartyPane({super.key, required this.hub, this.gameName});
 
   final TogetherHub hub;
+  final String? Function(String titleId)? gameName;
 
   @override
   State<PartyPane> createState() => _PartyPaneState();
@@ -24,6 +28,7 @@ class PartyPane extends StatefulWidget {
 class _PartyPaneState extends State<PartyPane> {
   String? _error;
   bool _busy = false;
+  late final _codes = JoinCodes(widget.hub.account);
 
   @override
   void initState() {
@@ -85,101 +90,109 @@ class _PartyPaneState extends State<PartyPane> {
     final open = widget.hub.friends.friends
         .where((f) => f.presence.partyId != null && f.presence.partyOpen)
         .toList();
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(texts.party, style: _title),
-                const SizedBox(height: 6),
-                Text(
-                  texts.partyIntro,
-                  style: const TextStyle(color: Colors.white60, fontSize: 14),
-                ),
-                const SizedBox(height: 18),
-                FilledButton.icon(
-                  onPressed: _busy ? null : () => _try(parties.create),
-                  icon: const Icon(Icons.celebration_rounded, size: 18),
-                  label: Text(texts.partyStart),
-                ),
-                if (parties.kicked)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(
-                      texts.partyKicked,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 13,
-                      ),
-                    ),
+    final start = <Widget>[
+      Text(texts.party, style: _title),
+      const SizedBox(height: 6),
+      Text(
+        texts.partyIntro,
+        style: const TextStyle(color: Colors.white60, fontSize: 14),
+      ),
+      const SizedBox(height: 18),
+      FilledButton.icon(
+        onPressed: _busy ? null : () => _try(parties.create),
+        icon: const Icon(Icons.celebration_rounded, size: 18),
+        label: Text(texts.partyStart),
+      ),
+      if (parties.kicked)
+        Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Text(
+            texts.partyKicked,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
+          ),
+        ),
+      if (_error != null) _errorText,
+    ];
+    final join = <Widget>[
+      if (parties.invites.isNotEmpty) ...[
+        SectionLabel(texts.partyInvites),
+        for (final invite in parties.invites)
+          _Row(
+            person: invite.from,
+            title: invite.from?.displayName ?? texts.party,
+            subtitle: invite.size == null
+                ? null
+                : texts.partyInviteFrom(
+                    '@${invite.from?.handle ?? ''}',
+                    invite.size!,
                   ),
-                if (_error != null) _errorText,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextButton(
+                  onPressed: () => _try(() => parties.decline(invite.partyId)),
+                  child: Text(
+                    texts.decline,
+                    style: const TextStyle(color: Colors.white60),
+                  ),
+                ),
+                FilledButton(
+                  onPressed: _busy
+                      ? null
+                      : () => _try(() => parties.join(invite.partyId)),
+                  child: Text(texts.partyJoin),
+                ),
               ],
             ),
           ),
-        ),
-        Expanded(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(4, 0, 18, 18),
-            children: [
-              if (parties.invites.isNotEmpty) ...[
-                SectionLabel(texts.partyInvites),
-                for (final invite in parties.invites)
-                  _Row(
-                    person: invite.from,
-                    title: invite.from?.displayName ?? texts.party,
-                    subtitle: invite.size == null
-                        ? null
-                        : texts.partyInviteFrom(
-                            '@${invite.from?.handle ?? ''}',
-                            invite.size!,
-                          ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        TextButton(
-                          onPressed: () =>
-                              _try(() => parties.decline(invite.partyId)),
-                          child: Text(
-                            texts.decline,
-                            style: const TextStyle(color: Colors.white60),
-                          ),
-                        ),
-                        FilledButton(
-                          onPressed: _busy
-                              ? null
-                              : () => _try(() => parties.join(invite.partyId)),
-                          child: Text(texts.partyJoin),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-              if (open.isNotEmpty) ...[
-                SectionLabel(texts.partyFriendsParties),
-                for (final friend in open)
-                  _Row(
-                    person: friend.person,
-                    title: friend.person.displayName,
-                    subtitle: '@${friend.person.handle}',
-                    trailing: OutlinedButton(
-                      onPressed: _busy
-                          ? null
-                          : () => _try(
-                              () => parties.join(friend.presence.partyId!),
-                            ),
-                      child: Text(texts.partyJoin),
-                    ),
-                  ),
-              ],
-            ],
-          ),
-        ),
       ],
+      if (open.isNotEmpty) ...[
+        SectionLabel(texts.partyFriendsParties),
+        for (final friend in open)
+          _Row(
+            person: friend.person,
+            title: friend.person.displayName,
+            subtitle: '@${friend.person.handle}',
+            trailing: OutlinedButton(
+              onPressed: _busy
+                  ? null
+                  : () => _try(() => parties.join(friend.presence.partyId!)),
+              child: Text(texts.partyJoin),
+            ),
+          ),
+      ],
+      JoinWithCode(codes: _codes, gameName: widget.gameName),
+    ];
+    return LayoutBuilder(
+      builder: (context, box) {
+        // A small phone: starting a party, then the invites and codes under it.
+        if (box.maxWidth < 600) {
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
+            children: [...start, ...join],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: start,
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(4, 0, 18, 18),
+                children: join,
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -231,8 +244,11 @@ class _PartyPaneState extends State<PartyPane> {
                   party.inCall.contains(member.id) ||
                   (member.id == me && voice.active),
               muted: member.id == me
-                  ? voice.active && voice.muted
+                  ? voice.active && (voice.muted || voice.deafened)
                   : party.muted.contains(member.id),
+              deafened: member.id == me
+                  ? voice.active && voice.deafened
+                  : party.deafened.contains(member.id),
               ring:
                   (member.id == me
                       ? voice.speaking
@@ -342,6 +358,8 @@ class _PartyPaneState extends State<PartyPane> {
         ),
         _publicListing(texts, party),
       ],
+      PartyCode(parties: parties, party: party, leader: leader, run: _try),
+      PartyDiscord(parties: parties, party: party, leader: leader, run: _try),
       const SizedBox(height: 10),
       OutlinedButton.icon(
         onPressed: () => _try(parties.leave),
@@ -529,6 +547,7 @@ Widget _voiceCardBody(
     );
   }
   final peers = voice.peers;
+  final silent = voice.muted || voice.deafened;
   final connected = peers.where((p) => p.state == 'connected').length;
   final connecting = peers.length - connected;
   return Column(
@@ -547,18 +566,36 @@ Widget _voiceCardBody(
         children: [
           Expanded(
             child: FilledButton.tonalIcon(
-              onPressed: () => voice.setMuted(!voice.muted),
-              style: voice.muted
+              onPressed: () => voice.setMuted(!silent),
+              style: silent
                   ? FilledButton.styleFrom(
                       backgroundColor: const Color(0x33FF8A80),
                       foregroundColor: togetherError,
                     )
                   : null,
               icon: Icon(
-                voice.muted ? Icons.mic_off_rounded : Icons.mic_rounded,
+                silent ? Icons.mic_off_rounded : Icons.mic_rounded,
                 size: 18,
               ),
-              label: Text(voice.muted ? texts.voiceUnmute : texts.voiceMute),
+              label: Text(silent ? texts.voiceUnmute : texts.voiceMute),
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton.filledTonal(
+            tooltip: voice.deafened ? texts.undeafen : texts.deafen,
+            isSelected: voice.deafened,
+            onPressed: () => voice.setDeafened(!voice.deafened),
+            style: voice.deafened
+                ? IconButton.styleFrom(
+                    backgroundColor: const Color(0x33FF8A80),
+                    foregroundColor: togetherError,
+                  )
+                : null,
+            icon: Icon(
+              voice.deafened
+                  ? Icons.headset_off_rounded
+                  : Icons.headset_rounded,
+              size: 18,
             ),
           ),
           const SizedBox(width: 8),
@@ -583,6 +620,7 @@ class _Member extends StatelessWidget {
     required this.inVoice,
     this.ring,
     this.muted = false,
+    this.deafened = false,
     this.onKick,
   });
 
@@ -593,6 +631,7 @@ class _Member extends StatelessWidget {
   /// Green while they speak.
   final Color? ring;
   final bool muted;
+  final bool deafened;
   final VoidCallback? onKick;
 
   @override
@@ -617,9 +656,16 @@ class _Member extends StatelessWidget {
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
-                      muted ? Icons.mic_off_rounded : Icons.headset_mic_rounded,
+                      deafened
+                          ? Icons.headset_off_rounded
+                          : muted
+                          ? Icons.mic_off_rounded
+                          : Icons.headset_mic_rounded,
                       size: 15,
-                      color: muted ? togetherError : togetherPlaying,
+                      color: muted || deafened
+                          ? togetherError
+                          : togetherPlaying,
+                      semanticLabel: deafened ? texts.deafened : null,
                     ),
                   ),
                 ),

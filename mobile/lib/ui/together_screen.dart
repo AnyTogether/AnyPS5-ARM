@@ -199,7 +199,10 @@ class _TogetherScreenState extends State<TogetherScreen> {
                             onOpen: _openNotice,
                           ),
                           TogetherTab.messages => MessagesPane(hub: widget.hub),
-                          TogetherTab.party => PartyPane(hub: widget.hub),
+                          TogetherTab.party => PartyPane(
+                            hub: widget.hub,
+                            gameName: widget.gameName,
+                          ),
                           TogetherTab.findPlayers => FindPlayersPane(
                             hub: widget.hub,
                             view: _find,

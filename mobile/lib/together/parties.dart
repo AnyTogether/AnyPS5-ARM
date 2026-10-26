@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
+import 'join_codes.dart';
 import 'people.dart';
 import 'together_account.dart';
 import 'together_socket.dart';
@@ -53,6 +54,9 @@ class Party {
     this.muted = const {},
     this.listing,
     this.requests = const [],
+    this.deafened = const {},
+    this.joinCode,
+    this.discord,
   });
 
   factory Party.fromJson(Map<String, dynamic> json) {
@@ -79,6 +83,14 @@ class Party {
                 id as String,
             }
           : const {},
+      deafened: call is Map<String, dynamic>
+          ? {
+              for (final id in (call['deafened'] as List? ?? const []))
+                id as String,
+            }
+          : const {},
+      joinCode: JoinCode.fromJson(json['joinCode']),
+      discord: json['discord'] as String?,
       listing: PartyListing.fromJson(json['public']),
       requests: [
         for (final person in (json['requests'] as List? ?? const []))
@@ -106,6 +118,15 @@ class Party {
   /// People who asked to join (members see them, the leader answers).
   final List<Person> requests;
 
+  /// Who in the call hears nobody (and is muted too).
+  final Set<String> deafened;
+
+  /// The code the leader handed out, while it works (members see it).
+  final JoinCode? joinCode;
+
+  /// The party's Discord server or channel, set by the leader (members see it).
+  final String? discord;
+
   bool get full => members.length >= maxPartySize;
 
   bool has(String userId) => members.any((person) => person.id == userId);
@@ -129,6 +150,9 @@ class Party {
     muted: muted,
     listing: listing,
     requests: requests ?? this.requests,
+    deafened: deafened,
+    joinCode: joinCode,
+    discord: discord,
   );
 }
 
@@ -251,6 +275,58 @@ class Parties extends ChangeNotifier {
       }),
     );
   }
+
+  /// Leader only: a join code in place of the one before (24 hours unless [hours] says).
+  Future<JoinCode?> makeCode({int? hours}) async {
+    final current = party;
+    if (current == null) return null;
+    final code = JoinCode.fromJson(
+      await account.call('POST', 'parties/${current.id}/code', {
+        'hours': ?hours,
+      }),
+    );
+    if (party?.id == current.id && code != null) {
+      party = _with(party!, joinCode: () => code);
+      notifyListeners();
+    }
+    return code;
+  }
+
+  /// Leader only: the join code stops working.
+  Future<void> stopCode() async {
+    final current = party;
+    if (current == null) return;
+    await account.call('DELETE', 'parties/${current.id}/code');
+    if (party?.id == current.id) {
+      party = _with(party!, joinCode: () => null);
+      notifyListeners();
+    }
+  }
+
+  /// Leader only: the party's Discord invite or channel link, or none with null.
+  Future<void> setDiscord(String? link) async {
+    final current = party;
+    if (current == null) return;
+    _keep(
+      await account.call('PATCH', 'parties/${current.id}', {'discord': link}),
+    );
+  }
+
+  Party _with(Party p, {JoinCode? Function()? joinCode}) => Party(
+    id: p.id,
+    leaderId: p.leaderId,
+    open: p.open,
+    members: p.members,
+    invited: p.invited,
+    callId: p.callId,
+    inCall: p.inCall,
+    muted: p.muted,
+    listing: p.listing,
+    requests: p.requests,
+    deafened: p.deafened,
+    joinCode: joinCode == null ? p.joinCode : joinCode(),
+    discord: p.discord,
+  );
 
   /// Leader only: lets someone who asked in (an invite they join with), or says no.
   Future<void> answerRequest(String userId, {required bool accept}) async {

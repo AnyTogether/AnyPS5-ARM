@@ -176,6 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               value,
                             );
                           },
+                          onTestVibration: () => widget.session.haptics?.test(),
                           motion: widget.session.motion?.enabled ?? true,
                           onMotion: (value) {
                             widget.session.motion?.enabled = value;

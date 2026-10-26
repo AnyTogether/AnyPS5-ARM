@@ -25,6 +25,10 @@ class FakeLink implements VoiceLink {
   double incoming = 0;
   double outgoing = 0;
   bool closed = false;
+  bool hearing = true;
+
+  @override
+  Future<void> setHearing(bool on) async => hearing = on;
 
   @override
   String signalingState = 'stable';
@@ -420,6 +424,56 @@ void main() {
       expect(server.requests.last.$2, '/api/v1/calls/call1/leave');
       // Muted stays muted for the next time.
       await voice().join();
+      expect(engine.talking, isFalse);
+    });
+
+    test(
+      'deafening silences everyone and the microphone; unmuting undeafens',
+      () async {
+        await voice().join();
+        await until(() => engine.links.length == 1);
+        voice().setDeafened(true);
+        expect(engine.talking, isFalse);
+        expect(engine.links.single.hearing, isFalse);
+        await until(
+          () => server.requests.any((r) => r.$2 == '/api/v1/calls/call1/mute'),
+        );
+        expect(
+          server.requests
+              .lastWhere((r) => r.$2 == '/api/v1/calls/call1/mute')
+              .$3,
+          {'muted': true, 'deafened': true},
+        );
+        // Someone joining while deafened is not heard either.
+        server.push('signal', {
+          'call': 'call1',
+          'from': 'can',
+          'device': 'dev-can',
+          'kind': 'offer',
+          'data': {'type': 'offer', 'sdp': offerSdp},
+        }, id: '18-a');
+        await until(() => engine.links.length == 2);
+        expect(engine.links.last.hearing, isFalse);
+        voice().setMuted(false);
+        expect(voice().deafened, isFalse);
+        expect(engine.talking, isTrue);
+        expect(engine.links.every((link) => link.hearing), isTrue);
+        await until(
+          () =>
+              server.requests
+                  .lastWhere((r) => r.$2 == '/api/v1/calls/call1/mute')
+                  .$3?['deafened'] ==
+              false,
+        );
+      },
+    );
+
+    test('undeafening gives the microphone back as it was', () async {
+      await voice().join();
+      voice().setMuted(true);
+      voice().setDeafened(true);
+      voice().setDeafened(false);
+      expect(voice().muted, isTrue);
       expect(engine.talking, isFalse);
     });
 

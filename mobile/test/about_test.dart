@@ -53,4 +53,33 @@ void main() {
       expect(box.bottom, lessThanOrEqualTo(screen.height), reason: text);
     }
   });
+
+  testWidgets('Test plays the vibration, and only while it is on', (
+    tester,
+  ) async {
+    var tested = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showAbout(
+              context,
+              vibration: true,
+              onVibration: (_) {},
+              onTestVibration: () => tested++,
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Test'));
+    expect(tested, 1);
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Test'), warnIfMissed: false);
+    expect(tested, 1);
+  });
 }
