@@ -182,7 +182,7 @@ final class BrowserPadInputTests: XCTestCase {
     func testBrokenMessagesAreDropped() {
         for text in ["", "nope", "[]", #"{"t":"pad"}"#, #"{"t":"pad","b":"1"}"#, #"{"t":"pad","b":true}"#, #"{"t":"pad","b":1,"s":[1,2,3]}"#,
                      #"{"t":"pad","b":1,"s":[1,2,3,"x"]}"#, #"{"t":"what"}"#, #"{"b":1}"#, #"{"t":"pad","b":-1}"#,
-                     #"{"t":"pad","b":1,"pad":""# + String(repeating: "x", count: 2000) + #""}"#] {
+                     #"{"t":"pad","b":1,"pad":""# + String(repeating: "x", count: 5000) + #""}"#] {
             XCTAssertNil(BrowserPadMessage.parse(text), text)
         }
     }
