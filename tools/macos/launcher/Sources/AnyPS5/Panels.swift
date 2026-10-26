@@ -564,7 +564,11 @@ extension AppModel {
         if command == .options, row.id.hasPrefix("shortcut-"), clearShortcut(row: row.id) { return true }
         // With the pad a choice changes only while it is edited (✕ starts, ✕ or ○ end); the
         // keyboard and the mouse change it at once.
-        switch rowEditor.intent(for: command, row: row.id, kind: row.valueKind, mode: InputModeState.shared.mode) {
+        // Written only when it changes, so a move that went nowhere still bumps.
+        var editor = rowEditor
+        let intent = editor.intent(for: command, row: row.id, kind: row.valueKind, mode: InputModeState.shared.mode)
+        if editor != rowEditor { rowEditor = editor }
+        switch intent {
         case .move(let delta): movePanelRow(delta, rows)
         case .change(let delta): change(row, by: delta)
         case .activate: activate(row)
@@ -587,7 +591,7 @@ extension AppModel {
         guard categories.count > 1, capturing == nil, shortcutCapture == nil else { return true }
         let next = min(categories.count - 1, max(0, panelCategory + delta))
         guard next != panelCategory else { return true }
-        rowEditor.stop()
+        if rowEditor.editing != nil { rowEditor.stop() }
         withAnimation(Motion.focus) { panelCategory = next }
         panelRow = 0
         if panelInRows {
@@ -601,7 +605,7 @@ extension AppModel {
     private func movePanelCategory(_ delta: Int, count: Int) {
         let next = min(count - 1, max(0, panelCategory + delta))
         guard next != panelCategory else { return }
-        rowEditor.stop()
+        if rowEditor.editing != nil { rowEditor.stop() }
         panelCategory = next
         panelRow = 0
         Sounds.shared.play(.move)
@@ -615,7 +619,7 @@ extension AppModel {
     }
 
     private func leaveRows(_ single: Bool) {
-        rowEditor.stop()
+        if rowEditor.editing != nil { rowEditor.stop() }
         if single { closeOverlay(); return }
         panelInRows = false
         Sounds.shared.play(.back)
@@ -782,7 +786,7 @@ struct RowList: View {
                     .onTapGesture {
                         if model.overlayHasCategories { model.panelInRows = true }
                         model.focusRow(index, in: rows)
-                        model.rowEditor.stop()
+                        if model.rowEditor.editing != nil { model.rowEditor.stop() }
                         model.activate(row)
                     }
             }

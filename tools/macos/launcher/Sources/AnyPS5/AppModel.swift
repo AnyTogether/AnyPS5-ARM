@@ -235,7 +235,7 @@ final class AppModel: ObservableObject {
             if oldValue != overlay {
                 discoverOverlayChanged()
                 askingRow = nil
-                rowEditor.stop()
+                if rowEditor.editing != nil { rowEditor.stop() }
                 if shortcutCapture != nil { endShortcutCapture() }
             }
             // The controller test takes the pads' buttons: only PS acts while it is open.
@@ -248,7 +248,7 @@ final class AppModel: ObservableObject {
     @Published var panelRow = 0 {
         didSet {
             if !keepingFocus { panelFocusID = nil }
-            if panelRow != oldValue { rowEditor.stop() }
+            if panelRow != oldValue, rowEditor.editing != nil { rowEditor.stop() }
         }
     }
     /// The item the panel's focus is on, so rows coming in above it do not move it to another.
