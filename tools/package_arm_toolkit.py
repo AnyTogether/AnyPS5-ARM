@@ -17,6 +17,7 @@ AnyPS5-ARM release by that name and checks them against the release's signed SHA
 """
 import argparse
 import io
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -28,6 +29,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import package_release  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
+
+
+def windows_runtime(build):
+    """The MinGW runtime folder: the compiler's, found on PATH when CMake kept a bare g++."""
+    folder = package_release_windows_runtime(build)
+    if folder.is_absolute():
+        return folder
+    compiler = shutil.which("g++")
+    if compiler is None:
+        raise RuntimeError("CMake names the compiler g++ without a folder and no g++ is on PATH")
+    return Path(compiler).resolve().parent
+
+
+package_release_windows_runtime = package_release.windows_runtime
+package_release.windows_runtime = windows_runtime
 
 
 def current_commit():
