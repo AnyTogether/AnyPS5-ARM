@@ -718,6 +718,7 @@ void main() {
         );
         await until(() => calls('me/conversations').length > before);
         await until(() => messages().conversations.isNotEmpty);
+        await until(() => calls('me/conversations/unread').length > 1);
         expect(calls('me/conversations/unread').length, greaterThan(1));
       },
     );
