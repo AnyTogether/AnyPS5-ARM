@@ -188,8 +188,11 @@ extension TogetherClient {
     }
 
     /// Refused with "version_mismatch" (409) unless both match the host's, "full" when it is.
-    public func joinGameSession(_ id: String, gameVersion: String, engineBuild: String) async throws -> TogetherGameSession {
-        try gameSession(try await authorized("POST", "game-sessions/\(id)/join", ["gameVersion": gameVersion, "engineBuild": engineBuild]))
+    /// `overrideVersion`: Try anyway after a game version refusal (the engine is still checked).
+    public func joinGameSession(_ id: String, gameVersion: String, engineBuild: String, overrideVersion: Bool = false) async throws -> TogetherGameSession {
+        var body: [String: Any] = ["gameVersion": gameVersion, "engineBuild": engineBuild]
+        if overrideVersion { body["overrideVersion"] = true }
+        return try gameSession(try await authorized("POST", "game-sessions/\(id)/join", body))
     }
 
     public func inviteToGame(_ userIds: [String], session id: String) async throws {

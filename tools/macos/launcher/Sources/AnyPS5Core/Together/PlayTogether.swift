@@ -16,9 +16,13 @@ public struct TogetherPartyTogether: Decodable, Equatable, Sendable {
     public let versionRule: String
     /// Who plays, the host first, by user ID.
     public let players: [String]
+    /// The players who joined with a game version that did not fit, by trying anyway (none from
+    /// a server before it).
+    public let versionOverrides: [String]
     public let capacity: Int
 
-    public init(sessionId: String, hostId: String, titleId: String, gameVersion: String, engineBuild: String, versionRule: String = "exact", players: [String], capacity: Int) {
+    public init(sessionId: String, hostId: String, titleId: String, gameVersion: String, engineBuild: String, versionRule: String = "exact", players: [String],
+                versionOverrides: [String] = [], capacity: Int) {
         self.sessionId = sessionId
         self.hostId = hostId
         self.titleId = titleId
@@ -26,24 +30,39 @@ public struct TogetherPartyTogether: Decodable, Equatable, Sendable {
         self.engineBuild = engineBuild
         self.versionRule = versionRule
         self.players = players
+        self.versionOverrides = versionOverrides
         self.capacity = capacity
+    }
+
+    enum CodingKeys: String, CodingKey { case sessionId, hostId, titleId, gameVersion, engineBuild, versionRule, players, versionOverrides, capacity }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(sessionId: try c.decode(String.self, forKey: .sessionId), hostId: try c.decode(String.self, forKey: .hostId),
+                  titleId: try c.decode(String.self, forKey: .titleId), gameVersion: try c.decode(String.self, forKey: .gameVersion),
+                  engineBuild: try c.decode(String.self, forKey: .engineBuild), versionRule: try c.decodeIfPresent(String.self, forKey: .versionRule) ?? "exact",
+                  players: try c.decode([String].self, forKey: .players), versionOverrides: try c.decodeIfPresent([String].self, forKey: .versionOverrides) ?? [],
+                  capacity: try c.decode(Int.self, forKey: .capacity))
     }
 }
 
 /// Why the server refused a join: a different game version or engine build, the host's and this
-/// copy's, and whether this side is the one behind.
+/// copy's, whether this side is the one behind, and whether the player may try anyway (a game
+/// version only: a different engine build cannot talk to the host's).
 public struct TogetherJoinRefusal: Equatable, Sendable {
     public enum Reason: String, Sendable { case gameVersion = "game_version", engine }
     public let reason: Reason
     public let expected: String
     public let actual: String
     public let youUpdate: Bool
+    public let overridable: Bool
 
-    public init(reason: Reason, expected: String, actual: String, youUpdate: Bool) {
+    public init(reason: Reason, expected: String, actual: String, youUpdate: Bool, overridable: Bool? = nil) {
         self.reason = reason
         self.expected = expected
         self.actual = actual
         self.youUpdate = youUpdate
+        self.overridable = overridable ?? (reason == .gameVersion)
     }
 }
 
@@ -120,11 +139,12 @@ public enum PlayTogetherCheck {
     }
 
     /// Signed in, owned, version, engine, not busy, room, unlocked: the first that does not hold.
-    public static func verdict(_ offer: PlayTogetherOffer, signedIn: Bool, copies: [Copy], running: String?) -> PlayTogetherVerdict {
+    /// `overrideVersion` (Try anyway) takes any copy's game version; the engine is still checked.
+    public static func verdict(_ offer: PlayTogetherOffer, signedIn: Bool, copies: [Copy], running: String?, overrideVersion: Bool = false) -> PlayTogetherVerdict {
         guard signedIn else { return .signIn }
         let owned = copies.filter { $0.titleId == offer.titleId }
         guard let first = owned.first else { return .missing(titleId: offer.titleId) }
-        let fitting = owned.filter { TogetherGameSession.versionFits(offer.versionRule, host: offer.gameVersion, joiner: $0.gameVersion) }
+        let fitting = overrideVersion ? owned : owned.filter { TogetherGameSession.versionFits(offer.versionRule, host: offer.gameVersion, joiner: $0.gameVersion) }
         guard !fitting.isEmpty else {
             return .gameVersion(have: first.gameVersion, need: offer.gameVersion, youUpdate: TogetherGameSession.compareVersions(first.gameVersion, offer.gameVersion) < 0)
         }
@@ -140,5 +160,17 @@ public enum PlayTogetherCheck {
         if !copy.unlocked { return .unlockAndPlay(copy.id) }
         if copy.engineBuild != offer.engineBuild { return .updateAndPlay(copy.id) }
         return .join(copy.id)
+    }
+
+    /// Try anyway: when only the game version keeps this Mac out, the way in that skipping the
+    /// version check gives (join, or unlock or update first); nil when the version fits or
+    /// something else (the engine, a running game, no room) is in the way.
+    public static func tryAnyway(_ offer: PlayTogetherOffer, signedIn: Bool, copies: [Copy], running: String?) -> PlayTogetherVerdict? {
+        guard case .gameVersion = verdict(offer, signedIn: signedIn, copies: copies, running: running) else { return nil }
+        let anyway = verdict(offer, signedIn: signedIn, copies: copies, running: running, overrideVersion: true)
+        switch anyway {
+        case .join, .unlockAndPlay, .updateAndPlay: return anyway
+        default: return nil
+        }
     }
 }

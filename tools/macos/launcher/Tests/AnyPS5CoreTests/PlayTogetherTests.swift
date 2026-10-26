@@ -48,7 +48,7 @@ final class PlayTogetherClientTests: TogetherSignedInCase {
             _ = try await client.joinGameSession("s1", gameVersion: "01.008.000", engineBuild: "0.2.21-4194")
             XCTFail("no error")
         } catch let problem as TogetherProblem {
-            XCTAssertEqual(problem.joinRefusal, TogetherJoinRefusal(reason: .gameVersion, expected: "01.044.000", actual: "01.008.000", youUpdate: true))
+            XCTAssertEqual(problem.joinRefusal, TogetherJoinRefusal(reason: .gameVersion, expected: "01.044.000", actual: "01.008.000", youUpdate: true, overridable: true))
         }
         FakeTogether.handler = { _, _ in
             (409, ["code": "version_mismatch", "status": 409, "title": "x", "reason": "engine", "expected": "0.2.20-1", "actual": "0.2.21-4194", "update": "host"])
@@ -60,6 +60,38 @@ final class PlayTogetherClientTests: TogetherSignedInCase {
             XCTAssertEqual(problem.joinRefusal?.reason, .engine)
             XCTAssertEqual(problem.joinRefusal?.youUpdate, false)
         }
+    }
+
+    func testTryingAnywaySendsTheOverrideOnlyWhenAsked() async throws {
+        FakeTogether.handler = { _, _ in (200, Self.lan()) }
+        _ = try await client.joinGameSession("s1", gameVersion: "01.008.000", engineBuild: "0.2.21-4194", overrideVersion: true)
+        XCTAssertEqual(last(), "POST /api/v1/game-sessions/s1/join")
+        XCTAssertEqual(body()?["overrideVersion"] as? Bool, true)
+        _ = try await client.joinGameSession("s1", gameVersion: "01.044.000", engineBuild: "0.2.21-4194")
+        XCTAssertNil(body()?["overrideVersion"], "a plain join says nothing about it")
+    }
+
+    func testARefusalSaysWhetherTryingAnywayIsPossible() throws {
+        func refusal(_ json: [String: Any]) throws -> TogetherJoinRefusal? {
+            let base: [String: Any] = ["code": "version_mismatch", "status": 409, "title": "x", "expected": "1", "actual": "2", "update": "you"]
+            return try JSONDecoder.together.decode(TogetherProblem.self, from: JSONSerialization.data(withJSONObject: base.merging(json) { _, new in new })).joinRefusal
+        }
+        XCTAssertEqual(try refusal(["reason": "game_version", "overridable": true])?.overridable, true)
+        XCTAssertEqual(try refusal(["reason": "engine", "overridable": false])?.overridable, false)
+        // A server from before the override: a game version could be tried anyway, an engine never.
+        XCTAssertEqual(try refusal(["reason": "game_version"])?.overridable, true)
+        XCTAssertEqual(try refusal(["reason": "engine"])?.overridable, false)
+    }
+
+    func testThePartyCarriesWhoTriedAnyway() throws {
+        var json = TogetherPartyTests.party(members: [TogetherPartyTests.member("u1", "Utku"), TogetherPartyTests.member("f1", "Ayse")])
+        json["together"] = ["sessionId": "s1", "hostId": "u1", "titleId": "PPSA17221", "gameVersion": "01.044.000", "engineBuild": "0.2.21-4194",
+                            "versionRule": "exact", "players": ["u1", "f1"], "versionOverrides": ["f1"], "capacity": 8, "startedAt": "2026-10-26T00:00:00.000Z"]
+        let party = try JSONDecoder.together.decode(TogetherParty.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(party.together?.versionOverrides, ["f1"])
+        var older = json
+        older["together"] = (json["together"] as! [String: Any]).filter { $0.key != "versionOverrides" }
+        XCTAssertEqual(try JSONDecoder.together.decode(TogetherParty.self, from: JSONSerialization.data(withJSONObject: older)).together?.versionOverrides, [])
     }
 
     func testThePartyCarriesItsPlayTogetherGame() throws {
@@ -141,6 +173,18 @@ final class PlayTogetherCheckTests: XCTestCase {
         XCTAssertFalse(TogetherGameSession.versionFits("major", host: "01.044.000", joiner: "02.000.000"))
         XCTAssertTrue(TogetherGameSession.versionFits("any", host: "01.044.000", joiner: "09.000.000"))
         XCTAssertFalse(TogetherGameSession.versionFits("exact", host: "01.044.000", joiner: "01.044.001"))
+    }
+
+    func testTryingAnywayLooksPastTheGameVersionButNeverTheEngine() {
+        // Only a game version that does not fit can be tried anyway, and then with the copy that would join.
+        XCTAssertEqual(PlayTogetherCheck.tryAnyway(offer, signedIn: true, copies: [copy(version: "01.008.000")], running: nil), .join("g1"))
+        XCTAssertEqual(PlayTogetherCheck.tryAnyway(offer, signedIn: true, copies: [copy(version: "02.000.000", unlocked: false)], running: nil), .unlockAndPlay("g1"))
+        XCTAssertNil(PlayTogetherCheck.tryAnyway(offer, signedIn: true, copies: [copy()], running: nil), "nothing to try: it fits")
+        XCTAssertNil(PlayTogetherCheck.tryAnyway(offer, signedIn: true, copies: [copy(version: "01.008.000", engine: "0.2.20-1")], running: nil),
+                     "a different engine is never tried anyway")
+        XCTAssertNil(PlayTogetherCheck.tryAnyway(offer, signedIn: true, copies: [copy(version: "01.008.000")], running: "Stray"), "close the game first")
+        XCTAssertNil(PlayTogetherCheck.tryAnyway(offer, signedIn: true, copies: [], running: nil))
+        XCTAssertEqual(PlayTogetherCheck.verdict(offer, signedIn: true, copies: [copy(version: "01.008.000")], running: nil, overrideVersion: true), .join("g1"))
     }
 
     func testTheOfferFromASession() throws {

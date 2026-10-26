@@ -46,6 +46,13 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var expected: String? = nil
     public var actual: String? = nil
     public var update: String? = nil
+    /// With "version_mismatch": whether the joiner may try anyway (join again with the override).
+    public var overridable: Bool? = nil
+    /// With "client_too_old": the oldest version AnyTogether still answers, this one's, and where
+    /// to update.
+    public var minimum: String? = nil
+    public var current: String? = nil
+    public var downloadUrl: String? = nil
     /// With "conflict" on starting Play Together: the party's game already running.
     public var sessionId: String? = nil
     public var description: String { title }
@@ -53,7 +60,27 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     /// Why a join was refused, when it was for the versions.
     public var joinRefusal: TogetherJoinRefusal? {
         guard code == "version_mismatch", let reason = reason.flatMap(TogetherJoinRefusal.Reason.init(rawValue:)), let expected, let actual else { return nil }
-        return TogetherJoinRefusal(reason: reason, expected: expected, actual: actual, youUpdate: update != "host")
+        return TogetherJoinRefusal(reason: reason, expected: expected, actual: actual, youUpdate: update != "host", overridable: overridable)
+    }
+
+    /// AnyTogether no longer answers this launcher's version.
+    public var clientTooOld: TogetherClientTooOld? {
+        guard code == "client_too_old", let minimum else { return nil }
+        return TogetherClientTooOld(minimum: minimum, current: current, downloadUrl: downloadUrl.flatMap(URL.init(string:)))
+    }
+}
+
+/// "Update required": AnyTogether answers 426 client_too_old to launchers older than `minimum`
+/// (MIN_LAUNCHER_VERSION on the server), with where to get a newer one.
+public struct TogetherClientTooOld: Equatable, Sendable {
+    public let minimum: String
+    public let current: String?
+    public let downloadUrl: URL?
+
+    public init(minimum: String, current: String?, downloadUrl: URL?) {
+        self.minimum = minimum
+        self.current = current
+        self.downloadUrl = downloadUrl
     }
 }
 
@@ -137,6 +164,8 @@ public final class TogetherClient: @unchecked Sendable {
     let session: URLSession
     public let clientName: String
     private let refresher = Refresher()
+    /// Called with every client_too_old answer, from whichever call got it (set once at start).
+    public var onClientTooOld: (@Sendable (TogetherClientTooOld) -> Void)?
 
     public init(base: URL, store: TokenStore = TokenStore(), session: URLSession = .shared, clientName: String) {
         self.base = base
@@ -298,7 +327,9 @@ public final class TogetherClient: @unchecked Sendable {
         let (data, response) = try await session.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200 ..< 300).contains(status) else {
-            throw (try? JSONDecoder.together.decode(TogetherProblem.self, from: data)) ?? TogetherProblem(status: status, code: "internal", title: "AnyTogether answered \(status)")
+            let problem = (try? JSONDecoder.together.decode(TogetherProblem.self, from: data)) ?? TogetherProblem(status: status, code: "internal", title: "AnyTogether answered \(status)")
+            if let old = problem.clientTooOld { onClientTooOld?(old) }
+            throw problem
         }
         return (data, status)
     }
