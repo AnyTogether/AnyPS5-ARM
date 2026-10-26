@@ -96,6 +96,8 @@ struct Preferences: Codable, Equatable {
     var pauseOnMenu: Bool?
     /// Settings → Shortcuts: what differs from the defaults; nil for none.
     var shortcuts: ShortcutMap?
+    /// Settings → Battery & Heat (PowerProfiles); nil for the defaults.
+    var powerProfiles: PowerProfiles?
     var games: [String: GameSettings] = [:]
     var lastPlayed: [String: Date] = [:]
 
@@ -456,6 +458,8 @@ final class AppModel: ObservableObject {
     private var toastTask: Task<Void, Never>?
     private var startWatch: Task<Void, Never>?
     private var exitWatch: DispatchSourceProcess?
+    /// The Mac's power and the battery and heat profiles in force (PowerWatch.swift).
+    let power = PowerWatch()
 
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
@@ -475,6 +479,7 @@ final class AppModel: ObservableObject {
         }
         apply()
         changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
+        startPowerWatch()
         if persists { loadEngines(); loadProfilePicture(); watchFullScreen() }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
@@ -589,7 +594,8 @@ final class AppModel: ObservableObject {
     private func apply() {
         T.language = preferences.language
         if persists { DispatchQueue.main.async { [weak self] in self?.stepPrepare() } }
-        Motion.reduced = preferences.reducedMotion
+        power.profiles = preferences.powerProfiles ?? PowerProfiles()
+        Motion.reduced = preferences.reducedMotion || power.adjustment.dimEffects
         Sounds.shared.enabled = preferences.sounds
         Sounds.shared.volume = Float(preferences.soundVolume ?? 100) / 100
         Feel.shared.vibration = preferences.controllerVibration ?? true
@@ -1462,6 +1468,8 @@ final class AppModel: ObservableObject {
         var settings = settings(for: game)
         // Settings → Controllers → Stick Dead Zone, for a game that set none of its own.
         if let deadzone = preferences.stickDeadzone, deadzone > 0 { settings.tuning = StickDeadzone.tuning(settings.tuning, percent: deadzone) }
+        // Settings → Battery & Heat: one resolution step down while a profile asks for it.
+        if let lower = powerResolution(for: game, current: settings.resolution) { settings.resolution = lower }
         let inputFile = AppModel.inputFile(for: game)
         // Without the file the game keeps the engine's built-in keys.
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
@@ -1476,6 +1484,8 @@ final class AppModel: ObservableObject {
             .merging(OnlinePlayHost.environment(for: game, client: together, engineBuild: engineBuild(for: game))) { _, online in online }
             // Where the engine's online bridge finds the AnyTogether game session, once there is one.
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
+            // The battery and heat profiles' frame cap, and the file they change it through live.
+            .merging(powerEnvironment()) { _, power in power }
         markStart(of: game, traced: trace || settings.trace == true)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()

@@ -23,6 +23,7 @@
 #include "prx/libSceAgcDriver/Execution/include/SubgroupClock.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderDeviceProfile.hpp"
 #include "prx/libSceAgcDriver/Execution/include/FrameGeneration.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PowerControl.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentMode.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceOverlay.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentationPass.hpp"
@@ -367,6 +368,7 @@ struct VulkanDevice::State {
     std::unique_ptr<FrameGenerator> frameGenerator;
     FrameGenerationGovernor frameGenerationGovernor;
     bool frameGenerationShown = false;
+    bool frameGenerationPaused = false;
     bool realPending = false;
     VkFence realFence = VK_NULL_HANDLE;
     bool realAcquired = false;
@@ -3756,9 +3758,18 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
             state->frameGenerator->RecordCapture(commands, barrier.image);
             // With two kept, and where generation pays (FrameGenerationGovernor), this image shows
             // the frame between them; the game's own goes next.
+            // The launcher's battery and heat profiles can pause it while the game runs
+            // (PowerControl.hpp); frames are still kept, and on resuming it is measured afresh.
+            const auto now = std::chrono::steady_clock::now();
+            const bool paused = PowerControl::Current(now).frameGenerationPaused;
+            if (paused != state->frameGenerationPaused) {
+                state->frameGenerationPaused = paused;
+                if (!paused) state->frameGenerationGovernor = FrameGenerationGovernor{};
+                std::fprintf(stderr, "[present] frame generation %s by the launcher's power profile\n", paused ? "paused" : "resumed");
+            }
             auto& governor = state->frameGenerationGovernor;
-            const bool generate = governor.Generate(std::chrono::steady_clock::now());
-            if (!governor.Probing() && generate != state->frameGenerationShown) {
+            const bool generate = !paused && governor.Generate(now);
+            if (!paused && !governor.Probing() && generate != state->frameGenerationShown) {
                 std::fprintf(stderr, "[present] frame generation %s: the game at %.1f fps with it, %.1f without\n", generate ? "on" : "off, as it would cost the game frames here",
                              governor.RateOn().value_or(0), governor.RateOff().value_or(0));
                 state->frameGenerationShown = generate;

@@ -39,6 +39,7 @@
 #include "prx/libSceAgcDriver/Execution/include/Presentation.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PerformanceTimer.hpp"
 #include "prx/libSceAgcDriver/Execution/include/GuestMemory.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PowerControl.hpp"
 #include "prx/libc/include/PreciseWait.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 
@@ -623,6 +624,17 @@ void VideoOutDriver::processFlip(FlipRequest& req) {
             return;
         }
         req.cfg->lastFlipVblank = req.cfg->vblankStatus.count;
+    }
+    // The launcher's battery and heat profiles cap the frame rate (PowerControl.hpp): the flip
+    // waits for its turn, and the game, which sees it complete only once presented, follows.
+    {
+        static AgcDriver::PowerControl::FramePacer pacer;
+        const auto now = std::chrono::steady_clock::now();
+        const auto due = pacer.Due(AgcDriver::PowerControl::Current(now).fpsCap, now);
+        if (due > now) {
+            PreciseSleepUntil(due);
+            timing.Mark("frame_cap");
+        }
     }
     require(req.width != 0 && req.height != 0 && req.width <= static_cast<uint32_t>(std::numeric_limits<int>::max()) && req.height <= static_cast<uint32_t>(std::numeric_limits<int>::max()), "invalid window dimensions");
     if (req.cfg->busType == VIDEO_OUT_BUS_TYPE_OVERLAY) {

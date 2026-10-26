@@ -116,8 +116,9 @@ struct RootView: View {
     @Environment(\.mockDesktop) private var mockDesktop
 
     private var look: Look {
-        Look.make(style: model.lookStyle, reduceTransparency: reduceTransparency, offscreen: stillBackground != nil,
-                  reduceMotion: model.preferences.reducedMotion || systemReduceMotion,
+        // On battery or hot, Settings → Battery & Heat can turn the blur and the motion down.
+        Look.make(style: model.lookStyle, reduceTransparency: reduceTransparency || model.powerDimmed, offscreen: stillBackground != nil,
+                  reduceMotion: model.preferences.reducedMotion || systemReduceMotion || model.powerDimmed,
                   transparency: model.preferences.glassTransparency, seeThrough: stillBackground == nil || mockDesktop != nil)
     }
 
