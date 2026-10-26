@@ -333,6 +333,7 @@ extension AppModel {
                 self?.removePhone(device.id)
             }))
         }
+        advanced += browserPlayRows()
 
         return [
             PanelCategory(id: "appearance", title: T.text(.appearance), symbol: "paintbrush", rows: appearance),

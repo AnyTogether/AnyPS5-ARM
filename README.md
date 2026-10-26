@@ -230,6 +230,19 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - **Your own layout, per game:** the lock on the pad opens an editor to move, size, fade or hide any control, or make it a toggle or turbo button; the Mac keeps it with the game's settings.
 - The phone uses the launcher's language (English by default, or Turkish).
 
+#### No app: play from a browser
+
+**Settings → Advanced → Phones → Show QR code**: any phone on the same Wi-Fi scans it with its camera and its browser becomes the pad, nothing to install. Both sticks (they come to the thumb), the D-pad, ✕ ○ □ △, L1 R1 L2 R2, Options, Create, PS and the touchpad, with the game's light bar beside the touchpad, the DualSense's player lights under it, and vibration where the browser has it (Android). A browser goes through the same pairing card, seats (players 2 to 4 after the first) and pad path as the phone app.
+
+- The QR code's link works once and for two minutes; it turns into a cookie for that browser alone. The page is served on the Mac's local network address only, to the local network only, and refuses other sites and hosts; too many requests or wrong codes are slowed down.
+- The server runs only while the QR code is shown and while browsers it let in are connected (two more minutes for a reload or a locked screen), or always with **Keep browser play on**. Turning **Play from a browser** off stops it.
+- Plain HTTP on the local network: tilt (motion sensors), keeping the screen awake and vibration on iPhones need HTTPS or Safari support the page does not have. For those, use the app.
+- The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop)) serves the same page ([`tools/macos/launcher/BrowserPad/index.html`](tools/macos/launcher/BrowserPad/index.html)). The idea of an app-free browser pad was seen in AnyPlay's launcher; nothing of theirs is used.
+
+| The QR code on the Mac | The pad in a phone's browser |
+|---|---|
+| ![Play from a browser on the Mac](docs/screenshots/browser-play-qr.jpg) | ![The browser pad](docs/screenshots/browser-pad.jpg) |
+
 | The launcher, with the phone in the corner | Silksong played on the phone |
 |---|---|
 | ![The launcher with the phone connected](docs/screenshots/phone-live-launcher.jpg) | ![Silksong played with the phone](docs/screenshots/phone-live-silksong.jpg) |

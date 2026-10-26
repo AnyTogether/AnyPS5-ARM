@@ -38,6 +38,9 @@ struct Preferences: Codable, Equatable {
     var pushToTalk: Bool?
     /// A session friends can join while a game runs; nil means on.
     var friendsJoin: Bool?
+    /// Play from a browser (BrowserPlay.swift): nil is on; browserPlayAlways keeps its server up.
+    var browserPlay: Bool?
+    var browserPlayAlways: Bool?
     /// Another AnyTogether server than AnyTogether's own; nil is AnyTogether's.
     var togetherServer: String?
     /// The running game on the user's Discord profile; nil means on.
@@ -193,6 +196,8 @@ enum Overlay: Equatable {
     case compare
     /// Settings → Controllers → Test Buttons and Sticks.
     case controllerTest
+    /// Settings → Advanced → Play from a browser: the QR code a phone scans (BrowserPlay.swift).
+    case browserPlay
     /// PS in a game: Resume, Game Settings, Close Game, over the launcher (HomeMenus.swift).
     case quickMenu
     /// PS held in a game: "Close <game>?".
@@ -411,7 +416,9 @@ final class AppModel: ObservableObject {
     private var cable: UsbTunnel?
     /// Android phones on a cable, through adb when it is installed.
     private var androidCable: AdbTunnel?
-    private let pairedDevices = PairedDevices()
+    let pairedDevices = PairedDevices()
+    /// Play from a browser's server and what its screen shows.
+    let browserPlay = BrowserPlay()
     /// The library the phone was told last, and what keeps it told.
     private var phoneLibrary: RemoteMessage?
     private var librarySink: AnyCancellable?
@@ -1904,6 +1911,7 @@ final class AppModel: ObservableObject {
             server.togetherServer = together.base.absoluteString
             if (try? server.start()) != nil {
                 remote = server
+                updateBrowserPlay()
                 if let port = server.controlPort {
                     cable = UsbTunnel(targetPort: port)
                     cable?.start()

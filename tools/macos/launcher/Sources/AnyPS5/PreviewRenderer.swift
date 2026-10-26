@@ -499,6 +499,7 @@ enum PreviewRenderer {
         ChatPreviews.run(preferences, found, root, still, output)
         UpdatePreviews.run(preferences, found, root, still, output)
         ControllerPreviews.run(preferences, found, root, still, output)
+        BrowserPlayPreviews.run(preferences, found, root, still, output)
         HomeMenuPreviews.run(preferences, found, root, still, output)
         print("rendered into \(output.path)")
     }

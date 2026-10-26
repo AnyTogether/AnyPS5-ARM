@@ -261,6 +261,8 @@ struct RootView: View {
             CrashReportView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .controllerTest:
             ControllerTestView().transition(.opacity.combined(with: .scale(scale: 1.03)))
+        case .browserPlay:
+            BrowserPlayCard(play: model.browserPlay).transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .cropPicture:
             PictureCropView().transition(.opacity.combined(with: .scale(scale: 1.02)))
         case .trophies:

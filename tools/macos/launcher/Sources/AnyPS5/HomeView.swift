@@ -870,6 +870,8 @@ extension AppModel {
             return crashReportCommand(command)
         case .controllerTest:
             return controllerTestCommand(command)
+        case .browserPlay:
+            return browserPlayCommand(command)
         case .quickMenu, .closeGame, .homeMenu:
             return gameMenuCommand(command)
         case .gallery:
