@@ -181,24 +181,26 @@ public final class OnlineStreamRelay: @unchecked Sendable {
         }
     }
 
-    /// A player's connection is gone: their streams break.
+    /// A player's connection is gone: their streams break (those they had already ended stay
+    /// ended, as a closed TCP connection does when its peer goes).
     public func peerGone(_ peer: UInt32) {
         let gone = lock.withLock { () -> [UInt32] in
-            let ids = routes.filter { $0.value.key.peer == peer }.map(\.key)
-            for id in ids { removeLocked(id) }
-            return ids
+            let ended = routes.filter { $0.value.key.peer == peer }
+            for id in ended.keys { removeLocked(id) }
+            return ended.filter { !$0.value.peerEnded }.map(\.key)
         }
         for id in gone { toEngine(.close(stream: id, .reset)) }
     }
 
-    /// The game's connection is gone (or a new game connected): every stream breaks for the players.
+    /// The game's connection is gone (or a new game connected): every stream it had not ended
+    /// breaks for the players.
     public func engineGone() {
         let gone = lock.withLock { () -> [Key] in
             defer {
                 routes = [:]
                 engineIds = [:]
             }
-            return routes.values.map(\.key)
+            return routes.values.filter { !$0.engineEnded }.map(\.key)
         }
         for key in gone { _ = toPeer(key.peer, Message(op: .close, senderOpened: key.mine, stream: key.stream, reason: .reset).bytes) }
     }

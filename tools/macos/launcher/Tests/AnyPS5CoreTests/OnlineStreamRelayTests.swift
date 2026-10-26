@@ -125,6 +125,25 @@ final class OnlineStreamRelayTests: XCTestCase {
         bob.reachable = false
         bob.relay.fromEngine(.accept(stream: fifth))
         XCTAssertEqual(bob.take(), [.close(stream: fifth, .reset)], "a message that cannot be sent breaks the stream")
+        bob.reachable = true
+
+        // A game that closed its stream and then went (or a player who did) leaves it closed, not broken.
+        alice.relay.fromEngine(.open(stream: 6, peer: b, peerPort: 1, peerVport: 0, localPort: 0, localVport: 0))
+        guard case .open(let sixth, _, _, _, _, _)? = bob.take().first else { return XCTFail() }
+        bob.relay.fromEngine(.accept(stream: sixth))
+        XCTAssertEqual(alice.take(), [.accept(stream: 6)])
+        alice.relay.fromEngine(.close(stream: 6, .closed))
+        XCTAssertEqual(bob.take(), [.close(stream: sixth, .closed)])
+        alice.relay.engineGone()
+        XCTAssertEqual(bob.take(), [], "a stream the game had closed is not reset when the game goes")
+        bob.relay.fromEngine(.data(stream: sixth, Data("x".utf8)))
+        XCTAssertEqual(bob.take(), [.close(stream: sixth, .reset)], "but nothing more reaches it")
+        alice.relay.fromEngine(.open(stream: 7, peer: b, peerPort: 1, peerVport: 0, localPort: 0, localVport: 0))
+        guard case .open(let seventh, _, _, _, _, _)? = bob.take().first else { return XCTFail() }
+        bob.relay.fromEngine(.close(stream: seventh, .closed))
+        XCTAssertEqual(alice.take(), [.close(stream: 7, .closed)])
+        alice.relay.peerGone(b)
+        XCTAssertEqual(alice.take(), [], "nor one the player had closed when they go")
     }
 
     func testTheBridgeCarriesStreamFrames() throws {
