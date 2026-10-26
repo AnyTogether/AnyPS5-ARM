@@ -786,7 +786,7 @@ extension AppModel {
             return true
         }
         switch overlay {
-        case .settings, .gameSettings, .confirmUninstall, .updateChoice, .noSpace:
+        case .settings, .gameSettings, .confirmUninstall, .updateChoice, .updateRequired, .noSpace:
             return panelCommand(command)
         case .controls, .advanced:
             if command == .back || command == .options {
@@ -802,7 +802,8 @@ extension AppModel {
             return panelCommand(command)
         case .friends, .party:
             if command == .back {
-                closeOverlay()
+                // A question asked in place (AskFirst.swift) is answered Cancel first.
+                if !cancelAsk() { closeOverlay() }
                 return true
             }
             return panelCommand(command)

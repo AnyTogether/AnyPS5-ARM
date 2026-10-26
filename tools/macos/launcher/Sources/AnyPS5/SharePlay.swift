@@ -320,8 +320,9 @@ extension AppModel {
                                      detail: SP.linkText(link, pad: nil, seated: false), symbol: "gamecontroller",
                                      kind: .action(destructive: false) { [weak self] in self?.letPlay(viewer) }, person: person))
             }
-            rows.append(PanelRow(id: "share-remove-\(viewer.user.userId)", title: SP.format(.remove, name), symbol: "person.crop.circle.badge.xmark",
-                                 kind: .action(destructive: true) { [weak self] in self?.removeShareViewer(viewer) }))
+            rows += askingFirst(PanelRow(id: "share-remove-\(viewer.user.userId)", title: SP.format(.remove, name), symbol: "person.crop.circle.badge.xmark",
+                                         kind: .action(destructive: true) { [weak self] in self?.removeShareViewer(viewer) }),
+                                question: TK.format(.askRemoveViewer, name))
         }
         rows.append(PanelRow(id: "share-open", title: SP.text(.openToFriends), detail: SP.text(.openToFriendsDetail), symbol: "person.2",
                              kind: .toggle(hosting.open) { [weak self] on in self?.setShareOpen(on) }))
@@ -338,7 +339,8 @@ extension AppModel {
                                  kind: .action(destructive: false) { [weak self] in self?.inviteToWatch(friend) },
                                  person: PanelPerson(name: friend.displayName, avatar: friend.avatar, status: friend.presence?.playing == true ? .playing : .online)))
         }
-        rows.append(PanelRow(id: "share-stop", title: SP.text(.stop), symbol: "stop.circle", kind: .action(destructive: true) { [weak self] in self?.stopSharePlay() }))
+        rows += askingFirst(PanelRow(id: "share-stop", title: SP.text(.stop), symbol: "stop.circle", kind: .action(destructive: true) { [weak self] in self?.stopSharePlay() }),
+                            question: TK.text(.askStopShare))
         return rows
     }
 }

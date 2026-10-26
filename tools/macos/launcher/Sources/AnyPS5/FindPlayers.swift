@@ -337,7 +337,8 @@ extension AppModel {
                 }
             }
             if post.isOpen() {
-                rows.append(PanelRow(id: "mine-close-\(post.id)", title: FP.text(.closePost), symbol: "xmark.bin", kind: .action(destructive: true) { [weak self] in self?.closePost(post) }))
+                rows += askingFirst(PanelRow(id: "mine-close-\(post.id)", title: FP.text(.closePost), symbol: "xmark.bin", kind: .action(destructive: true) { [weak self] in self?.closePost(post) }),
+                                    question: TK.text(.askClosePost))
             }
         }
         if !discover.asked.isEmpty {

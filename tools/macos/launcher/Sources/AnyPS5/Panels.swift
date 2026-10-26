@@ -86,6 +86,8 @@ extension AppModel {
                 }),
                 PanelRow(id: "cancel", title: T.text(.cancel), kind: .action(destructive: false) { [weak self] in self?.closeOverlay() }),
             ])]
+        case .updateRequired:
+            return [PanelCategory(id: "updateRequired", title: TK.text(.updateRequiredTitle), symbol: "arrow.down.circle", rows: updateRequiredRows())]
         case .updateChoice:
             guard let game = selectedGame else { return [] }
             // Which engine unlocked it and which one is chosen now.
@@ -545,13 +547,14 @@ extension AppModel {
         case .up: movePanelRow(-1, rows)
         case .down: movePanelRow(1, rows)
         case .left:
-            if !change(row, by: -1) { leaveRows(single) }
+            if !change(row, by: -1), !cancelAsk() { leaveRows(single) }
         case .right:
             _ = change(row, by: 1)
         case .select:
             activate(row)
         case .back:
-            leaveRows(single)
+            // A question asked in place (AskFirst.swift) is answered Cancel first.
+            if !cancelAsk() { leaveRows(single) }
         case .options:
             closeOverlay()
         case .previousGame, .nextGame, .home, .capture:

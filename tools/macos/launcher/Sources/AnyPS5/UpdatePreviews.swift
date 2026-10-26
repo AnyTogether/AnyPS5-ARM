@@ -13,6 +13,16 @@ enum UpdatePreviews {
                 configure(model)
             }
         }
+        // Update Required: AnyTogether's minimum is newer than this copy; the update found, downloading, ready.
+        let tooOld = TogetherClientTooOld(minimum: "0.2.20", current: "0.2.13", downloadUrl: URL(string: "https://anytogether.example/download"))
+        for (name, state) in [("available", LauncherUpdateState.available(version: "0.2.20")), ("downloading", .downloading(version: "0.2.20", fraction: 0.42)),
+                              ("ready", .ready(version: "0.2.20")), ("failed", .failed)] {
+            render("update-required-\(name)") { model in
+                model.previewUpdate(state)
+                model.updateRequired = tooOld
+                model.open(.updateRequired)
+            }
+        }
         let ready = LauncherUpdateState.ready(version: "0.2.20")
         render("update-notice") { $0.previewUpdate(ready) }
         render("update-notice-focus") { $0.previewUpdate(ready); $0.focus = .notice(0) }

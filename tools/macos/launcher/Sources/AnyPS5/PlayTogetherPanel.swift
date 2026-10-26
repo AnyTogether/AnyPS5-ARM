@@ -73,9 +73,11 @@ extension AppModel {
 
     // MARK: Joining
 
-    /// Join from the party or the offer: the check first, then the game in the same session.
+    /// Join from the party or the offer: the check first, then the game in the same session. After
+    /// Try anyway the check looks past the game version (never the engine).
     func joinPlayTogether(_ offer: PlayTogetherOffer, afterUnlock: Bool = false) {
-        let verdict = PlayTogetherCheck.verdict(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: running?.game.name)
+        let verdict = PlayTogetherCheck.verdict(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: running?.game.name,
+                                                overrideVersion: togetherTryAnyway.contains(offer.sessionId))
         switch verdict {
         case .join(let id):
             guard let game = games.first(where: { $0.id == id }) else { return }
@@ -99,14 +101,48 @@ extension AppModel {
         if succeeded { joinPlayTogether(offer, afterUnlock: true) }
     }
 
+    /// Try anyway: the user chose to join with a game version that does not fit; the server
+    /// records it and still checks the engine.
+    func tryAnywayPlayTogether(_ offer: PlayTogetherOffer) {
+        togetherTryAnyway.insert(offer.sessionId)
+        joinPlayTogether(offer)
+    }
+
+    /// Only the game version keeps this Mac out, here or as the server said.
+    func canTryAnyway(_ offer: PlayTogetherOffer) -> Bool {
+        if PlayTogetherCheck.tryAnyway(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: running?.game.name) != nil { return true }
+        guard togetherVersionRefused.contains(offer.sessionId) else { return false }
+        switch PlayTogetherCheck.verdict(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: running?.game.name, overrideVersion: true) {
+        case .join, .unlockAndPlay, .updateAndPlay: return true
+        default: return false
+        }
+    }
+
+    /// The engine build this Mac would play a title with (previews match it to show Try Anyway).
+    func previewEngineBuild(_ titleId: String) -> String? {
+        togetherCopies().first { $0.titleId == titleId }?.engineBuild
+    }
+
+    /// The Try Anyway row for an offer, when it can help.
+    func tryAnywayRow(_ offer: PlayTogetherOffer, id: String) -> PanelRow? {
+        guard canTryAnyway(offer) else { return nil }
+        return PanelRow(id: id, title: PT.text(.tryAnyway), detail: PT.text(.tryAnywayDetail), symbol: "exclamationmark.arrow.triangle.2.circlepath",
+                        kind: .action(destructive: false) { [weak self] in self?.tryAnywayPlayTogether(offer) })
+    }
+
     private func joinTogether(_ offer: PlayTogetherOffer, game: Game) {
-        show(PT.format(.joined, offer.hostName, game.name), symbol: "person.2.wave.2.fill")
+        let anyway = togetherTryAnyway.contains(offer.sessionId)
+        show(anyway ? PT.format(.tryingAnyway, game.name) : PT.format(.joined, offer.hostName, game.name), symbol: "person.2.wave.2.fill")
         Task {
             do {
-                let joined = try await together.joinGameSession(offer.sessionId, gameVersion: gameVersion(for: game), engineBuild: engineBuild(for: game))
+                let joined = try await together.joinGameSession(offer.sessionId, gameVersion: gameVersion(for: game), engineBuild: engineBuild(for: game),
+                                                                overrideVersion: anyway)
+                togetherTryAnyway.remove(offer.sessionId)
                 enterTogether(joined, game: game)
             } catch let problem as TogetherProblem {
                 if let refusal = problem.joinRefusal {
+                    // The party panel offers Try Anyway for a version the server would let by on request.
+                    if refusal.overridable, !anyway { togetherVersionRefused.insert(offer.sessionId) }
                     let verdict: PlayTogetherVerdict = refusal.reason == .engine
                         ? .engine(have: refusal.actual, need: refusal.expected, youUpdate: refusal.youUpdate)
                         : .gameVersion(have: refusal.actual, need: refusal.expected, youUpdate: refusal.youUpdate)
@@ -222,6 +258,7 @@ extension AppModel {
             var details: [String] = []
             if userId == together.hostId { details.append(PT.text(.host)) }
             details.append(userId == me ? PT.text(.you) : mine ? linkText(userId) : PT.text(.inGame))
+            if together.versionOverrides.contains(userId) { details.append(PT.text(.triedAnyway)) }
             rows.append(PanelRow(id: "together-player-\(userId)", title: person.displayName, detail: details.joined(separator: " · "), symbol: "gamecontroller",
                                  kind: .info(""), person: PanelPerson(name: person.displayName, avatar: person.avatar, status: .playing)))
         }
@@ -235,22 +272,25 @@ extension AppModel {
             }
             rows.append(PanelRow(id: "together-join", title: title, detail: verdictText(verdict, offer: offer) ?? PT.text(.joinDetail), symbol: "play.circle.fill",
                                  kind: .action(destructive: false) { [weak self] in self?.joinPlayTogether(offer) }))
+            if let anyway = tryAnywayRow(offer, id: "together-try-anyway") { rows.append(anyway) }
         } else {
             if hosting {
                 rows.append(PanelRow(id: "together-code", title: PT.text(.code), detail: PT.text(.codeDetail), symbol: "ticket",
                                      kind: .action(destructive: false) { [weak self] in self?.shareTogetherCode() }))
             }
-            rows.append(PanelRow(id: "together-leave", title: hosting ? PT.text(.end) : PT.text(.leave), symbol: "xmark.circle",
-                                 kind: .action(destructive: true) { [weak self] in self?.leavePlayTogether() }))
+            rows += askingFirst(PanelRow(id: "together-leave", title: hosting ? PT.text(.end) : PT.text(.leave), symbol: "xmark.circle",
+                                         kind: .action(destructive: true) { [weak self] in self?.leavePlayTogether() }),
+                                question: TK.text(hosting ? .askEndTogether : .askLeaveTogether))
         }
         return rows
     }
 
     /// The friends panel's offers: "<host> started <game> — Join".
     func togetherOfferRows() -> [PanelRow] {
-        playTogetherOffers.filter { $0.sessionId != gameSession?.id }.map { offer in
-            PanelRow(id: "together-offer-\(offer.sessionId)", title: PT.format(.offer, offer.hostName, gameName(offer.titleId)), detail: PT.text(.joinDetail),
-                     symbol: "person.2.wave.2.fill", kind: .action(destructive: false) { [weak self] in self?.joinPlayTogether(offer) })
+        playTogetherOffers.filter { $0.sessionId != gameSession?.id }.flatMap { offer in
+            [PanelRow(id: "together-offer-\(offer.sessionId)", title: PT.format(.offer, offer.hostName, gameName(offer.titleId)), detail: PT.text(.joinDetail),
+                      symbol: "person.2.wave.2.fill", kind: .action(destructive: false) { [weak self] in self?.joinPlayTogether(offer) })]
+                + [tryAnywayRow(offer, id: "together-offer-anyway-\(offer.sessionId)")].compactMap { $0 }
         }
     }
 
