@@ -1,4 +1,5 @@
 import Foundation
+import IOKit.ps
 
 // Battery and heat profiles (Settings → Battery & Heat): what a MacBook on battery, or a Mac
 // running hot, does to the game playing. On battery the game can be held to 30, 40 or 45 fps,
@@ -45,6 +46,29 @@ public struct PowerReading: Equatable, Sendable {
 
     /// A desktop Mac, cool, plugged in.
     public static let pluggedIn = PowerReading(hasBattery: false, onBattery: false, batteryPercent: nil, minutesToEmpty: nil, thermal: .nominal, lowPowerMode: false)
+
+    /// The Mac's power now: IOKit's power sources, macOS's estimate of the time left, the
+    /// thermal state and Low Power Mode.
+    public static func current() -> PowerReading {
+        let process = ProcessInfo.processInfo
+        var reading = PowerReading(hasBattery: false, onBattery: false, batteryPercent: nil, minutesToEmpty: nil,
+                                   thermal: ThermalLevel(process.thermalState), lowPowerMode: process.isLowPowerModeEnabled)
+        guard let info = IOPSCopyPowerSourcesInfo()?.takeRetainedValue() else { return reading }
+        reading.onBattery = (IOPSGetProvidingPowerSourceType(info)?.takeUnretainedValue() as String?) == kIOPSBatteryPowerValue
+        let list = IOPSCopyPowerSourcesList(info)?.takeRetainedValue() as? [CFTypeRef] ?? []
+        for item in list {
+            guard let description = IOPSGetPowerSourceDescription(info, item)?.takeUnretainedValue() as? [String: Any],
+                  description[kIOPSTypeKey] as? String == kIOPSInternalBatteryType else { continue }
+            reading.hasBattery = true
+            if let current = description[kIOPSCurrentCapacityKey] as? Int, let maximum = description[kIOPSMaxCapacityKey] as? Int, maximum > 0 {
+                reading.batteryPercent = min(100, max(0, current * 100 / maximum))
+            }
+            break
+        }
+        let seconds = IOPSGetTimeRemainingEstimate()
+        if reading.onBattery, seconds > 0 { reading.minutesToEmpty = Int(seconds / 60) }
+        return reading
+    }
 
     /// Battery or Low Power Mode: the user wants power saved.
     public var savingPower: Bool { onBattery || lowPowerMode }

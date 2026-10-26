@@ -127,14 +127,19 @@ extension AppModel {
         }
         switch overlay {
         case .quickMenu:
+            // Resume, Game Settings, the battery and heat profiles' Undo while there is one, Close.
+            let undo = quickMenuUndo != nil
             switch command {
-            case .up, .left: move(-1, count: 3)
-            case .down, .right: move(1, count: 3)
+            case .up, .left: move(-1, count: undo ? 4 : 3)
+            case .down, .right: move(1, count: undo ? 4 : 3)
             case .back: resumeGame()
             case .select:
                 switch menuIndex {
                 case 0: resumeGame()
                 case 1: open(.gameSettings)
+                case 2 where undo:
+                    undoPowerAdjustment()
+                    withAnimation(Motion.focus) { menuIndex = 0 }
                 default:
                     Sounds.shared.play(.select)
                     menuIndex = 0
@@ -543,10 +548,38 @@ struct GameMenuCard: View {
             }
             .font(.display(13 * scale, .medium))
             .foregroundStyle(.white.opacity(0.7))
+            powerLine
         case .closeGame:
             Text(TH.text(.closeGameText)).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.65))
         default:
             EmptyView()
+        }
+    }
+
+    /// The battery and what the battery and heat profiles do now: "On battery · 64% · about 2 h
+    /// left · Battery profile · 40 FPS cap". A Mac without a battery shows it only while hot.
+    @ViewBuilder private var powerLine: some View {
+        let reading = model.power.reading
+        if reading.hasBattery || model.power.mode == .hot {
+            let hot = model.power.mode == .hot
+            let warm = Color(red: 1, green: 0.62, blue: 0.3)
+            HStack(alignment: .firstTextBaseline, spacing: 7 * scale) {
+                Image(systemName: hot ? "thermometer.sun.fill" : reading.onBattery ? "battery.75percent" : "powerplug.fill")
+                    .font(.system(size: 12 * scale, weight: .semibold))
+                    .foregroundStyle(hot ? warm : .white.opacity(0.7))
+                    .frame(width: 18 * scale)
+                VStack(alignment: .leading, spacing: 2 * scale) {
+                    if reading.hasBattery {
+                        Text(model.powerSourceLine).monospacedDigit()
+                    }
+                    Text(model.powerProfileLine)
+                        .foregroundStyle(hot ? warm : model.power.adjustment.isNone ? .white.opacity(0.5) : model.accent)
+                }
+                .lineLimit(1).minimumScaleFactor(0.85)
+            }
+            .font(.display(12.5 * scale, .medium))
+            .foregroundStyle(.white.opacity(0.66))
+            .padding(.top, 2 * scale)
         }
     }
 
@@ -564,9 +597,13 @@ struct GameMenuCard: View {
             return [Item(id: 0, title: TH.text(.switchProfile), detail: TH.text(.switchProfileDetail), symbol: "person.2.circle", disabled: true),
                     Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
         default:
-            return [Item(id: 0, title: TH.text(.resume), symbol: "play.fill"),
-                    Item(id: 1, title: T.text(.gameSettings), symbol: "slider.horizontal.3"),
-                    Item(id: 2, title: TH.text(.closeGame), symbol: "xmark.circle", destructive: true)]
+            var items = [Item(id: 0, title: TH.text(.resume), symbol: "play.fill"),
+                         Item(id: 1, title: T.text(.gameSettings), symbol: "slider.horizontal.3")]
+            if let undo = model.quickMenuUndo {
+                items.append(Item(id: 2, title: undo.title, detail: undo.detail, symbol: "arrow.uturn.backward"))
+            }
+            items.append(Item(id: items.count, title: TH.text(.closeGame), symbol: "xmark.circle", destructive: true))
+            return items
         }
     }
 
