@@ -22,6 +22,10 @@ public struct Game: Identifiable, Hashable, Sendable {
     public let executable: Executable
     /// The age ratings in param.json's `ageLevel`: "default" or a region ("US") to an age.
     public var ageLevels: [String: Int]? = nil
+    /// The update dumped beside the game (GameAddons), nil when there is none.
+    public var update: GameUpdate? = nil
+    /// The add-ons dumped beside the game (GameAddons).
+    public var addons: [GameAddon] = []
 
     public var bundleIdentifier: String {
         "org.anyps5." + titleID.lowercased().filter { $0.isLetter || $0.isNumber }
@@ -54,6 +58,7 @@ public enum GameLibrary {
     public static func survey(_ root: URL) -> Survey {
         var found = Survey()
         visit(root, depth: 0, into: &found)
+        GameAddons.attach(to: &found)
         found.games.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         return found
     }
@@ -64,6 +69,7 @@ public enum GameLibrary {
         return zip(left, right).allSatisfy { a, b in
             a.folder == b.folder && a.titleID == b.titleID && a.name == b.name && a.version == b.version && a.icon == b.icon
                 && a.background == b.background && a.music == b.music && a.executable == b.executable && a.ageLevels == b.ageLevels
+                && a.update == b.update && a.addons == b.addons
         }
     }
 
@@ -109,8 +115,9 @@ public enum GameLibrary {
         } else {
             executable = .unreadable
         }
+        let beside = GameAddons.look(beside: folder, titleID: titleID)
         return Game(folder: folder, titleID: titleID, name: name, version: version, icon: existing("icon0.png"), background: existing("pic0.png"), music: existing("snd0.at9"), executable: executable,
-                    ageLevels: ageLevels(parameters["ageLevel"]))
+                    ageLevels: ageLevels(parameters["ageLevel"]), update: beside.update, addons: beside.addons)
     }
 
     /// The numbers of an `ageLevel` object; nil when there is none.
