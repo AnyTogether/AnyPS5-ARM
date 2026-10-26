@@ -9,7 +9,7 @@ struct Backdrop: View {
 
     var body: some View {
         let preferences = model.preferences
-        let paused = model.running != nil || !model.active || preferences.reducedMotion
+        let paused = model.running != nil || !model.active || preferences.reducedMotion || model.powerDimmed
         ZStack {
             if let design = model.activeDesign, let file = model.themes.file(design.background, of: design) {
                 if design.backgroundIsVideo {
@@ -870,6 +870,8 @@ extension AppModel {
             return crashReportCommand(command)
         case .controllerTest:
             return controllerTestCommand(command)
+        case .browserPlay:
+            return browserPlayCommand(command)
         case .quickMenu, .closeGame, .homeMenu, .profileMenu:
             return gameMenuCommand(command)
         case .profilePicker:

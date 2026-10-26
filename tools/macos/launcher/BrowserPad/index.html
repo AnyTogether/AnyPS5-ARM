@@ -1,0 +1,792 @@
+<!doctype html>
+<!--
+  AnyPS5 browser pad: a phone with no app scans the launcher's QR code and this page becomes a
+  DualSense. One file, no outside requests; the Mac launcher (tools/macos/launcher) and the
+  Windows/Linux launcher (AnyPS5-Desktop) serve this same file. Its WebSocket protocol is written
+  down in BrowserPadInput.swift / browser_pad_input.dart.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0a0e18" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#eceef3" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AnyPS5 Pad">
+<meta name="format-detection" content="telephone=no">
+<meta name="anyps5-browser-pad" content="1">
+<title>AnyPS5 Pad</title>
+<style>
+:root {
+  --accent: #4f94ff;
+  --deep: #070b16;
+  --middle: #15213d;
+  --shell: #0b0f19;
+  --surface: #191e2b;
+  --surface-hi: #232a3b;
+  --line: rgba(255, 255, 255, 0.09);
+  --ink: #eef2fb;
+  --ink-soft: rgba(238, 242, 251, 0.62);
+  --ink-faint: rgba(238, 242, 251, 0.34);
+  --glyph: rgba(238, 242, 251, 0.82);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 10px 24px -10px rgba(0, 0, 0, 0.7);
+  --press: rgba(255, 255, 255, 0.10);
+  --pad-face: #10141f;
+  --texture: 0.075;
+  --green: #4cd97b;
+  --orange: #ff9f33;
+  --t-cross: #7fb0ff;
+  --t-circle: #ff6b7d;
+  --t-square: #f58ad8;
+  --t-triangle: #4fe0b6;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  /* The white DualSense: a pale shell, white controls, the touchpad's black middle kept. */
+  :root {
+    --deep: #e3e6ee;
+    --middle: #f6f7fa;
+    --shell: #eceef3;
+    --surface: #ffffff;
+    --surface-hi: #f4f6fa;
+    --line: rgba(14, 22, 44, 0.10);
+    --ink: #0f1626;
+    --ink-soft: rgba(15, 22, 38, 0.64);
+    --ink-faint: rgba(15, 22, 38, 0.38);
+    --glyph: rgba(15, 22, 38, 0.78);
+    --shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 8px 20px -10px rgba(20, 30, 60, 0.35), 0 1px 2px rgba(20, 30, 60, 0.12);
+    --press: rgba(14, 22, 44, 0.07);
+    --pad-face: #ffffff;
+    --texture: 0.10;
+    --t-cross: #2f6fe0;
+    --t-circle: #e0364c;
+    --t-square: #c63ea3;
+    --t-triangle: #0f9e79;
+    color-scheme: light;
+  }
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
+  background: var(--shell); color: var(--ink);
+  font: 500 15px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Noto Sans", system-ui, sans-serif;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-text-size-adjust: 100%;
+  touch-action: none;
+}
+body { position: fixed; inset: 0; }
+#stage {
+  position: fixed; inset: 0; overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 50% -10%, color-mix(in srgb, var(--middle) 85%, var(--accent) 15%) 0%, transparent 60%),
+    radial-gradient(90% 80% at 50% 120%, var(--deep), transparent 70%),
+    var(--shell);
+}
+@media (prefers-color-scheme: light) {
+  #stage { background: radial-gradient(120% 90% at 50% -10%, #ffffff 0%, transparent 60%), radial-gradient(90% 80% at 50% 120%, var(--deep), transparent 70%), var(--shell); }
+}
+/* The DualSense's grips carry a micro-texture of tiny PlayStation shapes; so do these. */
+.grip {
+  position: absolute; bottom: -4%; width: 46%; height: 70%; pointer-events: none; opacity: var(--texture);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' fill='none' stroke='%23888' stroke-width='1.1' stroke-linejoin='round'%3E%3Cpath d='M7 2.2 10.4 8H3.6z'/%3E%3Ccircle cx='21' cy='5.4' r='3'/%3E%3Cpath d='M4.4 17.6l5.2 5.2M9.6 17.6l-5.2 5.2'/%3E%3Crect x='18' y='17.2' width='6' height='6'/%3E%3C/svg%3E");
+  background-size: 14px 14px;
+}
+.grip.left { left: -6%; -webkit-mask-image: radial-gradient(70% 70% at 30% 85%, #000 30%, transparent 72%); mask-image: radial-gradient(70% 70% at 30% 85%, #000 30%, transparent 72%); }
+.grip.right { right: -6%; -webkit-mask-image: radial-gradient(70% 70% at 70% 85%, #000 30%, transparent 72%); mask-image: radial-gradient(70% 70% at 70% 85%, #000 30%, transparent 72%); }
+
+.ctl { position: absolute; display: grid; place-items: center; color: var(--glyph); }
+.key {
+  background: linear-gradient(180deg, var(--surface-hi), var(--surface));
+  box-shadow: var(--shadow); border: 1px solid var(--line);
+  transition: transform 120ms cubic-bezier(.2, .8, .2, 1), background-color 120ms, box-shadow 120ms;
+}
+.key.on { transform: scale(0.93); transition-duration: 0ms; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent), 0 0 22px -4px color-mix(in srgb, var(--accent) 55%, transparent); }
+.key.on::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: var(--press); }
+.pill { border-radius: 999px; }
+.round { border-radius: 50%; }
+.label { font-weight: 700; letter-spacing: 0.02em; font-size: calc(var(--s) * 15px); }
+.label small { font-weight: 600; opacity: 0.6; font-size: 0.72em; margin-left: 0.12em; }
+svg { display: block; overflow: visible; }
+
+.face svg { width: 46%; height: 46%; }
+.face svg * { fill: none; stroke: currentColor; stroke-width: 2.1; stroke-linecap: round; stroke-linejoin: round; }
+.face.on { color: var(--hue); box-shadow: 0 0 0 1px color-mix(in srgb, var(--hue) 55%, transparent), 0 0 26px -4px color-mix(in srgb, var(--hue) 70%, transparent); }
+.face.cross { --hue: var(--t-cross); }
+.face.circle { --hue: var(--t-circle); }
+.face.square { --hue: var(--t-square); }
+.face.triangle { --hue: var(--t-triangle); }
+
+.dpad-plate { position: absolute; border-radius: 50%; background: radial-gradient(circle, var(--press), transparent 70%); pointer-events: none; }
+.arrow { border-radius: calc(var(--s) * 12px); }
+.arrow svg { width: 38%; height: 38%; }
+.arrow svg path { fill: currentColor; }
+
+.stick-zone { position: absolute; pointer-events: none; }
+.stick-base {
+  position: absolute; border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, transparent 52%, var(--press) 53%, transparent 70%), color-mix(in srgb, var(--surface) 55%, transparent);
+  border: 1px solid var(--line);
+  transition: transform 200ms cubic-bezier(.2, .9, .3, 1.15);
+}
+.stick-base.held { transition: none; }
+.stick-knob {
+  position: absolute; left: 50%; top: 50%; border-radius: 50%;
+  background: radial-gradient(circle at 50% 38%, var(--surface-hi), var(--surface) 70%);
+  box-shadow: var(--shadow), 0 0 0 1px var(--line);
+  transform: translate(-50%, -50%);
+  transition: transform 160ms cubic-bezier(.2, .9, .3, 1.2);
+}
+.stick-knob::before { content: ""; position: absolute; inset: 22%; border-radius: 50%; border: 1px solid var(--line); }
+.stick-base.held .stick-knob { transition: none; box-shadow: var(--shadow), 0 0 0 1.5px color-mix(in srgb, var(--accent) 70%, transparent), 0 0 24px -6px var(--accent); }
+.stick-base.click .stick-knob { background: color-mix(in srgb, var(--accent) 30%, var(--surface)); }
+
+#touchpad {
+  border-radius: calc(var(--s) * 18px) calc(var(--s) * 18px) calc(var(--s) * 30px) calc(var(--s) * 30px);
+  background: linear-gradient(180deg, var(--pad-face), color-mix(in srgb, var(--pad-face) 85%, var(--deep)));
+  box-shadow: var(--shadow); border: 1px solid var(--line); overflow: visible;
+}
+#touchpad.on { transform: scale(0.985); }
+#touchpad .hint { font-size: calc(var(--s) * 11px); letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); font-weight: 700; }
+/* The light bar runs along both sides of the touchpad, in the colour the game sets. */
+.lightbar { position: absolute; top: 14%; bottom: 10%; width: calc(var(--s) * 4px); border-radius: 4px; background: var(--light, var(--accent)); box-shadow: 0 0 calc(var(--s) * 14px) calc(var(--s) * 2px) var(--light, var(--accent)); opacity: 0.85; transition: background-color 300ms, box-shadow 300ms, opacity 200ms; }
+.lightbar.l { left: calc(var(--s) * -10px); }
+.lightbar.r { right: calc(var(--s) * -10px); }
+body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
+.finger { position: absolute; width: calc(var(--s) * 26px); height: calc(var(--s) * 26px); margin: calc(var(--s) * -13px); border-radius: 50%; background: color-mix(in srgb, var(--accent) 30%, transparent); border: 1.5px solid var(--accent); pointer-events: none; }
+
+#leds { position: absolute; display: flex; gap: calc(var(--s) * 9px); pointer-events: none; transform: translateX(-50%); }
+#leds i { width: calc(var(--s) * 7px); height: calc(var(--s) * 3px); border-radius: 2px; background: var(--line); transition: background-color 250ms, box-shadow 250ms; }
+#leds i.lit { background: var(--ink); box-shadow: 0 0 8px rgba(255, 255, 255, 0.55); }
+
+.sys svg { width: 44%; height: 44%; }
+.sys svg * { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+#ps { color: var(--ink); }
+#ps .label { font-size: calc(var(--s) * 13px); letter-spacing: 0.04em; }
+
+#chip {
+  position: absolute; display: flex; align-items: center; gap: calc(var(--s) * 8px);
+  padding: 0 calc(var(--s) * 6px) 0 calc(var(--s) * 14px); height: calc(var(--s) * 34px); border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 75%, transparent); border: 1px solid var(--line);
+  font-size: calc(var(--s) * 13px); font-weight: 600; color: var(--ink-soft); white-space: nowrap;
+  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transform: translateX(-50%);
+}
+#chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 8px var(--orange); flex: none; }
+#chip.ok .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+#chip .host { color: var(--ink); max-width: 32vw; overflow: hidden; text-overflow: ellipsis; }
+#chip .ms { font-variant-numeric: tabular-nums; }
+#chip button { all: unset; display: grid; place-items: center; width: calc(var(--s) * 26px); height: calc(var(--s) * 26px); border-radius: 50%; background: var(--press); color: var(--ink); }
+#chip button svg { width: 55%; height: 55%; }
+
+/* Cards over the pad: connecting, the pairing code, waiting, refused; the menu. */
+#veil { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--shell) 55%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); z-index: 10; opacity: 1; transition: opacity 220ms ease-out; }
+#veil.hidden { opacity: 0; pointer-events: none; }
+.card { width: min(460px, 100%); padding: 26px 28px 24px; border-radius: 28px; text-align: center; background: color-mix(in srgb, var(--surface) 88%, transparent); border: 1px solid var(--line); box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.6); animation: rise 380ms cubic-bezier(.2, .9, .25, 1.12) both; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px) scale(0.96); } to { opacity: 1; transform: none; } }
+.card .mark { width: 46px; height: 46px; margin: 0 auto 12px; color: var(--accent); }
+.card .mark svg * { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.card h1 { margin: 0 0 6px; font-size: 25px; line-height: 1.08; letter-spacing: -0.02em; font-weight: 700; text-wrap: balance; }
+.card p { margin: 0; color: var(--ink-soft); font-size: 15px; text-wrap: pretty; }
+.code { display: flex; justify-content: center; gap: 10px; margin: 18px 0 14px; }
+.code b { width: 54px; height: 66px; display: grid; place-items: center; border-radius: 16px; font: 700 38px/1 ui-rounded, -apple-system, "SF Pro Rounded", system-ui, sans-serif; font-variant-numeric: tabular-nums; background: var(--surface-hi); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--ink); animation: rise 420ms cubic-bezier(.2, .9, .25, 1.12) both; }
+.code b:nth-child(2) { animation-delay: 40ms; } .code b:nth-child(3) { animation-delay: 80ms; } .code b:nth-child(4) { animation-delay: 120ms; }
+.spinner { width: 26px; height: 26px; margin: 16px auto 2px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.actions { display: flex; gap: 10px; justify-content: center; margin-top: 18px; flex-wrap: wrap; }
+.btn { all: unset; cursor: pointer; padding: 11px 20px; border-radius: 999px; font-weight: 700; font-size: 15px; background: var(--press); color: var(--ink); border: 1px solid var(--line); transition: transform 120ms cubic-bezier(.2, .8, .2, 1); }
+.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+.btn:active { transform: scale(0.97); }
+.btn:focus-visible, #chip button:focus-visible, .switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 2px; border-top: 1px solid var(--line); text-align: left; }
+.row:first-of-type { border-top: 0; }
+.row span { font-weight: 600; }
+.row small { display: block; color: var(--ink-faint); font-weight: 500; font-size: 13px; }
+.switch { all: unset; flex: none; width: 46px; height: 28px; border-radius: 999px; background: var(--line); position: relative; cursor: pointer; transition: background-color 180ms; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 220ms cubic-bezier(.2, .9, .3, 1.2); }
+.switch[aria-checked="true"] { background: var(--accent); }
+.switch[aria-checked="true"]::after { transform: translateX(18px); }
+
+/* Held upright: ask to turn the phone. */
+#turn { position: fixed; inset: 0; z-index: 20; display: none; place-items: center; text-align: center; padding: 24px; background: var(--shell); }
+#turn .phone { width: 44px; height: 76px; margin: 0 auto 18px; border: 2.5px solid var(--ink); border-radius: 10px; position: relative; animation: turn 2.2s cubic-bezier(.6, 0, .2, 1) infinite; }
+#turn .phone::after { content: ""; position: absolute; left: 50%; bottom: 6px; width: 12px; height: 2.5px; margin-left: -6px; border-radius: 2px; background: var(--ink); }
+@keyframes turn { 0%, 20% { transform: rotate(0); } 50%, 80% { transform: rotate(-90deg); } 100% { transform: rotate(0); } }
+#turn h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; }
+#turn p { margin: 0; color: var(--ink-soft); }
+@media (orientation: portrait) { #turn { display: grid; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
+  #turn .phone { transform: rotate(-90deg); }
+}
+</style>
+</head>
+<body>
+<div id="stage" aria-hidden="false">
+  <div class="grip left"></div><div class="grip right"></div>
+</div>
+<div id="veil"><div class="card" id="card"></div></div>
+<div id="turn"><div><div class="phone"></div><h1 data-t="turnTitle"></h1><p data-t="turnText"></p></div></div>
+<script>
+"use strict";
+(() => {
+  // ---------- Words ----------
+  const words = {
+    en: {
+      connecting: "Connecting", connectingText: "Reaching AnyPS5 on your computer.",
+      pairTitle: "Allow this phone", pairText: "Your computer is asking too. Check the code matches and choose Allow there.",
+      busyTitle: "Waiting for a seat", busyText: "Another device is being added, or all four players are taken. This page keeps trying.",
+      deniedTitle: "Not allowed", deniedText: "The computer said no. Scan the QR code again to ask once more.",
+      expiredTitle: "Scan the code again", expiredText: "This link is used up or has expired. Open Play from a browser on your computer and scan the new QR code.",
+      lostTitle: "Connection lost", lostText: "Trying again. Keep the phone on the same Wi-Fi as the computer.",
+      waitTitle: "Waiting for AnyPS5", waitText: "The launcher's phone controller is not answering yet.",
+      protocolTitle: "Update AnyPS5", protocolText: "This page and the launcher do not speak the same version.",
+      turnTitle: "Turn your phone sideways", turnText: "The pad is laid out for landscape.",
+      tryAgain: "Try again", menuTitle: "Pad", vibration: "Vibration", vibrationText: "Buzz on presses and when the game rumbles",
+      vibrationNone: "This browser cannot vibrate", fullscreen: "Full screen", homeScreen: "For full screen, add this page to your Home Screen.",
+      leave: "Leave", done: "Done", player: "Player", touchpad: "Touchpad", ms: "ms",
+    },
+    tr: {
+      connecting: "Bağlanıyor", connectingText: "Bilgisayarındaki AnyPS5'e ulaşılıyor.",
+      pairTitle: "Bu telefona izin ver", pairText: "Bilgisayarın da soruyor. Kodun aynı olduğuna bak ve orada İzin Ver'i seç.",
+      busyTitle: "Yer bekleniyor", busyText: "Başka bir cihaz ekleniyor ya da dört oyuncu da dolu. Bu sayfa denemeye devam ediyor.",
+      deniedTitle: "İzin verilmedi", deniedText: "Bilgisayar hayır dedi. Yeniden sormak için QR kodu tekrar tara.",
+      expiredTitle: "Kodu yeniden tara", expiredText: "Bu bağlantı kullanılmış ya da süresi dolmuş. Bilgisayarda Tarayıcıdan oyna'yı aç ve yeni QR kodu tara.",
+      lostTitle: "Bağlantı koptu", lostText: "Yeniden deneniyor. Telefon bilgisayarla aynı Wi-Fi'da kalsın.",
+      waitTitle: "AnyPS5 bekleniyor", waitText: "Başlatıcının telefon kumandası henüz yanıt vermiyor.",
+      protocolTitle: "AnyPS5'i güncelle", protocolText: "Bu sayfa ile başlatıcı aynı sürümü konuşmuyor.",
+      turnTitle: "Telefonu yan çevir", turnText: "Kumanda yatay ekran için dizildi.",
+      tryAgain: "Yeniden dene", menuTitle: "Kumanda", vibration: "Titreşim", vibrationText: "Basınca ve oyun titreştiğinde titrer",
+      vibrationNone: "Bu tarayıcı titreşemiyor", fullscreen: "Tam ekran", homeScreen: "Tam ekran için bu sayfayı Ana Ekran'a ekle.",
+      leave: "Ayrıl", done: "Tamam", player: "Oyuncu", touchpad: "Dokunmatik yüzey", ms: "ms",
+    },
+  };
+  const lang = (navigator.languages || [navigator.language || "en"]).some((l) => /^tr\b/i.test(l)) ? "tr" : "en";
+  const t = (key) => words[lang][key] || words.en[key] || key;
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-t]").forEach((el) => { el.textContent = t(el.dataset.t); });
+
+  // ---------- Pad state ----------
+  const B = { l3: 0x2, r3: 0x4, options: 0x8, up: 0x10, right: 0x20, down: 0x40, left: 0x80, l2: 0x100, r2: 0x200, l1: 0x400, r1: 0x800,
+              triangle: 0x1000, circle: 0x2000, cross: 0x4000, square: 0x8000, touch: 0x100000 };
+  const stage = document.getElementById("stage");
+  const prefs = (() => { try { return JSON.parse(localStorage.getItem("anyps5-pad") || "{}"); } catch { return {}; } })();
+  const savePrefs = () => { try { localStorage.setItem("anyps5-pad", JSON.stringify(prefs)); } catch {} };
+  const canVibrate = typeof navigator.vibrate === "function";
+  if (prefs.vibration === undefined) prefs.vibration = canVibrate;
+
+  const svg = (inner, box = "0 0 24 24") => `<svg viewBox="${box}" aria-hidden="true">${inner}</svg>`;
+  const glyph = {
+    triangle: svg('<path d="M12 4.2 20.4 18.6H3.6Z"/>'),
+    circle: svg('<circle cx="12" cy="12" r="7.6"/>'),
+    cross: svg('<path d="M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/>'),
+    square: svg('<rect x="5" y="5" width="14" height="14" rx="0.6"/>'),
+    arrow: svg('<path d="M12 5 20 17H4Z"/>'),
+    create: svg('<path d="M8 4v16M12 4v16M16 4v16"/>'),
+    options: svg('<path d="M4 7h16M4 12h16M4 17h16"/>'),
+    more: svg('<circle cx="6" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18" cy="12" r="1.3" fill="currentColor"/>'),
+  };
+
+  const el = (cls, html = "", parent = stage) => {
+    const node = document.createElement("div");
+    node.className = cls;
+    node.innerHTML = html;
+    parent.appendChild(node);
+    return node;
+  };
+
+  // Every control: its element, its kind and, once laid out, its place.
+  const controls = {
+    l2: { el: el("ctl key pill label", 'L2'), kind: "button", bit: B.l2, shape: "rect" },
+    l1: { el: el("ctl key pill label", 'L1'), kind: "button", bit: B.l1, shape: "rect" },
+    r2: { el: el("ctl key pill label", 'R2'), kind: "button", bit: B.r2, shape: "rect" },
+    r1: { el: el("ctl key pill label", 'R1'), kind: "button", bit: B.r1, shape: "rect" },
+    create: { el: el("ctl key pill sys", glyph.create), kind: "system", name: "create", shape: "rect" },
+    options: { el: el("ctl key pill sys", glyph.options), kind: "button", bit: B.options, shape: "rect" },
+    ps: { el: el("ctl key round label", '<span class="label">PS</span>'), kind: "system", name: "ps", shape: "circle" },
+    touchpad: { el: el("ctl", `<div class="lightbar l"></div><div class="lightbar r"></div><span class="hint">${t("touchpad")}</span>`), kind: "touchpad", shape: "rect" },
+    dpad: { kind: "dpad", shape: "circle" },
+    face: { kind: "face", shape: "circle" },
+    lstick: { kind: "stick", side: 0, shape: "zone" },
+    rstick: { kind: "stick", side: 1, shape: "zone" },
+  };
+  controls.touchpad.el.id = "touchpad";
+  controls.ps.el.id = "ps";
+  const dpadPlate = el("dpad-plate");
+  const arrows = {};
+  for (const [name, turn] of [["up", 0], ["right", 90], ["down", 180], ["left", 270]]) {
+    arrows[name] = el("ctl key arrow", glyph.arrow);
+    arrows[name].firstChild.style.transform = `rotate(${turn}deg)`;
+  }
+  const faces = {};
+  for (const name of ["triangle", "circle", "cross", "square"]) faces[name] = el(`ctl key round face ${name}`, glyph[name]);
+  const sticks = [0, 1].map(() => {
+    const base = el("stick-base", '<div class="stick-knob"></div>');
+    return { base, knob: base.firstChild, home: { x: 0, y: 0 }, at: { x: 0, y: 0 }, r: 1 };
+  });
+  const leds = el("", "<i></i><i></i><i></i><i></i><i></i>");
+  leds.id = "leds";
+  const chip = el("", `<span class="dot"></span><span class="host">AnyPS5</span><span class="ms"></span><button type="button" aria-label="${t("menuTitle")}">${glyph.more}</button>`);
+  chip.id = "chip";
+  const chipHost = chip.querySelector(".host"), chipMs = chip.querySelector(".ms");
+  // The chip's button opens the menu from pointerdown: the pad keeps touches from becoming clicks.
+  chip.querySelector("button").addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); showMenu(); } });
+  const fingerDots = [el("finger", "", controls.touchpad.el), el("finger", "", controls.touchpad.el)];
+  fingerDots.forEach((dot) => { dot.style.display = "none"; });
+
+  // ---------- Layout ----------
+  // Laid out for an 844 x 390 landscape phone and scaled; the extra width of longer phones
+  // goes between the two halves. Safe areas (the notch) are kept clear.
+  const probe = el("", "");
+  probe.style.cssText = "position:absolute;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
+  let W = 0, H = 0, s = 1;
+  const place = (node, x, y, w, h) => {
+    node.style.left = `${x}px`; node.style.top = `${y}px`; node.style.width = `${w}px`; node.style.height = `${h}px`;
+  };
+  function layout() {
+    W = window.innerWidth; H = window.innerHeight;
+    const pad = getComputedStyle(probe);
+    const inL = parseFloat(pad.paddingLeft) || 0, inR = parseFloat(pad.paddingRight) || 0;
+    const inB = parseFloat(pad.paddingBottom) || 0;
+    s = Math.max(0.6, Math.min(H / 390, (W - inL - inR) / 800, 1.6));
+    document.documentElement.style.setProperty("--s", s.toFixed(3));
+    const L = inL + 16 * s, R = W - inR - 16 * s;
+    const set = (c, x, y, w, h) => { c.x = x; c.y = y; c.w = w; c.h = h; if (c.el) place(c.el, x, y, w, h); };
+    set(controls.l2, L, 12 * s, 128 * s, 40 * s);
+    set(controls.l1, L, 60 * s, 128 * s, 36 * s);
+    set(controls.r2, R - 128 * s, 12 * s, 128 * s, 40 * s);
+    set(controls.r1, R - 128 * s, 60 * s, 128 * s, 36 * s);
+    const padW = Math.min(268 * s, W * 0.34), padH = 118 * s;
+    set(controls.touchpad, W / 2 - padW / 2, 14 * s, padW, padH);
+    set(controls.create, W / 2 - padW / 2 - 58 * s, 26 * s, 44 * s, 30 * s);
+    set(controls.options, W / 2 + padW / 2 + 14 * s, 26 * s, 44 * s, 30 * s);
+    leds.style.left = `${W / 2}px`; leds.style.top = `${14 * s + padH + 12 * s}px`;
+    const psR = 23 * s;
+    set(controls.ps, W / 2 - psR, 14 * s + padH + 34 * s, psR * 2, psR * 2);
+    controls.ps.cx = W / 2; controls.ps.cy = controls.ps.y + psR; controls.ps.r = psR;
+
+    // D-pad and face buttons, high on each side; sticks below and inwards, as on the pad.
+    const clusterY = 182 * s, clusterX = 118 * s;
+    const dp = controls.dpad;
+    dp.cx = L + clusterX - 16 * s; dp.cy = clusterY; dp.r = 70 * s;
+    const arm = 40 * s, size = 44 * s;
+    place(dpadPlate, dp.cx - dp.r, dp.cy - dp.r, dp.r * 2, dp.r * 2);
+    place(arrows.up, dp.cx - size / 2, dp.cy - arm - size / 2, size, size);
+    place(arrows.down, dp.cx - size / 2, dp.cy + arm - size / 2, size, size);
+    place(arrows.left, dp.cx - arm - size / 2, dp.cy - size / 2, size, size);
+    place(arrows.right, dp.cx + arm - size / 2, dp.cy - size / 2, size, size);
+    const fc = controls.face;
+    fc.cx = R - clusterX + 16 * s; fc.cy = clusterY; fc.r = 76 * s;
+    const faceR = 25 * s, spread = 45 * s;
+    fc.buttons = [["triangle", 0, -spread], ["circle", spread, 0], ["cross", 0, spread], ["square", -spread, 0]].map(([name, dx, dy]) => {
+      place(faces[name], fc.cx + dx - faceR, fc.cy + dy - faceR, faceR * 2, faceR * 2);
+      return { name, bit: B[name], x: fc.cx + dx, y: fc.cy + dy, r: faceR };
+    });
+    const stickR = 56 * s, stickY = H - inB - Math.max(70 * s, stickR + 14 * s);
+    [[controls.lstick, L + 236 * s], [controls.rstick, R - 236 * s]].forEach(([c, x], side) => {
+      const stick = sticks[side];
+      stick.r = stickR;
+      stick.home = { x: side ? Math.max(x, W / 2 + stickR + 60 * s) : Math.min(x, W / 2 - stickR - 60 * s), y: stickY };
+      place(stick.base, stick.home.x - stickR, stick.home.y - stickR, stickR * 2, stickR * 2);
+      stick.knob.style.width = stick.knob.style.height = `${stickR * 0.92}px`;
+      if (!stick.pointer) moveBase(stick, stick.home);
+      // A thumb anywhere in the lower half of its side takes the stick.
+      c.zone = side ? { x: W / 2 + 30 * s, y: 112 * s + padH * 0.2, w: W / 2, h: H } : { x: 0, y: 112 * s + padH * 0.2, w: W / 2 - 30 * s, h: H };
+    });
+    chip.style.left = `${W / 2}px`;
+    chip.style.top = `${H - inB - 46 * s}px`;
+  }
+  function moveBase(stick, at) {
+    stick.at = at;
+    stick.base.style.transform = `translate(${at.x - stick.home.x}px, ${at.y - stick.home.y}px)`;
+  }
+
+  // ---------- Touches ----------
+  const pointers = new Map();
+  const inRect = (c, x, y, slop = 0) => x >= c.x - slop && x <= c.x + c.w + slop && y >= c.y - slop && y <= c.y + c.h + slop;
+  const near = (cx, cy, r, x, y) => Math.hypot(x - cx, y - cy) <= r;
+
+  function claim(x, y) {
+    const slop = 8 * s;
+    for (const name of ["l2", "l1", "r2", "r1", "create", "options"]) if (inRect(controls[name], x, y, slop)) return name;
+    if (near(controls.ps.cx, controls.ps.cy, controls.ps.r + slop, x, y)) return "ps";
+    if (inRect(controls.touchpad, x, y)) return "touchpad";
+    if (near(controls.dpad.cx, controls.dpad.cy, controls.dpad.r, x, y)) return "dpad";
+    if (near(controls.face.cx, controls.face.cy, controls.face.r, x, y)) return "face";
+    const chipBox = chip.getBoundingClientRect();
+    if (x >= chipBox.left - 6 && x <= chipBox.right + 6 && y >= chipBox.top - 6 && y <= chipBox.bottom + 6) return "menu";
+    for (const name of ["lstick", "rstick"]) if (inRect(controls[name].zone, x, y)) return name;
+    return null;
+  }
+
+  function dpadBits(x, y) {
+    const c = controls.dpad, dx = x - c.cx, dy = y - c.cy;
+    if (Math.hypot(dx, dy) < c.r * 0.16) return 0;
+    // Eight ways: a diagonal within 22.5 degrees of one.
+    const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    const sector = Math.round(((angle + 360) % 360) / 45) % 8;
+    return [B.right, B.right | B.down, B.down, B.down | B.left, B.left, B.left | B.up, B.up, B.up | B.right][sector];
+  }
+
+  function faceBits(x, y) {
+    // Every button under the thumb, so one thumb can hold two that touch; the nearest close by.
+    let bits = 0, best = null, bestD = Infinity;
+    for (const b of controls.face.buttons) {
+      const d = Math.hypot(x - b.x, y - b.y);
+      if (d <= b.r * 1.08) bits |= b.bit;
+      if (d < bestD) { bestD = d; best = b; }
+    }
+    if (!bits && best && bestD <= best.r * 1.6) bits = best.bit;
+    return bits;
+  }
+
+  const lastStickTap = [0, 0];
+  function down(event) {
+    event.preventDefault();
+    tryFullscreenOnce();
+    const name = claim(event.clientX, event.clientY);
+    if (name === "menu") return showMenu();
+    if (!name) return;
+    const c = controls[name];
+    const p = { name, c, x: event.clientX, y: event.clientY, bits: 0, start: performance.now(), sx: event.clientX, sy: event.clientY };
+    try { stage.setPointerCapture(event.pointerId); } catch {}
+    if (c.kind === "button") p.bits = c.bit;
+    else if (c.kind === "system") send({ t: "btn", n: c.name });
+    else if (c.kind === "dpad") p.bits = dpadBits(p.x, p.y);
+    else if (c.kind === "face") p.bits = faceBits(p.x, p.y);
+    else if (c.kind === "stick") {
+      const stick = sticks[c.side];
+      if (stick.pointer !== undefined) return;
+      stick.pointer = event.pointerId;
+      // The stick comes to the thumb, kept on screen.
+      const r = stick.r;
+      const at = { x: Math.min(Math.max(p.x, r + 4), W - r - 4), y: Math.min(Math.max(p.y, c.zone.y + r * 0.4), H - r - 4) };
+      moveBase(stick, at);
+      stick.base.classList.add("held");
+      // A second tap straight after the first clicks it (L3 / R3) for as long as it is held.
+      const now = performance.now();
+      p.click = now - lastStickTap[c.side] < 300;
+      lastStickTap[c.side] = now;
+      if (p.click) { p.bits = c.side ? B.r3 : B.l3; stick.base.classList.add("click"); }
+    } else if (c.kind === "touchpad") {
+      p.touchId = (nextTouchId = (nextTouchId + 1) & 0x7f);
+    }
+    pointers.set(event.pointerId, p);
+    move(event);
+    // A press goes out at once, not with the next frame: no waiting, and no tap too short to send.
+    flush();
+  }
+  let nextTouchId = 0;
+
+  function move(event) {
+    const p = pointers.get(event.pointerId);
+    if (!p) return;
+    event.preventDefault();
+    p.x = event.clientX; p.y = event.clientY;
+    const c = p.c;
+    if (c.kind === "dpad") p.bits = dpadBits(p.x, p.y);
+    else if (c.kind === "face") p.bits = faceBits(p.x, p.y);
+    else if (c.kind === "stick") {
+      const stick = sticks[c.side];
+      let dx = p.x - stick.at.x, dy = p.y - stick.at.y;
+      const d = Math.hypot(dx, dy), max = stick.r * 0.82;
+      if (d > max) { dx *= max / d; dy *= max / d; }
+      stick.knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+      p.axis = [dx / max, dy / max];
+    }
+    dirty = true;
+  }
+
+  function up(event) {
+    const p = pointers.get(event.pointerId);
+    if (!p) return;
+    pointers.delete(event.pointerId);
+    const c = p.c;
+    if (c.kind === "stick") {
+      const stick = sticks[c.side];
+      stick.pointer = undefined;
+      stick.base.classList.remove("held", "click");
+      stick.knob.style.transform = "translate(-50%, -50%)";
+      moveBase(stick, stick.home);
+    } else if (c.kind === "touchpad") {
+      // A quick tap on the touchpad clicks it.
+      if (performance.now() - p.start < 260 && Math.hypot(p.x - p.sx, p.y - p.sy) < 24 * s) {
+        tapUntil = performance.now() + 90;
+        setTimeout(() => { dirty = true; }, 100);
+      }
+    }
+    dirty = true;
+    flush();
+  }
+  let tapUntil = 0;
+
+  stage.addEventListener("pointerdown", down, { passive: false });
+  stage.addEventListener("pointermove", move, { passive: false });
+  stage.addEventListener("pointerup", up);
+  stage.addEventListener("pointercancel", up);
+  for (const type of ["touchstart", "touchmove", "touchend", "gesturestart", "gesturechange", "dblclick", "contextmenu"]) {
+    document.addEventListener(type, (event) => { if (event.target.closest && !event.target.closest("#veil")) event.preventDefault(); }, { passive: false });
+  }
+
+  // ---------- The state on the wire ----------
+  let dirty = true, lastSent = "", sentAt = 0, lastBits = 0;
+  function current() {
+    let b = 0;
+    const axes = [128, 128, 128, 128];
+    const tp = [];
+    for (const p of pointers.values()) {
+      b |= p.bits;
+      if (p.c.kind === "stick" && p.axis) {
+        axes[p.c.side * 2] = Math.round(128 + p.axis[0] * 127);
+        axes[p.c.side * 2 + 1] = Math.round(128 + p.axis[1] * 127);
+      } else if (p.c.kind === "touchpad" && tp.length < 2) {
+        const c = p.c;
+        tp.push([p.touchId, Math.round(((p.x - c.x) / c.w) * 1919), Math.round(((p.y - c.y) / c.h) * 1079)]);
+      }
+    }
+    if (performance.now() < tapUntil) b |= B.touch;
+    return { t: "pad", b, s: axes.map((v) => Math.max(0, Math.min(255, v))), l2: b & B.l2 ? 255 : 0, r2: b & B.r2 ? 255 : 0, tp };
+  }
+
+  function paint(state) {
+    const b = state.b;
+    for (const name of ["l2", "l1", "r2", "r1", "options"]) controls[name].el.classList.toggle("on", !!(b & controls[name].bit));
+    for (const name of ["up", "down", "left", "right"]) arrows[name].classList.toggle("on", !!(b & B[name]));
+    for (const name of ["triangle", "circle", "cross", "square"]) faces[name].classList.toggle("on", !!(b & B[name]));
+    let systemHeld = { ps: false, create: false };
+    for (const p of pointers.values()) if (p.c.kind === "system") systemHeld[p.c.name] = true;
+    controls.ps.el.classList.toggle("on", systemHeld.ps);
+    controls.create.el.classList.toggle("on", systemHeld.create);
+    controls.touchpad.el.classList.toggle("on", !!(b & B.touch));
+    state.tp.forEach((point, index) => {
+      fingerDots[index].style.display = "block";
+      fingerDots[index].style.left = `${(point[1] / 1919) * 100}%`;
+      fingerDots[index].style.top = `${(point[2] / 1079) * 100}%`;
+    });
+    for (let index = state.tp.length; index < 2; index++) fingerDots[index].style.display = "none";
+    const pressed = b & ~lastBits;
+    if (pressed && prefs.vibration && canVibrate && !rumbling) navigator.vibrate(8);
+    lastBits = b;
+  }
+
+  function flush() {
+    dirty = false;
+    const state = current();
+    paint(state);
+    const text = JSON.stringify(state);
+    if (text !== lastSent && welcomed) { send(state); lastSent = text; sentAt = performance.now(); }
+  }
+  // Moves are sent once a frame, whatever the touch rate.
+  function frame() {
+    if (dirty) flush();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  // The same pad again every 200 ms while nothing changes: the launcher lets go of a pad it
+  // has not heard from in a while.
+  setInterval(() => {
+    if (welcomed && performance.now() - sentAt >= 190) { send(current()); sentAt = performance.now(); }
+  }, 200);
+
+  // ---------- The launcher ----------
+  let socket = null, welcomed = false, opened = false, failures = 0, finished = false, hostName = "AnyPS5";
+  function send(message) {
+    if (socket && socket.readyState === 1) socket.send(JSON.stringify(message));
+  }
+  function connect() {
+    if (finished) return;
+    socket = new WebSocket(`ws://${location.host}/ws`);
+    let thisOpened = false;
+    socket.onopen = () => { thisOpened = opened = true; failures = 0; };
+    socket.onmessage = (event) => {
+      let m;
+      try { m = JSON.parse(event.data); } catch { return; }
+      heard(m);
+    };
+    socket.onclose = (event) => {
+      welcomed = false;
+      chip.classList.remove("ok");
+      releaseAll();
+      if (finished) return;
+      if (!thisOpened) {
+        // Refused before it opened: no session (a spent or old link), after a second try.
+        failures += 1;
+        if (failures >= 2 && !opened) return finish("expired");
+      }
+      if (opened) showCard("lost");
+      setTimeout(connect, Math.min(4000, 600 * Math.max(1, failures)));
+    };
+  }
+  function heard(m) {
+    switch (m.t) {
+      case "wait": showCard(welcomed ? "lost" : "connecting"); break;
+      case "pairing": showCard("pair", m.code); break;
+      case "busy": welcomed = false; showCard("busy"); break;
+      case "welcome":
+        welcomed = true; hostName = m.host || "AnyPS5";
+        chipHost.textContent = hostName;
+        chip.classList.add("ok");
+        hideCard();
+        dirty = true; lastSent = "";
+        break;
+      case "rejected": finish(m.reason === "denied" ? "denied" : m.reason === "protocol" ? "protocol" : "expired"); break;
+      case "out": output(m); break;
+      case "player": setPlayer(m.n); break;
+      case "look": look(m); break;
+      case "pong": {
+        const ms = Math.max(1, Math.round(performance.now() - m.at));
+        chipMs.textContent = `${ms} ${t("ms")}`;
+        send({ t: "lat", ms });
+        break;
+      }
+    }
+  }
+  setInterval(() => { if (welcomed) send({ t: "ping", at: performance.now() }); }, 2000);
+
+  function finish(kind) {
+    finished = true;
+    welcomed = false;
+    showCard(kind);
+    try { socket && socket.close(); } catch {}
+  }
+
+  function releaseAll() {
+    for (const [id, p] of pointers) up({ pointerId: id, clientX: p.x, clientY: p.y });
+    pointers.clear();
+    dirty = true;
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { releaseAll(); send(current()); }
+  });
+
+  // DualSense's player lights: one, two, three or four of five.
+  const ledPattern = { 1: [0, 0, 1, 0, 0], 2: [0, 1, 0, 1, 0], 3: [1, 0, 1, 0, 1], 4: [1, 1, 0, 1, 1] };
+  function setPlayer(n) {
+    const pattern = ledPattern[n] || [0, 0, 0, 0, 0];
+    [...leds.children].forEach((led, index) => led.classList.toggle("lit", !!pattern[index]));
+    leds.title = n ? `${t("player")} ${n}` : "";
+  }
+
+  // The game's light bar, and its rumble as the phone's buzz: a browser cannot vary how strong,
+  // so how much of every 100 ms it buzzes stands for it.
+  let rumbling = false, rumbleLevel = 0, rumbleTimer = null;
+  function output(m) {
+    if (m.rgb) document.documentElement.style.setProperty("--light", m.rgb);
+    rumbleLevel = Math.max(m.big || 0, (m.small || 0) * 0.6) / 255;
+    document.body.classList.toggle("rumble", rumbleLevel > 0.04);
+    if (rumbleLevel > 0.04 && prefs.vibration && canVibrate) {
+      if (!rumbleTimer) {
+        const pulse = () => {
+          if (rumbleLevel <= 0.04 || !prefs.vibration) { rumbleTimer = null; rumbling = false; navigator.vibrate(0); return; }
+          rumbling = true;
+          navigator.vibrate(Math.max(12, Math.round(100 * rumbleLevel)));
+          rumbleTimer = setTimeout(pulse, 100);
+        };
+        pulse();
+      }
+    }
+  }
+
+  function look(m) {
+    const hex = (v) => /^#[0-9a-f]{6}$/i.test(v || "");
+    const root = document.documentElement.style;
+    if (hex(m.accent)) root.setProperty("--accent", m.accent);
+    if (!matchMedia("(prefers-color-scheme: light)").matches) {
+      if (hex(m.deep)) root.setProperty("--deep", m.deep);
+      if (hex(m.middle)) root.setProperty("--middle", m.middle);
+    }
+  }
+
+  // ---------- Cards ----------
+  const veil = document.getElementById("veil"), card = document.getElementById("card");
+  const marks = {
+    phone: svg('<rect x="7" y="2.5" width="10" height="19" rx="2.4"/><path d="M10.5 18.5h3"/><path d="M19.5 7.5a6 6 0 0 1 0 9M21.8 5.2a9.5 9.5 0 0 1 0 13.6" />'),
+    seat: svg('<circle cx="12" cy="8" r="3.4"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>'),
+    stop: svg('<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/>'),
+    qr: svg('<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 18.5v2M18.5 14h2"/>'),
+    wifi: svg('<path d="M2.5 9a14 14 0 0 1 19 0M5.8 12.4a9.2 9.2 0 0 1 12.4 0M9.1 15.8a4.4 4.4 0 0 1 5.8 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/>'),
+  };
+  const escape = (text) => String(text).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+  let cardKind = null;
+  function showCard(kind, code) {
+    const key = kind + (code || "");
+    if (cardKind === key) return;
+    cardKind = key;
+    const spec = {
+      connecting: ["wifi", "connecting", "connectingText", true],
+      pair: ["phone", "pairTitle", "pairText", false],
+      busy: ["seat", "busyTitle", "busyText", true],
+      denied: ["stop", "deniedTitle", "deniedText", false],
+      expired: ["qr", "expiredTitle", "expiredText", false],
+      lost: ["wifi", "lostTitle", "lostText", true],
+      protocol: ["stop", "protocolTitle", "protocolText", false],
+    }[kind];
+    const [mark, title, text, spin] = spec;
+    const digits = code ? `<div class="code" aria-label="${escape(code)}">${[...String(code)].map((d) => `<b>${escape(d)}</b>`).join("")}</div>` : "";
+    const retry = kind === "expired" || kind === "denied" ? `<div class="actions"><button class="btn" type="button" id="again">${t("tryAgain")}</button></div>` : "";
+    card.innerHTML = `<div class="mark">${marks[mark]}</div><h1>${t(title)}</h1>${digits}<p>${t(text)}</p>${spin ? '<div class="spinner" role="progressbar"></div>' : ""}${retry}`;
+    card.style.animation = "none"; void card.offsetWidth; card.style.animation = "";
+    const again = document.getElementById("again");
+    if (again) again.addEventListener("click", () => location.reload());
+    veil.classList.remove("hidden");
+  }
+  function hideCard() { cardKind = null; veil.classList.add("hidden"); }
+
+  function showMenu() {
+    cardKind = "menu";
+    const canFull = !!document.documentElement.requestFullscreen;
+    card.innerHTML = `<h1 style="margin-bottom:12px">${t("menuTitle")}</h1>
+      <div class="row"><div><span>${t("vibration")}</span><small>${canVibrate ? t("vibrationText") : t("vibrationNone")}</small></div>
+        <button class="switch" type="button" role="switch" id="vib" aria-label="${t("vibration")}" aria-checked="${!!prefs.vibration && canVibrate}" ${canVibrate ? "" : "disabled"}></button></div>
+      ${canFull ? "" : `<div class="row"><div><span>${t("fullscreen")}</span><small>${t("homeScreen")}</small></div></div>`}
+      <div class="actions">${canFull ? `<button class="btn" type="button" id="full">${t("fullscreen")}</button>` : ""}
+        <button class="btn" type="button" id="leave">${t("leave")}</button><button class="btn primary" type="button" id="done">${t("done")}</button></div>`;
+    veil.classList.remove("hidden");
+    const vib = document.getElementById("vib");
+    vib.addEventListener("click", () => {
+      prefs.vibration = !prefs.vibration; savePrefs();
+      vib.setAttribute("aria-checked", String(prefs.vibration));
+      if (prefs.vibration) navigator.vibrate(20);
+    });
+    document.getElementById("done").addEventListener("click", hideCard);
+    document.getElementById("leave").addEventListener("click", () => { releaseAll(); send(current()); finished = true; try { socket.close(); } catch {} showCard("expired"); });
+    const full = document.getElementById("full");
+    if (full) full.addEventListener("click", () => { goFullscreen(); hideCard(); });
+  }
+
+  // Full screen and landscape where the browser allows it (Android); iPhones need the Home Screen.
+  let triedFullscreen = false;
+  function goFullscreen() {
+    const root = document.documentElement;
+    if (!root.requestFullscreen || document.fullscreenElement) return;
+    root.requestFullscreen({ navigationUI: "hide" }).then(() => {
+      if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {});
+    }).catch(() => {});
+  }
+  function tryFullscreenOnce() {
+    if (triedFullscreen || !welcomed || !/Android/i.test(navigator.userAgent)) return;
+    triedFullscreen = true;
+    goFullscreen();
+  }
+
+  window.addEventListener("resize", () => { layout(); dirty = true; });
+  window.addEventListener("orientationchange", () => setTimeout(layout, 120));
+  layout();
+  setPlayer(0);
+  showCard("connecting");
+  // Screenshots and checks can drive the page without a launcher: #demo=pad|pair|busy|expired.
+  const demo = new URLSearchParams(location.hash.slice(1)).get("demo");
+  if (demo) {
+    finished = demo !== "pad";
+    if (demo === "pad") { heard({ t: "welcome", host: "Utku's MacBook Pro" }); setPlayer(2); chipMs.textContent = "9 ms"; }
+    else if (demo === "pair") showCard("pair", "4821");
+    else showCard(demo);
+    window.anyps5Pad = { heard, current: () => current() };
+  } else {
+    connect();
+  }
+})();
+</script>
+</body>
+</html>
