@@ -8,18 +8,8 @@
 #include <cstdlib>
 #include <cstring>
 
-// FreeBSD code reaches its thread pointer through %fs, and macOS cannot set the fs base. The macOS
-// relinker turns every guest %fs access into a stub that reads the image's thread pointer from the
-// pthread key in the image's TLS descriptor (as pthread_getspecific does, through %gs) and, on a
-// thread's first access, calls Aps5GuestTlsAllocate with the descriptor. Each guest image (the
-// executable and every bundled module) has its own descriptor, key and block; the image's initializer
-// registers the descriptor before any guest code runs. The thread pointer follows the block (variant
-// II) and points at itself, as on FreeBSD; dynamic TLS reaches a module's block through
-// Aps5GuestTlsGetAddr, which stands in for __tls_get_addr with the descriptor as the module id.
-
 namespace {
 
-// Written by the relinker into __APS5DATA,__meta; see MacOsImage.cpp.
 struct GuestTlsDescriptor {
     std::uint64_t version;
     std::uint64_t templateAddress;
@@ -34,8 +24,6 @@ struct TlsIndex {
     std::uint64_t offset;
 };
 
-// The guest's thread control block: the self pointer, the DTV and the stack guard at 0x28. The last
-// slot keeps the start of the allocation for the key destructor.
 constexpr std::size_t ThreadControlBlockBytes = 0x100;
 constexpr std::size_t AllocationSlot = ThreadControlBlockBytes - sizeof(void*);
 
@@ -52,8 +40,10 @@ void Release(void* threadPointer) {
 
 extern "C" {
 
-// Whether the allocation stub has to keep the upper halves of the ymm registers.
-std::uint8_t Aps5GuestTlsAvx_nid_no_patch = __builtin_cpu_supports("avx") ? 1 : 0;
+std::uint8_t Aps5GuestTlsAvx_nid_no_patch = [] {
+    __builtin_cpu_init();
+    return __builtin_cpu_supports("avx") ? 1 : 0;
+}();
 
 void Aps5GuestTlsRegister_nid_no_patch(GuestTlsDescriptor* descriptor) {
     if (descriptor == nullptr || descriptor->version != 1) Fail("unknown TLS descriptor");
@@ -80,7 +70,6 @@ void* Aps5GuestTlsAllocateThreadPointer_nid_no_patch(const GuestTlsDescriptor* d
     return threadPointer;
 }
 
-// __tls_get_addr for guest modules: the block start plus the offset (DTPOFF is block-relative).
 void* Aps5GuestTlsGetAddr_nid_no_patch(const TlsIndex* index) {
     const auto* descriptor = index->module;
     auto* threadPointer = static_cast<std::uint8_t*>(pthread_getspecific(static_cast<pthread_key_t>(descriptor->key)));
@@ -90,8 +79,6 @@ void* Aps5GuestTlsGetAddr_nid_no_patch(const TlsIndex* index) {
 
 }
 
-// rax = descriptor in, rax = thread pointer out. Called from rewritten guest code, so every other
-// register is preserved (the stubs keep the flags themselves).
 asm(R"(
     .text
     .globl _Aps5GuestTlsAllocate_nid_no_patch

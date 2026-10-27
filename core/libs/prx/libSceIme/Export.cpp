@@ -1,3 +1,4 @@
+#include "prx/libSceIme/include/Api.hpp"
 #include <atomic>
 #include <algorithm>
 #include <cstdint>
@@ -15,25 +16,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libSceIme/include/ImeFilterText.hpp"
 #include "prx/libSceIme/include/ImeInput.hpp"
-
-struct ImeVshContext;
-struct ImeVshParameter;
-struct ImePreeditMetaInfo;
-struct ImeDictionaryWord;
-
-struct ImeVshCaretGeometry {
-    std::int32_t x;
-    std::int32_t y;
-    std::uint32_t height;
-    std::uint32_t index;
-};
-
-struct ImeVshTextGeometry {
-    std::int32_t x;
-    std::int32_t y;
-    std::uint32_t width;
-    std::uint32_t height;
-};
+#include "prx/libSceIme/include/ImeKeyboardView.hpp"
 
 static_assert(sizeof(ImeEditText) == 64);
 static_assert(offsetof(ImeEvent, param) == 8);
@@ -105,6 +88,8 @@ std::set<int32_t> g_openKeyboards;
 std::mutex g_imeMutex;
 std::optional<Session> g_session;
 std::atomic<ImeHostTextSink> g_textSink{nullptr};
+std::atomic<ImeHostPadSink> g_padSink{nullptr};
+std::atomic<ImeKeyboardViewProvider> g_viewProvider{nullptr};
 std::uint64_t g_nextSessionId = 0;
 
 bool IsHighSurrogateUnit(char16_t unit) { return unit >= 0xd800 && unit <= 0xdbff; }
@@ -477,6 +462,27 @@ std::uint32_t ImeGetHostPrompt_nid_postfix(ImeHostPrompt* prompt) {
     return g_promptRevision.load();
 }
 
+bool ImeCapturesPad_nid_postfix() {
+    return g_padSink.load() != nullptr;
+}
+
+void ImePublishPad_nid_postfix(const ImeHostPad& pad) {
+    if (const ImeHostPadSink sink = g_padSink.load()) sink(pad);
+}
+
+void ImeSetHostPadSink_nid_no_patch(ImeHostPadSink sink) {
+    g_padSink = sink;
+}
+
+void ImeSetKeyboardViewProvider_nid_no_patch(ImeKeyboardViewProvider provider) {
+    g_viewProvider = provider;
+}
+
+bool ImeReadKeyboardView_nid_postfix(ImeKeyboardView& view) {
+    const ImeKeyboardViewProvider provider = g_viewProvider.load();
+    return provider != nullptr && provider(view);
+}
+
 int APS5_VABI sceImeOpen_nid_postfix(const Param* param, const ExtendedParam* extended) {
     std::lock_guard lock(g_imeMutex);
     if (g_session) return ErrorBusy;
@@ -553,7 +559,7 @@ int APS5_VABI sceImeKeyboardGetResourceId(int32_t user_id, KeyboardResourceIdArr
 }
 
 int APS5_VABI sceImeKeyboardOpen(int32_t user_id, const KeyboardParam* param) {
- if (!param) APS5_INVALID_ARG_EX;
+ if (!param) return ErrorInvalidAddress;
  std::lock_guard lock(g_keyboardMutex);
  if (!g_openKeyboards.insert(user_id).second) return ErrorBusy;
  return 0;
@@ -621,7 +627,7 @@ int APS5_VABI sceImeSetTextGeometry(TextAreaMode mode, const TextGeometry* geome
 }
 
 int APS5_VABI sceImeUpdate(EventHandler handler) {
-    if (!handler) APS5_INVALID_ARG_EX;
+    if (!handler) return ErrorInvalidHandler;
     for (;;) {
         ImeEvent event{};
         void* arg = nullptr;

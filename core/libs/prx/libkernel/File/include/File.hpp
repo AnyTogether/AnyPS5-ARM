@@ -41,10 +41,11 @@ int HostStandardOutput();
 void SharePositionedTransfer(int from, int to);
 #ifdef _WIN32
 std::int64_t WriteAtEnd(int descriptor, const void* buf, std::size_t nbytes);
+#elif defined(__APPLE__)
+std::int64_t WritevAtEnd(int descriptor, const iovec* iov, int iovcnt);
 #endif
 #ifdef __APPLE__
 [[nodiscard]] std::unique_lock<std::mutex> LockAppendOffset(int descriptor);
-std::int64_t AppendKeepingOffset(int descriptor, const struct iovec* vectors, int count);
 #endif
 }
 

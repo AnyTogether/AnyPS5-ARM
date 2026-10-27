@@ -10,10 +10,6 @@
 extern "C" void Aps5RunOnMainThread_nid_no_patch(void (*function)(void*), void* context);
 #endif
 
-// AppKit only works on the main thread: SDL's Cocoa windows, Metal surfaces, event pumping and game
-// controllers. On macOS the relinked executable runs the guest on another thread and keeps the main
-// thread in a run loop (libkernel's Aps5StartGuest), so those SDL calls go there and their exceptions
-// come back to the caller. Other platforms run them in place.
 template <class Function>
 std::invoke_result_t<Function&> OnMainThread(Function&& function) {
 #ifdef __APPLE__

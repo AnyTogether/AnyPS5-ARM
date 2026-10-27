@@ -1,3 +1,4 @@
+#include "prx/libSceVideoRecordingP/include/Api.hpp"
 #include <cstdint>
 #include <cstddef>
 #include "SceTypes.hpp"
@@ -5,48 +6,11 @@
 #include <stdexcept>
 #include <string>
 
-struct VideoRecordingContext;
-
-struct VideoRecordingQueryParam {
-    std::uint64_t size;
-    std::uint32_t reserved8;
-    std::int32_t mode;
-    std::uint8_t reserved16[12];
-    std::uint32_t option;
-    std::uint8_t reserved32[32];
-};
-
 static_assert(sizeof(VideoRecordingQueryParam) == 64);
 static_assert(offsetof(VideoRecordingQueryParam, mode) == 12);
 static_assert(offsetof(VideoRecordingQueryParam, option) == 28);
 
-
-struct VideoRecordingSupportInfo {
-    std::uint8_t data[18];
-};
-
 static_assert(sizeof(VideoRecordingSupportInfo) == 18);
-
-struct VideoRecordingParam {
-    std::uint64_t size;
-    std::int32_t threadPriority;
-    std::uint32_t duration;
-    std::uint32_t mode;
-    std::int32_t outputMode;
-    std::uint32_t option;
-    std::uint32_t format;
-};
-
-struct VideoRecordingParam2 {
-    std::uint64_t size;
-    std::uint64_t affinityMask;
-    std::int32_t threadPriority;
-    std::uint32_t duration;
-    std::uint32_t mode;
-    std::int32_t outputMode;
-    std::uint32_t option;
-    std::uint32_t format;
-};
 
 static_assert(sizeof(VideoRecordingParam) == 32);
 static_assert(offsetof(VideoRecordingParam, duration) == 12);

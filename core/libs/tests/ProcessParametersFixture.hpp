@@ -15,6 +15,7 @@
 #include <unistd.h>
 #elif defined(__APPLE__)
 #include "prx/libc/include/specifics/linux/ElfTypes.hpp"
+#include <array>
 #endif
 
 namespace ProcessParametersFixture {
@@ -23,15 +24,7 @@ namespace {
 #ifdef _WIN32
 [[gnu::section(".proctst"), gnu::used]] alignas(4) std::uint32_t metadata[2]{};
 #elif defined(__APPLE__)
-struct ImageMetadata {
-    std::uint64_t version;
-    std::uint64_t loadBias;
-    std::uint64_t runtime[9];
-    std::uint64_t headerCount;
-    Elf64_Phdr headers[2];
-};
-static_assert(offsetof(ImageMetadata, headerCount) == 0x58 && offsetof(ImageMetadata, headers) == 0x60);
-[[gnu::section("__APS5DATA,__meta"), gnu::used]] alignas(8) ImageMetadata metadata{};
+[[gnu::section("__APS5DATA,__meta"), gnu::used]] alignas(8) std::array<std::byte, 0x60 + 2 * sizeof(Elf64_Phdr)> metadata{};
 #endif
 
 bool Install(std::byte* process, std::size_t size) {
@@ -93,12 +86,22 @@ bool Install(std::byte* process, std::size_t size) {
     }, &request);
     return request.installed;
 #elif defined(__APPLE__)
-    const auto address = reinterpret_cast<std::uintptr_t>(process);
-    metadata.loadBias = 0;
-    metadata.headers[0] = Elf64_Phdr{PT_LOAD, PF_R | PF_W, 0, address, address, size, size, 1};
-    metadata.headers[1] = Elf64_Phdr{0x61000001, PF_R, 0, address, address, size, size, 8};
-    metadata.headerCount = 2;
-    metadata.version = 2;
+    const std::uint64_t version = 2;
+    const std::uint64_t loadBias = 0;
+    const std::uint64_t count = 2;
+    std::memcpy(metadata.data(), &version, sizeof(version));
+    std::memcpy(metadata.data() + 0x08, &loadBias, sizeof(loadBias));
+    std::memcpy(metadata.data() + 0x58, &count, sizeof(count));
+    Elf64_Phdr headers[2]{};
+    headers[0].p_type = PT_LOAD;
+    headers[1].p_type = 0x61000001;
+    for (auto& header : headers) {
+        header.p_vaddr = reinterpret_cast<std::uintptr_t>(process);
+        header.p_paddr = header.p_vaddr;
+        header.p_filesz = size;
+        header.p_memsz = size;
+    }
+    std::memcpy(metadata.data() + 0x60, headers, sizeof(headers));
     return true;
 #else
     return false;

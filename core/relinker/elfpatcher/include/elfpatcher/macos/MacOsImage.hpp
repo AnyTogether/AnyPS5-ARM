@@ -46,6 +46,12 @@ struct MacOsTlsExport {
     std::uint64_t Flags = 0;
 };
 
+struct MacOsTraceImport {
+    std::uint32_t Rva;
+    std::string Name;
+    std::string Library;
+};
+
 // A guest image laid out by WindowsLoadImage (ImageBase + RVA, relocations already written) and what
 // the Mach-O writer adds around it. dyld rebases the Rebases slots, binds the Binds slots and loads the
 // Dylibs in order; flat-namespace lookups then search the images in that load order.
@@ -73,6 +79,8 @@ struct MacOsImageInput {
     std::vector<MacOsTlsExport> TlsExports;
     // --to-intel: AMD-only instructions that jump to an out-of-line stub (in __AMDSTUB).
     const std::vector<Codegen::TrampolineSite>* Trampolines = nullptr;
+    bool TraceImports = false;
+    std::vector<MacOsTraceImport> Traced;
     std::function<void(std::string_view)> Message;
 };
 
