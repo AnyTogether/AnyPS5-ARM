@@ -1,0 +1,26 @@
+# Engine tests that AnyTogether CI (.github/workflows/anytogether-ci.yml) leaves out of ctest.
+#
+# Every line: <platforms> <test name, a regular expression for the whole name> <reason>
+#   platforms: all, or a comma list of linux, windows, macos
+# Only add a test here when it fails on main too (a known, tracked failure) or when it depends on the
+# runner rather than the code (timing under load, real network, a GPU the runner lacks). A test that
+# a pull request breaks is a regression: fix it, do not list it.
+
+# Known failures of the fork on every host (tracked in docs/dev/MACOS_PORT.md and the merge notes).
+all     net_dontwait_.*                 Non-blocking socket timing; fails since the eighth upstream merge.
+all     guest_sce_net                   Needs real network interfaces the runners do not expose the way the test expects.
+all     guest_update_env                Known failure since the upstream merges (update environment probing).
+all     guest_floating_point            x87/denormal modes differ from the console (Rosetta and host libm).
+all     guest_math                      _FSinh and friends round differently on the host libm.
+all     guest_math_exact                Bit-exact libm results the host libm does not give.
+
+# Timing tests: they measure wall-clock sleeps, which a shared runner cannot keep.
+all     precise_wait                    Spin/sleep deadline test; upstream's own release job leaves it out too.
+
+# macOS under Rosetta (MoltenVK is not installed on the runner, so GPU tests skip themselves).
+macos   macos_fixtures                  Its argv fixture ends in int3, which stays exiting in the kernel under Rosetta.
+macos   guest_kernel_fcntl              Flaky under parallel ctest on macOS.
+macos   agc_thread_priority_refused_rt  Expects a refused real-time priority request to throw; macOS grants it.
+macos   agc_thread_priority_refused_high  Same as above, high priority.
+macos   agc_driver_pm4_priority_refused Same as above, for the PM4 queue priority.
+macos   agc_shared_write                Cannot inspect mapping lifetimes on macOS.
