@@ -20,6 +20,7 @@ all     agc_layer_input                 "a Layer input on a device with geometry
 linux   agc_driver_sampled_cache_budget(_without_storage_image_multisample)?  The runner's lavapipe heap gives a sampled texture budget below the 2 GiB floor the test asks for.
 linux   agc_driver                      Fails on main on lavapipe ("a small copy whose source the GPU still stores into was not recorded on the GPU"); needs a look.
 linux   guest_sysmodule(_maps_scan)?    Aborts on Linux on main (passes on macOS); needs a look.
+linux   agc_driver_optimize_on_fiber    Needs SPIRV-Tools, which the fork's builds leave off (it would only report a skip). With SPIRV-Tools on, agc_spirv_optimizer* and agc_driver_pixel_sample_iteration fail on main too.
 
 # Windows: real failures on main, to fix (WinLibs GCC 15.2, as the owner's Windows builds).
 windows prx_thread_local_destructors    libkernel (dl*_nid_postfix, LoadFailure) and AgcDriver (LockStats) register thread_local destructors, which run after emulated TLS is freed on Windows; they belong in HostThreadLocal.
@@ -44,5 +45,6 @@ macos   guest_kernel_app_archive_mmap   Known macOS failure: mmap of a file read
 macos   font_face_lifetime(_replace|_churn)?  The test finishes, then its process does not exit within the timeout under Rosetta on the runner.
 macos   guest_memory_lifetime           Its exit probe times out under Rosetta on the runner.
 macos   guest_ssl_transport_(kernel|net)  On the runner a server certificate passes the initial verify without a loaded CA (its trust store differs); needs a look.
+macos   guest_avplayer                  Its EOF stop latency must stay under 10 ms; the macOS runner under parallel ctest misses that now and then (14 ms seen).
 macos   guest_poll                      Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.
 macos   guest_socket_pair               Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.
