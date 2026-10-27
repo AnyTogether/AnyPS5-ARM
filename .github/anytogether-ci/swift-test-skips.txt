@@ -1,0 +1,6 @@
+# Tests AnyTogether CI leaves out of the Mac launcher's `swift test` (tools/macos/launcher), one per line:
+# <regular expression for Target.TestCase/test> <reason>
+# Only for tests that depend on the runner rather than the code (real-time timing, devices).
+
+AnyPS5SharePlayTests.SharePlayOpusTests/testAViewerSayingHelloHearsStereoOpus  Real-time WebRTC audio: the jitter buffer and packet rate it measures go past its limits on a shared runner.
+AnyPS5CoreTests.BrowserPadServerTests/testABrowserScansPairsAndDrivesTheGame  Real-time: counts the pad keep-alive repeats within 1.5 s of wall clock, which a busy runner does not always reach.

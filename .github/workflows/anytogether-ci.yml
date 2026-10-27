@@ -1,0 +1,467 @@
+# AnyTogether's own CI for AnyPS5-ARM. Upstream's workflows (build.yml, release.yml, labels, pages,
+# ...) stay in the tree untouched so upstream merges do not conflict; they are disabled in the repo's
+# Actions settings instead. The one required check is `ci-ok`, which sums up every job below.
+name: AnyTogether CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anytogether-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FLUTTER_VERSION: 3.47.1
+  WINLIBS_RELEASE: 15.2.0posix-14.0.0-ucrt-r7
+  WINLIBS_ZIP: winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip
+  KNOWN_FAILURES: .github/anytogether-ci/ctest-known-failures.txt
+
+jobs:
+  # Named eligibility for upstream's ci-gate convention (tools/check_conventions.py, run by ctest):
+  # every pull request job needs it and an if on its outputs.
+  eligibility:
+    name: Changed parts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      engine: ${{ steps.filter.outputs.engine }}
+      launcher: ${{ steps.filter.outputs.launcher }}
+      mobile: ${{ steps.filter.outputs.mobile }}
+    steps:
+      # The pull request's merge commit (or the pushed commit) and its first parent are enough to list
+      # what changed; no file contents are needed.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          filter: blob:none
+          sparse-checkout: .github
+          persist-credentials: false
+      - id: filter
+        shell: bash
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] || ! git rev-parse -q --verify HEAD^1 >/dev/null; then
+            echo "Running every part"
+            printf 'engine=true\nlauncher=true\nmobile=true\n' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD > changed.txt
+          echo "$(wc -l < changed.txt) changed files"
+          ci='^\.github/(workflows/anytogether-ci\.yml|anytogether-ci/)'
+          match() { grep -Eq "$1|$ci" changed.txt && echo true || echo false; }
+          {
+            echo "engine=$(match '^(core|cmake|3rdparty)/|(^|/)CMakeLists\.txt$|\.cmake$|^\.gitmodules$|^tools/check_skips\.py$')"
+            echo "launcher=$(match '^tools/macos/launcher/')"
+            echo "mobile=$(match '^mobile/')"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------- engine
+
+  # The Linux engine that ships: built on Ubuntu 22.04 with GCC 12, so it asks for glibc 2.35 and
+  # GCC 12's libstdc++ at most (docs/dev/WINDOWS_LINUX_ENGINE.md).
+  engine-linux:
+    name: Engine (Linux build, Ubuntu 22.04, GCC 12)
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install GCC 12, Ninja and the audio/display development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-12 ninja-build pkg-config \
+            libpipewire-0.3-dev libdecor-0-dev libvulkan-dev libx11-dev libxext-dev libxrandr-dev \
+            libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: engine-linux
+          max-size: 2G
+          evict-old-files: job
+      - id: ffmpeg
+        run: echo "commit=$(git rev-parse HEAD:3rdparty/ffmpeg-core)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: build/externals
+          key: ffmpeg-linux-${{ steps.ffmpeg.outputs.commit }}
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Build the relinker and the patched libraries
+        run: cmake --build build --target relinker libs
+      - name: Check the glibc and libstdc++ floor (2.35, GCC 12)
+        run: |
+          glibc=$(objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          glibcxx=$(objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBCXX_[0-9.]*' | sort -uV | tail -1)
+          echo "highest symbol versions: $glibc $glibcxx"
+          printf '%s\n' "$glibc" GLIBC_2.35 | sort -CV || { echo "::error::The engine needs $glibc, newer than Ubuntu 22.04's glibc 2.35"; exit 1; }
+          printf '%s\n' "$glibcxx" GLIBCXX_3.4.30 | sort -CV || { echo "::error::The engine needs $glibcxx, newer than GCC 12's libstdc++"; exit 1; }
+
+  # The whole build and ctest on Ubuntu 24.04 (still GCC 12): its Mesa has a lavapipe new enough for
+  # the AGC execution tests (22.04's Mesa 23.2 fails dozens of them), its kernel has the userfaultfd
+  # write protection the guest write watch needs, and Python is 3.12. SPIRV-Tools stays off, as in
+  # the fork's own builds and releases.
+  engine-linux-tests:
+    name: Engine (Linux tests, Ubuntu 24.04, lavapipe)
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install GCC 12, Ninja, the audio/display development files and lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-12 ninja-build pkg-config \
+            libpipewire-0.3-dev libdecor-0-dev libvulkan-dev libx11-dev libxext-dev libxrandr-dev \
+            libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev \
+            libvulkan1 mesa-vulkan-drivers vulkan-tools
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: engine-linux-tests
+          max-size: 3G
+          evict-old-files: job
+      - id: ffmpeg
+        run: echo "commit=$(git rev-parse HEAD:3rdparty/ffmpeg-core)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: build/externals
+          key: ffmpeg-linux-${{ steps.ffmpeg.outputs.commit }}
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Build everything and the tests
+        run: cmake --build build
+      - name: Build the patched libraries
+        run: cmake --build build --target libs
+      - name: Leave out the known failures
+        run: |
+          pattern=$(awk -v p=linux '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")
+          echo "CTEST_EXCLUDE=^($pattern)\$" >> "$GITHUB_ENV"
+          echo "Left out: ^($pattern)\$"
+      # The guest write watch uses userfaultfd write protection, which Ubuntu keeps for root unless
+      # this is on.
+      - name: Allow userfaultfd for the guest write watch
+        run: sudo sysctl -w vm.unprivileged_userfaultfd=1
+      # A failing test gets two more tries, as on macOS: lavapipe on a shared runner finishes GPU
+      # work late now and then (agc_driver_queued_index_read_order).
+      - name: Run the tests
+        run: |
+          uname -r
+          vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo|apiVersion' || true
+          ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --no-tests=error --repeat until-pass:3 -E "$CTEST_EXCLUDE" --output-junit ctest.xml
+        env:
+          ANYPS5_REQUIRE_VULKAN: 1
+          GALLIUM_OVERRIDE_CPU_CAPS: avx
+      - name: Check that every skip is a device limitation
+        if: ${{ !cancelled() && hashFiles('build/ctest.xml') != '' }}
+        run: python3 tools/check_skips.py build/ctest.xml
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: ctest-linux
+          path: |
+            build/ctest.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  engine-windows:
+    name: Engine (Windows, WinLibs GCC 15.2)
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CONFIGURE: >-
+        -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+        -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      # The same toolchain as the owner's Windows builds and upstream's Windows job.
+      - name: Point the WinLibs CMake at the CA bundle of Git for Windows
+        run: |
+          for prefix in ucrt64 mingw64; do
+            bundle="C:/Program Files/Git/$prefix/etc/ssl/certs/ca-bundle.crt"
+            if [ -f "$bundle" ]; then echo "SSL_CERT_FILE=$bundle" >> "$GITHUB_ENV"; exit 0; fi
+          done
+          echo "::error::No CA bundle found in Git for Windows"; exit 1
+      - id: toolchain
+        uses: actions/cache@v6
+        with:
+          path: C:\winlibs
+          key: ${{ env.WINLIBS_ZIP }}
+      - if: steps.toolchain.outputs.cache-hit != 'true'
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/winlibs.zip" "https://github.com/brechtsanders/winlibs_mingw/releases/download/$WINLIBS_RELEASE/$WINLIBS_ZIP"
+          7z x "$RUNNER_TEMP/winlibs.zip" -oC:/winlibs > /dev/null
+      - run: echo 'C:\winlibs\mingw64\bin' >> "$GITHUB_PATH"
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: engine-windows
+          max-size: 3G
+          evict-old-files: job
+      - id: ffmpeg
+        run: echo "commit=$(git rev-parse HEAD:3rdparty/ffmpeg-core)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: build/externals
+          key: ffmpeg-windows-${{ steps.ffmpeg.outputs.commit }}
+      - name: Configure
+        shell: cmd
+        run: cmake -S . -B build %CONFIGURE% "-DANYPS5_AGC_EXECUTION_TESTS=F16ToF32Unpack;F64FmaSubnormals;RegistrationPrepareShutdown"
+      - name: Build everything and the tests
+        shell: cmd
+        run: cmake --build build
+      - name: Build the patched libraries
+        shell: cmd
+        run: cmake --build build --target libs
+      - name: Leave out the known failures
+        run: |
+          pattern=$(awk -v p=windows '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")
+          echo "CTEST_EXCLUDE=^($pattern)\$" >> "$GITHUB_ENV"
+          echo "Left out: ^($pattern)\$"
+      # From cmd, as upstream does: Git Bash puts its own mingw64/bin (another libstdc++-6.dll) ahead
+      # of WinLibs on PATH, and the patched libraries then fail to load.
+      - name: Run the tests
+        shell: cmd
+        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --no-tests=error --repeat until-pass:3 -E "%CTEST_EXCLUDE%" --output-junit ctest.xml
+      - name: Check that every skip is expected (no Vulkan driver on the runner)
+        if: ${{ !cancelled() && hashFiles('build/ctest.xml') != '' }}
+        shell: cmd
+        run: python tools/check_skips.py build/ctest.xml --job windows
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: ctest-windows
+          path: |
+            build/ctest.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  engine-macos:
+    name: Engine (macOS arm64, x86-64 under Rosetta)
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 150
+    env:
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      # Guest code and the prx libraries are x86-64 and run under Rosetta (docs/dev/MACOS_PORT.md).
+      - name: Install Rosetta and Ninja
+        run: |
+          sudo softwareupdate --install-rosetta --agree-to-license
+          brew install ninja
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: engine-macos
+          max-size: 3G
+          evict-old-files: job
+      - id: ffmpeg
+        run: echo "commit=$(git rev-parse HEAD:3rdparty/ffmpeg-core)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: build/externals
+          key: ffmpeg-macos-${{ steps.ffmpeg.outputs.commit }}
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          -DCMAKE_OSX_ARCHITECTURES=x86_64
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Build everything and the tests
+        run: cmake --build build
+      - name: Build the patched libraries
+        run: cmake --build build --target libs
+      - name: Leave out the known failures
+        run: |
+          pattern=$(awk -v p=macos '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")
+          echo "CTEST_EXCLUDE=^($pattern)\$" >> "$GITHUB_ENV"
+          echo "Left out: ^($pattern)\$"
+      # A test that fails gets two more tries (on every platform): on shared runners, and under
+      # Rosetta in a virtual machine here, timing tests miss their marks now and then. One that
+      # keeps failing still fails.
+      - name: Run the tests
+        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 3 --no-tests=error --repeat until-pass:3 -E "$CTEST_EXCLUDE" --output-junit ctest.xml
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: ctest-macos
+          path: |
+            build/ctest.xml
+            build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------- Mac launcher
+
+  launcher:
+    name: Mac launcher (swift test)
+    needs: eligibility
+    if: needs.eligibility.outputs.launcher == 'true'
+    # Liquid Glass (glassEffect) needs the macOS 26 SDK.
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: tools/macos/launcher
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # The newest Xcode on the runner (its SDK has Liquid Glass; the launcher must also build with Xcode 26's Swift 6.3).
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          swift --version
+      - uses: actions/cache@v6
+        with:
+          path: tools/macos/launcher/.build
+          key: launcher-spm-${{ runner.os }}-${{ hashFiles('tools/macos/launcher/Package.resolved') }}-${{ github.sha }}
+          restore-keys: launcher-spm-${{ runner.os }}-${{ hashFiles('tools/macos/launcher/Package.resolved') }}-
+      - name: swift test (without the runner-dependent tests in .github/anytogether-ci/swift-test-skips.txt)
+        run: |
+          skips=()
+          while read -r pattern _; do skips+=(--skip "$pattern"); done < <(grep -Ev '^(#|[[:space:]]*$)' "$GITHUB_WORKSPACE/.github/anytogether-ci/swift-test-skips.txt")
+          echo "swift test ${skips[*]}"
+          swift test "${skips[@]}"
+
+  # ---------------------------------------------------------------- phone app
+
+  mobile-test:
+    name: Phone app (analyze, test)
+    needs: eligibility
+    if: needs.eligibility.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+  mobile-android:
+    name: Phone app (Android APK)
+    needs: eligibility
+    if: needs.eligibility.outputs.mobile == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/**/*.gradle.kts', 'mobile/android/gradle.properties', 'mobile/pubspec.lock') }}
+          restore-keys: gradle-${{ runner.os }}-
+      # The release build type, signed with the generated debug key (no secrets on pull requests).
+      # Once more if it fails: the first build downloads the NDK, and a broken download fails it.
+      - run: flutter build apk --release || flutter build apk --release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: anyps5-remote-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 7
+
+  mobile-ios:
+    name: Phone app (iOS, no code signing)
+    needs: eligibility
+    if: needs.eligibility.outputs.mobile == 'true'
+    runs-on: macos-26
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - uses: actions/cache@v6
+        with:
+          path: mobile/ios/Pods
+          key: pods-${{ runner.os }}-${{ hashFiles('mobile/ios/Podfile.lock', 'mobile/pubspec.lock') }}
+      - run: flutter build ios --release --no-codesign
+
+  # ---------------------------------------------------------------- summary
+
+  ci-ok:
+    name: ci-ok
+    # Runs every time: a failed or cancelled job must fail this check, never skip it. The outputs
+    # are named only so upstream's ci-gate convention sees the gate.
+    if: always() || needs.eligibility.outputs.engine
+    needs: [eligibility, engine-linux, engine-linux-tests, engine-windows, engine-macos, launcher, mobile-test, mobile-android, mobile-ios]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Skipped jobs (their part did not change) count as passed; failed or cancelled ones do not.
+      - env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          bad=$(echo "$NEEDS" | jq -r '[to_entries[] | select(.value.result != "success" and .value.result != "skipped") | .key] | join(", ")')
+          if [ -n "$bad" ]; then echo "::error::Not passed: $bad"; exit 1; fi
