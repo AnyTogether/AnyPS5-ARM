@@ -23,7 +23,9 @@ env:
   KNOWN_FAILURES: .github/anytogether-ci/ctest-known-failures.txt
 
 jobs:
-  changes:
+  # Named eligibility for upstream's ci-gate convention (tools/check_conventions.py, run by ctest):
+  # every pull request job needs it and an if on its outputs.
+  eligibility:
     name: Changed parts
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -62,8 +64,8 @@ jobs:
 
   engine-linux:
     name: Engine (Linux, Ubuntu 22.04, GCC 12)
-    needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
     # Ubuntu 22.04 keeps the engine at glibc 2.35 and GCC 12's libstdc++ (docs/dev/WINDOWS_LINUX_ENGINE.md).
     runs-on: ubuntu-22.04
     timeout-minutes: 120
@@ -77,13 +79,20 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - name: Install GCC 12, Ninja, the audio/display development files and lavapipe
+      # Python 3.12 as on the developers' machines: unwrap_self's tests patch io.open, which the
+      # system Python 3.10's pathlib does not go through.
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      # Lavapipe from a current Mesa (22.04's own is 23.2, too old for many AGC execution tests).
+      - name: Install GCC 12, Ninja, the audio/display development files and a current lavapipe
         run: |
+          sudo add-apt-repository -y ppa:kisak/kisak-mesa
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends g++-12 ninja-build pkg-config \
             libpipewire-0.3-dev libdecor-0-dev libvulkan-dev libx11-dev libxext-dev libxrandr-dev \
             libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev \
-            libvulkan1 mesa-vulkan-drivers
+            libvulkan1 mesa-vulkan-drivers vulkan-tools
       - uses: hendrikmuhs/ccache-action@v1.2.24
         with:
           key: engine-linux
@@ -110,8 +119,14 @@ jobs:
           pattern=$(awk -v p=linux '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")
           echo "CTEST_EXCLUDE=^($pattern)\$" >> "$GITHUB_ENV"
           echo "Left out: ^($pattern)\$"
+      # The guest write watch uses userfaultfd write protection, which Ubuntu keeps for root unless
+      # this is on.
+      - name: Allow userfaultfd for the guest write watch
+        run: sudo sysctl -w vm.unprivileged_userfaultfd=1
       - name: Run the tests
-        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --no-tests=error -E "$CTEST_EXCLUDE" --output-junit ctest.xml
+        run: |
+          vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo|apiVersion' || true
+          ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --no-tests=error -E "$CTEST_EXCLUDE" --output-junit ctest.xml
         env:
           ANYPS5_REQUIRE_VULKAN: 1
           GALLIUM_OVERRIDE_CPU_CAPS: avx
@@ -136,8 +151,8 @@ jobs:
 
   engine-windows:
     name: Engine (Windows, WinLibs GCC 15.2)
-    needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
     runs-on: windows-latest
     timeout-minutes: 120
     env:
@@ -196,10 +211,14 @@ jobs:
           pattern=$(awk -v p=windows '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")
           echo "CTEST_EXCLUDE=^($pattern)\$" >> "$GITHUB_ENV"
           echo "Left out: ^($pattern)\$"
+      # From cmd, as upstream does: Git Bash puts its own mingw64/bin (another libstdc++-6.dll) ahead
+      # of WinLibs on PATH, and the patched libraries then fail to load.
       - name: Run the tests
-        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --no-tests=error -E "$CTEST_EXCLUDE" --output-junit ctest.xml
+        shell: cmd
+        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --no-tests=error -E "%CTEST_EXCLUDE%" --output-junit ctest.xml
       - name: Check that every skip is expected (no Vulkan driver on the runner)
         if: ${{ !cancelled() && hashFiles('build/ctest.xml') != '' }}
+        shell: cmd
         run: python tools/check_skips.py build/ctest.xml --job windows
       - uses: actions/upload-artifact@v7
         if: failure()
@@ -212,8 +231,8 @@ jobs:
 
   engine-macos:
     name: Engine (macOS arm64, x86-64 under Rosetta)
-    needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
     runs-on: macos-latest
     timeout-minutes: 150
     env:
@@ -269,8 +288,8 @@ jobs:
 
   launcher:
     name: Mac launcher (swift test)
-    needs: changes
-    if: needs.changes.outputs.launcher == 'true'
+    needs: eligibility
+    if: needs.eligibility.outputs.launcher == 'true'
     # Liquid Glass (glassEffect) needs the macOS 26 SDK.
     runs-on: macos-26
     timeout-minutes: 45
@@ -281,20 +300,31 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - run: swift --version
+      # The newest Xcode on the runner (its SDK has Liquid Glass; the launcher must also build with Xcode 26's Swift 6.3).
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          swift --version
       - uses: actions/cache@v6
         with:
           path: tools/macos/launcher/.build
           key: launcher-spm-${{ runner.os }}-${{ hashFiles('tools/macos/launcher/Package.resolved') }}-${{ github.sha }}
           restore-keys: launcher-spm-${{ runner.os }}-${{ hashFiles('tools/macos/launcher/Package.resolved') }}-
-      - run: swift test
+      - name: swift test (without the runner-dependent tests in .github/anytogether-ci/swift-test-skips.txt)
+        run: |
+          skips=()
+          while read -r pattern _; do skips+=(--skip "$pattern"); done < <(grep -Ev '^(#|[[:space:]]*$)' "$GITHUB_WORKSPACE/.github/anytogether-ci/swift-test-skips.txt")
+          echo "swift test ${skips[*]}"
+          swift test "${skips[@]}"
 
   # ---------------------------------------------------------------- phone app
 
   mobile-test:
     name: Phone app (analyze, test)
-    needs: changes
-    if: needs.changes.outputs.mobile == 'true'
+    needs: eligibility
+    if: needs.eligibility.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     defaults:
@@ -315,8 +345,8 @@ jobs:
 
   mobile-android:
     name: Phone app (Android APK)
-    needs: changes
-    if: needs.changes.outputs.mobile == 'true'
+    needs: eligibility
+    if: needs.eligibility.outputs.mobile == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     defaults:
@@ -352,8 +382,8 @@ jobs:
 
   mobile-ios:
     name: Phone app (iOS, no code signing)
-    needs: changes
-    if: needs.changes.outputs.mobile == 'true'
+    needs: eligibility
+    if: needs.eligibility.outputs.mobile == 'true'
     runs-on: macos-26
     timeout-minutes: 60
     defaults:
@@ -378,8 +408,10 @@ jobs:
 
   ci-ok:
     name: ci-ok
-    if: always()
-    needs: [changes, engine-linux, engine-windows, engine-macos, launcher, mobile-test, mobile-android, mobile-ios]
+    # Runs every time: a failed or cancelled job must fail this check, never skip it. The outputs
+    # are named only so upstream's ci-gate convention sees the gate.
+    if: always() || needs.eligibility.outputs.engine
+    needs: [eligibility, engine-linux, engine-windows, engine-macos, launcher, mobile-test, mobile-android, mobile-ios]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -1417,7 +1417,7 @@ final class AppModel: ObservableObject {
         if !waiting { prepareTimer?.invalidate(); prepareTimer = nil; return }
         guard prepareTimer == nil else { return }
         prepareTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stepPrepare() }
+            MainActor.assumeIsolated { _ = self?.stepPrepare() }
         }
     }
 

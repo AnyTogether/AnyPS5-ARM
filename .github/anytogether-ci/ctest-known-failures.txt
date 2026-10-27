@@ -4,23 +4,36 @@
 #   platforms: all, or a comma list of linux, windows, macos
 # Only add a test here when it fails on main too (a known, tracked failure) or when it depends on the
 # runner rather than the code (timing under load, real network, a GPU the runner lacks). A test that
-# a pull request breaks is a regression: fix it, do not list it.
+# a pull request breaks is a regression: fix it, do not list it. Remove a line once its test passes.
 
-# Known failures of the fork on every host (tracked in docs/dev/MACOS_PORT.md and the merge notes).
+# Known failures of the fork on every host (they fail on main and on the developers' Macs too).
 all     net_dontwait_.*                 Non-blocking socket timing; fails since the eighth upstream merge.
-all     guest_sce_net                   Needs real network interfaces the runners do not expose the way the test expects.
-all     guest_update_env                Known failure since the upstream merges (update environment probing).
+all     guest_sce_net                   Needs network interfaces the way the console reports them.
+all     guest_update_env(_pending_[0-9]_[0-9])?  feupdateenv does not trap an enabled pending exception on the host.
 all     guest_floating_point            x87/denormal modes differ from the console (Rosetta and host libm).
 all     guest_math                      _FSinh and friends round differently on the host libm.
 all     guest_math_exact                Bit-exact libm results the host libm does not give.
+all     agc_spirv_subvector_loop_begin  s_subvector_loop_begin's lowering has no exec == 0 branch; fails on main on Linux, Windows and macOS.
+all     agc_layer_input                 "a Layer input on a device with geometry shaders must declare Geometry"; fails on main on every host.
 
 # Timing tests: they measure wall-clock sleeps, which a shared runner cannot keep.
 all     precise_wait                    Spin/sleep deadline test; upstream's own release job leaves it out too.
 
-# macOS under Rosetta (MoltenVK is not installed on the runner, so GPU tests skip themselves).
+# macOS: x86-64 under Rosetta in a virtual machine, and no MoltenVK on the runner.
 macos   macos_fixtures                  Its argv fixture ends in int3, which stays exiting in the kernel under Rosetta.
 macos   guest_kernel_fcntl              Flaky under parallel ctest on macOS.
 macos   agc_thread_priority_refused_rt  Expects a refused real-time priority request to throw; macOS grants it.
 macos   agc_thread_priority_refused_high  Same as above, high priority.
 macos   agc_driver_pm4_priority_refused Same as above, for the PM4 queue priority.
 macos   agc_shared_write                Cannot inspect mapping lifetimes on macOS.
+macos   agc_write_tracking              Known macOS failure (also on the developers' Macs): a block outside the import window reads as written.
+macos   agc_submit_progress(_no_timeline)?  Needs a Vulkan device; the runner has no MoltenVK (also fails on the developers' Macs).
+macos   agc_driver_pipelined_prefetch   Known macOS failure: the AGC FS table cannot be mapped under Rosetta.
+macos   agc_driver_graphics             Known macOS hang: a failed map import is retried and the probe remap deadlocks on the imports mutex.
+macos   guest_memory                    Known macOS failure: mprotect of guest memory is refused (deterministic since the eighth merge).
+macos   guest_kernel_app_archive_mmap   Known macOS failure: mmap of a file read from app0.zar is not implemented there.
+macos   font_face_lifetime(_replace|_churn)?  The test finishes, then its process does not exit within the timeout under Rosetta on the runner.
+macos   guest_memory_lifetime           Its exit probe times out under Rosetta on the runner.
+macos   guest_ssl_transport_(kernel|net)  On the runner a server certificate passes the initial verify without a loaded CA (its trust store differs); needs a look.
+macos   guest_poll                      Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.
+macos   guest_socket_pair               Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.

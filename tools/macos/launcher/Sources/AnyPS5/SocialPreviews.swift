@@ -46,8 +46,8 @@ enum SocialPreviews {
         let person = { (id: String, name: String) in TogetherPerson(userId: id, handle: name.lowercased(), displayName: name, avatar: nil) }
         let names = ["Mira", "Kenji", "Sol", "Ines", "Theo", "Noor", "Lena", "Felix"]
         let top = names.enumerated().map { index, name in TogetherLeaderboard.Entry(rank: index + 1, user: person("p\(index)", name), value: 9_400 - index * 870) }
-        let me = TogetherLeaderboard.Entry(rank: 41, user: person("u1", "Robin"), value: 1_830)
-        let around = [TogetherLeaderboard.Entry(rank: 40, user: person("x1", "Lin"), value: 1_905), me, TogetherLeaderboard.Entry(rank: 42, user: person("x2", "Ada"), value: 1_790)]
+        let robin = TogetherLeaderboard.Entry(rank: 41, user: person("u1", "Robin"), value: 1_830)
+        let around = [TogetherLeaderboard.Entry(rank: 40, user: person("x1", "Lin"), value: 1_905), robin, TogetherLeaderboard.Entry(rank: 42, user: person("x2", "Ada"), value: 1_790)]
         render("leaderboard-game") { model in
             model.previewLeaderboard(TogetherLeaderboard(board: "points", scope: .global, game: nil, entries: Array(top.prefix(4)), me: .init(rank: 41, value: 1_830, listed: true), around: around, total: 312),
                                      game: found.first, index: 6)

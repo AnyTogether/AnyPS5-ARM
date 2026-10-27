@@ -158,7 +158,7 @@ public final class ProfileStore: @unchecked Sendable {
         let used = Set(book.profiles.map(\.avatar.color))
         let color = (0 ..< LauncherProfile.paletteSize).first { !used.contains($0) } ?? book.profiles.count % LauncherProfile.paletteSize
         let first = book.profiles.isEmpty
-        let made = id.flatMap { candidate in profile(candidate) == nil ? candidate : nil }
+        let made = id.flatMap { candidate in self.profile(candidate) == nil ? candidate : nil }
             ?? (first && book.legacyOwner == nil ? LauncherProfile.legacyID : UUID().uuidString.lowercased())
         let profile = LauncherProfile(id: made, name: name, avatar: .init(color: color), mode: mode, account: account)
         book.profiles.append(profile)
