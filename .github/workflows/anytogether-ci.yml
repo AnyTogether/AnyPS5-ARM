@@ -62,12 +62,61 @@ jobs:
 
   # ---------------------------------------------------------------- engine
 
+  # The Linux engine that ships: built on Ubuntu 22.04 with GCC 12, so it asks for glibc 2.35 and
+  # GCC 12's libstdc++ at most (docs/dev/WINDOWS_LINUX_ENGINE.md).
   engine-linux:
-    name: Engine (Linux, Ubuntu 22.04, GCC 12)
+    name: Engine (Linux build, Ubuntu 22.04, GCC 12)
     needs: eligibility
     if: needs.eligibility.outputs.engine == 'true'
-    # Ubuntu 22.04 keeps the engine at glibc 2.35 and GCC 12's libstdc++ (docs/dev/WINDOWS_LINUX_ENGINE.md).
     runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      CCACHE_MAXSIZE: 2G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install GCC 12, Ninja and the audio/display development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-12 ninja-build pkg-config \
+            libpipewire-0.3-dev libdecor-0-dev libvulkan-dev libx11-dev libxext-dev libxrandr-dev \
+            libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: engine-linux
+          max-size: 2G
+          evict-old-files: job
+      - id: ffmpeg
+        run: echo "commit=$(git rev-parse HEAD:3rdparty/ffmpeg-core)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: build/externals
+          key: ffmpeg-linux-${{ steps.ffmpeg.outputs.commit }}
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Build the relinker and the patched libraries
+        run: cmake --build build --target relinker libs
+      - name: Check the glibc and libstdc++ floor (2.35, GCC 12)
+        run: |
+          glibc=$(objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
+          glibcxx=$(objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBCXX_[0-9.]*' | sort -uV | tail -1)
+          echo "highest symbol versions: $glibc $glibcxx"
+          printf '%s\n' "$glibc" GLIBC_2.35 | sort -CV || { echo "::error::The engine needs $glibc, newer than Ubuntu 22.04's glibc 2.35"; exit 1; }
+          printf '%s\n' "$glibcxx" GLIBCXX_3.4.30 | sort -CV || { echo "::error::The engine needs $glibcxx, newer than GCC 12's libstdc++"; exit 1; }
+
+  # The whole build and ctest on Ubuntu 24.04 (still GCC 12): its Mesa has a lavapipe new enough for
+  # the AGC execution tests (22.04's Mesa 23.2 fails dozens of them), and Python 3.12.
+  engine-linux-tests:
+    name: Engine (Linux tests, Ubuntu 24.04, lavapipe)
+    needs: eligibility
+    if: needs.eligibility.outputs.engine == 'true'
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
       CCACHE_MAXSIZE: 3G
@@ -79,15 +128,8 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      # Python 3.12 as on the developers' machines: unwrap_self's tests patch io.open, which the
-      # system Python 3.10's pathlib does not go through.
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-      # Lavapipe from a current Mesa (22.04's own is 23.2, too old for many AGC execution tests).
-      - name: Install GCC 12, Ninja, the audio/display development files and a current lavapipe
+      - name: Install GCC 12, Ninja, the audio/display development files and lavapipe
         run: |
-          sudo add-apt-repository -y ppa:kisak/kisak-mesa
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends g++-12 ninja-build pkg-config \
             libpipewire-0.3-dev libdecor-0-dev libvulkan-dev libx11-dev libxext-dev libxrandr-dev \
@@ -95,7 +137,7 @@ jobs:
             libvulkan1 mesa-vulkan-drivers vulkan-tools
       - uses: hendrikmuhs/ccache-action@v1.2.24
         with:
-          key: engine-linux
+          key: engine-linux-tests
           max-size: 3G
           evict-old-files: job
       - id: ffmpeg
@@ -114,7 +156,6 @@ jobs:
       - name: Build the patched libraries
         run: cmake --build build --target libs
       - name: Leave out the known failures
-        shell: bash
         run: |
           pattern=$(awk -v p=linux '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")
           echo "CTEST_EXCLUDE=^($pattern)\$" >> "$GITHUB_ENV"
@@ -125,6 +166,7 @@ jobs:
         run: sudo sysctl -w vm.unprivileged_userfaultfd=1
       - name: Run the tests
         run: |
+          uname -r
           vulkaninfo --summary 2>/dev/null | grep -E 'deviceName|driverInfo|apiVersion' || true
           ctest --test-dir build --output-on-failure --timeout 120 --parallel 4 --no-tests=error -E "$CTEST_EXCLUDE" --output-junit ctest.xml
         env:
@@ -133,13 +175,6 @@ jobs:
       - name: Check that every skip is a device limitation
         if: ${{ !cancelled() && hashFiles('build/ctest.xml') != '' }}
         run: python3 tools/check_skips.py build/ctest.xml
-      - name: Check the glibc and libstdc++ floor (2.35, GCC 12)
-        run: |
-          glibc=$(objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
-          glibcxx=$(objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBCXX_[0-9.]*' | sort -uV | tail -1)
-          echo "highest symbol versions: $glibc $glibcxx"
-          printf '%s\n' "$glibc" GLIBC_2.35 | sort -CV || { echo "::error::The engine needs $glibc, newer than Ubuntu 22.04's glibc 2.35"; exit 1; }
-          printf '%s\n' "$glibcxx" GLIBCXX_3.4.30 | sort -CV || { echo "::error::The engine needs $glibcxx, newer than GCC 12's libstdc++"; exit 1; }
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
@@ -373,7 +408,8 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('mobile/android/**/*.gradle.kts', 'mobile/android/gradle.properties', 'mobile/pubspec.lock') }}
           restore-keys: gradle-${{ runner.os }}-
       # The release build type, signed with the generated debug key (no secrets on pull requests).
-      - run: flutter build apk --release
+      # Once more if it fails: the first build downloads the NDK, and a broken download fails it.
+      - run: flutter build apk --release || flutter build apk --release
       - uses: actions/upload-artifact@v7
         with:
           name: anyps5-remote-apk
@@ -411,7 +447,7 @@ jobs:
     # Runs every time: a failed or cancelled job must fail this check, never skip it. The outputs
     # are named only so upstream's ci-gate convention sees the gate.
     if: always() || needs.eligibility.outputs.engine
-    needs: [eligibility, engine-linux, engine-windows, engine-macos, launcher, mobile-test, mobile-android, mobile-ios]
+    needs: [eligibility, engine-linux, engine-linux-tests, engine-windows, engine-macos, launcher, mobile-test, mobile-android, mobile-ios]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

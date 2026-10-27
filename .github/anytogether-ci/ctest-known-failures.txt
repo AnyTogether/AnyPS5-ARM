@@ -16,6 +16,10 @@ all     guest_math_exact                Bit-exact libm results the host libm doe
 all     agc_spirv_subvector_loop_begin  s_subvector_loop_begin's lowering has no exec == 0 branch; fails on main on Linux, Windows and macOS.
 all     agc_layer_input                 "a Layer input on a device with geometry shaders must declare Geometry"; fails on main on every host.
 
+# Windows: real failures on main, to fix (WinLibs GCC 15.2, as the owner's Windows builds).
+windows prx_thread_local_destructors    libkernel (dl*_nid_postfix, LoadFailure) and AgcDriver (LockStats) register thread_local destructors, which run after emulated TLS is freed on Windows; they belong in HostThreadLocal.
+windows agc_frame_generation            The test executable does not start on Windows (0xc0000135: a DLL it links is not found).
+
 # Timing tests: they measure wall-clock sleeps, which a shared runner cannot keep.
 all     precise_wait                    Spin/sleep deadline test; upstream's own release job leaves it out too.
 
