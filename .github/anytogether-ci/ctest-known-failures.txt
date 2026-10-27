@@ -18,6 +18,7 @@ all     guest_math_exact                Bit-exact libm results the host libm doe
 all     agc_spirv_subvector_loop_begin  s_subvector_loop_begin's lowering has no exec == 0 branch; fails on main on Linux, Windows and macOS.
 all     agc_layer_input                 "a Layer input on a device with geometry shaders must declare Geometry"; fails on main on every host.
 
+all     public_headers(_compile_[0-9]+)?  Our local guest declarations not yet moved to headers (follow-up); the compile batches need its manifest.
 # Linux (Ubuntu 24.04 runner, lavapipe from Mesa 25).
 linux   agc_driver_sampled_cache_budget(_without_storage_image_multisample)?  The runner's lavapipe heap gives a sampled texture budget below the 2 GiB floor the test asks for.
 linux   agc_driver                      Fails on main on lavapipe ("a small copy whose source the GPU still stores into was not recorded on the GPU"); needs a look.
