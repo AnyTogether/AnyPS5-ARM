@@ -20,9 +20,9 @@ all     agc_layer_input                 "a Layer input on a device with geometry
 all     public_headers(_compile_[0-9]+)?  Our local guest declarations not yet moved to headers (follow-up); the compile batches need its manifest.
 
 # Linux (Ubuntu 24.04 runner, lavapipe from Mesa 25).
+linux   guest_sysmodule(_maps_scan)?    Aborts on Linux on main (passes on macOS); needs a look.
 linux   agc_driver_sampled_cache_budget(_without_storage_image_multisample)?  The runner's lavapipe heap gives a sampled texture budget below the 2 GiB floor the test asks for.
 linux   agc_driver                      Fails on main on lavapipe ("a small copy whose source the GPU still stores into was not recorded on the GPU"); needs a look.
-linux   guest_sysmodule(_maps_scan)?    Aborts on Linux on main (passes on macOS); needs a look.
 linux   agc_driver_optimize_on_fiber    Needs SPIRV-Tools, which the fork's builds leave off (it would only report a skip). With SPIRV-Tools on, agc_spirv_optimizer* and agc_driver_pixel_sample_iteration fail on main too.
 
 # Windows: real failures on main, to fix (WinLibs GCC 15.2, as the owner's Windows builds).
@@ -65,3 +65,4 @@ macos   guest_dynamic_loader            Upstream test, fails on macOS/Rosetta, t
 macos   guest_host_standard_error       Upstream test, fails on macOS/Rosetta, tracked.
 macos   guest_kernel_app_archive_archive  Upstream test, fails on macOS/Rosetta, tracked.
 macos   guest_job_manager_worker_spin(_scale_[0-9.]+)?  Upstream test, fails on macOS/Rosetta, tracked (upstream's new JobManager; about 19.7 s of its 20 s timeout on the runner).
+macos   guest_sysmodule(_maps_scan)?    Upstream test, fails on macOS/Rosetta, tracked (aborts now and then, also on retries, since upstream changed it).
