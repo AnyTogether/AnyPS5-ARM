@@ -1408,7 +1408,9 @@ ReversedBlend TranslateReversedBlend(std::uint32_t blendControl, std::uint8_t co
 
 void ApplyDepthBoundsEmulation(const Context& context, State& state, const ShaderRecompiler::ShaderPixelStageInfo& pixel) {
     if (!state.depthBoundsTest || !state.depth || context.depthBounds) return;
-    ValidateDepthBounds(context, state);
+    // ValidateDepthBounds lets any bounds through without the depthBounds feature (the pipeline draws
+    // untested there); the emulation turns the bounds into viewport depth, so they must stay in [0, 1].
+    Require(context.depthRangeUnrestricted || (state.minDepthBounds >= 0.0f && state.minDepthBounds <= 1.0f && state.maxDepthBounds >= 0.0f && state.maxDepthBounds <= 1.0f), "depth bounds outside [0, 1] require VK_EXT_depth_range_unrestricted");
     Require(!context.depthRangeUnrestricted, "the depth bounds test without the depthBounds feature is emulated only where stored depth stays in [0, 1]");
     Require(state.depth->format == VK_FORMAT_D32_SFLOAT || state.depth->format == VK_FORMAT_D32_SFLOAT_S8_UINT, "the depth bounds test on a normalized depth target needs the depthBounds feature");
     Require(!state.depthTest && !state.depthWrite, "the depth bounds test with depth testing needs the depthBounds feature");
