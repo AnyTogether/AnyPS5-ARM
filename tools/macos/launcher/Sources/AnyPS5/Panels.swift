@@ -307,8 +307,8 @@ extension AppModel {
         about += [
             PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(builtInToolkit.map { Toolkit.shortVersion($0.version) } ?? "—")),
             PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
-            PanelRow(id: "github", title: "GitHub", detail: "github.com/utkuhalis/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {
-                NSWorkspace.shared.open(URL(string: "https://github.com/utkuhalis/AnyPS5-ARM")!)
+            PanelRow(id: "github", title: "GitHub", detail: "github.com/AnyTogether/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {
+                NSWorkspace.shared.open(URL(string: "https://github.com/AnyTogether/AnyPS5-ARM")!)
             }),
             PanelRow(id: "upstream", title: T.text(.builtOn), detail: "github.com/boykopovar/AnyPS5", symbol: "heart", kind: .action(destructive: false) {
                 NSWorkspace.shared.open(URL(string: "https://github.com/boykopovar/AnyPS5")!)

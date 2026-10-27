@@ -102,8 +102,8 @@ changed. The first signed launcher reaches them through that last unchecked upda
 
 - `pinenacl` (MIT, a TweetNaCl port, no dependencies) verifies. `package:cryptography` is
   Apache-2.0, which GPL-2.0-only code cannot take, and `pointycastle` has no Ed25519.
-- A `GitHubReleases` source with `signingKeys` (ours: `utkuhalis/AnyPS5-Desktop`, and
-  `utkuhalis/AnyPS5-ARM` for our Windows engine) gets the same treatment as above. Signed
+- A `GitHubReleases` source with `signingKeys` (ours: `AnyTogether/AnyPS5-Desktop`, and
+  `AnyTogether/AnyPS5-ARM` for our Windows engine) gets the same treatment as above. Signed
   downloads must match the signed sums, an unsigned release after 0.2.16 is refused, and an older
   unsigned one needs the user's OK (`allowUnsigned`).
 - Desktop's own updates (`LauncherUpdates`) must always be signed. Every Desktop version newer

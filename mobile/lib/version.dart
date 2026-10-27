@@ -2,5 +2,5 @@
 const appVersion = '1.20.0';
 
 const author = 'Utku Halis';
-const repository = 'https://github.com/utkuhalis/AnyPS5-ARM';
+const repository = 'https://github.com/AnyTogether/AnyPS5-ARM';
 const upstream = 'https://github.com/boykopovar/AnyPS5';

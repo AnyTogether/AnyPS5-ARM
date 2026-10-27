@@ -845,7 +845,7 @@ final class AppModel: ObservableObject {
 
     /// Previews of the notice and of About's update rows.
     func previewUpdate(_ state: LauncherUpdateState, waitingForGame: Bool = false) {
-        let release = Updates.Release(tag: "v0.2.20-arm", version: "0.2.20", page: URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.20-arm")!,
+        let release = Updates.Release(tag: "v0.2.20-arm", version: "0.2.20", page: URL(string: "https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.20-arm")!,
                                       download: nil, size: nil)
         lastUpdateCheck = Date(timeIntervalSince1970: 1_793_000_000)
         switch state {

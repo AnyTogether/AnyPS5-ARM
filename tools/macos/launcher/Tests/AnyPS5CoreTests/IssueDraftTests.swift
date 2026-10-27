@@ -64,7 +64,7 @@ final class IssueDraftTests: XCTestCase {
         XCTAssertEqual(draft.title, "Crash: Stray (PPSA01234)")
         let components = try XCTUnwrap(URLComponents(url: draft.url, resolvingAgainstBaseURL: false))
         XCTAssertEqual(components.host, "github.com")
-        XCTAssertEqual(components.path, "/utkuhalis/AnyPS5-ARM/issues/new")
+        XCTAssertEqual(components.path, "/AnyTogether/AnyPS5-ARM/issues/new")
         let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         XCTAssertEqual(query["template"], "crash.yml")
         XCTAssertEqual(query["title"], "Crash: Stray (PPSA01234)")

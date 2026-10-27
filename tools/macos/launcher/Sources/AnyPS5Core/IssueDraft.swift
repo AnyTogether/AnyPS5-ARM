@@ -9,7 +9,7 @@ public struct IssueDraft: Sendable {
         public let value: String
     }
 
-    public static let repository = "utkuhalis/AnyPS5-ARM"
+    public static let repository = "AnyTogether/AnyPS5-ARM"
     /// The engine's own repository, for a bug in the engine rather than in the Mac port.
     public static let engineRepository = "boykopovar/AnyPS5"
     public static let maximumLength = 7000

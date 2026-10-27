@@ -143,7 +143,7 @@ public enum ToolkitVerifier {
 
 /// The toolkits attached to the launcher's GitHub releases (AnyPS5-toolkit-macos-<release>.zip).
 public enum EngineCatalogue {
-    public static let releasesURL = URL(string: "https://api.github.com/repos/utkuhalis/AnyPS5-ARM/releases?per_page=40")!
+    public static let releasesURL = URL(string: "https://api.github.com/repos/AnyTogether/AnyPS5-ARM/releases?per_page=40")!
     public static let assetPrefix = "AnyPS5-toolkit-macos-"
 
     public struct Entry: Codable, Equatable, Sendable, Identifiable {

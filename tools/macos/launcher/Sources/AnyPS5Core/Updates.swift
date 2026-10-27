@@ -10,8 +10,8 @@ import Foundation
 /// 0.2.16 < 0.2.16 + 766 commits < 0.2.17-nightly.20261025.1 < 0.2.17-nightly.20261025.2 <
 /// 0.2.17-nightly.20261026.1 < 0.2.17.
 public enum Updates {
-    public static let latestURL = URL(string: "https://api.github.com/repos/utkuhalis/AnyPS5-ARM/releases/latest")!
-    public static let releasesURL = URL(string: "https://api.github.com/repos/utkuhalis/AnyPS5-ARM/releases?per_page=30")!
+    public static let latestURL = URL(string: "https://api.github.com/repos/AnyTogether/AnyPS5-ARM/releases/latest")!
+    public static let releasesURL = URL(string: "https://api.github.com/repos/AnyTogether/AnyPS5-ARM/releases?per_page=30")!
     public static let assetName = "AnyPS5-macOS.zip"
 
     public enum Channel: String, Codable, CaseIterable, Sendable {

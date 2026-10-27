@@ -46,4 +46,4 @@ Bunlar anlık ölçümlerdir. Pencere başlığındaki parantezli sayı shader s
 | Test edilen kaynak | `main, 0deeb2a99` |
 | Sonuç | `Siyah ara sahne atlandıktan sonra başlık ve eğitim sahnesi çiziliyor; ekran görüntülerinde 30,45 ve 1,19 FPS; kaydetme/devam ve ısınmış FPS doğrulanmadı` |
 
-İlk rapor [PR #8](https://github.com/utkuhalis/AnyPS5-ARM/pull/8) ile Eyad Al-Daoud'dan geldi.
+İlk rapor [PR #8](https://github.com/AnyTogether/AnyPS5-ARM/pull/8) ile Eyad Al-Daoud'dan geldi.

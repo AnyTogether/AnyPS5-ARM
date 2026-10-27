@@ -42,7 +42,7 @@ Sürücü kodu da oyun gibi Rosetta ile çevrilerek çalışıyor. Kütüphanele
 
 ## 4. AnyPS5 uygulaması ve sürümler ⏭️
 
-Son sürüm [v0.1.0-arm](https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.1.0-arm), yukarıdaki işlerin çoğundan önce çıktı.
+Son sürüm [v0.1.0-arm](https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.1.0-arm), yukarıdaki işlerin çoğundan önce çıktı.
 
 | | Adım | Ayrıntı |
 |---|---|---|
@@ -52,7 +52,7 @@ Son sürüm [v0.1.0-arm](https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0
 
 ## 5. Rosetta'sız native arm64 💤
 
-Plan ve tasarım: `native-arm64` branch'indeki [NATIVE_ARM64.md](https://github.com/utkuhalis/AnyPS5-ARM/blob/native-arm64/docs/dev/NATIVE_ARM64.md). Oyunun x86-64 kodu önceden arm64'e çevriliyor (Capstone, LLVM), sistem kütüphaneleri native derleniyor.
+Plan ve tasarım: `native-arm64` branch'indeki [NATIVE_ARM64.md](https://github.com/AnyTogether/AnyPS5-ARM/blob/native-arm64/docs/dev/NATIVE_ARM64.md). Oyunun x86-64 kodu önceden arm64'e çevriliyor (Capstone, LLVM), sistem kütüphaneleri native derleniyor.
 
 | | Kilometre taşı | Ayrıntı |
 |---|---|---|

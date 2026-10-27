@@ -1,13 +1,13 @@
 #!/bin/sh
 # Installs the latest AnyPS5 launcher into /Applications (or ~/Applications):
 #
-#     curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/install.sh | sh
+#     curl -fsSL https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/install.sh | sh
 #
 # A download through curl carries no quarantine flag, so macOS opens the app without the
 # "cannot be opened" / "damaged" warnings it shows for unsigned apps downloaded in a browser.
 set -eu
 
-repository="${ANYPS5_REPOSITORY:-utkuhalis/AnyPS5-ARM}"
+repository="${ANYPS5_REPOSITORY:-AnyTogether/AnyPS5-ARM}"
 url="https://github.com/$repository/releases/latest/download/AnyPS5-macOS.zip"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT

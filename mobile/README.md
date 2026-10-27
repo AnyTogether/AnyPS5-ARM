@@ -1,6 +1,6 @@
 # AnyPS5 Remote
 
-Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/utkuhalis/AnyPS5-ARM) runs on a Mac. Android and iOS, from one Flutter code base.
+Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/AnyTogether/AnyPS5-ARM) runs on a Mac. Android and iOS, from one Flutter code base.
 
 | Launcher mode | The pad |
 |---|---|
@@ -23,11 +23,11 @@ Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/
 - **Language.** The phone uses the launcher's language: English by default, or Turkish.
 - The version is shown faintly in the bottom right corner.
 
-It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/utkuhalis/AnyPS5-Desktop), the launcher for Windows and Linux (early preview), pairs with it too.
+It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/AnyTogether/AnyPS5-Desktop), the launcher for Windows and Linux (early preview), pairs with it too.
 
 ## AnyTogether
 
-The phone signs in to [AnyTogether](https://anytogether.kodla.agency), the launchers' online home ([open source](https://github.com/utkuhalis/AnyTogether), MIT). Signed out, the phone is the controller as always.
+The phone signs in to [AnyTogether](https://anytogether.kodla.agency), the launchers' online home ([open source](https://github.com/AnyTogether/AnyTogether), MIT). Signed out, the phone is the controller as always.
 
 - **Sign-in:** with a code sent to your email, or with one tap using the account the Mac is signed in with; a signed-in phone also signs the Mac in. No password, no sign-up form.
 - **Friends**: from the people button on the home screen: who is online and what they play, requests, adding by handle.
@@ -51,8 +51,8 @@ The phone signs in to [AnyTogether](https://anytogether.kodla.agency), the launc
 
 ## Installing
 
-- **Android:** open [AnyPS5-Remote.apk](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) on the phone and allow installing from your browser when asked.
-- **iPhone** (iOS 15 or newer): install [AnyPS5-Remote.ipa](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.ipa) with [AltStore](https://altstore.io) (or SideStore, or [Sideloadly](https://sideloadly.io) from a computer): it signs the app with your own Apple ID as it installs it. With a free Apple ID the app has to be refreshed every 7 days, which AltStore does by itself.
+- **Android:** open [AnyPS5-Remote.apk](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) on the phone and allow installing from your browser when asked.
+- **iPhone** (iOS 15 or newer): install [AnyPS5-Remote.ipa](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.ipa) with [AltStore](https://altstore.io) (or SideStore, or [Sideloadly](https://sideloadly.io) from a computer): it signs the app with your own Apple ID as it installs it. With a free Apple ID the app has to be refreshed every 7 days, which AltStore does by itself.
 
 ## Building
 

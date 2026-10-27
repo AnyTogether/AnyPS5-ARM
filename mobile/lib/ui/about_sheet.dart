@@ -125,7 +125,7 @@ class _AboutState extends State<_About> {
                   _Row(label: texts.madeBy, value: author),
                   _Row(
                     label: texts.sourceCode,
-                    value: 'github.com/utkuhalis/AnyPS5-ARM',
+                    value: 'github.com/AnyTogether/AnyPS5-ARM',
                     link: repository,
                   ),
                   _Row(

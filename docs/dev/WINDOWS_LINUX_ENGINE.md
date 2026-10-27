@@ -1,6 +1,6 @@
 # Windows and Linux engine for AnyPS5 Desktop
 
-AnyPS5 Desktop (utkuhalis/AnyPS5-Desktop) can run games with AnyPS5-ARM's engine instead of
+AnyPS5 Desktop (AnyTogether/AnyPS5-Desktop) can run games with AnyPS5-ARM's engine instead of
 upstream's. It looks for it on AnyPS5-ARM's releases, by name:
 
     AnyPS5-toolkit-windows-<commit>.zip
@@ -35,7 +35,7 @@ exists, Git for Windows, Python 3 and CMake/Ninja (WinLibs has both). In PowerSh
 
 ```powershell
 $env:PATH = "C:\dev\winlibs\mingw64\bin;" + $env:PATH
-git clone --recurse-submodules https://github.com/utkuhalis/AnyPS5-ARM.git C:\dev\AnyPS5-ARM
+git clone --recurse-submodules https://github.com/AnyTogether/AnyPS5-ARM.git C:\dev\AnyPS5-ARM
 Set-Location C:\dev\AnyPS5-ARM
 git checkout <release commit>; git submodule update --init --recursive
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
@@ -56,7 +56,7 @@ Linux engine needs a newer glibc than the system has) and for no newer libstdc++
 sudo apt-get install -y g++-12 cmake ninja-build pkg-config python3 git zip \
     libpipewire-0.3-dev libdecor-0-dev libvulkan-dev libx11-dev libxext-dev libxrandr-dev \
     libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev
-git clone --recurse-submodules https://github.com/utkuhalis/AnyPS5-ARM.git ~/AnyPS5-ARM && cd ~/AnyPS5-ARM
+git clone --recurse-submodules https://github.com/AnyTogether/AnyPS5-ARM.git ~/AnyPS5-ARM && cd ~/AnyPS5-ARM
 git checkout <release commit> && git submodule update --init --recursive
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
 cmake --build build --target relinker libs
@@ -81,11 +81,11 @@ ANYPS5_TOOLKIT=<unpacked toolkit folder> dart run tool/anyps5_tool.dart install 
 
 ## Publishing
 
-1. Download every file of the release into one folder (`gh release download <tag> -R utkuhalis/AnyPS5-ARM`),
+1. Download every file of the release into one folder (`gh release download <tag> -R AnyTogether/AnyPS5-ARM`),
    drop the old `SHA256SUMS` and `SHA256SUMS.sig`, add the new archives.
 2. `tools/release/sign.sh <every file>` (the release key is on the release Mac), then
    `tools/release/verify.sh <folder>`.
-3. `gh release upload <tag> <archives> -R utkuhalis/AnyPS5-ARM`, compare the sizes GitHub lists
+3. `gh release upload <tag> <archives> -R AnyTogether/AnyPS5-ARM`, compare the sizes GitHub lists
    with the local ones, then `gh release upload <tag> SHA256SUMS SHA256SUMS.sig --clobber`.
 
 Keep an engine archive that launchers already downloaded on the release: its sum stays in the

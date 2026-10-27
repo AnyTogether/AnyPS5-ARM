@@ -30,7 +30,7 @@ final class UpdateLookupTests: XCTestCase {
     }
 
     func latest(_ tag: String) -> Data {
-        Data(#"{"tag_name":"\#(tag)","html_url":"https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/\#(tag)","draft":false,"prerelease":false,"assets":[{"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/a.zip","size":1}]}"#.utf8)
+        Data(#"{"tag_name":"\#(tag)","html_url":"https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/\#(tag)","draft":false,"prerelease":false,"assets":[{"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/a.zip","size":1}]}"#.utf8)
     }
 
     func testANewerReleaseIsFound() async {

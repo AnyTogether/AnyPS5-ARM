@@ -57,5 +57,5 @@ AnyPS5.app does not do these steps yet, so for now they are manual:
 
 ## Links
 
-- [PR #4: macOS unwind tables](https://github.com/utkuhalis/AnyPS5-ARM/pull/4)
+- [PR #4: macOS unwind tables](https://github.com/AnyTogether/AnyPS5-ARM/pull/4)
 - [Upstream #4194](https://github.com/boykopovar/AnyPS5/pull/4194)

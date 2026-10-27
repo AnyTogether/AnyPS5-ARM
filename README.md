@@ -10,15 +10,15 @@
 
 ![The AnyPS5 launcher in action](docs/videos/launcher-preview.webp)
 
-<p align="center"><a href="https://github.com/utkuhalis/AnyPS5-ARM/raw/main/docs/videos/launcher.mp4"><b>▶ Full video with sound</b></a> (1:39, MP4)</p>
+<p align="center"><a href="https://github.com/AnyTogether/AnyPS5-ARM/raw/main/docs/videos/launcher.mp4"><b>▶ Full video with sound</b></a> (1:39, MP4)</p>
 
 ```sh
-curl -fsSL https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/install.sh | sh
+curl -fsSL https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/install.sh | sh
 ```
 
-One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
+One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
 
-**On Windows or Linux?** Use [**AnyPS5 Desktop**](https://github.com/utkuhalis/AnyPS5-Desktop/releases/latest): this launcher for those systems, with AnyTogether built in (early preview).
+**On Windows or Linux?** Use [**AnyPS5 Desktop**](https://github.com/AnyTogether/AnyPS5-Desktop/releases/latest): this launcher for those systems, with AnyTogether built in (early preview).
 
 ### First start
 
@@ -196,7 +196,7 @@ Like the console's **Broadcast**, the launcher streams the game playing live to 
 
 - **Add My Games Too** gives every unlocked game its own entry with its own art (from the dump's `pic0` and `icon0`), started with `--steam --play <title ID>`: the game opens at once, and the launcher quits when it ends so Steam sees it end (a crash keeps it open on the report). A launcher already open takes the request instead of a second one starting.
 - The shortcuts go into `~/Library/Application Support/Steam/userdata/<account>/config/shortcuts.vdf` of the account signed in last (a choice when there are several), the pictures into `config/grid`, named after each shortcut's ID (the CRC-32 of the quoted program and the name with the top bit set, written into the shortcut so Steam uses it). **Open Full Screen from Steam** adds `--fullscreen`.
-- Steam writes its own copy of the file when it quits, so the launcher writes only while Steam is closed: with Steam open it offers **Quit Steam and Add**. The file is read and written back to the byte with only AnyPS5's entries changed, after a copy to `shortcuts.vdf.anyps5-backup`; **Remove from Steam** takes out only AnyPS5's entries and their pictures. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop)) does the same, for the Steam Deck too.
+- Steam writes its own copy of the file when it quits, so the launcher writes only while Steam is closed: with Steam open it offers **Quit Steam and Add**. The file is read and written back to the byte with only AnyPS5's entries changed, after a copy to `shortcuts.vdf.anyps5-backup`; **Remove from Steam** takes out only AnyPS5's entries and their pictures. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop)) does the same, for the Steam Deck too.
 
 ### Controllers & troubleshooting
 
@@ -204,7 +204,7 @@ The launcher reads every controller macOS has a profile for (DualSense, DualShoc
 
 - **Settings → Controllers** lists the pads with their family, USB or Bluetooth and battery (and charging), and offers **Test Buttons and Sticks** (a live drawing of the pad: every button, both sticks inside the dead zone's ring, the triggers; hold ○ / B or press Esc to leave), **Test Vibration**, **Light Bar** (the theme's accent or a colour, DualSense and DualShock 4), **Confirm Button** (○ confirms and ✕ goes back, as on Japanese consoles; the hints follow) and **Stick Dead Zone** (in the launcher, and in every game that sets no dead zone of its own). A controller nearly out of battery shows in the top bar.
 - The **troubleshooter** under it says what it sees: no controller at all (a data cable, how to pair each family over Bluetooth), a HID game controller macOS lists without a layout, a low battery, Steam running (its controller support can turn the pad into a mouse), and that the DualShock 3 works over USB only.
-- Every connect and disconnect is logged with the pad's family, connection and driver; the game's log gets the controllers at each start, and crash reports (**Export Report**, the issue form) carry them with the recent connects and disconnects. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop)) has the same screen, reading pads through SDL2 with a troubleshooter for Steam, DS4Windows, DualSenseX, HidHide and Linux permissions.
+- Every connect and disconnect is logged with the pad's family, connection and driver; the game's log gets the controllers at each start, and crash reports (**Export Report**, the issue form) carry them with the recent connects and disconnects. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop)) has the same screen, reading pads through SDL2 with a troubleshooter for Steam, DS4Windows, DualSenseX, HidHide and Linux permissions.
 
 ### Getting around
 
@@ -237,7 +237,7 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - The QR code's link works once and for two minutes; it turns into a cookie for that browser alone. The page is served on the Mac's local network address only, to the local network only, and refuses other sites and hosts; too many requests or wrong codes are slowed down.
 - The server runs only while the QR code is shown and while browsers it let in are connected (two more minutes for a reload or a locked screen), or always with **Keep browser play on**. Turning **Play from a browser** off stops it.
 - Plain HTTP on the local network: tilt (motion sensors), keeping the screen awake and vibration on iPhones need HTTPS or Safari support the page does not have. For those, use the app.
-- The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/utkuhalis/AnyPS5-Desktop)) serves the same page ([`tools/macos/launcher/BrowserPad/index.html`](tools/macos/launcher/BrowserPad/index.html)).
+- The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop)) serves the same page ([`tools/macos/launcher/BrowserPad/index.html`](tools/macos/launcher/BrowserPad/index.html)).
 
 | The QR code on the Mac | The pad in a phone's browser |
 |---|---|
@@ -247,21 +247,21 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 |---|---|
 | ![The launcher with the phone connected](docs/screenshots/phone-live-launcher.jpg) | ![Silksong played with the phone](docs/screenshots/phone-live-silksong.jpg) |
 
-<p align="center"><a href="https://github.com/utkuhalis/AnyPS5-ARM/raw/main/docs/videos/phone-demo.mp4"><b>▶ Video: the launcher and Silksong driven from the phone</b></a> (1:22, the phone's own screen in the corner, in sync)</p>
+<p align="center"><a href="https://github.com/AnyTogether/AnyPS5-ARM/raw/main/docs/videos/phone-demo.mp4"><b>▶ Video: the launcher and Silksong driven from the phone</b></a> (1:22, the phone's own screen in the corner, in sync)</p>
 
 | Launcher mode | The pad |
 |---|---|
 | ![The phone in launcher mode](docs/screenshots/phone-launcher.jpg) | ![The phone pad](docs/screenshots/phone-pad.jpg) |
 
-[⬇ Download the Android app](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) (APK; on the phone, allow installing from your browser when asked).
+[⬇ Download the Android app](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.apk) (APK; on the phone, allow installing from your browser when asked).
 
-**On an iPhone** (iOS 15 or newer), install [AnyPS5-Remote.ipa](https://github.com/utkuhalis/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.ipa) with [AltStore](https://altstore.io) (or SideStore, or [Sideloadly](https://sideloadly.io) from a computer): it signs the app with your own Apple ID as it installs it. With a free Apple ID the app has to be refreshed every 7 days, which AltStore does by itself.
+**On an iPhone** (iOS 15 or newer), install [AnyPS5-Remote.ipa](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-Remote.ipa) with [AltStore](https://altstore.io) (or SideStore, or [Sideloadly](https://sideloadly.io) from a computer): it signs the app with your own Apple ID as it installs it. With a free Apple ID the app has to be refreshed every 7 days, which AltStore does by itself.
 
 Games unlocked before phone support need **Update and Play** once, so they carry the engine that reads the phone.
 
 ### AnyTogether
 
-[AnyTogether](https://anytogether.kodla.agency) is the launcher's online home: friends, profiles, messages, parties and voice. It is optional; signed out, the launcher works exactly as before. The server is open source ([AnyTogether](https://github.com/utkuhalis/AnyTogether), MIT) and anyone can run their own.
+[AnyTogether](https://anytogether.kodla.agency) is the launcher's online home: friends, profiles, messages, parties and voice. It is optional; signed out, the launcher works exactly as before. The server is open source ([AnyTogether](https://github.com/AnyTogether/AnyTogether), MIT) and anyone can run their own.
 
 - **Sign-in:** Settings → AnyTogether, with a code sent to your email, or with one tap on your phone if it is already signed in (and the other way round). No password, no sign-up form. On the website you can also add a passkey.
 - **Friends:** add someone by their handle and see who is online and what they are playing.
@@ -324,7 +324,7 @@ Per-game status and test reports live in the [Game bring-up](https://github.com/
 
 AnyPS5-ARM is the macOS port of [AnyPS5](https://github.com/boykopovar/AnyPS5). AnyPS5 is not an emulator: its relinker turns a PS5 executable into a native program, and its system libraries are reimplemented as ordinary shared libraries the program links against. On Apple silicon:
 
-- **CPU:** the game's x86-64 code runs under **Rosetta 2**. A [native arm64 mode](https://github.com/utkuhalis/AnyPS5-ARM/blob/native-arm64/docs/dev/NATIVE_ARM64.md) without Rosetta is in development on the `native-arm64` branch.
+- **CPU:** the game's x86-64 code runs under **Rosetta 2**. A [native arm64 mode](https://github.com/AnyTogether/AnyPS5-ARM/blob/native-arm64/docs/dev/NATIVE_ARM64.md) without Rosetta is in development on the `native-arm64` branch.
 - **Executable:** the relinker writes a **Mach-O** executable.
 - **Graphics:** the PS5 graphics driver runs on **Vulkan through MoltenVK**, which runs on Metal.
 - **Distribution:** the result is a normal **`.app`** you open from Finder.
@@ -339,11 +339,11 @@ Each branch is its own project, with its own README:
 
 | Branch | What it holds |
 |---|---|
-| [`main`](https://github.com/utkuhalis/AnyPS5-ARM/tree/main) | The whole project: the engine, the launcher and the phone app. Releases are made from it. |
-| [`launcher`](https://github.com/utkuhalis/AnyPS5-ARM/tree/launcher) | The launcher (AnyPS5.app) only. |
-| [`mobile-controller`](https://github.com/utkuhalis/AnyPS5-ARM/tree/mobile-controller) | The phone app (AnyPS5 Remote) only. |
-| [`rosetta`](https://github.com/utkuhalis/AnyPS5-ARM/tree/rosetta) | The engine only, the way it runs today: x86-64 code under Rosetta 2. |
-| [`native-arm64`](https://github.com/utkuhalis/AnyPS5-ARM/tree/native-arm64) | The engine running games as native arm64 code, without Rosetta (experimental). |
+| [`main`](https://github.com/AnyTogether/AnyPS5-ARM/tree/main) | The whole project: the engine, the launcher and the phone app. Releases are made from it. |
+| [`launcher`](https://github.com/AnyTogether/AnyPS5-ARM/tree/launcher) | The launcher (AnyPS5.app) only. |
+| [`mobile-controller`](https://github.com/AnyTogether/AnyPS5-ARM/tree/mobile-controller) | The phone app (AnyPS5 Remote) only. |
+| [`rosetta`](https://github.com/AnyTogether/AnyPS5-ARM/tree/rosetta) | The engine only, the way it runs today: x86-64 code under Rosetta 2. |
+| [`native-arm64`](https://github.com/AnyTogether/AnyPS5-ARM/tree/native-arm64) | The engine running games as native arm64 code, without Rosetta (experimental). |
 
 ## Credits
 

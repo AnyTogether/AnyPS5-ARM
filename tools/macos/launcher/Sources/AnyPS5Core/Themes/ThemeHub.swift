@@ -4,9 +4,9 @@ import Foundation
 /// each theme's file to download. It starts as a folder in the AnyPS5-ARM repository on GitHub
 /// (shared by a pull request), to move to AnyPS5's own server.
 public enum ThemeHub {
-    public static let defaultBase = URL(string: "https://raw.githubusercontent.com/utkuhalis/AnyPS5-ARM/main/hub/")!
+    public static let defaultBase = URL(string: "https://raw.githubusercontent.com/AnyTogether/AnyPS5-ARM/main/hub/")!
     /// Where a theme is shared from: a new issue on the repository, with the file attached.
-    public static let shareURL = URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/issues/new?labels=theme&title=Theme%3A%20")!
+    public static let shareURL = URL(string: "https://github.com/AnyTogether/AnyPS5-ARM/issues/new?labels=theme&title=Theme%3A%20")!
 
     public struct Theme: Identifiable, Equatable, Sendable {
         public var id: String { design.id }

@@ -150,14 +150,14 @@ final class EngineToolkitTests: XCTestCase {
 
     static let releases = """
     [
-     {"tag_name":"v0.2.16-arm","name":"AnyPS5-ARM 0.2.16","html_url":"https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.16-arm","draft":false,"prerelease":false,
+     {"tag_name":"v0.2.16-arm","name":"AnyPS5-ARM 0.2.16","html_url":"https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.16-arm","draft":false,"prerelease":false,
       "published_at":"2026-11-02T10:00:00Z","body":"## What's new\\r\\n\\r\\n- **Faster** shader cache\\r\\n- Stray runs at 60 FPS\\r\\n",
       "assets":[{"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/AnyPS5-macOS.zip","size":47256820},
                 {"name":"AnyPS5-toolkit-macos-0.2.16-arm.zip","browser_download_url":"https://example.com/AnyPS5-toolkit-macos-0.2.16-arm.zip","size":39024826,
                  "digest":"sha256:ABCDEF0123456789abcdef0123456789abcdef0123456789abcdef0123456789"}]},
      {"tag_name":"v0.2.17-arm","name":"Draft","html_url":"https://x","draft":true,"prerelease":false,"published_at":null,"body":"",
       "assets":[{"name":"AnyPS5-toolkit-macos-0.2.17-arm.zip","browser_download_url":"https://example.com/t.zip","size":1}]},
-     {"tag_name":"v0.2.15-arm","name":"AnyPS5-ARM 0.2.15","html_url":"https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.15-arm","draft":false,"prerelease":true,
+     {"tag_name":"v0.2.15-arm","name":"AnyPS5-ARM 0.2.15","html_url":"https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.15-arm","draft":false,"prerelease":true,
       "published_at":"2026-10-25T10:00:00Z","body":"Engine picker. See [the notes](https://example.com) for more.",
       "assets":[{"name":"AnyPS5-toolkit-macos-0.2.15-arm.zip","browser_download_url":"https://example.com/AnyPS5-toolkit-macos-0.2.15-arm.zip","size":38000000,"digest":null}]},
      {"tag_name":"v0.2.14-arm","name":"AnyPS5-ARM 0.2.14","html_url":"https://x","draft":false,"prerelease":false,"published_at":"2026-10-20T10:00:00Z","body":"Old",

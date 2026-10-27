@@ -456,7 +456,7 @@ enum PreviewRenderer {
             render(preferences, found, root, still, output.appendingPathComponent("settings\(category).png")) { model in model.overlay = .settings; model.panelCategory = category }
         }
         render(preferences, found, root, still, output.appendingPathComponent("about-update.png")) { model in
-            model.previewUpdate(Updates.Release(tag: "v0.2.6-arm", version: "0.2.6", page: URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.6-arm")!, download: nil, size: nil), progress: 0.42)
+            model.previewUpdate(Updates.Release(tag: "v0.2.6-arm", version: "0.2.6", page: URL(string: "https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.6-arm")!, download: nil, size: nil), progress: 0.42)
             model.overlay = .settings
             model.panelCategory = model.panelCategories().firstIndex { $0.id == "about" } ?? 0
             model.panelInRows = true
@@ -468,7 +468,7 @@ enum PreviewRenderer {
             nightly.updateChannel = Updates.Channel.nightly.rawValue
             render(nightly, found, root, still, output.appendingPathComponent("about-nightly.png")) { model in
                 model.previewUpdate(Updates.Release(tag: "v0.2.17-arm-nightly.20261025.1", version: "0.2.17-nightly.20261025.1",
-                                                    page: URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.17-arm-nightly.20261025.1")!,
+                                                    page: URL(string: "https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.17-arm-nightly.20261025.1")!,
                                                     download: nil, size: nil, prerelease: true), progress: nil)
                 model.overlay = .settings
                 model.panelCategory = model.panelCategories().firstIndex { $0.id == "about" } ?? 0
@@ -720,7 +720,7 @@ enum PreviewRenderer {
             InstalledToolkit(version: version, folder: URL(fileURLWithPath: "/nonexistent/\(version)"), manifest: ToolkitManifest(version: version, buildDate: built))
         }
         let downloaded = [installed("0.2.16-arm-5c0ffee12345", built: "2026-11-02T10:00:00Z"), installed("0.2.15-arm-0badc0de4321", built: "2026-10-25T10:00:00Z")]
-        let page = URL(string: "https://github.com/utkuhalis/AnyPS5-ARM/releases")!
+        let page = URL(string: "https://github.com/AnyTogether/AnyPS5-ARM/releases")!
         let day = { (days: Double) in Date().addingTimeInterval(-days * 86_400) }
         let catalogue = [
             EngineCatalogue.Entry(release: "0.2.17-arm", tag: "v0.2.17-arm", title: "AnyPS5-ARM 0.2.17", summary: "Faster shader cache · Stray holds 60 FPS", date: day(1), page: page, download: page, size: 39_000_000, digest: nil, prerelease: false),

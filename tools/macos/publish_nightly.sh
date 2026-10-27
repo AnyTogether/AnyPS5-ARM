@@ -40,7 +40,7 @@ dry=0
 [ "${1:-}" = "--dry-run" ] && dry=1
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$root"
-repo="utkuhalis/AnyPS5-ARM"
+repo="AnyTogether/AnyPS5-ARM"
 
 # 1. Where we are.
 branch="$(git rev-parse --abbrev-ref HEAD)"

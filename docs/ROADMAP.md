@@ -42,7 +42,7 @@ The driver code runs translated by Rosetta, like the game. The libraries also bu
 
 ## 4. The AnyPS5 app and releases ⏭️
 
-The last release, [v0.1.0-arm](https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.1.0-arm), predates most of the work above.
+The last release, [v0.1.0-arm](https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.1.0-arm), predates most of the work above.
 
 | | Step | Details |
 |---|---|---|
@@ -52,7 +52,7 @@ The last release, [v0.1.0-arm](https://github.com/utkuhalis/AnyPS5-ARM/releases/
 
 ## 5. Native arm64, without Rosetta 💤
 
-Plan and design: [NATIVE_ARM64.md](https://github.com/utkuhalis/AnyPS5-ARM/blob/native-arm64/docs/dev/NATIVE_ARM64.md) on the `native-arm64` branch. Guest x86-64 code is translated to arm64 ahead of time (Capstone, LLVM), and the host libraries build natively.
+Plan and design: [NATIVE_ARM64.md](https://github.com/AnyTogether/AnyPS5-ARM/blob/native-arm64/docs/dev/NATIVE_ARM64.md) on the `native-arm64` branch. Guest x86-64 code is translated to arm64 ahead of time (Capstone, LLVM), and the host libraries build natively.
 
 | | Milestone | Details |
 |---|---|---|

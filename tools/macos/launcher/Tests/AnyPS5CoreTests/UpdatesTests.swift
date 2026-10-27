@@ -23,14 +23,14 @@ final class UpdatesTests: XCTestCase {
 
     func testTheLatestReleaseAsGitHubDescribesIt() throws {
         let json = """
-        {"tag_name":"v0.2.6-arm","name":"AnyPS5-ARM 0.2.6","html_url":"https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.6-arm","draft":false,"prerelease":false,
+        {"tag_name":"v0.2.6-arm","name":"AnyPS5-ARM 0.2.6","html_url":"https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.6-arm","draft":false,"prerelease":false,
          "assets":[{"name":"install.sh","browser_download_url":"https://example.com/install.sh","size":1562},
                    {"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/AnyPS5-macOS.zip","size":47256820}]}
         """
         let release = try XCTUnwrap(Updates.release(from: Data(json.utf8)))
         XCTAssertEqual(release.tag, "v0.2.6-arm")
         XCTAssertEqual(release.version, "0.2.6")
-        XCTAssertEqual(release.page.absoluteString, "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.6-arm")
+        XCTAssertEqual(release.page.absoluteString, "https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.6-arm")
         XCTAssertEqual(release.download?.absoluteString, "https://example.com/AnyPS5-macOS.zip")
         XCTAssertEqual(release.size, 47256820)
     }

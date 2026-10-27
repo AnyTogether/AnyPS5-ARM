@@ -46,4 +46,4 @@ These are point-in-time readings. The number in parentheses in the window title 
 | Tested source | `main at 0deeb2a99` |
 | Output | `Title and tutorial render after skipping black cutscene; screenshot FPS 30.45 and 1.19; warm-cache FPS and save/resume unverified` |
 
-First reported by Eyad Al-Daoud in [PR #8](https://github.com/utkuhalis/AnyPS5-ARM/pull/8).
+First reported by Eyad Al-Daoud in [PR #8](https://github.com/AnyTogether/AnyPS5-ARM/pull/8).

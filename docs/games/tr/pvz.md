@@ -55,5 +55,5 @@ AnyPS5.app bu adımları henüz yapmıyor; şimdilik elle:
 
 ## Bağlantılar
 
-- [PR #4: macOS unwind tabloları](https://github.com/utkuhalis/AnyPS5-ARM/pull/4)
+- [PR #4: macOS unwind tabloları](https://github.com/AnyTogether/AnyPS5-ARM/pull/4)
 - [Upstream #4194](https://github.com/boykopovar/AnyPS5/pull/4194)

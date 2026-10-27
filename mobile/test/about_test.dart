@@ -16,7 +16,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('AnyPS5 Remote  ·  v$appVersion'), findsOneWidget);
     expect(find.text('Utku Halis'), findsOneWidget);
-    expect(find.text('github.com/utkuhalis/AnyPS5-ARM'), findsOneWidget);
+    expect(find.text('github.com/AnyTogether/AnyPS5-ARM'), findsOneWidget);
     expect(find.text('github.com/boykopovar/AnyPS5'), findsOneWidget);
   });
 

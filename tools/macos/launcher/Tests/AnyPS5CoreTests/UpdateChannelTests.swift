@@ -39,7 +39,7 @@ final class UpdateChannelTests: XCTestCase {
     /// app, and an older release.
     static func list(_ releases: [(tag: String, pre: Bool, draft: Bool, app: Bool, published: String)]) -> Data {
         let items: [[String: Any]] = releases.map { item in
-            ["tag_name": item.tag, "html_url": "https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/\(item.tag)", "draft": item.draft, "prerelease": item.pre,
+            ["tag_name": item.tag, "html_url": "https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/\(item.tag)", "draft": item.draft, "prerelease": item.pre,
              "published_at": item.published,
              "assets": item.app ? [["name": "AnyPS5-macOS.zip", "browser_download_url": "https://example.com/\(item.tag).zip", "size": 1]] : []]
         }
@@ -99,7 +99,7 @@ final class UpdateChannelLookupTests: XCTestCase {
         configuration.protocolClasses = [ChannelStub.self]
         session = URLSession(configuration: configuration)
         ChannelStub.asked = []
-        ChannelStub.latest = Data(#"{"tag_name":"v0.2.16-arm","html_url":"https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.16-arm","draft":false,"prerelease":false,"assets":[{"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/a.zip","size":1}]}"#.utf8)
+        ChannelStub.latest = Data(#"{"tag_name":"v0.2.16-arm","html_url":"https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.16-arm","draft":false,"prerelease":false,"assets":[{"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/a.zip","size":1}]}"#.utf8)
         ChannelStub.list = UpdateChannelTests.github
     }
 
@@ -108,7 +108,7 @@ final class UpdateChannelLookupTests: XCTestCase {
         let found = await Updates.lookup(current: "0.2.16-arm", channel: .nightly, session: session)
         guard case .newer(let release) = found else { return XCTFail("no nightly offered: \(found)") }
         XCTAssertEqual(release.tag, "v0.2.17-arm-nightly.20261025.2")
-        XCTAssertEqual(ChannelStub.asked, ["/repos/utkuhalis/AnyPS5-ARM/releases"])
+        XCTAssertEqual(ChannelStub.asked, ["/repos/AnyTogether/AnyPS5-ARM/releases"])
     }
 
     /// Stable keeps asking for the latest release, as before the channels.
@@ -116,7 +116,7 @@ final class UpdateChannelLookupTests: XCTestCase {
         let found = await Updates.lookup(current: "0.2.15-arm", channel: .stable, session: session)
         guard case .newer(let release) = found else { return XCTFail("no release offered: \(found)") }
         XCTAssertEqual(release.tag, "v0.2.16-arm")
-        XCTAssertEqual(ChannelStub.asked, ["/repos/utkuhalis/AnyPS5-ARM/releases/latest"])
+        XCTAssertEqual(ChannelStub.asked, ["/repos/AnyTogether/AnyPS5-ARM/releases/latest"])
     }
 
     /// Back on Stable from a nightly: the older stable release is never offered...
@@ -127,7 +127,7 @@ final class UpdateChannelLookupTests: XCTestCase {
 
     /// ...but the release the nightly led to is.
     func testBackOnStableTakesTheNewerRelease() async {
-        ChannelStub.latest = Data(#"{"tag_name":"v0.2.17-arm","html_url":"https://github.com/utkuhalis/AnyPS5-ARM/releases/tag/v0.2.17-arm","draft":false,"prerelease":false,"assets":[{"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/a.zip","size":1}]}"#.utf8)
+        ChannelStub.latest = Data(#"{"tag_name":"v0.2.17-arm","html_url":"https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.17-arm","draft":false,"prerelease":false,"assets":[{"name":"AnyPS5-macOS.zip","browser_download_url":"https://example.com/a.zip","size":1}]}"#.utf8)
         let found = await Updates.lookup(current: "0.2.17-arm-nightly.20261025.2", channel: .stable, session: session)
         guard case .newer(let release) = found else { return XCTFail("the release was not offered: \(found)") }
         XCTAssertEqual(release.version, "0.2.17")
