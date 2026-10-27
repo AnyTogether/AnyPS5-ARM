@@ -741,7 +741,7 @@ int main() {
         for (const std::uint8_t version : {32u, 33u, 34u, 35u, 36u, 37u, 38u}) {
             pointRequest.target.spannedWaves = spanned;
             auto legacy = DecodeBase64(serializer.Serialize(pointRequest));
-            const std::size_t dropped = version >= 36u ? 27u : version >= 35u ? 27u : 32u;
+            const std::size_t dropped = version >= 36u ? 26u : version >= 35u ? 27u : 32u;
             legacy.resize(legacy.size() - dropped);
             if (version == 33u) legacy.insert(legacy.end(), {0xffu, 0xffu, 0xffu, 0xffu, 0u});
             legacy[4] = version;
@@ -839,7 +839,8 @@ int main() {
         return false;
     };
     auto version46Dither = twoSample;
-    version46Dither.pop_back();
+    // Version 49 ends with version 48's barycentric flag and the fork's subgroup stages and mesh-as-compute.
+    version46Dither.resize(version46Dither.size() - 6u);
     version46Dither[4] = 46u;
     Require(rejectsDither(version46Dither));
     version46Dither[ditherByte] = 1u;

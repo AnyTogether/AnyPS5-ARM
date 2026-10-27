@@ -666,7 +666,8 @@ int APS5_VABI sceFontGlyphRenderImageHorizontal(FontGlyph glyph, const FontStyle
 }
 
 int APS5_VABI sceFontGlyphRenderImageVertical(FontGlyph glyph, const FontStyleFrame* styleFrame, FontRenderer renderer, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* output) {
-    return RenderGlyph(glyph, styleFrame, renderer, surface, x, y, metrics, output, 2);
+    // RenderGlyph has no vertical layout yet: the generated glyph object's vertical placement draws it.
+    return RenderGlyphObject(glyph, styleFrame, renderer, surface, x, y, metrics, output, GlyphPlacement::Vertical);
 }
 
 }
