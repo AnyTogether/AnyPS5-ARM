@@ -111,7 +111,9 @@ jobs:
           printf '%s\n' "$glibcxx" GLIBCXX_3.4.30 | sort -CV || { echo "::error::The engine needs $glibcxx, newer than GCC 12's libstdc++"; exit 1; }
 
   # The whole build and ctest on Ubuntu 24.04 (still GCC 12): its Mesa has a lavapipe new enough for
-  # the AGC execution tests (22.04's Mesa 23.2 fails dozens of them), and Python 3.12.
+  # the AGC execution tests (22.04's Mesa 23.2 fails dozens of them), its kernel has the userfaultfd
+  # write protection the guest write watch needs, and Python is 3.12. SPIRV-Tools on, as upstream's
+  # Linux job has it.
   engine-linux-tests:
     name: Engine (Linux tests, Ubuntu 24.04, lavapipe)
     needs: eligibility
@@ -149,7 +151,7 @@ jobs:
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-          -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
+          -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12 -DANYPS5_ENABLE_SPIRV_TOOLS=ON
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build everything and the tests
         run: cmake --build build
