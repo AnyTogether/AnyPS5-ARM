@@ -1,6 +1,6 @@
 # Windows and Linux engine for AnyPS5 Desktop
 
-AnyPS5 Desktop (AnyTogether/AnyPS5-Desktop) can run games with AnyPS5-ARM's engine instead of
+AnyPS5 Desktop (AnyTogether/AnyLauncher-Port) can run games with AnyPS5-ARM's engine instead of
 upstream's. It looks for it on AnyPS5-ARM's releases, by name:
 
     AnyPS5-toolkit-windows-<commit>.zip

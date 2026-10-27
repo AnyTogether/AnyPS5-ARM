@@ -23,7 +23,7 @@ Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/
 - **Language.** The phone uses the launcher's language: English by default, or Turkish.
 - The version is shown faintly in the bottom right corner.
 
-It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/AnyTogether/AnyPS5-Desktop), the launcher for Windows and Linux (early preview), pairs with it too.
+It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/AnyTogether/AnyLauncher-Port), the launcher for Windows and Linux (early preview), pairs with it too.
 
 ## AnyTogether
 

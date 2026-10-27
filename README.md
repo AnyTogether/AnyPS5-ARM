@@ -18,7 +18,7 @@ curl -fsSL https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/in
 
 One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
 
-**On Windows or Linux?** Use [**AnyPS5 Desktop**](https://github.com/AnyTogether/AnyPS5-Desktop/releases/latest): this launcher for those systems, with AnyTogether built in (early preview).
+**On Windows or Linux?** Use [**AnyPS5 Desktop**](https://github.com/AnyTogether/AnyLauncher-Port/releases/latest): this launcher for those systems, with AnyTogether built in (early preview).
 
 ### First start
 
@@ -196,7 +196,7 @@ Like the console's **Broadcast**, the launcher streams the game playing live to 
 
 - **Add My Games Too** gives every unlocked game its own entry with its own art (from the dump's `pic0` and `icon0`), started with `--steam --play <title ID>`: the game opens at once, and the launcher quits when it ends so Steam sees it end (a crash keeps it open on the report). A launcher already open takes the request instead of a second one starting.
 - The shortcuts go into `~/Library/Application Support/Steam/userdata/<account>/config/shortcuts.vdf` of the account signed in last (a choice when there are several), the pictures into `config/grid`, named after each shortcut's ID (the CRC-32 of the quoted program and the name with the top bit set, written into the shortcut so Steam uses it). **Open Full Screen from Steam** adds `--fullscreen`.
-- Steam writes its own copy of the file when it quits, so the launcher writes only while Steam is closed: with Steam open it offers **Quit Steam and Add**. The file is read and written back to the byte with only AnyPS5's entries changed, after a copy to `shortcuts.vdf.anyps5-backup`; **Remove from Steam** takes out only AnyPS5's entries and their pictures. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop)) does the same, for the Steam Deck too.
+- Steam writes its own copy of the file when it quits, so the launcher writes only while Steam is closed: with Steam open it offers **Quit Steam and Add**. The file is read and written back to the byte with only AnyPS5's entries changed, after a copy to `shortcuts.vdf.anyps5-backup`; **Remove from Steam** takes out only AnyPS5's entries and their pictures. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyLauncher-Port)) does the same, for the Steam Deck too.
 
 ### Controllers & troubleshooting
 
@@ -204,7 +204,7 @@ The launcher reads every controller macOS has a profile for (DualSense, DualShoc
 
 - **Settings → Controllers** lists the pads with their family, USB or Bluetooth and battery (and charging), and offers **Test Buttons and Sticks** (a live drawing of the pad: every button, both sticks inside the dead zone's ring, the triggers; hold ○ / B or press Esc to leave), **Test Vibration**, **Light Bar** (the theme's accent or a colour, DualSense and DualShock 4), **Confirm Button** (○ confirms and ✕ goes back, as on Japanese consoles; the hints follow) and **Stick Dead Zone** (in the launcher, and in every game that sets no dead zone of its own). A controller nearly out of battery shows in the top bar.
 - The **troubleshooter** under it says what it sees: no controller at all (a data cable, how to pair each family over Bluetooth), a HID game controller macOS lists without a layout, a low battery, Steam running (its controller support can turn the pad into a mouse), and that the DualShock 3 works over USB only.
-- Every connect and disconnect is logged with the pad's family, connection and driver; the game's log gets the controllers at each start, and crash reports (**Export Report**, the issue form) carry them with the recent connects and disconnects. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop)) has the same screen, reading pads through SDL2 with a troubleshooter for Steam, DS4Windows, DualSenseX, HidHide and Linux permissions.
+- Every connect and disconnect is logged with the pad's family, connection and driver; the game's log gets the controllers at each start, and crash reports (**Export Report**, the issue form) carry them with the recent connects and disconnects. The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyLauncher-Port)) has the same screen, reading pads through SDL2 with a troubleshooter for Steam, DS4Windows, DualSenseX, HidHide and Linux permissions.
 
 ### Getting around
 
@@ -237,7 +237,7 @@ The launcher works like a console: the arrow keys, Return (✕) and Esc (○), `
 - The QR code's link works once and for two minutes; it turns into a cookie for that browser alone. The page is served on the Mac's local network address only, to the local network only, and refuses other sites and hosts; too many requests or wrong codes are slowed down.
 - The server runs only while the QR code is shown and while browsers it let in are connected (two more minutes for a reload or a locked screen), or always with **Keep browser play on**. Turning **Play from a browser** off stops it.
 - Plain HTTP on the local network: tilt (motion sensors), keeping the screen awake and vibration on iPhones need HTTPS or Safari support the page does not have. For those, use the app.
-- The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop)) serves the same page ([`tools/macos/launcher/BrowserPad/index.html`](tools/macos/launcher/BrowserPad/index.html)).
+- The Windows and Linux launcher ([AnyPS5-Desktop](https://github.com/AnyTogether/AnyLauncher-Port)) serves the same page ([`tools/macos/launcher/BrowserPad/index.html`](tools/macos/launcher/BrowserPad/index.html)).
 
 | The QR code on the Mac | The pad in a phone's browser |
 |---|---|
