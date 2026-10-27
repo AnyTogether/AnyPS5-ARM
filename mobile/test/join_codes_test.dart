@@ -31,7 +31,7 @@ Map<String, dynamic> party({
 
 final _code = {
   'code': 'K7QM3XPA',
-  'url': 'https://anytogether.kodla.agency/join/K7QM3XPA',
+  'url': 'https://anytogether.net/join/K7QM3XPA',
   'expiresAt': DateTime.now()
       .add(const Duration(hours: 24))
       .toUtc()
@@ -45,7 +45,7 @@ void main() {
       expect(JoinCode.normalize(' K7QM 3XPA '), 'K7QM3XPA');
       expect(
         JoinCode.normalize(
-          'https://anytogether.kodla.agency/join/K7QM3XPA?from=discord',
+          'https://anytogether.net/join/K7QM3XPA?from=discord',
         ),
         'K7QM3XPA',
       );
@@ -171,7 +171,7 @@ void main() {
 
     await tester.enterText(
       find.byType(TextField),
-      'https://anytogether.kodla.agency/join/k7qm-3xpa',
+      'https://anytogether.net/join/k7qm-3xpa',
     );
     await tester.tap(find.text('Look up'));
     await tester.pumpAndSettle();

@@ -3,7 +3,7 @@ import XCTest
 
 /// Join codes for a party or a share play, the party's Discord link and deafening in a call.
 final class TogetherJoinCodeTests: TogetherSignedInCase {
-    static let code: [String: Any] = ["code": "K7QM3XPA", "url": "https://anytogether.kodla.agency/join/K7QM3XPA", "expiresAt": "2099-10-26T10:00:00.000Z"]
+    static let code: [String: Any] = ["code": "K7QM3XPA", "url": "https://anytogether.net/join/K7QM3XPA", "expiresAt": "2099-10-26T10:00:00.000Z"]
 
     // MARK: The code itself
 
@@ -16,8 +16,8 @@ final class TogetherJoinCodeTests: TogetherSignedInCase {
     func testWhatIsTypedOrPastedIsReadAsACode() {
         XCTAssertEqual(TogetherJoinCode.normalize("K7QM-3XPA"), "K7QM3XPA")
         XCTAssertEqual(TogetherJoinCode.normalize(" k7qm 3xpa "), "K7QM3XPA")
-        XCTAssertEqual(TogetherJoinCode.normalize("https://anytogether.kodla.agency/join/K7QM3XPA"), "K7QM3XPA", "the link works too")
-        XCTAssertEqual(TogetherJoinCode.normalize("anytogether.kodla.agency/join/k7qm-3xpa?x=1"), "K7QM3XPA")
+        XCTAssertEqual(TogetherJoinCode.normalize("https://anytogether.net/join/K7QM3XPA"), "K7QM3XPA", "the link works too")
+        XCTAssertEqual(TogetherJoinCode.normalize("anytogether.net/join/k7qm-3xpa?x=1"), "K7QM3XPA")
         XCTAssertNil(TogetherJoinCode.normalize("K7QM3XP"), "too short")
         XCTAssertNil(TogetherJoinCode.normalize("K7QM3XPAB"), "too long")
         XCTAssertNil(TogetherJoinCode.normalize("K7QM3XP0"), "no 0, O, 1 or I")
@@ -40,7 +40,7 @@ final class TogetherJoinCodeTests: TogetherSignedInCase {
         json["discord"] = "https://discord.gg/abc"
         let party = try JSONDecoder.together.decode(TogetherParty.self, from: JSONSerialization.data(withJSONObject: json))
         XCTAssertEqual(party.joinCode?.code, "K7QM3XPA")
-        XCTAssertEqual(party.joinCode?.url, "https://anytogether.kodla.agency/join/K7QM3XPA")
+        XCTAssertEqual(party.joinCode?.url, "https://anytogether.net/join/K7QM3XPA")
         XCTAssertEqual(party.discord, "https://discord.gg/abc")
         XCTAssertEqual(party.call?.deafened, ["f1"])
         XCTAssertEqual(party.with(members: party.members, call: party.call).joinCode?.code, "K7QM3XPA", "kept through a local change")

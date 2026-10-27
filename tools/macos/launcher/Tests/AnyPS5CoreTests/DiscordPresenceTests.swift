@@ -196,7 +196,7 @@ final class DiscordPresenceTests: XCTestCase {
     }
     // MARK: The activity, with a party and a Join button
 
-    static let join = DiscordActivity.Button(label: "Join on AnyTogether", url: "https://anytogether.kodla.agency/join/K7QM3XPA")
+    static let join = DiscordActivity.Button(label: "Join on AnyTogether", url: "https://anytogether.net/join/K7QM3XPA")
 
     func testAGameAloneHasNoButtonsAndNoParty() throws {
         let activity = try XCTUnwrap(DiscordActivity(game: "Stray", since: Date(timeIntervalSince1970: 1_800_000_000), partyText: "In a party").json(knownGame: false))
@@ -211,16 +211,16 @@ final class DiscordPresenceTests: XCTestCase {
     func testAJoinButtonGoesWithTheActivity() throws {
         let activity = try XCTUnwrap(DiscordActivity(game: "Stray", since: Date(), button: Self.join, partyText: "In a party").json(knownGame: false))
         let buttons = try XCTUnwrap(activity["buttons"] as? [[String: String]])
-        XCTAssertEqual(buttons, [["label": "Join on AnyTogether", "url": "https://anytogether.kodla.agency/join/K7QM3XPA"]])
+        XCTAssertEqual(buttons, [["label": "Join on AnyTogether", "url": "https://anytogether.net/join/K7QM3XPA"]])
     }
 
     func testAButtonKeepsToDiscordsLimits() throws {
         let long = DiscordActivity.Button(label: String(repeating: "a", count: 40), url: Self.join.url)
         let clipped = try XCTUnwrap(DiscordActivity(game: "Stray", since: Date(), button: long, partyText: "x").json(knownGame: false)?["buttons"] as? [[String: String]])
         XCTAssertEqual(clipped.first?["label"]?.count, 32, "labels are 32 characters at most")
-        let plain = DiscordActivity.Button(label: "Join", url: "http://anytogether.kodla.agency/join/K7QM3XPA")
+        let plain = DiscordActivity.Button(label: "Join", url: "http://anytogether.net/join/K7QM3XPA")
         XCTAssertNil(DiscordActivity(game: "Stray", since: Date(), button: plain, partyText: "x").json(knownGame: false)?["buttons"], "https only")
-        let huge = DiscordActivity.Button(label: "Join", url: "https://anytogether.kodla.agency/join/" + String(repeating: "A", count: 500))
+        let huge = DiscordActivity.Button(label: "Join", url: "https://anytogether.net/join/" + String(repeating: "A", count: 500))
         XCTAssertNil(DiscordActivity(game: "Stray", since: Date(), button: huge, partyText: "x").json(knownGame: false)?["buttons"], "512 characters at most")
         let empty = DiscordActivity.Button(label: "  ", url: Self.join.url)
         XCTAssertNil(DiscordActivity(game: "Stray", since: Date(), button: empty, partyText: "x").json(knownGame: false)?["buttons"])
@@ -282,16 +282,16 @@ final class DiscordPresenceTests: XCTestCase {
     // MARK: Which code the Join button uses
 
     static func code(_ code: String, expires: TimeInterval = 3600) -> TogetherJoinCode {
-        TogetherJoinCode(code: code, url: "https://anytogether.kodla.agency/join/\(code)", expiresAt: Date().addingTimeInterval(expires))
+        TogetherJoinCode(code: code, url: "https://anytogether.net/join/\(code)", expiresAt: Date().addingTimeInterval(expires))
     }
 
     func testTheButtonUsesACodeThatWorks() {
         let party = DiscordJoin.Source(id: "p1", code: Self.code("PPPPPPPP"), mine: false, mayMake: false)
-        XCTAssertEqual(DiscordJoin.plan(share: nil, party: party), .button("https://anytogether.kodla.agency/join/PPPPPPPP"))
+        XCTAssertEqual(DiscordJoin.plan(share: nil, party: party), .button("https://anytogether.net/join/PPPPPPPP"))
         let share = DiscordJoin.Source(id: "s1", code: Self.code("SSSSSSSS"), mine: true, mayMake: true)
-        XCTAssertEqual(DiscordJoin.plan(share: share, party: party), .button("https://anytogether.kodla.agency/join/SSSSSSSS"), "the share play first")
+        XCTAssertEqual(DiscordJoin.plan(share: share, party: party), .button("https://anytogether.net/join/SSSSSSSS"), "the share play first")
         let ranOut = DiscordJoin.Source(id: "s1", code: Self.code("SSSSSSSS", expires: -10), mine: false, mayMake: false)
-        XCTAssertEqual(DiscordJoin.plan(share: ranOut, party: party), .button("https://anytogether.kodla.agency/join/PPPPPPPP"))
+        XCTAssertEqual(DiscordJoin.plan(share: ranOut, party: party), .button("https://anytogether.net/join/PPPPPPPP"))
     }
 
     func testTheLeaderGetsACodeMadeForTheButton() {
@@ -323,7 +323,7 @@ final class DiscordPresenceTests: XCTestCase {
         // The leader's code: until it runs out the button opens it, then a new one is made for it.
         let led = DiscordJoin.Source(id: "p1", code: Self.code("PPPPPPPP", expires: 900), mine: true, mayMake: true)
         let end = try XCTUnwrap(DiscordJoin.refresh(share: nil, party: led))
-        XCTAssertEqual(DiscordJoin.plan(share: nil, party: led, now: end.addingTimeInterval(-1)), .button("https://anytogether.kodla.agency/join/PPPPPPPP"))
+        XCTAssertEqual(DiscordJoin.plan(share: nil, party: led, now: end.addingTimeInterval(-1)), .button("https://anytogether.net/join/PPPPPPPP"))
         XCTAssertEqual(DiscordJoin.plan(share: nil, party: led, now: end), .makeParty("p1"))
         // A member's button goes; so does the leader's once they stopped making codes for it.
         let member = DiscordJoin.Source(id: "p1", code: led.code, mine: false, mayMake: false)
@@ -334,6 +334,6 @@ final class DiscordPresenceTests: XCTestCase {
         let share = DiscordJoin.Source(id: "s1", code: Self.code("SSSSSSSS", expires: 60), mine: true, mayMake: false)
         let party = DiscordJoin.Source(id: "p1", code: Self.code("PPPPPPPP", expires: 3600), mine: false, mayMake: false)
         let shareEnd = try XCTUnwrap(DiscordJoin.refresh(share: share, party: party))
-        XCTAssertEqual(DiscordJoin.plan(share: share, party: party, now: shareEnd), .button("https://anytogether.kodla.agency/join/PPPPPPPP"))
+        XCTAssertEqual(DiscordJoin.plan(share: share, party: party, now: shareEnd), .button("https://anytogether.net/join/PPPPPPPP"))
     }
 }
