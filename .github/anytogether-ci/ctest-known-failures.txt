@@ -29,7 +29,8 @@ windows agc_frame_generation            The test executable does not start on Wi
 # Timing tests: they measure wall-clock sleeps, which a shared runner cannot keep.
 all     precise_wait                    Spin/sleep deadline test; upstream's own release job leaves it out too.
 
-# macOS: x86-64 under Rosetta in a virtual machine, and no MoltenVK on the runner.
+# macOS: x86-64 under Rosetta in a virtual machine, and no MoltenVK on the runner. (The macOS job
+# also retries a failing test twice, for timing tests such as guest_avplayer and guest_itimer_*.)
 macos   macos_fixtures                  Its argv fixture ends in int3, which stays exiting in the kernel under Rosetta.
 macos   guest_kernel_fcntl              Flaky under parallel ctest on macOS.
 macos   agc_thread_priority_refused_rt  Expects a refused real-time priority request to throw; macOS grants it.
@@ -45,6 +46,5 @@ macos   guest_kernel_app_archive_mmap   Known macOS failure: mmap of a file read
 macos   font_face_lifetime(_replace|_churn)?  The test finishes, then its process does not exit within the timeout under Rosetta on the runner.
 macos   guest_memory_lifetime           Its exit probe times out under Rosetta on the runner.
 macos   guest_ssl_transport_(kernel|net)  On the runner a server certificate passes the initial verify without a loaded CA (its trust store differs); needs a look.
-macos   guest_avplayer                  Its EOF stop latency must stay under 10 ms; the macOS runner under parallel ctest misses that now and then (14 ms seen).
 macos   guest_poll                      Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.
 macos   guest_socket_pair               Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.

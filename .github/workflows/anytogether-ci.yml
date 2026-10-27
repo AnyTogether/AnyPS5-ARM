@@ -310,8 +310,10 @@ jobs:
           pattern=$(awk -v p=macos '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")
           echo "CTEST_EXCLUDE=^($pattern)\$" >> "$GITHUB_ENV"
           echo "Left out: ^($pattern)\$"
+      # A test that fails gets two more tries here: under Rosetta in a virtual machine, timing tests
+      # (signals, latencies) miss their marks now and then. One that keeps failing still fails.
       - name: Run the tests
-        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 3 --no-tests=error -E "$CTEST_EXCLUDE" --output-junit ctest.xml
+        run: ctest --test-dir build --output-on-failure --timeout 120 --parallel 3 --no-tests=error --repeat until-pass:3 -E "$CTEST_EXCLUDE" --output-junit ctest.xml
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
