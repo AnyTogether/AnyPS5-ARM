@@ -86,7 +86,7 @@ jobs:
             libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev
       - uses: hendrikmuhs/ccache-action@v1.2.24
         with:
-          key: engine-linux
+          key: engine-build-linux
           max-size: 2G
           evict-old-files: job
       - id: ffmpeg
