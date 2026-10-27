@@ -1,3 +1,5 @@
+#include "prx/libSceAgc/Misc/include/Platform.hpp"
+#include "prx/libSceAgc/include/Agc.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 
@@ -8,11 +10,9 @@
 #include <cstdio>
 #include <stdexcept>
 
-extern "C" int APS5_VABI sceAgcGetIsTrinityMode(bool* isTrinityMode);
 extern "C" std::uint32_t APS5_VABI sceAgcGetShaderInstrumentation(void);
 extern "C" int APS5_VABI sceAgcSetShaderInstrumentation(std::uint32_t flags);
 extern "C" int APS5_VABI sceAgcDebugRaiseException(std::uint32_t exceptionId);
-
 namespace {
 
 void check(bool condition, const char* message) {
@@ -52,6 +52,11 @@ void testDebugRaiseException() {
     check(sceAgcDebugRaiseException(0x1234) == 0, "debug exception request did not return 0");
 }
 
+void testExportLinked() {
+    auto* volatile linked = &sceAgcSuspendPointAndCheckStatus;
+    check(linked != nullptr, "sceAgcSuspendPointAndCheckStatus is not linked");
+}
+
 }
 
 int main() {
@@ -60,6 +65,7 @@ int main() {
         testRejections();
         testShaderInstrumentation();
         testDebugRaiseException();
+        testExportLinked();
         LibcRunShutdown_nid_postfix();
         std::puts("AGC platform tests passed");
         return 0;

@@ -1,3 +1,5 @@
+#include "prx/libc/include/Api.hpp"
+#include "prx/libSceSystemService/include/SystemService.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libSceSystemService/SystemService.hpp"
@@ -25,14 +27,9 @@
 #include <mach-o/dyld.h>
 #include <vector>
 #endif
-extern "C" int APS5_VABI sceSystemServiceLoadExec(const char*, const char* const*);
-extern "C" int APS5_VABI __cxa_atexit_nid_postfix(void (APS5_VABI *func)(void*), void* arg, void* dsoHandle);
-extern "C" void APS5_VABI _Exit_nid_postfix(int);
-extern "C" void APS5_VABI exit_nid_postfix(int);
-extern "C" void APS5_VABI catchReturnFromMain_nid_postfix(int);
+
 using GuestQuickExitCallback = void (APS5_VABI*)();
-extern "C" int APS5_VABI at_quick_exit_nid_postfix(GuestQuickExitCallback);
-extern "C" void APS5_VABI quick_exit_nid_postfix(int);
+
 namespace {
 std::atomic<bool> awaiting{false};
 void AwaitExit() {
@@ -246,6 +243,7 @@ int main(int argc, char** argv) {
             LibcSetEndFlush_nid_no_patch(ExitFlushAfterDrain);
         }
         _Exit_nid_postfix(7);
+
     }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--requested-exit-driver") == 0) {
         Require(RunChild(OwnExecutable(), "--requested-exit") == 0);
@@ -259,16 +257,19 @@ int main(int argc, char** argv) {
         Require(slot != FLS_OUT_OF_INDEXES && FlsSetValue(slot, &slot));
 #endif
         _Exit_nid_postfix(0);
+
         return 2;
     }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--return-from-main") == 0) {
         catchReturnFromMain_nid_postfix(0);
+
         return 2;
     }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--quick-exit") == 0) {
         Require(at_quick_exit_nid_postfix(QuickFirst) == 0);
         Require(at_quick_exit_nid_postfix(QuickSecond) == 0);
         quick_exit_nid_postfix(0);
+
         return 2;
     }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--nested-exit-driver") == 0) {
@@ -280,6 +281,7 @@ int main(int argc, char** argv) {
         Require(__cxa_atexit_nid_postfix(CheckShutdownStillRunning, nullptr, nullptr) == 0);
         Require(__cxa_atexit_nid_postfix(ExitingHandler, nullptr, nullptr) == 0);
         exit_nid_postfix(0);
+
         return 2;
     }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--exit-order-driver") == 0) {
@@ -289,6 +291,7 @@ int main(int argc, char** argv) {
         LibcRegisterShutdown_nid_postfix(GuestExitShutdown);
         Require(__cxa_atexit_nid_postfix(CheckShutdownStillRunning, nullptr, nullptr) == 0);
         exit_nid_postfix(0);
+
         return 2;
     }
     if (argc > firstArgument && std::strcmp(argv[firstArgument], "--relaunch-driver") == 0) {
@@ -324,16 +327,24 @@ int main(int argc, char** argv) {
             LibcRequestExit_nid_postfix(7);
             LibcAwaitExit_nid_postfix();
         }
+        if (std::strcmp(argv[firstArgument], "--lnc-exit") == 0) sceLncUtilLoadExec("exit", nullptr);
         sceSystemServiceLoadExec("exit", nullptr);
         return 2;
     }
     Require(sceSystemServiceLoadExec(nullptr, nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
     Require(sceSystemServiceLoadExec("", nullptr) == SYSTEM_SERVICE_ERROR_PARAMETER);
-    for (const char* path : {"/app0/another.bin", "/data/eboot.bin", "/app0/../eboot.bin", "/app0//eboot.bin"}) {
-        bool rejected = false;
-        try { sceSystemServiceLoadExec(path, nullptr); }
-        catch (const std::runtime_error& error) { rejected = std::string(error.what()).find(path) != std::string::npos; }
-        Require(rejected);
+    Require(sceLncUtilLoadExec(nullptr, nullptr) == LNC_UTIL_ERROR_INVALID_ARGUMENT);
+    bool emptyRejected = false;
+    try { sceLncUtilLoadExec("", nullptr); }
+    catch (const std::runtime_error&) { emptyRejected = true; }
+    Require(emptyRejected);
+    for (const auto loadExec : {sceSystemServiceLoadExec, sceLncUtilLoadExec}) {
+        for (const char* path : {"/app0/another.bin", "/data/eboot.bin", "/app0/../eboot.bin", "/app0//eboot.bin"}) {
+            bool rejected = false;
+            try { loadExec(path, nullptr); }
+            catch (const std::runtime_error& error) { rejected = std::string(error.what()).find(path) != std::string::npos; }
+            Require(rejected);
+        }
     }
 #ifdef _WIN32
     Require(GetEnvironmentVariableA("APS5_EBOOT", nullptr, 0) == 0);

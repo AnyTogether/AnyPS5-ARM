@@ -47,6 +47,11 @@ final class SelfUnwrapTests: XCTestCase {
         data.replaceSubrange(inner ..< inner + 4, with: [0x7F, 0x45, 0x4C, 0x46])
         data[inner + 4] = elfClass
         data[inner + 5] = 1
+        // Version 1, x86-64 and a 64-byte header, which upstream's reference now asks for.
+        data[inner + 6] = 1
+        SelfUnwrap.put16(&data, inner + 0x12, 62)
+        SelfUnwrap.put32(&data, inner + 0x14, 1)
+        SelfUnwrap.put16(&data, inner + 0x34, 64)
         SelfUnwrap.put64(&data, inner + 0x20, programOffset)
         SelfUnwrap.put16(&data, inner + 0x36, 56)
         SelfUnwrap.put16(&data, inner + 0x38, UInt16(segments.count))

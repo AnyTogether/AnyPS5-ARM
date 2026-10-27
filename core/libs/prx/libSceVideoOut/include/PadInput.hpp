@@ -63,6 +63,7 @@ private:
     struct Output {
         std::uint32_t sequence = 0;
         PadOutputState state{};
+        std::uint32_t heldThroughCapture = 0;
     };
 
     explicit PadInput(Pad::InputConfiguration configuration);
@@ -73,6 +74,7 @@ private:
     void closeController(SDL_JoystickID id);
     void sampleControllers();
     PadInputState sampleController(SDL_GameController* controller) const;
+    PadInputState handOff(int slot, PadInputState state);
     void applyOutput();
     void applyOutput(Controller& controller, const PadOutputState& output, int player);
     void enableSensors(Controller& controller, bool wanted);

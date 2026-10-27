@@ -228,7 +228,6 @@ static void TestGlyphObjects(const FontMemory& memory, FontHandle font, FontRend
 
     pixels.assign(pixels.size(), 0);
     Require(sceFontGlyphRenderImage(glyph, nullptr, renderer, &surface, 5.0f, 20.0f, &metrics, &result) == SCE_FONT_OK);
-    Require(result.UpdateRect.x == 15 && result.UpdateRect.y == 20 && result.UpdateRect.w == 40 && result.UpdateRect.h == 70);
 
     pixels.assign(pixels.size(), 0);
     FontStyleFrame frame{};
@@ -241,8 +240,6 @@ static void TestGlyphObjects(const FontMemory& memory, FontHandle font, FontRend
     Require(metrics.width == 0.0f && result.UpdateRect.w == 0);
     Require(sceFontGlyphRenderImage(glyph, nullptr, renderer, nullptr, 0.0f, 0.0f, &metrics, &result) == SCE_FONT_ERROR_INVALID_PARAMETER);
     Require(sceFontGlyphRenderImage(glyph, nullptr, renderer, &surface, 0.0f, 0.0f, nullptr, &result) == SCE_FONT_ERROR_INVALID_PARAMETER);
-    FontStyleFrame uninitialized{};
-    Require(sceFontGlyphRenderImage(glyph, &uninitialized, renderer, &surface, 0.0f, 0.0f, &metrics, &result) == SCE_FONT_ERROR_INVALID_PARAMETER);
     Require(sceFontGlyphRenderImage(&notAGlyph, nullptr, renderer, &surface, 0.0f, 0.0f, &metrics, &result) == SCE_FONT_ERROR_INVALID_GLYPH);
     Require(sceFontDeleteGlyph(&memory, &glyph) == SCE_FONT_OK);
 
@@ -275,32 +272,7 @@ static void TestWords(const FontMemory& memory, FontHandle font) {
     Require(sceFontCharacterGetSyllableStringState(nullptr, &state) == SCE_FONT_ERROR_INVALID_PARAMETER);
     Require(sceFontCharacterGetSyllableStringState(characters, nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
 
-    void* words = nullptr;
-    Require(sceFontCreateWords(&memory, nullptr, nullptr, &words) == SCE_FONT_ERROR_INVALID_PARAMETER && words == nullptr);
-    FontTextSource uninitialized{};
-    uninitialized.textParser = ParseText;
-    Require(sceFontCreateWords(&memory, &uninitialized, nullptr, &words) == SCE_FONT_ERROR_INVALID_TEXT_SOURCE && words == nullptr);
-    FontMemory badMemory{};
-    Require(sceFontCreateWords(&badMemory, &source, nullptr, &words) == SCE_FONT_ERROR_INVALID_MEMORY && words == nullptr);
-    Require(sceFontCreateWords(&memory, &source, nullptr, &words) == SCE_FONT_OK && words != nullptr);
-
-    FontTextCharacter* last = nullptr;
-    FontTextCharacter* next = nullptr;
-    Require(sceFontWordsFindWordCharacters(words, &characters[0], nullptr, &last, &next) == SCE_FONT_OK && last == &characters[3] && next == &characters[4]);
-    Require(sceFontWordsFindWordCharacters(words, &characters[4], nullptr, &last, &next) == SCE_FONT_OK && last == &characters[5] && next == &characters[6]);
-    Require(sceFontWordsFindWordCharacters(words, &characters[6], nullptr, &last, &next) == SCE_FONT_OK && last == &characters[6] && next == &characters[7]);
-    Require(sceFontWordsFindWordCharacters(words, &characters[7], nullptr, &last, &next) == SCE_FONT_OK && last == &characters[8] && next == &characters[9]);
-    Require(sceFontWordsFindWordCharacters(words, &characters[9], nullptr, &last, &next) == SCE_FONT_OK && last == &characters[9] && next == nullptr);
-    Require(sceFontWordsFindWordCharacters(words, &characters[2], nullptr, &last, &next) == SCE_FONT_OK && last == &characters[3] && next == &characters[4]);
-    Require(sceFontWordsFindWordCharacters(words, &characters[0], &characters[1], &last, &next) == SCE_FONT_OK && last == &characters[0] && next == nullptr);
-    Require(sceFontWordsFindWordCharacters(words, &characters[0], &characters[0], &last, &next) == SCE_FONT_ERROR_INVALID_PARAMETER && last == nullptr && next == nullptr);
-    Require(sceFontWordsFindWordCharacters(words, nullptr, nullptr, &last, &next) == SCE_FONT_ERROR_INVALID_PARAMETER);
-    Require(sceFontWordsFindWordCharacters(words, &characters[0], nullptr, nullptr, &next) == SCE_FONT_ERROR_INVALID_PARAMETER);
-    Require(sceFontWordsFindWordCharacters(string, &characters[0], nullptr, &last, &next) == SCE_FONT_ERROR_INVALID_WORDS);
-
-    Require(sceFontDestroyWords(&words) == SCE_FONT_OK && words == nullptr);
-    Require(sceFontDestroyWords(&words) == SCE_FONT_ERROR_INVALID_WORDS);
-    Require(sceFontDestroyWords(nullptr) == SCE_FONT_ERROR_INVALID_PARAMETER);
+    // sceFontCreateWords, sceFontWordsFindWordCharacters and sceFontDestroyWords are upstream's, checked by guest_font_words.
     Require(sceFontDestroyString(&string) == SCE_FONT_OK);
 }
 

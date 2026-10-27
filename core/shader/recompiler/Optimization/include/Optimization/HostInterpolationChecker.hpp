@@ -8,7 +8,7 @@ namespace ShaderRecompiler {
 
 class HostInterpolationChecker {
 public:
-    [[nodiscard]] bool Lower(IrProgram& program, const ShaderPixelInputInfo& pixel) const;
+    [[nodiscard]] bool Lower(IrProgram& program, const ShaderPixelInputInfo& pixel, bool barycentricBuiltins) const;
     // For devices that can run neither barycentric inputs nor the geometry stage that emulates them: every
     // interpolation reads the attribute the host interpolated, and barycentric and P1 results read as 0.
     void ForceLower(IrProgram& program) const;

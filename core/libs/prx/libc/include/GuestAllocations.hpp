@@ -72,6 +72,7 @@ Lease GuestAllocationsAcquire_nid_postfix();
 // Acquire without waiting: false when another thread holds the registry lock (a caller that holds a
 // lock a mutation may wait for, such as the GPU mutex, must not wait for the registry).
 bool GuestAllocationsTryAcquire_nid_postfix(Lease& lease);
+Lease GuestAllocationsAcquireMapped_nid_no_patch(const Mapped& mapped);
 Lease GuestAllocationsAcquireAll_nid_postfix();
 std::shared_ptr<const Range> GuestAllocationsLookup_nid_postfix(std::uintptr_t address, bool next);
 // Changes whenever a mutation ends, so callers can cache facts about guest mappings between changes.

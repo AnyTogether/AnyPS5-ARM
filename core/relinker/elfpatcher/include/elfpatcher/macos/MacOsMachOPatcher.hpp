@@ -14,7 +14,7 @@ namespace Elfpatcher::MacOs {
 // flat-namespace binds to their NID names and RELATIVE relocations are rebases.
 class MacOsMachOPatcher final : public IElfPatcher {
 public:
-    explicit MacOsMachOPatcher(std::optional<std::uint64_t> fixedBase = std::nullopt, std::function<void(std::string_view)> message = {});
+    explicit MacOsMachOPatcher(std::optional<std::uint64_t> fixedBase = std::nullopt, std::function<void(std::string_view)> message = {}, bool traceImports = false);
 
     std::vector<std::uint8_t> Patch(
         std::vector<std::uint8_t> sourceElf,
@@ -30,6 +30,7 @@ public:
 private:
     std::optional<std::uint64_t> fixedBase;
     std::function<void(std::string_view)> message;
+    bool traceImports;
 };
 
 }

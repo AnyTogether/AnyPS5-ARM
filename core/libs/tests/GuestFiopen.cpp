@@ -1,3 +1,4 @@
+#include "prx/libc/include/Api.hpp"
 #include "prx/libc/include/FileStream.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include <csignal>
@@ -10,14 +11,6 @@
 #ifdef __APPLE__
 #include <unistd.h>
 #endif
-
-extern "C" {
-FileStream* APS5_VABI _ZSt7_FiopenPKcNSt5_IosbIiE9_OpenmodeEi_nid_postfix(const char*, int, int);
-FileStream* APS5_VABI fopen_nid_postfix(const char*, const char*);
-int APS5_VABI fopen_s_nid_postfix(FileStream**, const char*, const char*);
-int APS5_VABI fclose_nid_postfix(FileStream*);
-std::int64_t APS5_VABI ftello_nid_postfix(FileStream*);
-}
 
 static void Check(bool value, int line) {
     if (!value) {
@@ -42,6 +35,7 @@ static std::string Contents(const char* name) {
     std::string text;
     for (int c; (c = std::fgetc(stream->GetHandle())) != EOF;) text += static_cast<char>(c);
     fclose_nid_postfix(stream);
+
     return text;
 }
 
@@ -49,6 +43,7 @@ static void Write(FileStream* stream, const char* text) {
     Require(stream != nullptr);
     Require(std::fputs(text, stream->GetHandle()) >= 0);
     fclose_nid_postfix(stream);
+
 }
 
 static bool Exists(const char* name) {
@@ -91,10 +86,12 @@ int main() {
     auto* stream = Open(file, In);
     Require(stream != nullptr && std::fgetc(stream->GetHandle()) == 'a');
     fclose_nid_postfix(stream);
+
     stream = Open(file, In);
     Require(stream != nullptr);
     std::fputc('x', stream->GetHandle());
     fclose_nid_postfix(stream);
+
     Require(Contents(file) == "abc");
 
     Write(Open(file, App), "d");
@@ -105,6 +102,7 @@ int main() {
     stream = Open(file, In | Ate);
     Require(stream != nullptr && ftello_nid_postfix(stream) == 5);
     fclose_nid_postfix(stream);
+
     stream = Open(file, In | Binary);
     Require(stream != nullptr && ftello_nid_postfix(stream) == 0);
     fclose_nid_postfix(stream);
@@ -116,6 +114,7 @@ int main() {
     stream = Open(file, In | Noreplace);
     Require(stream != nullptr);
     fclose_nid_postfix(stream);
+
     stream = Open(file, In | Binary | Noreplace);
     Require(stream != nullptr);
     fclose_nid_postfix(stream);
@@ -132,6 +131,7 @@ int main() {
     stream = Open(file, In | Out);
     Require(stream != nullptr && std::fgetc(stream->GetHandle()) == 'X');
     fclose_nid_postfix(stream);
+
     Require(Contents(file) == "Xbcdef");
 
     Write(Open(file, In | Out | App), "g");

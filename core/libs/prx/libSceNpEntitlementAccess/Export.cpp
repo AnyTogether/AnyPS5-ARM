@@ -1,4 +1,5 @@
 #include "prx/libSceNetCtl/include/Online.hpp"
+#include "prx/libSceNpEntitlementAccess/include/Api.hpp"
 #include <cstdint>
 #include <cstddef>
 #include "SceTypes.hpp"
@@ -146,13 +147,15 @@ int APS5_VABI sceNpEntitlementAccessInitialize(const NpEntitlementAccessInitPara
 int APS5_VABI sceNpEntitlementAccessAbortRequest(std::int64_t requestId) {
     Online::Call call("libSceNpEntitlementAccess", __func__);
     call.Args([&](Online::Fields& in) { in.Int("requestId", static_cast<std::int64_t>(requestId)); });
-    throw std::logic_error("sceNpEntitlementAccessAbortRequest: asynchronous request tracking is unimplemented");
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 int APS5_VABI sceNpEntitlementAccessDeleteRequest(std::int64_t requestId) {
     Online::Call call("libSceNpEntitlementAccess", __func__);
     call.Args([&](Online::Fields& in) { in.Int("requestId", static_cast<std::int64_t>(requestId)); });
-    throw std::logic_error("sceNpEntitlementAccessDeleteRequest: asynchronous request tracking is unimplemented");
+    NotImplemented_nid_no_patch(__func__);
+    return 0;
 }
 
 int APS5_VABI sceNpEntitlementAccessGenerateTransactionId(NpEntitlementAccessTransactionId* transactionId) {
@@ -174,13 +177,11 @@ int APS5_VABI sceNpEntitlementAccessRequestConsumeUnifiedEntitlement(std::int32_
  return call.Return(SCE_NP_ERROR_SIGNED_OUT);
 }
 
-
 int APS5_VABI sceNpEntitlementAccessRequestConsumeServiceEntitlement(std::int32_t userId, std::uint32_t serviceLabel, const NpServiceEntitlementLabel* entitlementLabel, const NpEntitlementAccessTransactionId* transactionId, std::int32_t count, std::int64_t* requestId) {
     Online::Call call("libSceNpEntitlementAccess", __func__);
     call.Args([&](Online::Fields& in) { in.Int("userId", static_cast<std::int64_t>(userId)).Uint("serviceLabel", static_cast<std::uint64_t>(serviceLabel)).Ptr("entitlementLabel", entitlementLabel).Ptr("transactionId", transactionId).Int("count", static_cast<std::int64_t>(count)).Ptr("requestId", requestId); });
  return call.Return(SCE_NP_ERROR_SIGNED_OUT);
 }
-
 
 int APS5_VABI sceNpEntitlementAccessPollServiceEntitlementInfo(std::int64_t requestId, std::int32_t* result, NpEntitlementAccessServiceInfo* info) {
     Online::Call call("libSceNpEntitlementAccess", __func__);

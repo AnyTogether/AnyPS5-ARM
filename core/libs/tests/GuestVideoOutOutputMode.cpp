@@ -1,3 +1,4 @@
+#include "prx/libSceVideoOut/include/Output.hpp"
 #include "SceTypes.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "tests/VideoOutTestEnvironment.hpp"
@@ -9,15 +10,9 @@
 #include <stdexcept>
 
 extern "C" {
-int APS5_VABI sceVideoOutOpen(int userId, int busType, int index, const void* param);
-int APS5_VABI sceVideoOutClose(int handle);
-int APS5_VABI sceVideoOutInitializeOutputOptions(VideoOutOutputOptions* options);
-int APS5_VABI sceVideoOutIsOutputSupported(int handle, std::uint64_t mode, const VideoOutOutputOptions* options, void* reservedPtr, std::uint64_t reserved);
-int APS5_VABI sceVideoOutConfigureOutput(int handle, std::uint64_t mode, const VideoOutOutputOptions* options, void* reservedPtr, std::uint64_t reserved);
 int APS5_VABI sceVideoOutVrrPegToFixedRate(int handle, std::uint64_t arg1, std::uint64_t arg2);
 int APS5_VABI sceVideoOutVrrUnpegFromFixedRate(int handle);
 }
-
 static constexpr int SYSTEM_USER = 255;
 static constexpr int MAIN_BUS = 0;
 static constexpr int HMD2_MAIN_BUS = 0x20;
