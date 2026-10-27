@@ -578,7 +578,7 @@ public:
 
     int Protect(std::uintptr_t begin, std::uintptr_t end, int protection) {
         if (!_available) return ::mprotect(reinterpret_cast<void*>(begin), end - begin, protection) == 0 ? 0 : errno;
-        const Lock lock(_lock);
+        const Lock lock(_lock, SiteProtectionChanged);
         if (::mprotect(reinterpret_cast<void*>(begin), end - begin, protection) != 0) return errno;
         const auto first = pageStart(begin);
         const auto last = pageEnd(end);
