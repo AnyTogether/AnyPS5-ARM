@@ -39,6 +39,7 @@ struct TranslateOptions {
     bool interpolationFunctions = false;
     bool nativeFloat16 = false;
     bool float32FlushToZero = false;
+    bool float32FlushDeclared = false;
     bool float32DenormPreserve = false;
     bool gcnLegacyVertexInputs = false;
     std::optional<ShaderFloatMode> floatMode;

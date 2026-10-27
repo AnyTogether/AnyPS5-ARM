@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <iterator>
@@ -575,6 +576,21 @@ public:
         });
     }
 
+    int Protect(std::uintptr_t begin, std::uintptr_t end, int protection) {
+        if (!_available) return ::mprotect(reinterpret_cast<void*>(begin), end - begin, protection) == 0 ? 0 : errno;
+        const Lock lock(_lock);
+        if (::mprotect(reinterpret_cast<void*>(begin), end - begin, protection) != 0) return errno;
+        const auto first = pageStart(begin);
+        const auto last = pageEnd(end);
+        if (first < last) {
+            forEachPage(first, last, [&](std::uintptr_t page, std::uint8_t& state) {
+                if ((state & Hot) != 0) _snapshots.erase(page);
+                state = static_cast<std::uint8_t>(Written | (state & Fresh) | (protection & ProtectionMask));
+            });
+        }
+        return 0;
+    }
+
     void BeginHostWrite(std::uintptr_t begin, std::uintptr_t end) {
         if (!_available || end <= begin) return;
         begin = pageStart(begin);
@@ -1075,6 +1091,18 @@ void GuestWriteWatchProtectionChanged_nid_postfix(const void* pointer, std::size
     static_cast<void>(pointer);
     static_cast<void>(bytes);
     static_cast<void>(protection);
+#endif
+}
+
+int GuestWriteWatchProtect_nid_postfix(void* pointer, std::size_t bytes, int protection) {
+#if defined(__APPLE__)
+    const auto begin = reinterpret_cast<std::uintptr_t>(pointer);
+    return Watch::Get().Protect(begin, begin + bytes, protection);
+#else
+    static_cast<void>(pointer);
+    static_cast<void>(bytes);
+    static_cast<void>(protection);
+    return ENOSYS;
 #endif
 }
 
