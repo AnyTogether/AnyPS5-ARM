@@ -64,3 +64,4 @@ macos   guest_raw_resolver              Upstream test, fails on macOS/Rosetta, t
 macos   guest_dynamic_loader            Upstream test, fails on macOS/Rosetta, tracked.
 macos   guest_host_standard_error       Upstream test, fails on macOS/Rosetta, tracked.
 macos   guest_kernel_app_archive_archive  Upstream test, fails on macOS/Rosetta, tracked.
+macos   guest_job_manager_worker_spin(_scale_[0-9.]+)?  Upstream test, fails on macOS/Rosetta, tracked (upstream's new JobManager; about 19.7 s of its 20 s timeout on the runner).
