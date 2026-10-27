@@ -347,9 +347,19 @@ Each branch is its own project, with its own README:
 
 ## Credits
 
-- Online play's bridge protocol design is based on AnyPlay's bridge spec ([anyplaynet/network](https://github.com/anyplaynet/network/blob/main/spec/bridge-protocol.md), MIT/Apache-2.0): the frame header, the message numbering, the virtual LAN range and the A/B/C screening of games come from it. See [Online play](docs/dev/ONLINE_PLAY.md#compared-with-anyplay).
-- Stream P2P sockets over the bridge were added after AnyPlay's engine bridge showed the approach ([anyplaynet/AnyPS5](https://github.com/anyplaynet/AnyPS5), GPL-2.0: stream P2P sockets as loopback TCP carried by the net service). Our frames (0x0311–0x0314) and the launcher relay are our own.
-- Some launcher and service features follow ideas AnyPlay shipped first ([anyplaynet/launcher](https://github.com/anyplaynet/launcher), [anyplaynet/cloud](https://github.com/anyplaynet/cloud)): "Try anyway" on a Play Together version mismatch, retiring old launchers with an "Update required" answer, asking before leave party / remove friend and similar actions, and a phone browser as a controller via a QR code ([LudusCtrl](https://github.com/parl0v/ludusctrl)'s browser client by Josip Parlov, @parl0v, shipped in AnyPlay). The code is written independently.
+**The core**
+
+- **[AnyPS5](https://github.com/boykopovar/AnyPS5) by boykopovar** is where the core comes from: the relinker that turns a PS5 executable into a native program and the reimplemented system libraries. AnyPS5-ARM is its port to Apple silicon Macs, and every engine feature here starts from that work.
+- **[mugurc's community macOS port](https://github.com/mugurc/AnyPS5/tree/macos-port)** of AnyPS5 is the port AnyPS5-ARM builds on.
+- **[MoltenVK](https://github.com/KhronosGroup/MoltenVK)** (Khronos, Apache-2.0) runs the PS5 graphics driver's Vulkan on Metal, and **[SDL](https://github.com/libsdl-org/SDL)** (zlib) reads the controllers in games and in AnyLauncher Port.
+
+**Online play**
+
+- **The online design comes from [AnyPlay](https://github.com/anyplaynet).** Our bridge between the engine and the launcher follows AnyPlay's bridge spec ([anyplaynet/network](https://github.com/anyplaynet/network/blob/main/spec/bridge-protocol.md), MIT/Apache-2.0): the frame header, the message numbering, the virtual LAN range and the A/B/C screening of games come from it. Stream P2P sockets over the bridge follow the approach of AnyPlay's engine bridge ([anyplaynet/AnyPS5](https://github.com/anyplaynet/AnyPS5), GPL-2.0).
+- **Ideas AnyPlay shipped first** ([anyplaynet/launcher](https://github.com/anyplaynet/launcher), [anyplaynet/cloud](https://github.com/anyplaynet/cloud)): "Try anyway" on a Play Together version mismatch, retiring old launchers with "Update required", asking before leave party / remove friend and similar actions, the noise suppression switch, the public profile switch and the compatibility filters.
+- **A phone browser as a controller via a QR code** comes from [LudusCtrl](https://github.com/parl0v/ludusctrl)'s browser client by Josip Parlov (@parl0v), shipped in AnyPlay.
+
+Our code is written independently; where we followed someone's design or idea, it is named here.
 
 ## Disclaimer
 
