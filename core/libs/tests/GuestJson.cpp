@@ -1006,16 +1006,16 @@ static void ValueAccess() {
     Require(_ZN3sce4Json11InitializerD1Ev(initializer) == 0);
 
     std::memset(parameter, 0xff, sizeof(parameter));
-    _ZN3sce4Json14InitParameter2C2Ev(parameter);
+    _ZN3sce4Json14InitParameter2C2Ev(reinterpret_cast<SceJson2::InitParameter2*>(parameter));
     std::memcpy(stored, parameter, sizeof(stored));
     Require(stored[0] == nullptr && stored[1] == nullptr && stored[2] == nullptr);
 
     int allocParam = 0;
-    _ZN3sce4Json17InitParameterRttiC1EPNS0_14AllocParamRttiEPvm(parameter, &allocParam, &userData, 8192);
+    _ZN3sce4Json17InitParameterRttiC1EPNS0_14AllocParamRttiEPvm(reinterpret_cast<SceJson2::InitParameterRtti*>(parameter), &allocParam, &userData, 8192);
     std::memcpy(stored, parameter, sizeof(stored));
     Require(stored[0] == &allocParam && stored[1] == &userData && reinterpret_cast<std::uintptr_t>(stored[2]) == 8192);
     int otherParam = 0;
-    _ZN3sce4Json18InitParameterRtti216setAllocatorRttiEPNS0_14AllocParamRttiEPv(parameter, &otherParam, nullptr);
+    _ZN3sce4Json18InitParameterRtti216setAllocatorRttiEPNS0_14AllocParamRttiEPv(reinterpret_cast<SceJson2::InitParameter2*>(parameter), &otherParam, nullptr);
     std::memcpy(stored, parameter, sizeof(stored));
     Require(stored[0] == &otherParam && stored[1] == nullptr && reinterpret_cast<std::uintptr_t>(stored[2]) == 8192);
     _ZN3sce4Json12MemAllocator11notifyErrorEimPv(&allocator, -1, 64, &userData);

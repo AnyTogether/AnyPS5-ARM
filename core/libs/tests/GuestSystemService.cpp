@@ -37,7 +37,6 @@ bool LaunchAppThrows(const char* titleId, const char* const* arguments, const vo
 
 }
 
-extern "C" int APS5_VABI sceSystemServiceOpenTournamentOccurrence(const void* param);
 namespace {
 
 template<typename TList>

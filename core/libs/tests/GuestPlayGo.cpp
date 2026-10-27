@@ -21,6 +21,21 @@ static void Require(bool value, const std::source_location location = std::sourc
     std::abort();
 }
 
+template <typename Operation>
+static void RequireMissingChunkMetadata(Operation&& operation) {
+    bool threw = false;
+    try {
+        operation();
+    } catch (const std::runtime_error& error) {
+        const std::string_view message(error.what());
+        threw = message.find("playgo-chunk.dat") != std::string_view::npos &&
+            message.find("playgo-scenario.json") != std::string_view::npos &&
+            message.find("chunk ID") != std::string_view::npos &&
+            message.find("APS5_PLAYGO_UNLISTED_CHUNKS") != std::string_view::npos;
+    }
+    Require(threw);
+}
+
 static int CheckPackageChunkTable(const char* root) {
     constexpr int badChunkId = static_cast<int>(0x80B2000C);
     std::filesystem::current_path(root);

@@ -31,7 +31,7 @@ int APS5_VABI sceNpWebApi2PushEventCreateFilter(int libCtxId, int handleId, cons
 int APS5_VABI sceNpWebApi2PushEventCreateHandle(int libraryContextId);
 int APS5_VABI sceNpWebApi2PushEventAbortHandle(int libraryContextId, int handleId);
 int APS5_VABI sceNpWebApi2PushEventDeleteHandle(int libraryContextId, int handleId);
-int APS5_VABI sceNpWebApi2PushEventDeletePushContext(int userContextId, const void* pushContextId);
+int APS5_VABI sceNpWebApi2PushEventDeletePushContext(int userContextId, const NpWebApi2PushContextId* pushContextId);
 int APS5_VABI sceNpWebApi2PushEventRegisterCallback(int userContextId, int filterId, void* callback, void* userArg);
 int APS5_VABI sceNpWebApi2ReadData(int64_t requestId, void* data, size_t size);
 int APS5_VABI sceNpWebApi2SendRequest(int64_t requestId, const void* data, size_t dataSize, NpWebApi2ResponseInformationOption* responseInfoOption);

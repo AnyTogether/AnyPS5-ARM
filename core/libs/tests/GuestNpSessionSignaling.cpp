@@ -6,9 +6,6 @@
 #include <cstring>
 #include <array>
 
-extern "C" {
-int APS5_VABI sceNpSessionSignalingGetConnectionStatistics(void* statistics);
-}
 namespace {
 
 constexpr int InvalidArgument = static_cast<int>(0x80553303u);
@@ -107,7 +104,7 @@ int main() {
     unsigned char untouchedStatistics[sizeof(statistics)];
     std::memcpy(untouchedStatistics, statistics, sizeof(statistics));
     Require(sceNpSessionSignalingGetConnectionStatistics(nullptr) == InvalidArgument, "null connection statistics");
-    Require(sceNpSessionSignalingGetConnectionStatistics(statistics) == Unavailable, "connection statistics without network");
+    Require(sceNpSessionSignalingGetConnectionStatistics(reinterpret_cast<SessionSignalingConnectionStatistics*>(statistics)) == Unavailable, "connection statistics without network");
     Require(std::memcmp(statistics, untouchedStatistics, sizeof(statistics)) == 0, "failed statistics query wrote an output");
     Require(sceNpSessionSignalingDeactivate(firstId, 1) == ContextNotFound, "deactivate stale context");
     Require(sceNpSessionSignalingDeactivate(contextId, 1) == GroupNotFound, "deactivate nonexistent group");

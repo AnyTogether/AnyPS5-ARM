@@ -16,14 +16,6 @@
 #include <thread>
 #include <utility>
 
-extern "C" {
-int APS5_VABI scePadReadExt(int, PadData*, int);
-int APS5_VABI scePadGetFeatureReport(int);
-int APS5_VABI scePadSetFeatureReport(int);
-int APS5_VABI scePadOutputReport(int);
-int APS5_VABI scePadVrControllerGetDeviceInformation(int, void*);
-int APS5_VABI scePadVrControllerRead(int, void*, int);
-}
 static void Require(bool value) { if (!value) std::abort(); }
 
 static void CheckInputCommands() {
@@ -345,8 +337,8 @@ static void CheckReadStateHandle(int handle) {
     Require(scePadReadState(handle + 1, &data) == PAD_ERROR_INVALID_HANDLE);
     Require(scePadRead_nid_postfix(0, &data, 1) == PAD_ERROR_INVALID_HANDLE);
     Require(scePadReadState(handle, &data) == PAD_OK);
-    Require(scePadReadExt(handle + 1, &data, 1) == PAD_ERROR_INVALID_HANDLE);
-    Require(scePadReadExt(handle, &data, 1) == 1);
+    Require(scePadReadExt(handle + 1, reinterpret_cast<PadDataExtended*>(&data), 1) == PAD_ERROR_INVALID_HANDLE);
+    Require(scePadReadExt(handle, reinterpret_cast<PadDataExtended*>(&data), 1) == 1);
     Require(scePadRead_nid_postfix(handle, nullptr, 1) == PAD_ERROR_INVALID_ARG);
     Require(scePadRead_nid_postfix(handle, &data, 0) == PAD_ERROR_INVALID_ARG);
     Require(scePadRead_nid_postfix(handle, &data, -1) == PAD_ERROR_INVALID_ARG);
@@ -380,11 +372,11 @@ static void CheckAngularVelocityFilters(int handle) {
 static void CheckAbsentDevices(int handle) {
     std::uint8_t buffer[64]{};
     for (int target : {handle, handle + 1}) {
-        Require(scePadGetFeatureReport(target) == PAD_ERROR_INVALID_HANDLE);
-        Require(scePadSetFeatureReport(target) == PAD_ERROR_INVALID_HANDLE);
-        Require(scePadOutputReport(target) == PAD_ERROR_INVALID_HANDLE);
-        Require(scePadVrControllerGetDeviceInformation(target, buffer) == PAD_ERROR_INVALID_HANDLE);
-        Require(scePadVrControllerRead(target, buffer, 1) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadGetFeatureReport(target, 0, buffer, sizeof(buffer)) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadSetFeatureReport(target, 0, buffer, sizeof(buffer)) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadOutputReport(target, 0, buffer, sizeof(buffer)) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerGetDeviceInformation(target, reinterpret_cast<PadVrControllerDeviceInformation*>(buffer)) == PAD_ERROR_INVALID_HANDLE);
+        Require(scePadVrControllerRead(target, reinterpret_cast<PadVrControllerData*>(buffer), 1) == PAD_ERROR_INVALID_HANDLE);
     }
 }
 

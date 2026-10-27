@@ -10,9 +10,6 @@
 #include <initializer_list>
 #include <stdexcept>
 
-extern "C" {
-int APS5_VABI sceNpWebApi2PushEventCreatePushContext(int, char*);
-}
 static void Require(bool value) { if (!value) std::abort(); }
 
 int main() {
@@ -30,8 +27,8 @@ int main() {
     Require(sceNpWebApi2GetMemoryPoolStats(other, &stats) == 0 && stats.pool_size == 0x8000);
     Require(sceNpWebApi2GetMemoryPoolStats(context, nullptr) == 0);
     // Offline nobody pushes anything: no push context, as before online play.
-    char pushContext[37] = {};
-    Require(sceNpWebApi2PushEventCreatePushContext(sceNpWebApi2CreateUserContext(context, 0x10000000), pushContext) == static_cast<int>(0x80553406));
+    NpWebApi2PushContextId pushContext{};
+    Require(sceNpWebApi2PushEventCreatePushContext(sceNpWebApi2CreateUserContext(context, 0x10000000), &pushContext) == static_cast<int>(0x80553406));
     Require(sceNpWebApi2GetMemoryPoolStats(-1, nullptr) == invalidContext);
     Require(sceNpWebApi2PushEventCreateHandle(-1) == invalidContext);
     const int handle = sceNpWebApi2PushEventCreateHandle(context);

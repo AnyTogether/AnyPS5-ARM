@@ -1420,8 +1420,13 @@ bool importStaysWatched(const Context& context, HostImports& state, const Import
     return importWatching(context, state, !pages.writable, pages.writable, run.bytes).hostPointer;
 #else
     const auto watching = importWatching(context, state, false, true, run.bytes);
+#ifdef __linux__
     BackingFile backing;
     return watching.hostPointer && (watching.dmaBuf || !sharedBacking(context, run.base, run.bytes, backing));
+#else
+    // No shared file backing outside Linux (BackingFile is Linux-only), so nothing else holds the pages.
+    return static_cast<bool>(watching.hostPointer);
+#endif
 #endif
 }
 

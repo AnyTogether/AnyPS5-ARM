@@ -23,7 +23,7 @@
 extern "C" int kill(int, int);
 #endif
 
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
 extern char** environ;
 #endif
 

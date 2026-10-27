@@ -34,8 +34,8 @@ int main() {
     Require(sceWebBrowserDialogClose() == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(sceWebBrowserDialogOpen(nullptr) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(sceWebBrowserDialogOpen(param) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
-    Require(sceWebBrowserDialogSetCookie(param) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
-    Require(sceWebBrowserDialogResetCookie(param) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
+    Require(sceWebBrowserDialogSetCookie(reinterpret_cast<const WebBrowserDialogCookieParam*>(param)) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
+    Require(sceWebBrowserDialogResetCookie(reinterpret_cast<const WebBrowserDialogResetCookieParam*>(param)) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(sceWebBrowserDialogOpenForPredeterminedContent(param, &allowList) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
     Require(sceWebBrowserDialogGetResult(nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
     Require(sceWebBrowserDialogGetResult(&result) == COMMON_DIALOG_ERROR_NOT_INITIALIZED);
@@ -56,9 +56,9 @@ int main() {
 
     Require(sceWebBrowserDialogInitialize() == 0);
     Require(sceWebBrowserDialogSetCookie(nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
-    Require(sceWebBrowserDialogSetCookie(param) == COMMON_DIALOG_ERROR_PARAMETER);
+    Require(sceWebBrowserDialogSetCookie(reinterpret_cast<const WebBrowserDialogCookieParam*>(param)) == COMMON_DIALOG_ERROR_PARAMETER);
     Require(sceWebBrowserDialogResetCookie(nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
-    Require(sceWebBrowserDialogResetCookie(param) == COMMON_DIALOG_ERROR_PARAMETER);
+    Require(sceWebBrowserDialogResetCookie(reinterpret_cast<const WebBrowserDialogResetCookieParam*>(param)) == COMMON_DIALOG_ERROR_PARAMETER);
     Require(sceWebBrowserDialogOpenForPredeterminedContent(nullptr, &allowList) == COMMON_DIALOG_ERROR_ARG_NULL);
     Require(sceWebBrowserDialogOpen(nullptr) == COMMON_DIALOG_ERROR_ARG_NULL);
     Require(sceWebBrowserDialogOpen(param) == 0);
