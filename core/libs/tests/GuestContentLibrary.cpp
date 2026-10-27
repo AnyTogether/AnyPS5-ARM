@@ -34,7 +34,8 @@ static void CheckContentDelete() {
     param.heap_size = 0x4000;
     Require(sceContentDeleteInitialize(&param) == 0);
     Require(Throws<std::invalid_argument>([] { sceContentDeleteByPath(nullptr); }));
-    Require(Throws<std::logic_error>([] { sceContentDeleteByPath("/data/a.png"); }));
+    // Not implemented: upstream's NotImplemented_nid_no_patch throws std::runtime_error now.
+    Require(Throws<std::runtime_error>([] { sceContentDeleteByPath("/data/a.png"); }));
     Require(sceContentDeleteTerminate() == 0);
 }
 
