@@ -9,7 +9,7 @@ import 'storage.dart';
 
 /// AnyTogether's own server. AnyTogether can be hosted by anyone: the phone may be pointed at
 /// another one, and `--dart-define=ANYTOGETHER_URL=…` overrides both.
-final standardServer = Uri.parse('https://anytogether.kodla.agency');
+final standardServer = Uri.parse('https://anytogether.net');
 const forcedServer = String.fromEnvironment('ANYTOGETHER_URL');
 
 /// A server address as typed: https with a host, or http to this phone or the home network

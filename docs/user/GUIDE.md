@@ -41,7 +41,7 @@ It runs with the default settings now. A few letters of its font are missing (gl
 
 ### Compatibility
 
-The [compatibility list](COMPATIBILITY.md) has every game tested on macOS, its status and its frame rate. Players' own reports, for macOS, Windows and Linux, are on the [community compatibility list](https://anytogether.kodla.agency/compatibility) (see [How did it run?](#anytogether)).
+The [compatibility list](COMPATIBILITY.md) has every game tested on macOS, its status and its frame rate. Players' own reports, for macOS, Windows and Linux, are on the [community compatibility list](https://anytogether.net/compatibility) (see [How did it run?](#anytogether)).
 
 ### Status
 
@@ -135,7 +135,7 @@ The launcher is driven with the arrow keys, Return and Esc, a game controller (D
 
 ### AnyTogether
 
-[AnyTogether](https://anytogether.kodla.agency) is the launcher's online home: friends, profiles, messages, parties with voice, share play, activity, leaderboards, notifications, the Theme Hub and the community compatibility list. It is optional; signed out, the launcher works exactly as before. The server is open source ([AnyTogether](https://github.com/AnyTogether/AnyTogether), MIT), and **Settings → AnyTogether → Server** points the launcher at one you run yourself.
+[AnyTogether](https://anytogether.net) is the launcher's online home: friends, profiles, messages, parties with voice, share play, activity, leaderboards, notifications, the Theme Hub and the community compatibility list. It is optional; signed out, the launcher works exactly as before. The server is open source ([AnyTogether](https://github.com/AnyTogether/AnyTogether), MIT), and **Settings → AnyTogether → Server** points the launcher at one you run yourself.
 
 **Signing in.** **Settings → AnyTogether**: type your email and the code it sends you, approve the launcher on the website (where passkeys work too), or tap once on your phone if the AnyPS5 Remote app is paired and signed in. There is no password and no sign-up form; the first sign-in makes the account.
 
@@ -145,9 +145,9 @@ The launcher is driven with the arrow keys, Return and Esc, a game controller (D
 
 **Share play: watching.** In the launcher, **Watch** a friend from the Friends panel or from their invite: their game fills the screen with its sound, and once they let you play, your controller is their player 2, 3 or 4; the PS button leaves. On the phone (AnyPS5 Remote 1.11 or newer), **Watch** is in Friends; when the host hands you a pad, the on-screen pad lies over the picture, with the game's rumble and light bar. In a browser, open the link from the invite or the friend's profile on the website: a controller works (press a button once so the browser sees it), and so does the keyboard (WASD the left stick, the arrow keys the D-pad, I J K L the face buttons, Q / E L1 / R1, Z / C L2 / R2, Return Options).
 
-**Theme Hub.** **Settings → Appearance → Themes** lists the themes people share on AnyTogether's Theme Hub, installed with one press; the website's [Theme Hub](https://anytogether.kodla.agency/themes) has the same themes, with likes. Signed in, **Share on the Hub** uploads the theme you use (made in the Theme Studio, at most 50 MB); sharing it again sends a new version. `anyps5://theme/<id>` links open a Hub theme in the launcher.
+**Theme Hub.** **Settings → Appearance → Themes** lists the themes people share on AnyTogether's Theme Hub, installed with one press; the website's [Theme Hub](https://anytogether.net/themes) has the same themes, with likes. Signed in, **Share on the Hub** uploads the theme you use (made in the Theme Studio, at most 50 MB); sharing it again sends a new version. `anyps5://theme/<id>` links open a Hub theme in the launcher.
 
-**How did it run?** After you play a game, the launcher may ask **How did *game* run?**: Nothing, Boots, Menus, In game or Playable. One tap sends a report with the launcher and engine versions, the Mac model, macOS and the average frame rate (it shows what goes with it). **Don't ask after games** stops the question; a game's options still have **How does it run?**, with the community's verdict for that game. All reports make the [community compatibility list](https://anytogether.kodla.agency/compatibility).
+**How did it run?** After you play a game, the launcher may ask **How did *game* run?**: Nothing, Boots, Menus, In game or Playable. One tap sends a report with the launcher and engine versions, the Mac model, macOS and the average frame rate (it shows what goes with it). **Don't ask after games** stops the question; a game's options still have **How does it run?**, with the community's verdict for that game. All reports make the [community compatibility list](https://anytogether.net/compatibility).
 
 ### About the project
 
@@ -309,7 +309,7 @@ Artık varsayılan ayarlarla çalışıyor. Yazı tipinin bazı harfleri eksik (
 
 ### Uyumluluk
 
-[Uyumluluk listesi](COMPATIBILITY.md#türkçe), macOS'ta test edilen her oyunu, durumunu ve FPS'ini gösterir. Oyuncuların macOS, Windows ve Linux için gönderdiği raporlar [topluluk uyumluluk listesinde](https://anytogether.kodla.agency/compatibility) toplanır (bkz. [Nasıl çalıştı?](#anytogether-1)).
+[Uyumluluk listesi](COMPATIBILITY.md#türkçe), macOS'ta test edilen her oyunu, durumunu ve FPS'ini gösterir. Oyuncuların macOS, Windows ve Linux için gönderdiği raporlar [topluluk uyumluluk listesinde](https://anytogether.net/compatibility) toplanır (bkz. [Nasıl çalıştı?](#anytogether-1)).
 
 ### Durum
 
@@ -388,7 +388,7 @@ Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, �
 
 ### AnyTogether
 
-[AnyTogether](https://anytogether.kodla.agency), launcher'ın online evi: arkadaşlar, profiller, mesajlar, sesli partiler, birlikte oynama, etkinlikler, sıralamalar, bildirimler, Tema Hub ve topluluk uyumluluk listesi. İsteğe bağlıdır; giriş yapmadan launcher eskisi gibi çalışır. Sunucu açık kaynaktır ([AnyTogether](https://github.com/AnyTogether/AnyTogether), MIT); **Ayarlar → AnyTogether → Sunucu** launcher'ı kendi kurduğun bir sunucuya bağlar.
+[AnyTogether](https://anytogether.net), launcher'ın online evi: arkadaşlar, profiller, mesajlar, sesli partiler, birlikte oynama, etkinlikler, sıralamalar, bildirimler, Tema Hub ve topluluk uyumluluk listesi. İsteğe bağlıdır; giriş yapmadan launcher eskisi gibi çalışır. Sunucu açık kaynaktır ([AnyTogether](https://github.com/AnyTogether/AnyTogether), MIT); **Ayarlar → AnyTogether → Sunucu** launcher'ı kendi kurduğun bir sunucuya bağlar.
 
 **Giriş.** **Ayarlar → AnyTogether**: e-postanı ve gelen kodu yaz, launcher'ı web sitesinde onayla (orada passkey de çalışır) ya da AnyPS5 Remote uygulaması eşli ve giriş yapmışsa telefonda bir kez dokun. Şifre ve kayıt formu yok; ilk giriş hesabı açar.
 
@@ -398,9 +398,9 @@ Launcher ok tuşları, Return ve Esc ile, oyun kumandasıyla (yön tuşları, �
 
 **Birlikte oyna: izleyen.** Launcher'da bir arkadaşı Arkadaşlar panelinden ya da davetinden **İzle**: oyunu sesiyle tam ekran açılır; izin verdiğinde kolun onun 2., 3. ya da 4. oyuncusu olur; PS tuşu çıkarır. Telefonda (AnyPS5 Remote 1.11 ve üstü) **İzle** Arkadaşlar'dadır; paylaşan sana kol verince ekrandaki kol görüntünün üstüne gelir, oyunun titreşimi ve ışık çubuğu da gelir. Tarayıcıda davetteki bağlantıyı ya da web sitesinde arkadaşın profilini aç: kol çalışır (tarayıcının görmesi için bir tuşa bir kez bas), klavye de çalışır (WASD sol analog, ok tuşları yön tuşları, I J K L şekil tuşları, Q / E L1 / R1, Z / C L2 / R2, Return Options).
 
-**Tema Hub.** **Ayarlar → Görünüm → Temalar**, insanların AnyTogether'ın Tema Hub'ında paylaştığı temaları listeler; tek basışla kurulur. Web sitesindeki [Tema Hub](https://anytogether.kodla.agency/themes) aynı temaları beğenileriyle gösterir. Giriş yapmışken **Hub'da paylaş**, kullandığın temayı yükler (Tema Stüdyosu'nda yapılmış, en çok 50 MB); yeniden paylaşmak yeni bir sürüm gönderir. `anyps5://theme/<id>` bağlantıları bir Hub temasını launcher'da açar.
+**Tema Hub.** **Ayarlar → Görünüm → Temalar**, insanların AnyTogether'ın Tema Hub'ında paylaştığı temaları listeler; tek basışla kurulur. Web sitesindeki [Tema Hub](https://anytogether.net/themes) aynı temaları beğenileriyle gösterir. Giriş yapmışken **Hub'da paylaş**, kullandığın temayı yükler (Tema Stüdyosu'nda yapılmış, en çok 50 MB); yeniden paylaşmak yeni bir sürüm gönderir. `anyps5://theme/<id>` bağlantıları bir Hub temasını launcher'da açar.
 
-**Nasıl çalıştı?** Bir oyunu oynadıktan sonra launcher **… nasıl çalıştı?** diye sorabilir: Hiç, Açılıyor, Menüler, Oyun içi ya da Oynanabilir. Tek dokunuş launcher ve motor sürümlerini, Mac modelini, macOS'u ve ortalama FPS'i içeren bir rapor gönderir (neyin gittiğini gösterir). **Oyunlardan sonra sorma** soruyu kapatır; oyunun seçeneklerinde **Nasıl çalışıyor?** satırı topluluğun o oyun için kararıyla durur. Bütün raporlar [topluluk uyumluluk listesini](https://anytogether.kodla.agency/compatibility) oluşturur.
+**Nasıl çalıştı?** Bir oyunu oynadıktan sonra launcher **… nasıl çalıştı?** diye sorabilir: Hiç, Açılıyor, Menüler, Oyun içi ya da Oynanabilir. Tek dokunuş launcher ve motor sürümlerini, Mac modelini, macOS'u ve ortalama FPS'i içeren bir rapor gönderir (neyin gittiğini gösterir). **Oyunlardan sonra sorma** soruyu kapatır; oyunun seçeneklerinde **Nasıl çalışıyor?** satırı topluluğun o oyun için kararıyla durur. Bütün raporlar [topluluk uyumluluk listesini](https://anytogether.net/compatibility) oluşturur.
 
 ### Proje hakkında
 

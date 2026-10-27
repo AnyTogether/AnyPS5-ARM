@@ -115,7 +115,7 @@ enum DiscoverPreviews {
     /// Deafen in the voice, a share play's code and "Join with a code".
     static func renderCodes(_ render: (String, (AppModel) -> Void) -> Void, _ found: [Game]) {
         let robin = person("u1", "Robin"), mira = person("f1", "Mira"), sol = person("f3", "Sol"), lin = person("x1", "Lin")
-        let code = TogetherJoinCode(code: "K7QM3XPA", url: "https://anytogether.kodla.agency/join/K7QM3XPA", expiresAt: Date().addingTimeInterval(20 * 3600))
+        let code = TogetherJoinCode(code: "K7QM3XPA", url: "https://anytogether.net/join/K7QM3XPA", expiresAt: Date().addingTimeInterval(20 * 3600))
         render("party-code") { model in
             model.previewParty(TogetherParty(id: "p1", leaderId: "u1", privacy: "invite", members: [robin, mira, sol], invited: [],
                                              call: .init(id: "call1", in: ["u1", "f1", "f3"], muted: ["f3"], deafened: ["f3"]), requests: [lin], joinCode: code,

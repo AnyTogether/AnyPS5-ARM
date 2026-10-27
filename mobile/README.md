@@ -27,7 +27,7 @@ It needs AnyPS5.app with phone support, and games unlocked with it: a game unloc
 
 ## AnyTogether
 
-The phone signs in to [AnyTogether](https://anytogether.kodla.agency), the launchers' online home ([open source](https://github.com/AnyTogether/AnyTogether), MIT). Signed out, the phone is the controller as always.
+The phone signs in to [AnyTogether](https://anytogether.net), the launchers' online home ([open source](https://github.com/AnyTogether/AnyTogether), MIT). Signed out, the phone is the controller as always.
 
 - **Sign-in:** with a code sent to your email, or with one tap using the account the Mac is signed in with; a signed-in phone also signs the Mac in. No password, no sign-up form.
 - **Friends**: from the people button on the home screen: who is online and what they play, requests, adding by handle.

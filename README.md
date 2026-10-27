@@ -261,7 +261,7 @@ Games unlocked before phone support need **Update and Play** once, so they carry
 
 ### AnyTogether
 
-[AnyTogether](https://anytogether.kodla.agency) is the launcher's online home: friends, profiles, messages, parties and voice. It is optional; signed out, the launcher works exactly as before. The server is open source ([AnyTogether](https://github.com/AnyTogether/AnyTogether), MIT) and anyone can run their own.
+[AnyTogether](https://anytogether.net) is the launcher's online home: friends, profiles, messages, parties and voice. It is optional; signed out, the launcher works exactly as before. The server is open source ([AnyTogether](https://github.com/AnyTogether/AnyTogether), MIT) and anyone can run their own.
 
 - **Sign-in:** Settings → AnyTogether, with a code sent to your email, or with one tap on your phone if it is already signed in (and the other way round). No password, no sign-up form. On the website you can also add a passkey.
 - **Friends:** add someone by their handle and see who is online and what they are playing.
@@ -275,7 +275,7 @@ Games unlocked before phone support need **Update and Play** once, so they carry
 - **Share play:** while you play, start Share play from the Friends panel. Friends watch in their browser, on the phone or in their launcher, and you can let one play as player 2, 3 or 4: local co-op together from anywhere. Your controller stays player 1.
 - **Activity, leaderboards and notifications:** what friends unlock and play with reactions, boards per game and overall, and a bell in the top bar.
 - **Theme Hub:** Settings → Appearance → Themes lists the themes people share on AnyTogether; Share on the Hub uploads yours.
-- **How did it run?** After a session, one tap sends a compatibility report for the [compatibility list](https://anytogether.kodla.agency/compatibility).
+- **How did it run?** After a session, one tap sends a compatibility report for the [compatibility list](https://anytogether.net/compatibility).
 
 | A friend's profile | Friends |
 |---|---|

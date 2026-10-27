@@ -222,7 +222,7 @@ void main() {
     );
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
-    expect(find.text('anytogether.kodla.agency'), findsOneWidget);
+    expect(find.text('anytogether.net'), findsOneWidget);
     await tester.tap(find.text('Change'));
     await tester.pumpAndSettle();
     await tester.enterText(
@@ -235,7 +235,7 @@ void main() {
       find.text('An https:// address, or http:// on your home network'),
       findsOneWidget,
     );
-    expect(account.base.host, 'anytogether.kodla.agency');
+    expect(account.base.host, 'anytogether.net');
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('MacBook uses home.example.org'));

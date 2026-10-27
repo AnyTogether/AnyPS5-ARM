@@ -421,7 +421,7 @@ Map<String, dynamic> get partyJson => {
   },
   'joinCode': {
     'code': 'K7QM3XPA',
-    'url': 'https://anytogether.kodla.agency/join/K7QM3XPA',
+    'url': 'https://anytogether.net/join/K7QM3XPA',
     'expiresAt': _ago(const Duration(hours: -20)).toUtc().toIso8601String(),
   },
   'discord': 'https://discord.gg/anyps5',

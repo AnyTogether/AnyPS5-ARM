@@ -150,7 +150,7 @@ enum PreviewRenderer {
             model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = 2
         }
         render(preferences, found, root, still, output.appendingPathComponent("together-code.png")) { model in
-            model.togetherStep = .deviceCode(code: "K7QM-2XZP", url: URL(string: "https://anytogether.kodla.agency/link?code=K7QM-2XZP")!)
+            model.togetherStep = .deviceCode(code: "K7QM-2XZP", url: URL(string: "https://anytogether.net/link?code=K7QM-2XZP")!)
             model.overlay = .settings; model.panelCategory = 4; model.panelInRows = true; model.panelRow = 2
         }
         render(preferences, found, root, still, output.appendingPathComponent("together-in.png")) { model in

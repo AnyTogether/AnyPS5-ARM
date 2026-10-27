@@ -4,7 +4,7 @@ import Foundation
 /// anyone: the user may pick another server, and ANYTOGETHER_URL overrides both (staging, a
 /// local one).
 public enum TogetherServer {
-    public static let standard = URL(string: "https://anytogether.kodla.agency")!
+    public static let standard = URL(string: "https://anytogether.net")!
 
     /// A server address as typed: https with a host, or http on this Mac only; no user, query or
     /// fragment; without the trailing slash. nil when it is not one.
