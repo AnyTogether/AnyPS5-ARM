@@ -1,0 +1,52 @@
+# Engine tests that AnyTogether CI (.github/workflows/anytogether-ci.yml) leaves out of ctest.
+#
+# Every line: <platforms> <test name, a regular expression for the whole name> <reason>
+#   platforms: all, or a comma list of linux, windows, macos
+# Only add a test here when it fails on main too (a known, tracked failure) or when it depends on the
+# runner rather than the code (timing under load, real network, a GPU the runner lacks). A test that
+# a pull request breaks is a regression: fix it, do not list it. Remove a line once its test passes.
+# Every engine job also gives a failing test two more tries (ctest --repeat until-pass:3), for the
+# timing tests that miss their marks on a shared runner now and then; one that keeps failing fails.
+
+# Known failures of the fork on every host (they fail on main and on the developers' Macs too).
+all     net_dontwait_.*                 Non-blocking socket timing; fails since the eighth upstream merge.
+all     guest_sce_net                   Needs network interfaces the way the console reports them.
+all     guest_update_env(_pending_[0-9]_[0-9])?  feupdateenv does not trap an enabled pending exception on the host.
+all     guest_floating_point            x87/denormal modes differ from the console (Rosetta and host libm).
+all     guest_math                      _FSinh and friends round differently on the host libm.
+all     guest_math_exact                Bit-exact libm results the host libm does not give.
+all     agc_spirv_subvector_loop_begin  s_subvector_loop_begin's lowering has no exec == 0 branch; fails on main on Linux, Windows and macOS.
+all     agc_layer_input                 "a Layer input on a device with geometry shaders must declare Geometry"; fails on main on every host.
+
+# Linux (Ubuntu 24.04 runner, lavapipe from Mesa 25).
+linux   agc_driver_sampled_cache_budget(_without_storage_image_multisample)?  The runner's lavapipe heap gives a sampled texture budget below the 2 GiB floor the test asks for.
+linux   agc_driver                      Fails on main on lavapipe ("a small copy whose source the GPU still stores into was not recorded on the GPU"); needs a look.
+linux   guest_sysmodule(_maps_scan)?    Aborts on Linux on main (passes on macOS); needs a look.
+linux   agc_driver_optimize_on_fiber    Needs SPIRV-Tools, which the fork's builds leave off (it would only report a skip). With SPIRV-Tools on, agc_spirv_optimizer* and agc_driver_pixel_sample_iteration fail on main too.
+
+# Windows: real failures on main, to fix (WinLibs GCC 15.2, as the owner's Windows builds).
+windows prx_thread_local_destructors    libkernel (dl*_nid_postfix, LoadFailure) and AgcDriver (LockStats) register thread_local destructors, which run after emulated TLS is freed on Windows; they belong in HostThreadLocal.
+windows agc_frame_generation            The test executable does not start on Windows (0xc0000135: a DLL it links is not found).
+
+# Timing tests: they measure wall-clock sleeps, which a shared runner cannot keep.
+all     precise_wait                    Spin/sleep deadline test; upstream's own release job leaves it out too.
+
+# macOS: x86-64 under Rosetta in a virtual machine, and no MoltenVK on the runner.
+macos   macos_fixtures                  Its argv fixture ends in int3, which stays exiting in the kernel under Rosetta.
+macos   guest_kernel_fcntl              Flaky under parallel ctest on macOS.
+macos   agc_thread_priority_refused_rt  Expects a refused real-time priority request to throw; macOS grants it.
+macos   agc_thread_priority_refused_high  Same as above, high priority.
+macos   agc_driver_pm4_priority_refused Same as above, for the PM4 queue priority.
+macos   agc_shared_write                Cannot inspect mapping lifetimes on macOS.
+macos   agc_write_tracking              Known macOS failure (also on the developers' Macs): a block outside the import window reads as written.
+macos   agc_submit_progress(_no_timeline)?  Needs a Vulkan device; the runner has no MoltenVK (also fails on the developers' Macs).
+macos   agc_driver_pipelined_prefetch   Known macOS failure: the AGC FS table cannot be mapped under Rosetta.
+macos   agc_driver_graphics             Known macOS hang: a failed map import is retried and the probe remap deadlocks on the imports mutex.
+macos   guest_memory                    Known macOS failure: mprotect of guest memory is refused (deterministic since the eighth merge).
+macos   guest_kernel_app_archive_mmap   Known macOS failure: mmap of a file read from app0.zar is not implemented there.
+macos   font_face_lifetime(_replace|_churn)?  The test finishes, then its process does not exit within the timeout under Rosetta on the runner.
+macos   guest_memory_lifetime           Its exit probe times out under Rosetta on the runner.
+macos   guest_ssl_transport_(kernel|net)  On the runner a server certificate passes the initial verify without a loaded CA (its trust store differs); needs a look.
+macos   guest_avplayer                  Its EOF stop latency median must stay under 10 ms; on the macOS runner it is 12-14 ms, even on retries.
+macos   guest_poll                      Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.
+macos   guest_socket_pair               Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.

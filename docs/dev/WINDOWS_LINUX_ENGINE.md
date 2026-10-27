@@ -63,7 +63,8 @@ cmake --build build --target relinker libs
 python3 tools/package_arm_toolkit.py --platform linux --build build --output ~/dist
 ```
 
-Check the glibc floor of the result before publishing it:
+Check the glibc floor of the result before publishing it (CI's `Engine (Linux build, Ubuntu 22.04,
+GCC 12)` job runs the same check on every pull request that touches the engine):
 
 ```sh
 objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
