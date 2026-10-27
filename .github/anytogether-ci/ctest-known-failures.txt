@@ -5,6 +5,8 @@
 # Only add a test here when it fails on main too (a known, tracked failure) or when it depends on the
 # runner rather than the code (timing under load, real network, a GPU the runner lacks). A test that
 # a pull request breaks is a regression: fix it, do not list it. Remove a line once its test passes.
+# Every engine job also gives a failing test two more tries (ctest --repeat until-pass:3), for the
+# timing tests that miss their marks on a shared runner now and then; one that keeps failing fails.
 
 # Known failures of the fork on every host (they fail on main and on the developers' Macs too).
 all     net_dontwait_.*                 Non-blocking socket timing; fails since the eighth upstream merge.
@@ -29,8 +31,7 @@ windows agc_frame_generation            The test executable does not start on Wi
 # Timing tests: they measure wall-clock sleeps, which a shared runner cannot keep.
 all     precise_wait                    Spin/sleep deadline test; upstream's own release job leaves it out too.
 
-# macOS: x86-64 under Rosetta in a virtual machine, and no MoltenVK on the runner. (The macOS job
-# also retries a failing test twice, for timing tests such as guest_avplayer and guest_itimer_*.)
+# macOS: x86-64 under Rosetta in a virtual machine, and no MoltenVK on the runner.
 macos   macos_fixtures                  Its argv fixture ends in int3, which stays exiting in the kernel under Rosetta.
 macos   guest_kernel_fcntl              Flaky under parallel ctest on macOS.
 macos   agc_thread_priority_refused_rt  Expects a refused real-time priority request to throw; macOS grants it.
