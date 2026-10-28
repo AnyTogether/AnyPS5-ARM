@@ -24,9 +24,14 @@ Each archive is a whole toolkit folder:
 missing library stops it.
 
 Every AnyPS5-ARM release should carry both archives, built from the release's commit. The Mac
-nightly script (`tools/macos/publish_nightly.sh`) cannot build them; they come from a Windows
-machine with WSL, as below, and are added to the release afterwards, then the whole release is
-signed again.
+nightly script (`tools/macos/publish_nightly.sh`) cannot build them. The **Engine toolkits**
+workflow (`.github/workflows/engine-toolkits.yml`) builds both when a `v*-arm` tag is pushed (or
+by hand, `gh workflow run engine-toolkits.yml --ref <tag> -R AnyTogether/AnyPS5-ARM`), with the
+same toolchains as below, runs the online, remote pad, AppContent, UserService and power control
+tests, checks the Linux glibc floor and keeps the archives as the run's artifacts
+(`gh run download <run> -R AnyTogether/AnyPS5-ARM`). A Windows machine with WSL, as below, does
+the same by hand. Either way the archives are added to the release afterwards, then the whole
+release is signed again on the release Mac.
 
 ## Windows (WinLibs GCC 15.2, the Release workflow's toolchain)
 
