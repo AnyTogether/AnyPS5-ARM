@@ -11,6 +11,7 @@ import 'connection/discovery.dart';
 import 'connection/device_name.dart';
 import 'feedback/haptics.dart';
 import 'feedback/motion.dart';
+import 'l10n.dart';
 import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
@@ -40,6 +41,7 @@ const fixedLauncher = String.fromEnvironment('ANYPS5_LAUNCHER');
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
+    await L10n.load();
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,

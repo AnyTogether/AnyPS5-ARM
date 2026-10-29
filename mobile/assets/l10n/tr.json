@@ -1,5 +1,7 @@
 {
   "languageName": "Türkçe",
+  "numberGroupSeparator": ".",
+  "numberDecimalSeparator": ",",
   "welcomeTitle": "Telefonun DualSense olsun",
   "welcomeText": "Mac'te AnyPS5 ile açtığın oyunları bu telefonla oyna.",
   "stepOpen": "Mac'te AnyPS5'i aç",
@@ -220,6 +222,7 @@
   "storageMedia": "Fotoğraflar ve klipler",
   "storageDetail": "Bulut kayıtları ve gönderdiğin medya AnyTogether'da bu alanı paylaşır.",
   "storageFailed": "Alan bilgisi okunamadı.",
+  "storageUsed": "%@ / %@",
   "privateTitle": "Yalnızca arkadaşlar",
   "privateLead": "Yalnızca kabul ettiğin arkadaşlarının gördüğü bir ad ve fotoğraf, her zaman @kullanıcı adının yanında. Diğer herkes herkese açık olanları görür.",
   "privateName": "Arkadaşlara görünen ad",

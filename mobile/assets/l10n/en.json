@@ -1,5 +1,7 @@
 {
   "languageName": "English",
+  "numberGroupSeparator": ",",
+  "numberDecimalSeparator": ".",
   "welcomeTitle": "Your phone is a DualSense",
   "welcomeText": "Play the games you open with AnyPS5 on your Mac from this phone.",
   "stepOpen": "Open AnyPS5 on the Mac",
@@ -220,6 +222,7 @@
   "storageMedia": "Photos and clips",
   "storageDetail": "Cloud saves and the media you send share this space on AnyTogether.",
   "storageFailed": "Storage could not be read.",
+  "storageUsed": "%@ of %@",
   "privateTitle": "Friends only",
   "privateLead": "A name and picture only your accepted friends see, always next to your @handle. Everyone else sees the public ones.",
   "privateName": "Friends-only name",

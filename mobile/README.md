@@ -20,7 +20,7 @@ Use your phone as a DualSense for the PS5 games [AnyPS5-ARM](https://github.com/
 - **Your own layout, per game.** The lock at the pad's bottom left opens the editor: drag a control to move it, tap it to size it, fade it, hide it, or make it a toggle (one tap presses it, the next lets go) or a turbo button. Reset and Reset All go back to the default. The layout is kept on the Mac with the game's settings and comes back whenever that game plays.
 - **What the Mac is doing.** While a game is unlocked, updated or started, a card at the top of the phone shows the step, a bar that fills and the time it has taken, and says when the game is ready.
 - **Trophies.** A trophy earned in the game drops in at the top of the phone for a few seconds, with its icon and grade, and the phone buzzes.
-- **Language.** The phone uses the launcher's language: English by default, or Turkish.
+- **Language.** The phone uses the launcher's language when it has a file for it in `assets/l10n` (English and Turkish so far), else English. To add one, see [TRANSLATING.md](TRANSLATING.md).
 - The version is shown faintly in the bottom right corner.
 
 It needs AnyPS5.app with phone support, and games unlocked with it: a game unlocked before shows **Update available** and needs **Update and Play** once. [AnyPS5 Desktop](https://github.com/AnyTogether/AnyLauncher-Port), the launcher for Windows and Linux (early preview), pairs with it too.
