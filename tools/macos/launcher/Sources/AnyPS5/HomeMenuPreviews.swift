@@ -38,6 +38,16 @@ enum HomeMenuPreviews {
             model.overlay = .homeMenu
             model.menuIndex = 1
         }
+        // The launcher's own crash or stall last time, offered at the next start.
+        render("menu-report", .keyboard) { model in
+            model.launcherReport = LauncherReportState(problem: LauncherProblem(kind: .crash, at: Date(), version: "0.2.26", platform: "macOS"), forget: {})
+            model.overlay = .launcherReport
+        }
+        render("menu-report-hang", .pad) { model in
+            model.launcherReport = LauncherReportState(problem: LauncherProblem(kind: .hang, at: Date(), version: "0.2.26", platform: "macOS", stalledMs: 12_000, recovered: true), forget: {})
+            model.overlay = .launcherReport
+            model.menuIndex = 1
+        }
         // Esc on the home screen: Cancel has the focus.
         render("menu-quit", .keyboard) { model in
             model.overlay = .confirmQuit

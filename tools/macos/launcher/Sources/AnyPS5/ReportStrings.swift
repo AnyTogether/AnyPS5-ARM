@@ -20,5 +20,7 @@ enum TC {
         case traceTitle, traceDetail, traceOnNotice, traceOnNoticeDetail
         case lastSessionReport, lastSessionReportDetail
         case diagnosisAborted, diagnosisExited
+        case launcherReportWhen, launcherReportCrash, launcherReportHang, launcherReportHangEnded
+        case launcherReportSend, launcherReportSendDetail, launcherReportLater, launcherReportLaterDetail
     }
 }
