@@ -170,6 +170,10 @@ struct CommunityCard: View {
                 .transition(.opacity)
             }
         }
-        .task(id: game.titleID) { model.loadCompat(game.titleID) }
+        // Asked once the selection rests on the game, not for every game a held direction passes.
+        .task(id: game.titleID) {
+            try? await Task.sleep(for: AppModel.selectionSettle)
+            if !Task.isCancelled { model.loadCompat(game.titleID) }
+        }
     }
 }

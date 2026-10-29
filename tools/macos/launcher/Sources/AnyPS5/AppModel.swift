@@ -284,7 +284,9 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var games: [Game] = []
     @Published private(set) var scanning = false
-    @Published var selected = 0
+    @Published var selected = 0 {
+        didSet { if selected != oldValue { selectionMoved(from: oldValue) } }
+    }
     @Published var focus = HomeFocus.tiles
     @Published var overlay: Overlay? {
         didSet {
@@ -465,7 +467,19 @@ final class AppModel: ObservableObject {
         get { recordsStamp.withLock { $0 } }
         set { recordsStamp.withLock { $0 = newValue } }
     }
-    private var trophiesRead: Set<String> = []
+    private(set) var trophiesRead: Set<String> = []
+    /// The game whose folder is being measured, or whose trophies are being read, for the
+    /// selection: one at a time, so moving fast through the games starts no walk per game passed.
+    private var sizeWalk: String?
+    private var trophyRead: String?
+    /// How a game's folder is measured (off the main thread); the tests count the walks.
+    var folderSize: @Sendable (URL) -> Int64 = { GameLibrary.size(of: $0) }
+    /// The game whose key art is behind the home screen while the selection moves: the one it
+    /// rested on last; nil follows the selection.
+    @Published private(set) var backdropID: String?
+    /// Off for the offscreen previews, which draw the selection they set at once.
+    var settlesSelection: Bool
+    private var settleTask: Task<Void, Never>?
     let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
     private var starts: [String: Date] = [:]
     private(set) var remote: RemoteServer?
@@ -510,6 +524,7 @@ final class AppModel: ObservableObject {
 
     init(preferences: Preferences? = nil) {
         self.persists = preferences == nil
+        self.settlesSelection = preferences == nil
         let loaded = preferences ?? Preferences.load()
         self.preferences = loaded
         // Profiles: a launcher set up before them becomes its first profile at once, its session
@@ -1199,14 +1214,60 @@ final class AppModel: ObservableObject {
         show(T.text(.folderRemoved), symbol: "folder.badge.minus")
     }
 
+    /// The selected game's size and trophies, once the selection rests on it. A folder walk (tens
+    /// of thousands of files in a dump) and a trophy read go one at a time: when one ends, the
+    /// game the selection rests on then is next, and the games passed on the way are skipped.
     func measureSelected() {
-        guard let game = selectedGame else { return }
-        loadTrophies(game)
-        guard sizes[game.id] == nil else { return }
+        // While a held direction moves the selection, once it rests (selectionMoved).
+        guard let game = selectedGame, backdropID == nil else { return }
+        readSelectedTrophies()
+        guard sizes[game.id] == nil, sizeWalk == nil else { return }
+        sizeWalk = game.id
         sizes[game.id] = -1
+        let measure = folderSize
         Task.detached(priority: .utility) {
-            let size = GameLibrary.size(of: game.folder)
-            await MainActor.run { self.sizes[game.id] = size }
+            let size = measure(game.folder)
+            await MainActor.run {
+                self.sizes[game.id] = size
+                self.sizeWalk = nil
+                self.measureSelected()
+            }
+        }
+    }
+
+    private func readSelectedTrophies() {
+        guard let game = selectedGame, root(of: game) != nil, !trophiesRead.contains(game.id), trophyRead == nil else { return }
+        trophyRead = game.id
+        loadTrophies(game) { [weak self] in
+            self?.trophyRead = nil
+            self?.readSelectedTrophies()
+        }
+    }
+
+    /// The tests and the benchmark: the library as if nothing had been measured yet.
+    func forgetMeasurements() {
+        sizes = [:]
+        forgetTrophies()
+    }
+
+    /// The key art behind the home screen: the game the selection rests on. A held direction
+    /// passes a game every 60 to 80 ms; a 0.55 s fade and a 4K decode for each would pile up.
+    var backdropGame: Game? {
+        if let id = backdropID, let game = games.first(where: { $0.id == id }) { return game }
+        return selectedGame
+    }
+
+    static let selectionSettle: Duration = .milliseconds(180)
+
+    private func selectionMoved(from old: Int) {
+        guard settlesSelection else { return }
+        if backdropID == nil, games.indices.contains(old) { backdropID = games[old].id }
+        settleTask?.cancel()
+        settleTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.selectionSettle)
+            guard let self, !Task.isCancelled else { return }
+            self.backdropID = nil
+            self.measureSelected()
         }
     }
 
@@ -1231,7 +1292,7 @@ final class AppModel: ObservableObject {
         trophiesRead = []
     }
 
-    func loadTrophies(_ game: Game, again: Bool = false) {
+    func loadTrophies(_ game: Game, again: Bool = false, then done: (@MainActor () -> Void)? = nil) {
         guard let root = root(of: game), again || !trophiesRead.contains(game.id) else { return }
         trophiesRead.insert(game.id)
         let bundle = Installer.bundle(for: game, root: root)
@@ -1241,6 +1302,7 @@ final class AppModel: ObservableObject {
             await MainActor.run {
                 self.trophies[game.id] = set
                 if let set { self.recordTrophies(game, set) }
+                done?()
             }
         }
     }
