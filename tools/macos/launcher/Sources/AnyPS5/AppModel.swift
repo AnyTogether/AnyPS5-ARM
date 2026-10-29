@@ -107,6 +107,9 @@ struct Preferences: Codable, Equatable {
     /// Settings → Battery & Heat (PowerProfiles); nil for the defaults.
     var powerProfiles: PowerProfiles?
     var games: [String: GameSettings] = [:]
+    /// Settings › Default Display, for every game that leaves its display at Default; nil until
+    /// changed (the built-in values). Machine-wide, like the game settings.
+    var displayDefaults: DisplayDefaults?
     var lastPlayed: [String: Date] = [:]
 
     var accentColor: Color { (accent ?? theme.defaultAccent).color }
@@ -130,7 +133,10 @@ struct Preferences: Codable, Equatable {
     }
 
     func save() {
-        if let data = try? JSONEncoder().encode(self) { UserDefaults.standard.set(data, forKey: Preferences.key) }
+        // Every game's display keys as before, so an older launcher still reads the file.
+        let encoder = JSONEncoder()
+        encoder.userInfo[GameSettings.legacyDisplayKeys] = true
+        if let data = try? encoder.encode(self) { UserDefaults.standard.set(data, forKey: Preferences.key) }
     }
 }
 
@@ -228,6 +234,10 @@ enum Overlay: Equatable {
     case closeGame
     /// PS held in the launcher: Switch Profile, Quit AnyPS5.
     case homeMenu
+    /// Esc on the home screen: "Quit AnyPS5?", Cancel first.
+    case confirmQuit
+    /// The launcher's own crash or stall last time: Send Report, Not Now (LauncherReport.swift).
+    case launcherReport
     /// "Who's playing?": the profiles' tiles and Add Profile (Profiles.swift).
     case profilePicker
     /// A new profile: its name, then offline or online.
@@ -293,6 +303,7 @@ final class AppModel: ObservableObject {
                 // Friends' private picture links run out (6 to 12 hours): the list is read again.
                 if let overlay, [.friends, .party, .profile].contains(overlay), togetherUser != nil, identityBook.learnedAt != nil, identityBook.stale() { refreshFriends() }
                 askingRow = nil
+                if overlay == nil { offerLauncherReportSoon() }
                 if rowEditor.editing != nil { rowEditor.stop() }
                 if shortcutCapture != nil { endShortcutCapture() }
             }
@@ -345,6 +356,12 @@ final class AppModel: ObservableObject {
     @Published var galleryIndex = 0
     /// One screenshot over the whole screen, instead of the grid.
     @Published var galleryViewing = false
+    /// What the mouse's Forward button opens again (BackForward.swift).
+    var forwardStep: ForwardStep?
+    /// The launcher's own crash or stall last time, until offered (LauncherReport.swift).
+    var launcherReport: LauncherReportState?
+    /// Opens a link in the browser; the tests keep it.
+    var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
     @Published private(set) var galleryShots: [URL] = []
     @Published var onboardingStep = 0
     @Published var onboardingChoices: [Int: Int] = [:]
@@ -547,7 +564,7 @@ final class AppModel: ObservableObject {
         apply()
         changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
         startPowerWatch()
-        if persists { loadEngines(); loadProfilePicture(); watchFullScreen() }
+        if persists { loadEngines(); loadProfilePicture(); watchFullScreen(); watchLauncher() }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
             OnlinePlayHost.configure(transport: { OnlinePeerMesh(context: $0) }, signal: { [weak self] to, device, session, kind, data in
@@ -587,6 +604,8 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 self?.preparer?.cancel()
                 self?.installer?.cancel()
+                // Quit as it should: no crash to offer next time.
+                LauncherWatch.shared.quitting()
             }
         }
         // A games folder on an external drive: watched again and scanned when the drive comes or goes.
@@ -1255,6 +1274,20 @@ final class AppModel: ObservableObject {
         preferences.games[game.id] ?? GameSettings()
     }
 
+    var displayDefaults: DisplayDefaults { preferences.displayDefaults ?? DisplayDefaults() }
+
+    /// The settings a game starts with: its own, and Settings › Default Display for the display
+    /// choices it left at Default.
+    func launchSettings(for game: Game) -> GameSettings {
+        settings(for: game).withDefaults(displayDefaults)
+    }
+
+    func updateDisplayDefaults(_ change: (inout DisplayDefaults) -> Void) {
+        var value = displayDefaults
+        change(&value)
+        preferences.displayDefaults = value.isBuiltIn ? nil : value
+    }
+
     func update(_ game: Game, _ change: (inout GameSettings) -> Void) {
         var value = settings(for: game)
         let language = value.language
@@ -1609,7 +1642,7 @@ final class AppModel: ObservableObject {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         configuration.createsNewApplicationInstance = false
-        var settings = settings(for: game)
+        var settings = launchSettings(for: game)
         // Settings → Controllers → Stick Dead Zone, for a game that set none of its own.
         if let deadzone = preferences.stickDeadzone, deadzone > 0 { settings.tuning = StickDeadzone.tuning(settings.tuning, percent: deadzone) }
         // Settings → Battery & Heat: one resolution step down while a profile asks for it.

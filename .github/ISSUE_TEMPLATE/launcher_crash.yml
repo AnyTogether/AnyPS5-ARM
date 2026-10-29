@@ -1,0 +1,44 @@
+name: Launcher crash or freeze (macOS launcher)
+description: The AnyPS5 launcher itself closed unexpectedly or stopped responding on a Mac (not a game).
+title: "Launcher crash"
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The launcher fills this form in when you press **Send Report** after it closed unexpectedly or stopped responding the time before.
+        It has already taken your home folder, user and computer names, e-mail addresses and AnyTogether tokens out of everything below. Nothing was sent: this page is what you send.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What the launcher noticed, and what you were doing then (moving fast through the games, opening a panel, starting a game…).
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: System
+      description: Mac model, chip, memory and macOS version.
+      placeholder: Mac15,7 · Apple M3 Pro · 18 GB · macOS 15.6 (24G84) · 120 Hz
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Version
+      placeholder: Launcher 0.2.26 (macOS)
+    validations:
+      required: true
+  - type: textarea
+    id: error
+    attributes:
+      label: Uncaught error
+      description: The uncaught exception or fatal signal of that run with its stack, and the start of macOS's crash report.
+      render: text
+  - type: textarea
+    id: log
+    attributes:
+      label: Last seconds
+      description: A line a second before it happened - what was on screen, and the longest gap between two answers of the interface in that second.
+      render: text

@@ -12,6 +12,8 @@ public struct IssueDraft: Sendable {
     public static let repository = "AnyTogether/AnyPS5-ARM"
     /// The engine's own repository, for a bug in the engine rather than in the Mac port.
     public static let engineRepository = "boykopovar/AnyPS5"
+    /// Where the launcher's own crashes and stalls go (.github/ISSUE_TEMPLATE/launcher_crash.yml).
+    public static let launcherRepository = "AnyTogether/AnyPS5-ARM"
     public static let maximumLength = 7000
     /// One log line longer than this is cut, so it cannot crowd out the rest.
     static let lineLimit = 300
@@ -59,6 +61,45 @@ public struct IssueDraft: Sendable {
         // Their form's "title" field takes the issue title's parameter too: one value for both.
         return fit(repository: engineRepository, template: "bug_report.yml", title: "Crash: \(report.gameName) (\(report.titleID)) \(report.gameVersion)",
                    fixed: fixed, log: (id: "log", label: "Log"), after: [notes], report: report, logLines: logLines)
+    }
+
+    /// The launcher's own crash or stall (LauncherHealth), on launcher_crash.yml: every field
+    /// cleaned by `privacy`, the oldest lines going first until the link is short enough.
+    public static func launcherProblem(_ problem: LauncherProblem, system: SystemInfo, privacy: ReportPrivacy) -> IssueDraft {
+        let formatter = ISO8601DateFormatter()
+        let at = String(formatter.string(from: problem.at).prefix(19)).replacingOccurrences(of: "T", with: " ")
+        let seconds = Int(problem.stalledFor ?? 0)
+        let title: String, what: String
+        switch problem.kind {
+        case .crash:
+            title = "Launcher crash"
+            what = "The launcher closed without being quit (a crash, or Force Quit). Last seen alive \(at) UTC."
+        case .hang where problem.recovered == true:
+            title = "Launcher stopped responding (\(seconds)s)"
+            what = "The interface did not answer for \(seconds) s from \(at) UTC, then went on."
+        case .hang:
+            title = "Launcher stopped responding"
+            what = "The interface stopped answering at \(at) UTC and did not answer again (\(seconds)s or more) before it was closed."
+        }
+        func cut(_ line: String) -> String { line.count > lineLimit ? String(line.prefix(lineLimit)) + "…" : line }
+        var error = problem.error.map { privacy.clean($0).components(separatedBy: "\n").prefix(40).map(cut).joined(separator: "\n") } ?? "None caught."
+        var lines = problem.lines.map { cut(privacy.clean($0)) }
+        while true {
+            let fields = [
+                Field(id: "what", label: "What happened", value: what + "\nWhat I was doing: "),
+                Field(id: "system", label: "System", value: privacy.clean(system.line)),
+                Field(id: "versions", label: "Version", value: privacy.clean("Launcher \(problem.version) (\(problem.platform))")),
+                Field(id: "error", label: "Uncaught error", value: error),
+                Field(id: "log", label: "Last seconds", value: lines.isEmpty ? "(none kept)" : lines.joined(separator: "\n")),
+            ]
+            let url = link(repository: launcherRepository, template: "launcher_crash.yml", title: title, fields: fields)
+            if url.absoluteString.count <= maximumLength { return IssueDraft(title: title, fields: fields, url: url) }
+            if !lines.isEmpty {
+                lines.removeFirst()
+            } else {
+                error = String(error.prefix(error.count * 3 / 4)) + "…"
+            }
+        }
     }
 
     /// The newest log lines that fit: the oldest go first until the link is short enough.

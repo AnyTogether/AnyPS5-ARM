@@ -110,10 +110,10 @@ public enum Diagnosis: Equatable, Sendable {
 
     /// The newest crash report macOS wrote for the game's executable since `start`; with `pid`,
     /// only the report of that process.
-    public static func crashReport(since start: Date, bundleIdentifier: String, pid: Int32? = nil, folder: URL = reportsFolder) -> String? {
+    public static func crashReport(since start: Date, bundleIdentifier: String, pid: Int32? = nil, folder: URL = reportsFolder, process: String = "eboot") -> String? {
         guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
         let reports = files.compactMap { file -> (URL, Date)? in
-            guard file.lastPathComponent.hasPrefix("eboot"), file.pathExtension == "ips",
+            guard file.lastPathComponent.hasPrefix(process), file.pathExtension == "ips",
                   let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, date >= start else { return nil }
             return (file, date)
         }
