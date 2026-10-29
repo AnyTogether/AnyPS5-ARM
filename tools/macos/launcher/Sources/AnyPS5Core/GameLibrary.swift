@@ -63,6 +63,65 @@ public enum GameLibrary {
         return found
     }
 
+    /// One of the user's games folders as the last look found it: there or not (a drive
+    /// unplugged), and how many games it holds.
+    public struct FolderStatus: Equatable, Sendable {
+        public let url: URL
+        public let connected: Bool
+        public let games: Int
+        public init(url: URL, connected: Bool, games: Int) {
+            self.url = url
+            self.connected = connected
+            self.games = games
+        }
+    }
+
+    /// What a look through all the games folders found: the library (their union), the folder
+    /// each game came from, and each folder's state.
+    public struct Library: Sendable {
+        public var games: [Game] = []
+        /// Game ID (its folder's path) to the games folder it was found in: where its unlocked
+        /// copy lives (the folder's store, on the same drive).
+        public var roots: [String: URL] = [:]
+        public var folders: [FolderStatus] = []
+        public var incomplete: [URL] = []
+        public init() {}
+    }
+
+    /// The games under every folder in `roots`, in their order. A folder that is not there is
+    /// skipped and said to be not connected.
+    public static func survey(roots: [URL]) -> Library {
+        let fileManager = FileManager.default
+        return merge(roots.map { root in
+            var directory: ObjCBool = false
+            let there = fileManager.fileExists(atPath: root.path, isDirectory: &directory) && directory.boolValue
+            return (root, there ? survey(root) : nil)
+        })
+    }
+
+    /// The union of the folders' surveys (nil for a folder that is not there). A game (title ID)
+    /// in several folders shows once, from the folder earliest in the list; two dumps of one game
+    /// in the same folder both show, as with a single folder.
+    public static func merge(_ surveys: [(root: URL, survey: Survey?)]) -> Library {
+        var library = Library()
+        var earlier = Set<String>()
+        for (root, survey) in surveys {
+            guard let survey else {
+                library.folders.append(FolderStatus(url: root, connected: false, games: 0))
+                continue
+            }
+            library.folders.append(FolderStatus(url: root, connected: true, games: survey.games.count))
+            library.incomplete += survey.incomplete
+            for game in survey.games where !earlier.contains(game.titleID) && library.roots[game.id] == nil {
+                library.games.append(game)
+                library.roots[game.id] = root
+            }
+            earlier.formUnion(survey.games.map(\.titleID))
+        }
+        library.games.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return library
+    }
+
     /// Whether two scans show the same library: the same folders, names, art and states.
     public static func sameListing(_ left: [Game], _ right: [Game]) -> Bool {
         guard left.count == right.count else { return false }
@@ -147,5 +206,42 @@ enum Elf {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return false }
         defer { try? handle.close() }
         return handle.readData(ofLength: 4) == Data([0x7F, 0x45, 0x4C, 0x46])
+    }
+}
+
+/// The user's games folders, an ordered list of paths: the library is all of them, and the first
+/// is the one the first-run setup picks. Launchers before this kept a single folder.
+public enum LibraryFolders {
+    /// The list kept, or the single folder of an older launcher's settings as a list of one. The
+    /// list keeps its first folder in `legacy` too; when the two differ, an older launcher chose
+    /// another folder since, and that one becomes the first.
+    public static func list(_ folders: [String]?, legacy: String?) -> [String] {
+        guard let folders else { return legacy.map { [$0] } ?? [] }
+        guard let legacy, folders.first != legacy else { return folders }
+        return replacingFirst(with: legacy, in: folders)
+    }
+
+    /// `folders` with `path` added at the end; a folder already in the list (as it is written, or
+    /// once standardized) is not added again.
+    public static func adding(_ path: String, to folders: [String]) -> [String] {
+        let key = standard(path)
+        return folders.contains { standard($0) == key } ? folders : folders + [path]
+    }
+
+    /// `folders` with `path` as the first one: the first-run setup choosing again. A folder that
+    /// was further down moves up rather than showing twice.
+    public static func replacingFirst(with path: String, in folders: [String]) -> [String] {
+        let key = standard(path)
+        let rest = folders.dropFirst().filter { standard($0) != key }
+        return [path] + rest
+    }
+
+    public static func removing(_ path: String, from folders: [String]) -> [String] {
+        let key = standard(path)
+        return folders.filter { standard($0) != key }
+    }
+
+    static func standard(_ path: String) -> String {
+        URL(fileURLWithPath: path).standardizedFileURL.path
     }
 }

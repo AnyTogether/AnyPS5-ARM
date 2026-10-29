@@ -202,8 +202,7 @@ extension AppModel {
                      }),
         ]
 
-        let library: [PanelRow] = [
-            PanelRow(id: "folder", title: T.text(.folder), detail: preferences.gamesFolder ?? "—", symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.pickGamesFolder() }),
+        let library: [PanelRow] = libraryFolderRows() + [
             PanelRow(id: "rescan", title: T.text(.rescan), detail: T.format(.gamesFound, games.count), symbol: "arrow.clockwise", kind: .action(destructive: false) { [weak self] in
                 self?.rescan()
                 Sounds.shared.play(.select)
@@ -503,6 +502,26 @@ extension AppModel {
         ]
     }
 
+    /// Settings → Game Library's folders: one row each (where, and how many games or not
+    /// connected), pressed to remove it after asking, then Add Folder.
+    func libraryFolderRows() -> [PanelRow] {
+        let statuses = libraryFolders
+        var rows: [PanelRow] = []
+        for path in preferences.libraryFolders {
+            let url = URL(fileURLWithPath: path)
+            let status = statuses.first { $0.url.standardizedFileURL == url.standardizedFileURL }
+            let connected = status?.connected ?? true
+            let state = !connected ? T.text(.folderNotConnected) : status.map { $0.games == 1 ? T.text(.folderOneGame) : T.format(.folderGames, $0.games) } ?? T.text(.scanning)
+            let name = url.lastPathComponent.isEmpty ? path : url.lastPathComponent
+            rows += askingFirst(PanelRow(id: "folder-" + path, title: name, detail: url.abbreviatedPath + " · " + state,
+                                         symbol: connected ? "folder" : "externaldrive.badge.xmark", kind: .action(destructive: false) { [weak self] in self?.removeFolder(path) }),
+                                question: T.format(.removeFolderAsk, name), confirm: T.text(.removeFolder))
+        }
+        rows.append(PanelRow(id: "addFolder", title: T.text(.addFolder), detail: T.text(.addFolderDetail), symbol: "folder.badge.plus",
+                             kind: .action(destructive: false) { [weak self] in self?.pickGamesFolder() }))
+        return rows
+    }
+
     /// From the controls or the advanced page back to the game's settings, on the row that opened it.
     func backToGameSettings() {
         let opener = overlay == .advanced ? "advanced" : "controls"
@@ -513,14 +532,15 @@ extension AppModel {
         panelInRows = true
     }
 
-    func pickGamesFolder() {
+    /// Picks a games folder: added to the list, or as the first one (`first`, the first-run setup).
+    func pickGamesFolder(first: Bool = false) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = T.text(.pickFolder)
-        if let root { panel.directoryURL = root }
-        if panel.runModal() == .OK, let url = panel.url { chooseFolder(url) }
+        if let root = libraryRoots.first { panel.directoryURL = root }
+        if panel.runModal() == .OK, let url = panel.url { chooseFolder(url, first: first) }
     }
 
     func chooseBackdrop(_ kind: Preferences.Backdrop) {

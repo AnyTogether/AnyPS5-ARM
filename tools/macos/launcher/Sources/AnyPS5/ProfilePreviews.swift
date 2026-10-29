@@ -33,7 +33,7 @@ enum ProfilePreviews {
 
         var fresh = preferences
         fresh.onboarded = false
-        fresh.gamesFolder = root.path
+        fresh.libraryFolders = [root.path]
         PreviewRenderer.render(fresh, found, root, still, output.appendingPathComponent("onboarding3.png")) { model in
             model.onboardingStep = 3
             model.profileFlow.modeChoice = 1

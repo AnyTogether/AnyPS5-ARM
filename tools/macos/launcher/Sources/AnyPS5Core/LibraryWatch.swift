@@ -30,18 +30,24 @@ public struct LibraryTracker: Sendable {
     }
 }
 
-/// Watches the games folder and everything in it (FSEvents, file by file), and scans it again a
-/// moment after things stop changing there: a game copied in, in a subfolder too, shows up when
+/// Watches the games folders and everything in them (FSEvents, file by file), and scans them again
+/// a moment after things stop changing there: a game copied in, in a subfolder too, shows up when
 /// its copy is far enough along to be a game. A long copy is still looked at every few seconds,
 /// and a dump that is not whole yet is looked at again until it is, or until it has stayed the
 /// same for a while. The launcher's own store and hidden files never count, so unlocking a game
-/// does not keep rescanning.
+/// does not keep rescanning. A folder that is not there (its drive unplugged) is skipped and
+/// reported as not connected until it is back; `refresh()` watches it again once its drive mounts.
 ///
 /// `deliver` runs on the monitor's own queue after every scan, the first one included (whose
 /// `added` is always empty).
 public final class LibraryMonitor: @unchecked Sendable {
     public struct Update: Sendable {
+        /// The library: every folder's games, a game in several folders once (GameLibrary.merge).
         public let games: [Game]
+        /// Game ID to the folder it was found in.
+        public let roots: [String: URL]
+        /// Each folder, in order: there or not, and how many games it holds.
+        public let folders: [GameLibrary.FolderStatus]
         /// The games no scan had found before (see `LibraryTracker`).
         public let added: [Game]
         /// Folders that look like a dump still being copied.
@@ -64,7 +70,7 @@ public final class LibraryMonitor: @unchecked Sendable {
         public init() {}
     }
 
-    public let root: URL
+    public let roots: [URL]
     private let timing: Timing
     private let deliver: @Sendable (Update) -> Void
     private let queue = DispatchQueue(label: "org.anyps5.library-monitor", qos: .utility)
@@ -80,8 +86,12 @@ public final class LibraryMonitor: @unchecked Sendable {
     private var incompleteSince = DispatchTime.now()
     private var stopped = false
 
-    public init(root: URL, timing: Timing = Timing(), deliver: @escaping @Sendable (Update) -> Void) {
-        self.root = root
+    public convenience init(root: URL, timing: Timing = Timing(), deliver: @escaping @Sendable (Update) -> Void) {
+        self.init(roots: [root], timing: timing, deliver: deliver)
+    }
+
+    public init(roots: [URL], timing: Timing = Timing(), deliver: @escaping @Sendable (Update) -> Void) {
+        self.roots = roots
         self.timing = timing
         self.deliver = deliver
         queue.setSpecific(key: queueKey, value: true)
@@ -132,20 +142,35 @@ public final class LibraryMonitor: @unchecked Sendable {
     /// launcher's store and hidden files, and the folder itself or what holds it (moved, its drive
     /// gone).
     public static func matters(_ path: String, root: String) -> Bool {
-        func normal(_ path: String) -> String {
-            var value = path
-            while value.count > 1 && value.hasSuffix("/") { value.removeLast() }
-            for prefix in ["/private/var/", "/private/tmp/", "/private/etc/"] where value.hasPrefix(prefix) {
-                value.removeFirst("/private".count)
-            }
-            if value == "/private/var" || value == "/private/tmp" { value.removeFirst("/private".count) }
-            return value
-        }
         let event = normal(path), folder = normal(root)
         if event == folder || event == "/" || folder.hasPrefix(event + "/") { return true }
         guard event.hasPrefix(folder + "/") else { return true }
         let relative = event.dropFirst(folder.count + 1)
         return !relative.split(separator: "/").contains { $0.hasPrefix(".") }
+    }
+
+    /// A path as FSEvents and the settings may both write it: no trailing slash, /private/var,
+    /// /private/tmp and /private/etc as /var, /tmp and /etc.
+    static func normal(_ path: String) -> String {
+        var value = path
+        while value.count > 1 && value.hasSuffix("/") { value.removeLast() }
+        for prefix in ["/private/var/", "/private/tmp/", "/private/etc/"] where value.hasPrefix(prefix) {
+            value.removeFirst("/private".count)
+        }
+        if value == "/private/var" || value == "/private/tmp" { value.removeFirst("/private".count) }
+        return value
+    }
+
+    /// `matters` for several folders: an event inside one (or more, when one holds another) counts
+    /// when it counts for each folder holding it, so one folder's store is not another's change;
+    /// an event in none of them (what holds a folder, its drive) always counts.
+    public static func matters(_ path: String, roots: [String]) -> Bool {
+        let event = normal(path)
+        let holding = roots.filter { root in
+            let folder = normal(root)
+            return event == folder || event.hasPrefix(folder + "/")
+        }
+        return holding.isEmpty || holding.allSatisfy { matters(path, root: $0) }
     }
 
     // MARK: On the queue
@@ -164,7 +189,7 @@ public final class LibraryMonitor: @unchecked Sendable {
             let list = Unmanaged<CFArray>.fromOpaque(paths).takeUnretainedValue() as? [String] ?? []
             monitor.received(list)
         }
-        guard let created = FSEventStreamCreate(kCFAllocatorDefault, callback, &context, [root.path] as CFArray,
+        guard let created = FSEventStreamCreate(kCFAllocatorDefault, callback, &context, roots.map(\.path) as CFArray,
                                                 FSEventStreamEventId(kFSEventStreamEventIdSinceNow), timing.latency, FSEventStreamCreateFlags(flags)) else { return }
         FSEventStreamSetDispatchQueue(created, queue)
         guard FSEventStreamStart(created) else {
@@ -185,8 +210,8 @@ public final class LibraryMonitor: @unchecked Sendable {
 
     private func received(_ paths: [String]) {
         guard !stopped else { return }
-        let rootPath = root.path
-        guard paths.isEmpty || paths.contains(where: { Self.matters($0, root: rootPath) }) else { return }
+        let rootPaths = roots.map(\.path)
+        guard paths.isEmpty || paths.contains(where: { Self.matters($0, roots: rootPaths) }) else { return }
         request(after: timing.quiet)
     }
 
@@ -207,10 +232,10 @@ public final class LibraryMonitor: @unchecked Sendable {
         guard !stopped else { return }
         pending = nil
         firstRequest = nil
-        let survey = GameLibrary.survey(root)
+        let survey = GameLibrary.survey(roots: roots)
         let added = tracker.update(survey.games)
         scans += 1
-        let update = Update(games: survey.games, added: added, incomplete: survey.incomplete, first: scans == 1)
+        let update = Update(games: survey.games, roots: survey.roots, folders: survey.folders, added: added, incomplete: survey.incomplete, first: scans == 1)
         deliver(update)
         lookAgainAtIncomplete(survey.incomplete)
     }

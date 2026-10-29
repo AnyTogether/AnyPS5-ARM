@@ -43,7 +43,7 @@ enum T {
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
-        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, linkNoGame, folderNoGames, useGamesFolder, useGamesFolderDetail, useGamesFolderConfirm, copyLink, linkCopied, saveSync, saveSyncDetail, saveSyncNoFolder, syncFolder, syncFolderICloud, syncFolderNone, savesSyncedFrom, saveSyncFailed, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved, clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
+        case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, linkNoGame, folderNoGames, useGamesFolder, useGamesFolderDetail, useGamesFolderConfirm, addFolder, addFolderDetail, removeFolder, removeFolderAsk, folderRemoved, folderNotConnected, folderGames, folderOneGame, copyLink, linkCopied, saveSync, saveSyncDetail, saveSyncNoFolder, syncFolder, syncFolderICloud, syncFolderNone, savesSyncedFrom, saveSyncFailed, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved, clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
         case newGame, newGames, newGameDetail
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
@@ -406,9 +406,17 @@ enum T {
         .newGame: "Yeni oyun: %@",
         .newGames: "%d yeni oyun",
         .newGameDetail: "Oyunlar klasörüne eklendi",
-        .useGamesFolder: "Oyun klasörü “%@” olsun mu?",
-        .useGamesFolderDetail: "İçinde %d oyun var: %@. Launcher oyunlarını bundan sonra burada arar.",
-        .useGamesFolderConfirm: "Oyun Klasörü Yap",
+        .useGamesFolder: "“%@” oyun klasörlerine eklensin mi?",
+        .useGamesFolderDetail: "İçinde %d oyun var: %@. Launcher bundan sonra oyunları burada da arar.",
+        .useGamesFolderConfirm: "Klasörü Ekle",
+        .addFolder: "Klasör Ekle",
+        .addFolderDetail: "Başka bir diskte ya da klasörde duran oyunlar için",
+        .removeFolder: "Kütüphaneden Çıkar",
+        .removeFolderAsk: "“%@” kütüphaneden çıkarılsın mı? Oyunları listeden kalkar; diskteki dosyalara dokunulmaz.",
+        .folderRemoved: "Klasör kütüphaneden çıkarıldı",
+        .folderNotConnected: "Bağlı değil",
+        .folderGames: "%d oyun",
+        .folderOneGame: "1 oyun",
         .copyLink: "Bağlantıyı Kopyala",
         .linkCopied: "Bağlantı kopyalandı: tıklayan launcher'da bu oyunu açar",
         .saveSync: "Kayıt Senkronu",
@@ -994,9 +1002,17 @@ enum T {
         .newGame: "New game: %@",
         .newGames: "%d new games",
         .newGameDetail: "Added to your games folder",
-        .useGamesFolder: "Use “%@” as the games folder?",
-        .useGamesFolderDetail: "It holds %d games: %@. The launcher looks for games there from now on.",
-        .useGamesFolderConfirm: "Use as Games Folder",
+        .useGamesFolder: "Add “%@” to your games folders?",
+        .useGamesFolderDetail: "It holds %d games: %@. The launcher looks for games there too from now on.",
+        .useGamesFolderConfirm: "Add Folder",
+        .addFolder: "Add Folder",
+        .addFolderDetail: "For games on another drive or in another folder",
+        .removeFolder: "Remove from Library",
+        .removeFolderAsk: "Remove “%@” from the library? Its games leave the list; nothing on the drive is touched.",
+        .folderRemoved: "Folder removed from the library",
+        .folderNotConnected: "Not connected",
+        .folderGames: "%d games",
+        .folderOneGame: "1 game",
         .copyLink: "Copy Link",
         .linkCopied: "Link copied: opening it shows this game in the launcher",
         .saveSync: "Save Sync",

@@ -144,18 +144,18 @@ private struct FolderStep: View {
             StepTitle(title: T.text(.chooseFolder), subtitle: T.text(.chooseFolderSubtitle))
             VStack(alignment: .leading, spacing: 22 * scale) {
                 HStack(spacing: 18 * scale) {
-                    ConsoleButton(title: model.preferences.gamesFolder == nil ? T.text(.pickFolder) : T.text(.changeFolder), symbol: "folder", focused: model.onboardingChoice == 0, minWidth: 220) {
+                    ConsoleButton(title: model.preferences.libraryFolders.isEmpty ? T.text(.pickFolder) : T.text(.changeFolder), symbol: "folder", focused: model.onboardingChoice == 0, minWidth: 220) {
                         model.onboardingChoice = 0
-                        model.pickGamesFolder()
+                        model.pickGamesFolder(first: true)
                     }
-                    if model.preferences.gamesFolder != nil {
+                    if !model.preferences.libraryFolders.isEmpty {
                         ConsoleButton(title: TPro.text(.continueStep), symbol: "arrow.right", focused: model.onboardingChoice == 1, prominent: true, minWidth: 180) {
                             model.onboardingChoice = 1
                             model.onboardingConfirm()
                         }
                     }
                 }
-                if let folder = model.preferences.gamesFolder {
+                if let folder = model.preferences.libraryFolders.first {
                     HStack(spacing: 14 * scale) {
                         Image(systemName: model.scanning ? "magnifyingglass" : (model.games.isEmpty ? "questionmark.folder" : "checkmark.circle.fill"))
                             .foregroundStyle(model.games.isEmpty && !model.scanning ? .white.opacity(0.7) : model.accent)
@@ -194,14 +194,14 @@ extension AppModel {
         switch step {
         case 0: return Language.allCases.firstIndex(of: preferences.language) ?? 0
         case 1: return preferences.theme.rawValue
-        default: return preferences.gamesFolder == nil ? 0 : 1
+        default: return preferences.libraryFolders.isEmpty ? 0 : 1
         }
     }
 
     func onboardingCommand(_ command: Command) -> Bool {
         // The last step: the welcome cards, or the sign-in they lead to.
         if onboardingStep == 3 { return overlay == .signIn ? signInCommand(command) : modeChoiceCommand(command) }
-        let count = onboardingStep == 0 ? Language.allCases.count : onboardingStep == 1 ? Theme.allCases.count : (preferences.gamesFolder == nil ? 1 : 2)
+        let count = onboardingStep == 0 ? Language.allCases.count : onboardingStep == 1 ? Theme.allCases.count : (preferences.libraryFolders.isEmpty ? 1 : 2)
         switch command {
         case .left:
             if onboardingChoice > 0 { onboardingChoice -= 1; previewChoice(); Sounds.shared.play(.move) }
@@ -232,11 +232,11 @@ extension AppModel {
             preferences.theme = Theme(rawValue: onboardingChoice) ?? .cosmic
             advance()
         case 2:
-            if onboardingChoice == 1 && preferences.gamesFolder != nil {
+            if onboardingChoice == 1 && !preferences.libraryFolders.isEmpty {
                 profileFlow.modeChoice = 0
                 advance()
             } else {
-                pickGamesFolder()
+                pickGamesFolder(first: true)
                 onboardingChoice = 1
             }
         default:

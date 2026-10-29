@@ -58,6 +58,11 @@ struct Preferences: Codable, Equatable {
     /// Save Sync through the AnyTogether cloud ("together") instead of the folder; nil is the folder.
     var syncThrough: String?
     var profileName = NSFullUserName().components(separatedBy: " ").first ?? "Player"
+    /// The games folders, in order (Settings → Game Library): the library is all of them, and a
+    /// game in several shows from the first that has it. nil until set; `libraryFolders` reads
+    /// an older launcher's single `gamesFolder` as a list of one.
+    var gamesFolders: [String]?
+    /// The first games folder, kept beside the list so an older launcher still finds it.
     var gamesFolder: String?
     /// Where F12 saves screenshots, nil for ~/Pictures/AnyPS5.
     var screenshotsFolder: String?
@@ -106,10 +111,21 @@ struct Preferences: Codable, Equatable {
 
     var accentColor: Color { (accent ?? theme.defaultAccent).color }
 
+    /// The games folders; setting them keeps the first in `gamesFolder` too.
+    var libraryFolders: [String] {
+        get { LibraryFolders.list(gamesFolders, legacy: gamesFolder) }
+        set {
+            gamesFolders = newValue.isEmpty ? nil : newValue
+            gamesFolder = newValue.first
+        }
+    }
+
     static let key = "AnyPS5.preferences.v1"
 
     static func load() -> Preferences {
-        guard let data = UserDefaults.standard.data(forKey: key), let saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return Preferences() }
+        guard let data = UserDefaults.standard.data(forKey: key), var saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return Preferences() }
+        // One games folder from an older launcher becomes a list of one.
+        saved.libraryFolders = saved.libraryFolders
         return saved
     }
 
@@ -436,8 +452,12 @@ final class AppModel: ObservableObject {
     /// The unlock the no-space panel is about.
     @Published var spaceShortage: (game: Game, shortage: SpaceShortage)?
     private var installLog: [String: [String]] = [:]
-    /// Watches the games folder and scans it again when something is copied in (LibraryWatch.swift).
+    /// Watches the games folders and scans them again when something is copied in (LibraryWatch.swift).
     private var libraryMonitor: LibraryMonitor?
+    /// Game ID to the games folder it was found in: its unlocked copy is in that folder's store.
+    private var gameRoots: [String: URL] = [:]
+    /// Each games folder as the last scan found it (Settings → Game Library).
+    @Published private(set) var libraryFolders: [GameLibrary.FolderStatus] = []
     /// Bumped whenever an unlock or an uninstall changes the records, so a scan read before does
     /// not put back what they replaced.
     private nonisolated let recordsStamp = OSAllocatedUnfairLock(initialState: 0)
@@ -574,8 +594,9 @@ final class AppModel: ObservableObject {
             NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
                 let volume = (note.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL)?.standardizedFileURL.path
                 MainActor.assumeIsolated {
-                    guard let self, let root = self.root?.standardizedFileURL.path else { return }
-                    if volume.map({ root == $0 || root.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }) ?? true { self.libraryMonitor?.refresh() }
+                    guard let self else { return }
+                    let roots = self.libraryRoots.map(\.standardizedFileURL.path)
+                    if roots.contains(where: { root in volume.map { root == $0 || root.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") } ?? true }) { self.libraryMonitor?.refresh() }
                 }
             }
         }
@@ -612,6 +633,13 @@ final class AppModel: ObservableObject {
     /// Fills the library at once (offscreen previews).
     func preview(games: [Game], root: URL) {
         self.games = games
+        gameRoots = Dictionary(games.map { ($0.id, root) }, uniquingKeysWith: { first, _ in first })
+        // Each folder of the settings: one that is not there shows as not connected.
+        libraryFolders = libraryRoots.map { folder in
+            let there = FileManager.default.fileExists(atPath: folder.path)
+            let prefix = folder.standardizedFileURL.path + "/"
+            return GameLibrary.FolderStatus(url: folder, connected: there, games: there ? games.filter { $0.folder.standardizedFileURL.path.hasPrefix(prefix) }.count : 0)
+        }
         installedRecords = Dictionary(uniqueKeysWithValues: games.compactMap { game in Installer.record(of: Installer.bundle(for: game, root: root)).map { (game.id, $0) } })
         for game in games {
             sizes[game.id] = GameLibrary.size(of: game.folder)
@@ -1037,43 +1065,71 @@ final class AppModel: ObservableObject {
 
     /// The animated background drawn: the made theme's, else the built-in theme.
     var lookStyle: Theme { activeDesign.flatMap { Theme(rawValue: $0.style) } ?? preferences.theme }
-    var root: URL? { preferences.gamesFolder.map { URL(fileURLWithPath: $0) } }
+    /// The games folders, in order.
+    var libraryRoots: [URL] { preferences.libraryFolders.map { URL(fileURLWithPath: $0) } }
+
+    /// The games folder `game` was found in, whose store holds its unlocked copy: on the game's
+    /// own drive, so the copy is an APFS clone and goes with the drive.
+    func root(of game: Game) -> URL? {
+        if let root = gameRoots[game.id] { return root }
+        let path = game.folder.standardizedFileURL.path
+        return libraryRoots.first { path.hasPrefix($0.standardizedFileURL.path + "/") }
+    }
     var selectedGame: Game? { games.indices.contains(selected) ? games[selected] : nil }
 
     // MARK: Library
 
-    /// Scans the games folder now, and watches it from then on: games copied in later show up by
-    /// themselves, with a "New game" notice.
+    /// Scans the games folders now, and watches them from then on: games copied in later show up
+    /// by themselves, with a "New game" notice. A folder that is not there is looked at again on
+    /// the next scan, and when a drive mounts.
     func rescan() {
-        guard let root else { return }
+        let roots = libraryRoots
+        guard !roots.isEmpty else {
+            // The last folder removed: the library is empty again.
+            libraryMonitor?.stop()
+            libraryMonitor = nil
+            scanning = false
+            games = []
+            gameRoots = [:]
+            libraryFolders = []
+            installedRecords = [:]
+            selected = 0
+            libraryIndex = 0
+            return
+        }
         scanning = true
-        if installer == nil && preparer == nil { Installer.removeLeftovers(root: root) }
-        if let monitor = libraryMonitor, monitor.root == root {
+        if installer == nil && preparer == nil {
+            for root in roots where FileManager.default.fileExists(atPath: root.path) { Installer.removeLeftovers(root: root) }
+        }
+        if let monitor = libraryMonitor, monitor.roots == roots {
             monitor.rescan()
             return
         }
         libraryMonitor?.stop()
         let stamp = recordsStamp
-        let monitor = LibraryMonitor(root: root) { [weak self] update in
+        let monitor = LibraryMonitor(roots: roots) { [weak self] update in
             // The records are read off the main thread too; each game's is one small file.
             let generation = stamp.withLock { $0 }
-            let records = AppModel.records(of: update.games, root: root)
-            Task { @MainActor in self?.libraryScanned(update, records: records, generation: generation, root: root) }
+            let records = AppModel.records(of: update.games, roots: update.roots)
+            Task { @MainActor in self?.libraryScanned(update, records: records, generation: generation, roots: roots) }
         }
         libraryMonitor = monitor
         monitor.start()
     }
 
-    nonisolated private static func records(of games: [Game], root: URL) -> [String: InstallRecord] {
-        Dictionary(uniqueKeysWithValues: games.compactMap { game in Installer.record(of: Installer.bundle(for: game, root: root)).map { (game.id, $0) } })
+    nonisolated private static func records(of games: [Game], roots: [String: URL]) -> [String: InstallRecord] {
+        Dictionary(games.compactMap { game in roots[game.id].flatMap { Installer.record(of: Installer.bundle(for: game, root: $0)) }.map { (game.id, $0) } },
+                   uniquingKeysWith: { first, _ in first })
     }
 
     /// A scan's result: the library follows without moving the selection off the game it is on,
     /// and games that were not there before are announced.
-    private func libraryScanned(_ update: LibraryMonitor.Update, records scanned: [String: InstallRecord], generation: Int, root: URL) {
-        guard libraryMonitor?.root == root, self.root == root else { return }
+    private func libraryScanned(_ update: LibraryMonitor.Update, records scanned: [String: InstallRecord], generation: Int, roots: [URL]) {
+        guard libraryMonitor?.roots == roots, libraryRoots == roots else { return }
         scanning = false
-        let records = generation == recordsGeneration ? scanned : AppModel.records(of: update.games, root: root)
+        gameRoots = update.roots
+        if libraryFolders != update.folders { libraryFolders = update.folders }
+        let records = generation == recordsGeneration ? scanned : AppModel.records(of: update.games, roots: update.roots)
         let listingChanged = !GameLibrary.sameListing(games, update.games)
         if records.mapValues(\.toolkit) != installedRecords.mapValues(\.toolkit) || records.mapValues(\.date) != installedRecords.mapValues(\.date) {
             installedRecords = records
@@ -1124,10 +1180,23 @@ final class AppModel: ObservableObject {
         return one ? T.format(.newGame, names[0]) : T.format(.newGames, names.count)
     }
 
-    func chooseFolder(_ url: URL) {
-        preferences.gamesFolder = url.path
-        selected = 0
+    /// A games folder added at the end of the list (Settings, the empty library, a folder opened
+    /// with AnyPS5), or put first (`first`: the first-run setup choosing it).
+    func chooseFolder(_ url: URL, first: Bool = false) {
+        let folders = preferences.libraryFolders
+        let chosen = first ? LibraryFolders.replacingFirst(with: url.path, in: folders) : LibraryFolders.adding(url.path, to: folders)
+        if chosen != folders {
+            preferences.libraryFolders = chosen
+            selected = 0
+        }
         rescan()
+    }
+
+    /// A games folder out of the list; its games leave the library, nothing on the drive changes.
+    func removeFolder(_ path: String) {
+        preferences.libraryFolders = LibraryFolders.removing(path, from: preferences.libraryFolders)
+        rescan()
+        show(T.text(.folderRemoved), symbol: "folder.badge.minus")
     }
 
     func measureSelected() {
@@ -1163,7 +1232,7 @@ final class AppModel: ObservableObject {
     }
 
     func loadTrophies(_ game: Game, again: Bool = false) {
-        guard let root, again || !trophiesRead.contains(game.id) else { return }
+        guard let root = root(of: game), again || !trophiesRead.contains(game.id) else { return }
         trophiesRead.insert(game.id)
         let bundle = Installer.bundle(for: game, root: root)
         let languages = trophyLanguages(game)
@@ -1246,7 +1315,7 @@ final class AppModel: ObservableObject {
     // MARK: Unlocking
 
     func unlock(_ game: Game) {
-        guard let root else { return }
+        guard let root = root(of: game) else { return }
         guard let toolkit = toolkit(for: game) else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
         // Asked for while it is being prepared: it becomes the user's own and goes on at full speed.
         if prepare.active == game.id { return promotePreparation(game) }
@@ -1259,7 +1328,7 @@ final class AppModel: ObservableObject {
         }
         queue.append(game.id)
         Sounds.shared.play(.select)
-        startNext(root: root)
+        startNext()
         stepPrepare()
     }
 
@@ -1274,10 +1343,11 @@ final class AppModel: ObservableObject {
         open(.noSpace)
     }
 
-    private func startNext(root: URL) {
+    /// The next game in the queue, into the store of the games folder it is in.
+    private func startNext() {
         guard installer == nil, !queue.isEmpty else { return }
         let id = queue.removeFirst()
-        guard let game = games.first(where: { $0.id == id }), let toolkit = toolkit(for: game) else { startNext(root: root); return }
+        guard let game = games.first(where: { $0.id == id }), let toolkit = toolkit(for: game), let root = root(of: game) else { startNext(); return }
         installer = runUnlock(game, toolkit: toolkit, root: root, background: false) { [weak self] result in
             guard let self else { return }
             self.installer = nil
@@ -1299,7 +1369,7 @@ final class AppModel: ObservableObject {
                 self.togetherUnlockDone(id, succeeded: false)
                 self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
             }
-            self.startNext(root: root)
+            self.startNext()
             self.stepPrepare()
         }
     }
@@ -1389,12 +1459,12 @@ final class AppModel: ObservableObject {
     /// (unless `quiet`, when the caller tells them) and returned.
     @discardableResult
     func stepPrepare(quiet: Bool = false) -> [(String, PrepareSkip)] {
-        guard let root else { return [] }
+        guard !libraryRoots.isEmpty else { return [] }
         let conditions = prepareConditions
         var skipped: [(String, PrepareSkip)] = []
         while true {
             let action = prepare.step(conditions) { [weak self] id in
-                guard let self, let game = self.games.first(where: { $0.id == id }), let toolkit = self.toolkit(for: game) else { return nil }
+                guard let self, let game = self.games.first(where: { $0.id == id }), let toolkit = self.toolkit(for: game), let root = self.root(of: game) else { return nil }
                 return Installer.plan(game: game, toolkit: toolkit, root: root).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root))
             }
             switch action {
@@ -1402,7 +1472,7 @@ final class AppModel: ObservableObject {
                 schedulePrepareCheck()
                 if !quiet { for (id, reason) in skipped { tellSkipped(id, reason) } }
                 return skipped
-            case .start(let id): startPreparing(id, root: root)
+            case .start(let id): startPreparing(id)
             case .pause: preparer?.pause()
             case .resume: preparer?.resume()
             case .skip(let id, let reason): skipped.append((id, reason))
@@ -1421,8 +1491,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func startPreparing(_ id: String, root: URL) {
-        guard let game = games.first(where: { $0.id == id }), state(of: game) == .locked, let toolkit = toolkit(for: game) else {
+    private func startPreparing(_ id: String) {
+        guard let game = games.first(where: { $0.id == id }), state(of: game) == .locked, let toolkit = toolkit(for: game), let root = root(of: game) else {
             prepare.finished(id)
             return
         }
@@ -1454,7 +1524,7 @@ final class AppModel: ObservableObject {
                 self.failures[id] = error.localizedDescription
                 self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
             }
-            self.startNext(root: root)
+            self.startNext()
             self.stepPrepare()
         }
     }
@@ -1494,7 +1564,7 @@ final class AppModel: ObservableObject {
     }
 
     func uninstall(_ game: Game) {
-        guard let root else { return }
+        guard let root = root(of: game) else { return }
         try? FileManager.default.removeItem(at: Installer.bundle(for: game, root: root))
         try? FileManager.default.removeItem(at: Installer.dataFolder(for: game, root: root))
         try? FileManager.default.removeItem(at: Installer.keptRelink(for: game, root: root))
@@ -1527,14 +1597,14 @@ final class AppModel: ObservableObject {
     /// Plays the game, its saves brought in step first where save sync is on; `trace` turns
     /// detailed logging on for this start only.
     func play(_ game: Game, trace: Bool = false) {
-        guard root != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
+        guard root(of: game) != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
         // The profile's own saves and trophies in the game folder before anything reads them.
         activateProfileSaves(game)
         familyGate(game) { self.syncSaves(game) { self.ensureFonts(game) { self.start(game, trace: trace) } } }
     }
 
     private func start(_ game: Game, trace: Bool = false) {
-        guard let root, starting == nil, running == nil else { return }
+        guard let root = root(of: game), starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
@@ -1635,7 +1705,7 @@ final class AppModel: ObservableObject {
     }
 
     /// A folder opened with AnyPS5: a game in the library is selected; a game or a folder of
-    /// games elsewhere becomes the games folder, once the user agrees.
+    /// games elsewhere joins the games folders, once the user agrees.
     private func openFolder(_ folder: URL) {
         bringLauncherFront()
         if let index = games.firstIndex(where: { $0.folder.standardizedFileURL == folder.standardizedFileURL }) {
@@ -2351,7 +2421,7 @@ final class AppModel: ObservableObject {
     /// top of the screen, over the game.
     private func watchTrophies(_ game: Game) {
         trophyWatch?.cancel()
-        guard let root else { return }
+        guard let root = root(of: game) else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let languages = trophyLanguages(game)
         trophyWatch = Task.detached(priority: .utility) {
@@ -2550,7 +2620,7 @@ final class AppModel: ObservableObject {
 
     /// The folder the unlocked game reads and writes, its saves included.
     func gameFolder(_ game: Game) -> URL? {
-        guard let root else { return nil }
+        guard let root = root(of: game) else { return nil }
         return Installer.bundle(for: game, root: root).appendingPathComponent("Contents/Resources/game").resolvingSymlinksInPath()
     }
 
@@ -2592,7 +2662,7 @@ final class AppModel: ObservableObject {
     }
 
     func showInFinder(_ game: Game) {
-        guard let root else { return }
+        guard let root = root(of: game) else { return }
         let bundle = Installer.bundle(for: game, root: root)
         NSWorkspace.shared.activateFileViewerSelecting([FileManager.default.fileExists(atPath: bundle.path) ? bundle : game.folder])
     }
