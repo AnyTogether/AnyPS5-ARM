@@ -2,12 +2,12 @@ import Foundation
 
 /// The Glass theme's see-through window: its settings' texts, in both languages.
 enum TG {
-    enum Key {
-        case transparency, transparencyDetail, transparencyReduced
-        case artworkBehind, artworkBehindDetail, desktop
+    enum Key: String, CaseIterable {
+        case transparency = "glassTransparency", transparencyDetail = "glassTransparencyDetail", transparencyReduced = "glassTransparencyReduced"
+        case artworkBehind = "glassArtwork", artworkBehindDetail = "glassArtworkBehindDetail", desktop = "glassDesktop"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
     static let english: [Key: String] = [
         .transparency: "Glass Transparency",

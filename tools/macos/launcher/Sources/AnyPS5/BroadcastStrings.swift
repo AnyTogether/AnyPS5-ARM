@@ -2,15 +2,15 @@ import Foundation
 
 /// Broadcasting's texts, in both languages.
 enum TB {
-    enum Key {
-        case title, settingsDetail, service, serviceCustom, server, serverDetail, key, keyNone, keyDetail, keyEnter, keyEnterDetail, keyPaste, keyPasted, keyClipboardEmpty
-        case keyPage, keyPageDetail, quality, qualityDetail, microphone, microphoneDetail, microphoneLevel, badge, badgeDetail, viewerLink, viewerLinkDetail, keptPrivately
-        case goLive, goLiveDetail, goLiveNoGame, setUpFirst, setUpFirstDetail, live, starting, reconnecting, failed, stop, stopped, copyLink, linkCopied
-        case liveStats, dropped, stateLine, startedNotice, startedDetail, endedNotice, failedNotice, reconnectingNotice, reconnectingDetail
-        case needsPermission, needsPermissionDetail, noMicrophone, save, cancel, liveBadge
+    enum Key: String, CaseIterable {
+        case title = "broadcastTitle", settingsDetail = "broadcastSettingsDetail", service = "broadcastService", serviceCustom = "broadcastServiceCustom", server = "broadcastServer", serverDetail = "broadcastServerDetail", key = "broadcastKey", keyNone = "broadcastKeyNone", keyDetail = "broadcastKeyDetail", keyEnter = "broadcastKeyEnter", keyEnterDetail = "broadcastKeyEnterDetail", keyPaste = "broadcastKeyPaste", keyPasted = "broadcastKeyPasted", keyClipboardEmpty = "broadcastKeyClipboardEmpty"
+        case keyPage = "broadcastKeyPage", keyPageDetail = "broadcastKeyPageDetail", quality = "broadcastQuality", qualityDetail = "broadcastQualityDetail", microphone = "broadcastMicrophone", microphoneDetail = "broadcastMicrophoneDetail", microphoneLevel = "broadcastMicrophoneLevel", badge = "broadcastBadge", badgeDetail = "broadcastBadgeDetail", viewerLink = "broadcastViewerLink", viewerLinkDetail = "broadcastViewerLinkDetail", keptPrivately = "broadcastKeptPrivately"
+        case goLive = "broadcastGoLive", goLiveDetail = "broadcastGoLiveDetail", goLiveNoGame = "broadcastGoLiveNoGame", setUpFirst = "broadcastSetUpFirst", setUpFirstDetail = "broadcastSetUpFirstDetail", live = "broadcastLive", starting = "broadcastStarting", reconnecting = "broadcastReconnecting", failed = "broadcastFailed", stop = "broadcastStop", stopped = "broadcastStopped", copyLink = "broadcastCopyLink", linkCopied = "broadcastLinkCopied"
+        case liveStats = "broadcastLiveStats", dropped = "broadcastDropped", stateLine = "broadcastStateLine", startedNotice = "broadcastStartedNotice", startedDetail = "broadcastStartedDetail", endedNotice = "broadcastEndedNotice", failedNotice = "broadcastFailedNotice", reconnectingNotice = "broadcastReconnectingNotice", reconnectingDetail = "broadcastReconnectingDetail"
+        case needsPermission = "broadcastNeedsPermission", needsPermissionDetail = "broadcastNeedsPermissionDetail", noMicrophone = "broadcastNoMicrophone", save = "broadcastSave", cancel = "broadcastCancel", liveBadge = "broadcastLiveBadge"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     /// 0:42, 12:05 or 1:02:09.

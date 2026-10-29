@@ -878,7 +878,7 @@ struct MessageList: View {
     /// "14:05" today, "Mon" this week, "Oct 3" before.
     static func time(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+        formatter.locale = T.locale
         let calendar = Calendar.current
         if calendar.isDateInToday(date) {
             formatter.timeStyle = .short

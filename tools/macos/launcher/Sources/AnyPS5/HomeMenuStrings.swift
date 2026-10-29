@@ -4,21 +4,21 @@ import Foundation
 /// Full screen, the PS button's menus, the replay buffer's cost and the Shortcuts page: their
 /// texts, in both languages.
 enum TH {
-    enum Key {
-        case fullScreen, fullScreenDetail
+    enum Key: String, CaseIterable {
+        case fullScreen = "launcherFullscreen", fullScreenDetail = "menuFullScreenDetail"
         case pauseOnMenu, pauseOnMenuDetail
-        case resume, closeGame, paused, stillRunning, quickMenuKicker
-        case closeGameTitle, closeGameText
-        case homeMenuKicker, switchProfile, quitApp, quitWithGame
-        case shortcuts, shortcutsIntro, keyboard, controller, held, notSet, pressButtons, inGameToo
-        case actionHome, actionQuickMenu, actionScreenshot, actionClip, actionFullScreen, actionPrevious, actionNext
-        case conflictSame, conflictNavigationKey, conflictNavigationButton, conflictReservedKey, conflictNeedsModifier, refused, cleared
-        case resetShortcuts, resetShortcutsDetail, shortcutsReset, gameButtons, gameButtonsDetail, gameButtonsNoGame
-        case screenshotSaved, screenshotFailed, minutes, clipsCost
-        case hintChange, hintDone, hintClear
+        case resume = "quickResume", closeGame = "quickCloseGame", paused = "quickPaused", stillRunning = "menuStillRunning", quickMenuKicker = "menuQuickMenuKicker"
+        case closeGameTitle, closeGameText = "menuCloseGameText"
+        case homeMenuKicker = "menuHomeMenuKicker", switchProfile, quitApp = "quitLauncher", quitWithGame = "menuQuitWithGame"
+        case shortcuts, shortcutsIntro = "menuShortcutsIntro", keyboard = "menuKeyboard", controller = "menuController", held = "shortcutHeld", notSet = "menuNotSet", pressButtons = "menuPressButtons", inGameToo = "menuInGameToo"
+        case actionHome = "menuActionHome", actionQuickMenu = "shortcutQuickMenu", actionScreenshot = "shortcutScreenshot", actionClip = "menuActionClip", actionFullScreen = "shortcutFullscreen", actionPrevious = "shortcutPreviousSection", actionNext = "shortcutNextSection"
+        case conflictSame = "menuConflictSame", conflictNavigationKey = "menuConflictNavigationKey", conflictNavigationButton = "menuConflictNavigationButton", conflictReservedKey = "menuConflictReservedKey", conflictNeedsModifier = "menuConflictNeedsModifier", refused = "menuRefused", cleared = "menuCleared"
+        case resetShortcuts = "shortcutsReset", resetShortcutsDetail = "menuResetShortcutsDetail", shortcutsReset = "shortcutsResetDone", gameButtons = "shortcutsGameButtons", gameButtonsDetail = "shortcutsGameButtonsDetail", gameButtonsNoGame = "menuGameButtonsNoGame"
+        case screenshotSaved, screenshotFailed, minutes = "menuMinutes", clipsCost = "menuClipsCost"
+        case hintChange = "menuHintChange", hintDone = "menuHintDone", hintClear = "menuHintClear"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     static func name(_ action: ShortcutAction) -> String {

@@ -435,7 +435,7 @@ struct CapturesView: View {
             if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
         }
         .screenFrost(0.74)
-        .environment(\.locale, Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US"))
+        .environment(\.locale, T.locale)
     }
 
     private var header: some View {

@@ -5,21 +5,18 @@ import Foundation
 /// conversations and the read receipts setting, in both languages (the same words the website
 /// uses). `TChat.text(.key)` reads the launcher's language.
 enum TChat {
-    static func text(_ key: Key) -> String {
-        let table = T.language == .turkish ? turkish : english
-        return table[key] ?? english[key] ?? key.rawValue
-    }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
     static func format(_ key: Key, _ arguments: CVarArg...) -> String {
         String(format: text(key), arguments: arguments)
     }
 
-    enum Key: String {
-        case react, reactionLike, reactionLove, reactionLaugh, reactionWow, reactionSad, reactionFire, reactionGg, reactedBy
-        case reply, replyingTo, earlierMessage, edit, editing, editLimit, unsend, unsendConfirm
-        case receiptSent, receiptDelivered, receiptRead, seenBy, seenByEveryone
-        case pin, unpin, pinned, pinFull, mute, unmute, muted
-        case readReceipts, readReceiptsHint, hintActions
+    enum Key: String, CaseIterable {
+        case react = "messagesReact", reactionLike, reactionLove, reactionLaugh, reactionWow, reactionSad, reactionFire, reactionGg, reactedBy = "chatReactedBy"
+        case reply = "messagesReply", replyingTo = "messagesReplyingTo", earlierMessage = "messagesEarlier", edit = "messagesEdit", editing = "chatEditing", editLimit = "messagesEditLimit", unsend = "messagesUnsend", unsendConfirm = "messagesUnsendConfirm"
+        case receiptSent, receiptDelivered, receiptRead, seenBy = "chatSeenBy", seenByEveryone = "receiptSeenByEveryone"
+        case pin = "conversationPin", unpin = "conversationUnpin", pinned = "conversationPinned", pinFull = "chatPinFull", mute = "conversationMute", unmute = "conversationUnmute", muted = "conversationMuted"
+        case readReceipts, readReceiptsHint, hintActions = "chatHintActions"
     }
 
     static func name(_ reaction: TogetherMessageReaction) -> String {

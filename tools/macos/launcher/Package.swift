@@ -30,5 +30,7 @@ let package = Package(
         .testTarget(name: "AnyPS5SharePlayTests", dependencies: ["AnyPS5SharePlay"], path: "Tests/AnyPS5SharePlayTests"),
         // Online play end to end in one process: two launchers, two fake engines, real data channels.
         .testTarget(name: "AnyPS5OnlineTests", dependencies: ["AnyPS5Online"], path: "Tests/AnyPS5OnlineTests"),
+        // The launcher's texts against its language files in l10n (TRANSLATING.md there).
+        .testTarget(name: "AnyPS5Tests", dependencies: ["AnyPS5"], path: "Tests/AnyPS5Tests"),
     ]
 )

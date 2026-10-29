@@ -3,13 +3,13 @@ import Foundation
 
 /// Controller vibration and the launcher's own update notice: their texts, in both languages.
 enum TU {
-    enum Key {
+    enum Key: String, CaseIterable {
         case controllerVibration, controllerVibrationDetail
-        case noticeReady, noticeReadyDetail, restartNow, later, noticeWaiting, cancelRestart
-        case stateIdle, stateChecking, stateUpToDate, stateFailed, stateAvailableDetail, stateDownloading
+        case noticeReady = "desktopNoticeReady", noticeReadyDetail, restartNow = "desktopRestartNow", later = "desktopLater", noticeWaiting = "desktopRestartWaiting", cancelRestart = "desktopCancelRestart"
+        case stateIdle = "noticeStateIdle", stateChecking = "noticeStateChecking", stateUpToDate = "noticeStateUpToDate", stateFailed = "desktopUpdateNoAnswer", stateAvailableDetail = "noticeStateAvailableDetail", stateDownloading = "noticeStateDownloading"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     /// About's line for the check: where it stands.

@@ -3,16 +3,13 @@ import Foundation
 
 /// The texts of Settings → Game Presets, in both languages; kept apart from `T` like `TPrep`.
 enum TPresets {
-    static func text(_ key: Key) -> String {
-        let table = T.language == .turkish ? turkish : english
-        return table[key] ?? english[key] ?? key.rawValue
-    }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
     enum Key: String, CaseIterable {
-        case title, intro, gameDefault, difficulty, easiest, easy, normal, hard, hardest
-        case priority, priorityDetail, performance, resolution
-        case invertVerticalFirst, invertHorizontalFirst, invertVerticalThird, invertHorizontalThird
-        case subtitles, show, hide, audioLanguage, reset
+        case title = "presetsTitle", intro = "presetsIntro", gameDefault = "presetGameDefault", difficulty = "presetDifficulty", easiest = "presetEasiest", easy = "presetEasy", normal = "presetNormal", hard = "presetHard", hardest = "presetHardest"
+        case priority = "presetPriority", priorityDetail = "presetPriorityDetail", performance = "presetPerformance", resolution = "presetResolution"
+        case invertVerticalFirst = "presetInvertVerticalFirst", invertHorizontalFirst = "presetInvertHorizontalFirst", invertVerticalThird = "presetInvertVerticalThird", invertHorizontalThird = "presetInvertHorizontalThird"
+        case subtitles = "presetSubtitles", show = "presetShow", hide = "presetHide", audioLanguage = "presetAudioLanguage", reset = "presetsReset"
     }
 
     static let english: [Key: String] = [

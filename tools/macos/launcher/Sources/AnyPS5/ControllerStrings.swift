@@ -3,19 +3,19 @@ import Foundation
 
 /// Settings → Controllers, the controller test and the troubleshooter: their texts, in both languages.
 enum TP {
-    enum Key {
-        case title, noneConnected, noneConnectedDetail, playerOne, testInputs, testInputsDetail, testVibration, testVibrationDetail
-        case light, lightDetail, lightTheme, lightBlue, lightRed, lightGreen, lightPurple, lightPink, lightOrange, lightWhite, lightOff
-        case confirm, confirmDetail, confirmCross, confirmCircle, deadzone, deadzoneDetail
-        case usb, bluetooth, connectionUnknown, battery, batteryAbout, charging, generic
-        case troubleshoot, allGood, allGoodDetail
-        case noControllers, noControllersDetail, usbCable, usbCableDetail, bluetoothPairing, bluetoothPairingDetail
-        case dualShock3, dualShock3Detail, unmapped, unmappedDetail, lowBattery, lowBatteryDetail, steamRunning, steamRunningDetail
-        case testTitle, testHoldToLeave, testLeave, testNoPad, testSticks, testTriggers, vibrated, noVibration
-        case connected, disconnected
+    enum Key: String, CaseIterable {
+        case title = "padTitle", noneConnected = "padNone", noneConnectedDetail = "padNoneDetail", playerOne = "padPlayerOne", testInputs = "padTest", testInputsDetail = "padTestDetail", testVibration = "padVibrate", testVibrationDetail = "padVibrateDetail"
+        case light = "padLight", lightDetail = "padLightDetail", lightTheme = "padLight_theme", lightBlue = "padLight_blue", lightRed = "padLight_red", lightGreen = "padLight_green", lightPurple = "padLight_purple", lightPink = "padLight_pink", lightOrange = "padLight_orange", lightWhite = "padLight_white", lightOff = "padLight_off"
+        case confirm = "padConfirm", confirmDetail = "padConfirmDetail", confirmCross = "padConfirmCross", confirmCircle = "padConfirmCircle", deadzone = "padDeadzone", deadzoneDetail = "padDeadzoneDetail"
+        case usb = "padUsb", bluetooth = "padBluetooth", connectionUnknown = "padConnected", battery = "padBattery", batteryAbout = "padBatteryAbout", charging = "padCharging", generic = "padGeneric"
+        case troubleshoot = "padTroubleshoot", allGood = "padAllGood", allGoodDetail = "padAllGoodLauncherDetail"
+        case noControllers = "padFinding_noControllers", noControllersDetail = "padFinding_noControllersDetail", usbCable = "padFinding_usbCable", usbCableDetail = "padFinding_usbCableDetail", bluetoothPairing = "padFinding_bluetoothPairing", bluetoothPairingDetail = "padFinding_bluetoothPairingDetail"
+        case dualShock3 = "padDualShock3", dualShock3Detail = "padDualShock3Detail", unmapped = "padFinding_unmapped", unmappedDetail = "padFinding_unmappedDetail", lowBattery = "padFinding_lowBattery", lowBatteryDetail = "padFinding_lowBatteryDetail", steamRunning = "padFinding_steamRunning", steamRunningDetail = "padFinding_steamRunningDetail"
+        case testTitle = "padTestTitle", testHoldToLeave = "padHoldToLeave", testLeave = "padLeave", testNoPad = "padTestNoPad", testSticks = "padSticks", testTriggers = "padTriggers", vibrated = "padVibrating", noVibration = "padNoVibration"
+        case connected = "padArrived", disconnected = "padLeft"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     static func light(_ light: PadLight) -> String {

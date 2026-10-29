@@ -4,20 +4,20 @@ import Foundation
 /// Family limits: play time, age ratings, asking a parent and what a parent turned off: the
 /// texts, in both languages.
 enum FS {
-    enum Key {
-        case family, leftToday, noLimitToday, timeUp, outsideHours, playedToday, limitToday
-        case stale, staleDetail, locked, lockedDetail, signInToAsk
-        case askParent, askedTooMany, askMoreTime, askMinutes, askMinutesDetail, asked, askedAlready, askedGame, askedFriend, askFriend, askFailed
-        case ratedAbove, ratedUnknown, startLimit, startWindow
-        case warnMinutes, warnOne, warnDetail, noticeTitle, noticeCloses, noticeClosing, noticeNotify, noticeAsk, moreTime
-        case hoursMinutes, minutes
-        case refusedVoice, refusedShare, refusedPublic, refusedMessages, refusedFriends, refusedDiscovery, refusedMedia, refusedProfile, refusedCommunities, refusedAge, refusedFamily
-        case refusedOther, otherServer
-        case notifAsksTime, notifAsksGame, notifAsksFriend, notifSaidNo, notifGaveTime, notifGameYes, notifFriendYes
-        case notifReachedLimit, notifJoinedFamily, notifDeclinedFamily, notifFamilyInvite, notifSummary
+    enum Key: String, CaseIterable {
+        case family = "familyTitle", leftToday = "familyLeftToday", noLimitToday = "familyNoLimitToday", timeUp = "familyTimeUp", outsideHours = "familyOutsideHours", playedToday = "familyPlayedToday", limitToday = "familyLimitToday"
+        case stale = "familyStaleConnect", staleDetail = "familyStaleDetail", locked = "familyLocked", lockedDetail = "familyLockedDetail", signInToAsk = "familySignInToAsk"
+        case askParent = "familyAskParent", askedTooMany = "familyAskedTooMany", askMoreTime = "familyAskMoreTime", askMinutes = "familyAskMinutesFor", askMinutesDetail = "familyAskTimeDetail", asked = "familyAsked", askedAlready = "familyAskedAlready", askedGame = "familyAskedToPlay", askedFriend = "familyAskedFriend", askFriend = "familyAskFriend", askFailed = "familyAskFailed"
+        case ratedAbove = "familyRatedAbove", ratedUnknown = "familyRatedUnknown", startLimit = "familyStartLimit", startWindow = "familyStartWindow"
+        case warnMinutes = "familyWarnMinutes", warnOne = "familyWarnOne", warnDetail = "familyWarnDetail", noticeTitle = "familyNoticeTitle", noticeCloses = "familyNoticeCloses", noticeClosing = "familyNoticeClosing", noticeNotify = "familyNoticeNotify", noticeAsk = "familyNoticeAsk", moreTime = "familyMoreTime"
+        case hoursMinutes = "familyHoursMinutes", minutes = "familyMinutes"
+        case refusedVoice = "familyRefusedVoice", refusedShare = "familyRefusedShare", refusedPublic = "familyRefusedPublic", refusedMessages = "familyRefusedMessages", refusedFriends = "familyRefusedFriends", refusedDiscovery = "familyRefusedDiscovery", refusedMedia = "familyRefusedMedia", refusedProfile = "familyRefusedProfile", refusedCommunities = "familyRefusedCommunities", refusedAge = "familyRefusedAge", refusedFamily = "familyRefusedFamily"
+        case refusedOther = "familyOtherSide", otherServer = "familyOtherServer"
+        case notifAsksTime = "familyNotifAsksTime", notifAsksGame = "familyNotifAsksGame", notifAsksFriend = "familyNotifAsksFriend", notifSaidNo = "familyNotifSaidNo", notifGaveTime = "familyNotifGaveTime", notifGameYes = "familyNotifGameYes", notifFriendYes = "familyNotifFriendYes"
+        case notifReachedLimit = "familyNotifReachedLimit", notifJoinedFamily = "familyNotifJoinedFamily", notifDeclinedFamily = "familyNotifDeclinedFamily", notifFamilyInvite = "familyNotifFamilyInvite", notifSummary = "familyNotifSummary"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     /// "1 h 20 min", "45 min"; a started minute counts.

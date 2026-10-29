@@ -411,14 +411,14 @@ extension AppModel {
 
 /// Share play's texts, in both languages.
 enum SP {
-    enum Key {
-        case start, startDetail, starting, started, couldNotStart, sharing, watching, letPlay, stopPlaying, remove, invite, invitedAlready, invited
-        case openToFriends, openToFriendsDetail, maxViewers, maxViewersDetail, stop, stopped, noPadFree, nowPlays, invitedYou, watchFriend, watchDetail, decline
-        case player, onlyWatches, connecting, direct, relayed, roundTrip
-        case full, couldNotWatch, youPlay, youWatch, tookYouOut, hostStopped, leave
+    enum Key: String, CaseIterable {
+        case start = "sharePlayStart", startDetail = "sharePlayStartDetail", starting = "sharePlayStarting", started = "sharePlayStarted", couldNotStart = "sharePlayCouldNotStart", sharing = "sharePlaySharing", watching = "sharePlayWatching", letPlay = "sharePlayLetPlay", stopPlaying = "sharePlayStopPlaying", remove = "sharePlayRemove", invite = "sharePlayInvite", invitedAlready = "sharePlayInvitedAlready", invited = "sharePlayInvited"
+        case openToFriends = "sharePlayOpenToFriends", openToFriendsDetail = "sharePlayOpenToFriendsDetail", maxViewers = "sharePlayMaxViewers", maxViewersDetail = "sharePlayMaxViewersDetail", stop = "sharePlayStop", stopped = "sharePlayStopped", noPadFree = "sharePlayNoPadFree", nowPlays = "sharePlayNowPlays", invitedYou = "sharePlayInvitedYou", watchFriend = "sharePlayWatchFriend", watchDetail = "sharePlayWatchDetail", decline = "sharePlayDecline"
+        case player = "sharePlayPlayer", onlyWatches = "sharePlayOnlyWatches", connecting = "sharePlayConnecting", direct = "sharePlayDirect", relayed = "sharePlayRelayed", roundTrip = "sharePlayRoundTrip"
+        case full = "sharePlayFull", couldNotWatch = "sharePlayCouldNotWatch", youPlay = "sharePlayYouPlay", youWatch = "sharePlayYouWatch", tookYouOut = "sharePlayTookYouOut", hostStopped = "sharePlayHostStopped", leave = "sharePlayLeave"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     /// A viewer's line: player or watching, the path and its round trip.

@@ -2,22 +2,22 @@ import Foundation
 
 /// Cloud saves and media on AnyTogether: their texts, in both languages.
 enum TCloud {
-    enum Key {
-        case syncThrough, syncThroughFolder, syncThroughTogether, saveSyncTogetherDetail
-        case storageTitle, storageSubtitle, storageUsed, storageLoading, storageFailed, storageOff, storageSaves, storageMedia, storageFree
-        case storageNoSaves, storageGameDetail, storageVersion, storageNewest, storageRestore, storageRestoreDetail, storageDelete, storageDeleteGame
-        case storagePressAgain, storageDeleted, storageRestored, storageRestoredHere, storageMediaTitle, storageNoMedia, storagePinned, storageRunning
-        case photo, clip, voiceNote, removed, unavailable
-        case savesUploaded, savesDownloaded, conflictTitle, conflictDetail, conflictKeepMine, conflictTakeCloud, notNow, conflictCloudUnknown
-        case quotaTitle, quotaReplaceDetail, replace, quotaFull, tooBig, badMedia, notThisKind, cloudOff
-        case share, sendToChat, shareToGallery, showInFinder, sending, sentTo, addedToGallery, galleryFull, noChats, preparing
-        case profileGallery, profileGalleryPrivate, profileGalleryEmpty, privacyGallery, hintShare, hintView, close
+    enum Key: String, CaseIterable {
+        case syncThrough = "cloudSyncThrough", syncThroughFolder = "cloudSyncThroughFolder", syncThroughTogether = "cloudSyncThroughTogether", saveSyncTogetherDetail = "cloudSaveSyncTogetherDetail"
+        case storageTitle = "cloudStorageTitle", storageSubtitle = "cloudStorageSubtitle", storageUsed = "cloudStorageUsed", storageLoading = "cloudStorageLoading", storageFailed = "cloudStorageFailed", storageOff = "cloudStorageOff", storageSaves = "cloudStorageSaves", storageMedia = "cloudStorageMedia", storageFree = "cloudStorageFree"
+        case storageNoSaves = "cloudStorageNoSaves", storageGameDetail = "cloudStorageGameDetail", storageVersion = "cloudStorageVersion", storageNewest = "cloudStorageNewest", storageRestore = "cloudStorageRestore", storageRestoreDetail = "cloudStorageRestoreDetail", storageDelete = "cloudStorageDelete", storageDeleteGame = "cloudStorageDeleteGame"
+        case storagePressAgain = "cloudStoragePressAgain", storageDeleted = "cloudStorageDeleted", storageRestored = "cloudStorageRestored", storageRestoredHere = "cloudStorageRestoredHere", storageMediaTitle = "cloudStorageMediaTitle", storageNoMedia = "cloudStorageNoMedia", storagePinned = "cloudStoragePinned", storageRunning = "cloudStorageRunning"
+        case photo = "cloudPhoto", clip, voiceNote = "cloudVoiceNote", removed = "cloudRemoved", unavailable = "cloudUnavailable"
+        case savesUploaded = "cloudSavesUploaded", savesDownloaded = "cloudSavesDownloaded", conflictTitle = "cloudConflictTitle", conflictDetail = "cloudConflictDetail", conflictKeepMine = "cloudConflictKeepMine", conflictTakeCloud = "cloudConflictTakeCloud", notNow = "cloudNotNow", conflictCloudUnknown = "cloudConflictCloudUnknown"
+        case quotaTitle = "cloudQuotaTitle", quotaReplaceDetail = "cloudQuotaReplaceDetail", replace = "cloudReplace", quotaFull = "cloudQuotaFull", tooBig = "cloudTooBig", badMedia = "cloudBadMedia", notThisKind = "cloudNotThisKind", cloudOff
+        case share = "cloudShare", sendToChat = "cloudSendToChat", shareToGallery = "cloudShareToGallery", showInFinder = "cloudShowInFinder", sending = "cloudSending", sentTo = "cloudSentTo", addedToGallery = "cloudAddedToGallery", galleryFull = "cloudGalleryFull", noChats = "cloudNoChats", preparing = "cloudPreparing"
+        case profileGallery = "cloudProfileGallery", profileGalleryPrivate = "cloudProfileGalleryPrivate", profileGalleryEmpty = "cloudProfileGalleryEmpty", privacyGallery = "cloudPrivacyGallery", hintShare = "cloudHintShare", hintView = "cloudHintView", close = "cloudClose"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
     /// Capitals in the launcher's language: "KAYITLAR", "İ" and all.
-    static var locale: Locale { Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US") }
+    static var locale: Locale { T.locale }
 
     /// "25 Eki 2026 21:15" in the launcher's language.
     static func date(_ date: Date) -> String {

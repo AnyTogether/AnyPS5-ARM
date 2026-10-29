@@ -317,12 +317,12 @@ enum QRCode {
 
 /// Play from a browser's texts, in both languages.
 enum TW {
-    enum Key {
-        case title, subtitle, rowDetail, offDetail, showCode, showCodeDetail, keepOn, keepOnDetail
-        case step1, step2, step3, playing, asking, newCode, done, renews, noNetwork, starting
+    enum Key: String, CaseIterable {
+        case title = "browserPlay", subtitle = "browserPlaySubtitle", rowDetail = "browserPlayDetail", offDetail = "browserPlayOff", showCode = "browserPlayShow", showCodeDetail = "browserPlayShowDetail", keepOn = "browserPlayKeep", keepOnDetail = "browserPlayKeepDetail"
+        case step1 = "browserPlayStep1", step2 = "browserPlayStep2", step3 = "browserPlayStep3", playing = "browserPlayPlaying", asking = "browserPlayAsking", newCode = "browserPlayNewCode", done = "browserPlayDone", renews = "browserPlayRenewsIn", noNetwork = "browserPlayNoNetwork", starting = "browserPlayStarting"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     static let english: [Key: String] = [

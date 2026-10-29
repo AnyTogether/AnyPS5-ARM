@@ -117,7 +117,7 @@ extension AppModel {
         default:
             let formatter = NumberFormatter()
             formatter.numberStyle = .decimal
-            formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+            formatter.locale = T.locale
             return TS.format(.boardPointsValue, formatter.string(from: NSNumber(value: value)) ?? "\(value)")
         }
     }
@@ -154,7 +154,7 @@ struct LeaderboardView: View {
         .padding(.vertical, 56 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .screenFrost(0.74)
-        .environment(\.locale, Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US"))
+        .environment(\.locale, T.locale)
     }
 
     // MARK: Header
@@ -307,7 +307,7 @@ struct LeaderboardView: View {
     /// "now", "2 minutes ago": boards are kept for half a minute to a minute.
     static func updated(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+        formatter.locale = T.locale
         formatter.dateTimeStyle = .named
         let now = Date()
         return formatter.localizedString(for: min(date, now), relativeTo: now)

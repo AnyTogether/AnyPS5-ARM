@@ -3,29 +3,29 @@ import Foundation
 /// Find players, Live now, public parties and share plays, discovery and game hubs: the texts,
 /// in both languages.
 enum FP {
-    enum Key {
-        case findPlayers, findPlayersDetail, board, myPosts, liveAndParties, people, overview
-        case game, allGames, purpose, anyPurpose, language, anyLanguage, startingSoon, startingSoonDetail
-        case purposeCoop, purposeOnline, purposeParty, purposeTrophies
-        case findFor, findForDetail, hubOf, hubDetail, loading, noPosts, noPostsDetail, more
-        case now, inMinutes, inHours, filled, selectImIn, waitingFor, inSharePlay, inParty, saidNo, closed, full, waitingCount
-        case noMine, noMineDetail, letIn, letInCoop, letInParty, notNow, theyShare, theyParty, closePost, askedTitle
-        case liveNow, liveDetail, noLive, publicParties, publicPartiesDetail, noParties, viewers
-        case askToWatch, askedToWatch, askedToWatchToast, askParty, askedParty, askedPartyToast, selectTakeBack, yourParty
-        case discoverySettings, discoveryDetail, youShow, youHide, noSuggestions, noSuggestionsDetail, addFriend, alreadyFriends
-        case bothPlay, friendsInCommon, speaks
-        case playingNow, players, forMinutes, noGroups, noPlayers, noPlayersDetail, played
-        case slots, slotsCount, coopDetail, partyDetail, alsoIn, noOther, starts, staysUp, staysUpDetail, hours, note, noteDetail
-        case post, postDetail, posting, posted, toldThem, letInDone, letInDoneCoop
-        case slowDown, tooManyPosts
-        case wantsIn, youreInParty, youreInShare, notThisTime, asksParty, partyLetYouIn, asksWatch
-        case listPublic, listPublicDetail, listOff, listAsk, listOpen, listOpenWatch, listGame, listNoGame, listLanguage, liveToggle, liveToggleDetail
-        case letWatch, findParty, findPartyDetail
-        case discoveryTitle, showMe, showMeDetail, followLibrary, on, off, languagesTitle, languagesDetail, languagesFull
-        case notifLfgRequest, notifLfgAccepted
+    enum Key: String, CaseIterable {
+        case findPlayers = "discoverFindPlayers", findPlayersDetail = "discoverFindPlayersDetail", board = "discoverBoard", myPosts = "discoverMyPosts", liveAndParties = "discoverLiveAndParties", people = "discoverPeople", overview = "discoverOverview"
+        case game = "discoverGame", allGames = "discoverAllGames", purpose = "discoverPurpose", anyPurpose = "discoverAnyPurpose", language = "discoverLanguage", anyLanguage = "discoverAnyLanguage", startingSoon = "discoverStartingSoon", startingSoonDetail = "discoverStartingSoonDetail"
+        case purposeCoop = "discoverPurposeCoop", purposeOnline = "discoverPurposeOnline", purposeParty = "discoverPurposeParty", purposeTrophies = "discoverPurposeTrophies"
+        case findFor = "discoverFindFor", findForDetail = "discoverFindForDetail", hubOf = "discoverHubOf", hubDetail = "discoverHubDetail", loading = "discoverLoading", noPosts = "discoverNoPosts", noPostsDetail = "discoverNoPostsDetail", more = "discoverMore"
+        case now = "discoverNow", inMinutes = "discoverInMinutes", inHours = "discoverInHours", filled = "discoverFilled", selectImIn = "discoverSelectImIn", waitingFor = "discoverWaitingFor", inSharePlay = "discoverInSharePlay", inParty = "discoverInParty", saidNo = "discoverSaidNo", closed = "discoverClosed", full = "discoverFull", waitingCount = "discoverWaitingCount"
+        case noMine = "discoverNoMine", noMineDetail = "discoverNoMineDetail", letIn = "discoverLetIn", letInCoop = "discoverLetInCoop", letInParty = "discoverLetInParty", notNow = "discoverNotNow", theyShare = "discoverTheyShare", theyParty = "discoverTheyParty", closePost = "discoverClosePost", askedTitle = "discoverAskedTitle"
+        case liveNow = "discoverLiveNow", liveDetail = "discoverLiveDetail", noLive = "discoverNoLive", publicParties = "discoverPublicParties", publicPartiesDetail = "discoverPublicPartiesDetail", noParties = "discoverNoParties", viewers = "discoverViewers"
+        case askToWatch = "discoverAskToWatch", askedToWatch = "discoverAskedToWatch", askedToWatchToast = "discoverAskedToWatchToast", askParty = "discoverAskParty", askedParty = "discoverAskedParty", askedPartyToast = "discoverAskedPartyToast", selectTakeBack = "discoverSelectTakeBack", yourParty = "discoverYourParty"
+        case discoverySettings, discoveryDetail, youShow = "discoverYouShow", youHide = "discoverYouHide", noSuggestions = "discoverNoSuggestions", noSuggestionsDetail = "discoverNoSuggestionsDetail", addFriend = "discoverAddFriend", alreadyFriends = "discoverAlreadyFriends"
+        case bothPlay = "discoverBothPlay", friendsInCommon = "discoverFriendsInCommon", speaks = "discoverSpeaks"
+        case playingNow = "discoverPlayingNow", players = "discoverPlayers", forMinutes = "discoverForMinutes", noGroups = "discoverNoGroups", noPlayers = "discoverNoPlayers", noPlayersDetail = "discoverNoPlayersDetail", played = "discoverPlayed"
+        case slots = "discoverSlots", slotsCount = "discoverSlotsCount", coopDetail = "discoverCoopDetail", partyDetail = "discoverPartyDetail", alsoIn = "discoverAlsoIn", noOther = "discoverNoOther", starts = "discoverStarts", staysUp = "discoverStaysUp", staysUpDetail = "discoverStaysUpDetail", hours = "discoverHours", note = "discoverNote", noteDetail = "discoverNoteDetail"
+        case post = "discoverPost", postDetail = "discoverPostDetail", posting = "discoverPosting", posted = "discoverPosted", toldThem = "discoverToldThem", letInDone = "discoverLetInDone", letInDoneCoop = "discoverLetInDoneCoop"
+        case slowDown = "discoverSlowDown", tooManyPosts = "discoverTooManyPosts"
+        case wantsIn = "discoverWantsIn", youreInParty = "discoverYoureInParty", youreInShare = "discoverYoureInShare", notThisTime = "discoverNotThisTime", asksParty = "discoverAsksParty", partyLetYouIn = "discoverPartyLetYouIn", asksWatch = "discoverAsksWatch"
+        case listPublic = "discoverListPublic", listPublicDetail = "discoverListPublicDetail", listOff = "discoverListOff", listAsk = "discoverListAsk", listOpen = "discoverListOpen", listOpenWatch = "discoverListOpenWatch", listGame = "discoverListGame", listNoGame = "discoverListNoGame", listLanguage = "discoverListLanguage", liveToggle = "discoverLiveToggle", liveToggleDetail = "discoverLiveToggleDetail"
+        case letWatch = "discoverLetWatch", findParty = "discoverFindParty", findPartyDetail = "discoverFindPartyDetail"
+        case discoveryTitle, showMe = "discoverShowMe", showMeDetail = "discoverShowMeDetail", followLibrary = "discoverFollowLibrary", on = "discoverOn", off = "discoverOff", languagesTitle = "discoverLanguagesTitle", languagesDetail = "discoverLanguagesDetail", languagesFull = "discoverLanguagesFull"
+        case notifLfgRequest = "discoverNotifLfgRequest", notifLfgAccepted = "discoverNotifLfgAccepted"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     static let english: [Key: String] = [

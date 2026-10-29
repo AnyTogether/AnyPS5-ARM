@@ -3,19 +3,16 @@ import Foundation
 /// The texts of assist (another device helps player 1) and of gyro aiming, in both languages;
 /// kept apart from `T` like `TPow`.
 enum TA {
-    static func text(_ key: Key) -> String {
-        let table = T.language == .turkish ? turkish : english
-        return table[key] ?? english[key] ?? key.rawValue
-    }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
     static func format(_ key: Key, _ arguments: CVarArg...) -> String {
         String(format: text(key), arguments: arguments)
     }
 
     enum Key: String, CaseIterable {
-        case assist, assistDetail, assistOff, assistControllers, assistOn, assistShare, assistShareDetail, assistHelping
-        case gyroSection, gyro, gyroDetail, gyroSensitivity, gyroSensitivityDetail, gyroInvert, gyroInvertNone, gyroInvertX, gyroInvertY, gyroInvertBoth
-        case gyroActivation, gyroActivationDetail, gyroAlways, gyroL2, gyroTouch, gyroDeadzone, gyroDeadzoneDetail, degreesPerSecond
+        case assist = "padAssist", assistDetail = "padAssistDetail", assistOff = "padAssistOff", assistControllers = "padAssistControllers", assistOn = "padAssistOn", assistShare, assistShareDetail, assistHelping
+        case gyroSection, gyro, gyroDetail, gyroSensitivity, gyroSensitivityDetail, gyroInvert, gyroInvertNone = "gyroInvert_none", gyroInvertX = "gyroInvert_x", gyroInvertY = "gyroInvert_y", gyroInvertBoth = "gyroInvert_xy"
+        case gyroActivation, gyroActivationDetail, gyroAlways = "gyro_always", gyroL2 = "gyro_l2", gyroTouch = "gyro_touch", gyroDeadzone, gyroDeadzoneDetail, degreesPerSecond
     }
 
     static let english: [Key: String] = [

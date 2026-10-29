@@ -3,10 +3,7 @@ import Foundation
 /// The texts of the engine picker (Settings → Engine and a game's engine), in both languages;
 /// kept apart from `T` like `TS`. `TE.text(.key)` reads the launcher's current language.
 enum TE {
-    static func text(_ key: Key) -> String {
-        let table = T.language == .turkish ? turkish : english
-        return table[key] ?? english[key] ?? key.rawValue
-    }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
     static func format(_ key: Key, _ arguments: CVarArg...) -> String {
         String(format: text(key), arguments: arguments)
@@ -16,10 +13,10 @@ enum TE {
         case engineTitle, engineDefault, engineDefaultDetail, engineBuiltIn, engineCustomName, engineFollow
         case engineGameDetail, engineUnlockedWith, engineNotUnlocked, engineSwitch
         case engineDownloadedSection, engineAvailableSection, engineCustomSection
-        case engineInUse, engineDeleteHint, engineDeleted, engineInUseNoDelete, engineDeleteUnused, engineDeleteUnusedDetail, engineNothingUnused
-        case engineDownloadHint, engineDownloading, engineReady, engineDownloadFailed, enginePrerelease, engineBuilt
+        case engineInUse, engineDeleteHint, engineDeleted = "engineVersionDeleted", engineInUseNoDelete, engineDeleteUnused, engineDeleteUnusedDetail, engineNothingUnused
+        case engineDownloadHint, engineDownloading = "engineDownloadingPercent", engineReady, engineDownloadFailed, enginePrerelease, engineBuilt
         case engineSigned, engineUnsignedOlder, engineUnsignedOlderDetail, engineUnsignedReady, engineUnsignedRefused, engineUnsignedRefusedDetail
-        case engineRefresh, engineChecked, engineChecking, engineOffline, engineNeverChecked, engineNoneYet, engineCheckFailed
+        case engineRefresh, engineChecked, engineChecking, engineOffline = "engineOfflineList", engineNeverChecked, engineNoneYet, engineCheckFailed
         case engineFolder, engineFolderNone, engineFolderReset, engineFolderInvalid, engineFolderPick, engineFolderUsed
         case engineHint
     }

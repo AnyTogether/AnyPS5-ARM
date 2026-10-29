@@ -3,14 +3,14 @@ import Foundation
 /// The questions social steps ask before they happen, and the Update Required screen: their
 /// texts, in both languages.
 enum TK {
-    enum Key {
+    enum Key: String, CaseIterable {
         case askLeaveParty, askKick, askEndTogether, askLeaveTogether, askRemoveViewer, askStopShare, askClosePost
-        case updateRequiredTitle, updateRequiredSubtitle, updateRequiredTooOld, updateRequiredTooOldVersion, updateRequiredDetail, updateRequiredUpdate, updateRequiredUpdateDetail
-        case updateRequiredRestart, updateRequiredRestartDetail, updateRequiredDownloading, updateRequiredLooking, updateRequiredDownload
-        case updateRequiredDownloadDetail, updateRequiredLater, updateRequiredToast
+        case updateRequiredTitle = "requiredTitle", updateRequiredSubtitle, updateRequiredTooOld = "requiredTooOld", updateRequiredTooOldVersion = "requiredTooOldVersion", updateRequiredDetail, updateRequiredUpdate, updateRequiredUpdateDetail
+        case updateRequiredRestart, updateRequiredRestartDetail, updateRequiredDownloading, updateRequiredLooking, updateRequiredDownload = "requiredDownload"
+        case updateRequiredDownloadDetail = "requiredDownloadDetail", updateRequiredLater = "requiredLater", updateRequiredToast
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     static let english: [Key: String] = [

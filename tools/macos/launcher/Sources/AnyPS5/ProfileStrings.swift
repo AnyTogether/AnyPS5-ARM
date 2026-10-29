@@ -3,20 +3,20 @@ import Foundation
 /// Profiles (the picker, adding one, online and offline, Settings → Profiles) and the
 /// friends-only name and picture: their texts, in both languages.
 enum TPro {
-    enum Key {
-        case profilesCategory, pickerKicker, whoIsPlaying, pickerSubtitle, pickerSubtitleLaunch, hintPlay, playingNow, online, offline
-        case howToPlay, howToPlaySubtitle, profileNamePlaceholder, playerNumber, continueStep
-        case offlineTitle, offlineLead, offlineFact1, offlineFact2, offlineFact3, offlineTag
-        case onlineTitle, onlineLead, onlineFact1, onlineFact2, onlineFact3, onlineTag
-        case signInTitleNew, signInTitleOnline, signInTitleAgain, signInSubtitle
-        case menuKicker, otherProfiles, otherProfile, addSomeone, goOffline, goOnline, goOfflineDetail, goOnlineDetail, manageProfiles
-        case closeGameFirst, waitForSync, welcomeBack, nowOffline, savesNotSwapped
-        case onlineAs, onlineSignedOut, offlineDetail, tileColour, tileColourDetail, askEveryTime, askEveryTimeDetail
-        case otherProfilesTitle, switchTo, deleteProfile, deleteQuestion, addProfile, addProfileDetail, backupFolder, cannotDelete, deleted
-        case offlineTogether, offlineTogetherDetail
-        case friendsOnlyTitle, friendsOnlyDetail, friendsOnlyName, friendsOnlyNameDetail, friendsOnlyNameSave, friendsOnlyNameClear
-        case friendsOnlyNameSaved, friendsOnlyNameCleared, friendsOnlyPicture, friendsOnlyPictureDetail, friendsOnlyPictureRemove
-        case friendsOnlyPictureSaved, friendsOnlyPictureRemoved, friendsOnlyBadge
+    enum Key: String, CaseIterable {
+        case profilesCategory, pickerKicker = "profileKicker", whoIsPlaying = "profileWhoIsPlaying", pickerSubtitle = "profilePickerSubtitle", pickerSubtitleLaunch = "profilePickerSubtitleLaunch", hintPlay = "profileHintPlay", playingNow = "profilePlayingNow", online = "profileOnline", offline = "profileOffline"
+        case howToPlay = "profileHowToPlay", howToPlaySubtitle = "profileHowToPlaySubtitle", profileNamePlaceholder = "profileNameHint", playerNumber = "profilePlayerNumber", continueStep = "profileContinueStep"
+        case offlineTitle = "profileOfflineTitle", offlineLead = "profileOfflineLead", offlineFact1 = "profileOfflineFact1", offlineFact2 = "profileOfflineFact2", offlineFact3 = "profileOfflineFact3", offlineTag = "profileOfflineTag"
+        case onlineTitle = "profileOnlineTitle", onlineLead = "profileOnlineLead", onlineFact1 = "profileOnlineFact1", onlineFact2 = "profileOnlineFact2", onlineFact3 = "profileOnlineFact3", onlineTag = "profileOnlineTag"
+        case signInTitleNew = "profileSignInNew", signInTitleOnline = "profileSignInOnline", signInTitleAgain = "profileSignInAgain", signInSubtitle = "profileSignInSubtitle"
+        case menuKicker = "profileMenuTitle", otherProfiles = "profileOtherProfiles", otherProfile = "profileOtherProfile", addSomeone = "profileAddSomeone", goOffline = "profileGoOffline", goOnline = "profileGoOnline", goOfflineDetail = "profileGoOfflineDetail", goOnlineDetail = "profileGoOnlineDetail", manageProfiles = "profileManage"
+        case closeGameFirst = "profileCloseGameFirst", waitForSync = "profileWaitForSync", welcomeBack = "profileWelcomeBack", nowOffline = "profileNowOffline", savesNotSwapped = "profileSavesNotSwapped"
+        case onlineAs = "profileOnlineAs", onlineSignedOut = "profileOnlineSignedOut", offlineDetail = "profileOfflineDetail", tileColour = "profileColour", tileColourDetail = "profileTileColourDetail", askEveryTime = "profileAskEveryTime", askEveryTimeDetail = "profileAskEveryTimeDetail"
+        case otherProfilesTitle = "profileOtherTitle", switchTo = "profileSwitchTo", deleteProfile = "profileDelete", deleteQuestion = "profileDeleteQuestion", addProfile = "profileAdd", addProfileDetail = "profileAddProfileDetail", backupFolder = "profileBackupFolder", cannotDelete = "profileCannotDelete", deleted = "profileDeleted"
+        case offlineTogether = "profileOfflineTogether", offlineTogetherDetail = "profileOfflineTogetherDetail"
+        case friendsOnlyTitle = "privateTitle", friendsOnlyDetail = "privateDetail", friendsOnlyName = "privateName", friendsOnlyNameDetail = "profileFriendsOnlyNameDetail", friendsOnlyNameSave = "privateNameSave", friendsOnlyNameClear = "privateNameClear"
+        case friendsOnlyNameSaved = "privateNameSaved", friendsOnlyNameCleared = "privateNameCleared", friendsOnlyPicture = "profileFriendsOnlyPicture", friendsOnlyPictureDetail = "profileFriendsOnlyPictureDetail", friendsOnlyPictureRemove = "privatePictureRemove"
+        case friendsOnlyPictureSaved = "privatePictureSaved", friendsOnlyPictureRemoved = "privatePictureRemoved", friendsOnlyBadge = "privateBadge"
         case colourIndigo, colourTeal, colourCoral, colourAmber, colourViolet, colourGreen, colourPink, colourSky
     }
 
@@ -25,7 +25,7 @@ enum TPro {
         count > 1 ? format(.otherProfiles, count) : count == 1 ? text(.otherProfile) : text(.addSomeone)
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     /// The tile colours, in AppModel.profilePalette's order.

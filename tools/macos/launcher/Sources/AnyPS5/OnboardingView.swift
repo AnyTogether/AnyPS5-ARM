@@ -71,7 +71,7 @@ private struct LanguageStep: View {
                     ForEach(Array(Language.allCases.enumerated()), id: \.element) { index, language in
                         let focused = model.onboardingChoice == index
                         VStack(alignment: .leading, spacing: 10 * scale) {
-                            Text(language == .turkish ? "TR" : "EN").font(.display(15 * scale, .bold)).opacity(0.6)
+                            Text(language.code.uppercased()).font(.display(15 * scale, .bold)).opacity(0.6)
                             Text(language.displayName).font(.display(28 * scale, .medium))
                         }
                         .foregroundStyle(focused ? Color.black : .white)
