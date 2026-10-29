@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'strings.dart';
 import 'together/join_codes.dart';
 import 'together/together_account.dart';
@@ -196,3 +198,11 @@ const _tr = {
   'remove': 'Kaldır',
   'vibrationTest': 'Dene',
 };
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesJoin() => {'en': _en, 'tr': _tr};
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, List<String>> oldMonths() => {'en': _enMonths, 'tr': _trMonths};

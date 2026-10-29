@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'strings.dart';
 
 /// The questions social steps ask before they happen, and Update Required, in English and
@@ -53,3 +55,7 @@ const _tr = {
   'updateRequiredUpdate': 'Güncelle',
   'updateRequiredLater': 'Sonra',
 };
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesSafety() => {'en': _en, 'tr': _tr};

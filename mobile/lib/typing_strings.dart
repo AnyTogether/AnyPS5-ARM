@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'strings.dart';
 
 /// Typing for the game on the phone's own keyboard, in English and Turkish, beside [Strings].
@@ -40,3 +42,10 @@ extension TypingTexts on Strings {
     'typeKeyboardHint': 'Buraya yazdığın oyuna gider.',
   };
 }
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesTyping() => {
+  'en': TypingTexts._en,
+  'tr': TypingTexts._tr,
+};

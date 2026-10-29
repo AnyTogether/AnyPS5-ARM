@@ -121,3 +121,7 @@ const _tr = {
   'readReceiptsOff': 'Kapalı',
   'readReceiptsHint': 'Kapalıyken mesajlarını okuduğunu kimse görmez, sen de onlarınkini görmezsin. İletildi bilgisi yine görünür.',
 };
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesChat() => {'en': _en, 'tr': _tr};

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'strings.dart';
 
 /// The friends-only name and picture (AnyTogether's private identity): their texts, English
@@ -38,3 +40,7 @@ const _tr = <String, String>{
   'privatePictureRemove': 'Kaldır',
   'privateBadge': 'Yalnızca arkadaşlar',
 };
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesPrivate() => {'en': _en, 'tr': _tr};

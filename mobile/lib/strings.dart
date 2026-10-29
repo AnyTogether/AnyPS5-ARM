@@ -584,3 +584,10 @@ class Texts extends InheritedWidget {
   @override
   bool updateShouldNotify(Texts old) => old.strings != strings;
 }
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTables() => {
+  "en": Strings._english,
+  "tr": Strings._turkish,
+};

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'strings.dart';
 import 'together/activity.dart';
 import 'together/calls.dart';
@@ -784,3 +786,7 @@ const _tr = {
   'yesterday': 'dün',
   'daysAgo': '{n} gün önce',
 };
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesSocial() => {'en': _en, 'tr': _tr};

@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'strings.dart';
 import 'together/discover.dart';
 
@@ -445,4 +447,15 @@ const _tr = {
   'discoveryHidden': 'Şu an keşifte gizlisin.',
   'languagesYouPlay': 'Oynadığın diller',
   'languagesHint': '“Senin dilini konuşuyor” önerileri ve ilanlarda varsayılan için. En fazla 5.',
+};
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesDiscover() => {'en': _en, 'tr': _tr};
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldLanguages() => {
+  'en': _enLanguages,
+  'tr': _trLanguages,
 };

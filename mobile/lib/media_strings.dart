@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 import 'strings.dart';
 import 'together/messages.dart';
 import 'together/storage.dart';
@@ -116,3 +118,7 @@ const _tr = {
       'Bulut kayıtları ve gönderdiğin medya AnyTogether\'da bu alanı paylaşır.',
   'storageFailed': 'Alan bilgisi okunamadı.',
 };
+
+/// The old table, for the test that checks assets/l10n against it.
+@visibleForTesting
+Map<String, Map<String, String>> oldTablesMedia() => {'en': _en, 'tr': _tr};
