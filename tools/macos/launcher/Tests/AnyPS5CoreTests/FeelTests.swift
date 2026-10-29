@@ -34,7 +34,7 @@ final class StickGateTests: XCTestCase {
 
     func testUpIsPositiveAndTheBiggerAxisWinsAtFirst() {
         var stick = StickGate()
-        XCTAssertEqual(stick.update(x: 0.3, y: 0.6), .up)
+        XCTAssertEqual(stick.update(x: 0.3, y: 0.7), .up)
         stick = StickGate()
         XCTAssertEqual(stick.update(x: -0.7, y: -0.6), .left)
         stick = StickGate()
@@ -46,7 +46,8 @@ final class StickGateTests: XCTestCase {
         XCTAssertEqual(stick.update(x: 0.7, y: 0), .right)
         // Near the diagonal the held direction stays.
         XCTAssertEqual(stick.update(x: 0.6, y: 0.7), .right)
-        XCTAssertEqual(stick.update(x: 0.5, y: 0.7), .up, "0.7 is more than 1.25 × 0.5")
+        XCTAssertEqual(stick.update(x: 0.4, y: 0.7), .up, "0.7 is more than 1.5 × 0.4")
+        XCTAssertEqual(stick.update(x: -0.6, y: 0.45), .left, "and back: 0.6 is more than 1.25 × 0.45")
     }
 
     func testAFlickThroughTheMiddleTurnsAtOnce() {
@@ -54,6 +55,72 @@ final class StickGateTests: XCTestCase {
         XCTAssertEqual(stick.update(x: 0.9, y: 0), .right)
         XCTAssertEqual(stick.update(x: -0.8, y: 0), .left)
         XCTAssertEqual(stick.update(x: 0, y: 0), nil)
+    }
+}
+
+/// A player on Windows with an Xbox pad: "the main screen's sensitivity seems too high for up and
+/// down, resulting in unintentional movement". On Home up and down leave the tiles for the top bar
+/// or the buttons, so the stick's up and down need a clear push (AnyPS5 Desktop's feel.dart, the
+/// same numbers).
+final class StickUpDownTests: XCTestCase {
+    /// The moves a run of stick samples gives, as Input dispatches them: each new direction held.
+    func moves(_ samples: [(Double, Double)]) -> [Command] {
+        var stick = StickGate()
+        var moves: [Command] = []
+        for (x, y) in samples {
+            let before = stick.held
+            if let held = stick.update(x: x, y: y), held != before { moves.append(held) }
+        }
+        return moves
+    }
+
+    func testAPushRightWhoseFirstSampleIsOnTheThumbsArcMovesRightOnly() {
+        // Pushed right with the thumb, the stick sweeps through up-and-right on its way out.
+        XCTAssertEqual(moves([(0.35, 0.55), (0.75, 0.5), (0.95, 0.2), (0, 0)]), [.right])
+    }
+
+    func testASmallPushUpOrDownMovesNothing() {
+        XCTAssertEqual(moves([(0.05, -0.55), (0, 0), (-0.1, 0.6), (0, 0)]), [])
+    }
+
+    func testAStickWobblingNearTheLineMovesOnceAtMost() {
+        XCTAssertEqual(moves([-0.52, -0.28, -0.55, -0.25, -0.58, -0.27, -0.5, 0].map { (0, $0) }), [], "it never went far enough down")
+        XCTAssertEqual(moves([-0.7, -0.45, -0.72, -0.42, -0.75, 0].map { (0, $0) }), [.down], "pushed once, the wobble on top of it is not more")
+    }
+
+    func testBrowsingRightTheThumbDriftingUpDoesNotLeaveTheTiles() {
+        XCTAssertEqual(moves([(0.9, 0), (0.65, 0.75), (0.6, 0.8), (0, 0)]), [.right])
+    }
+
+    func testADiagonalGoesTheWayOfTheBiggerLeanAndSidewaysWhenEven() {
+        XCTAssertEqual(moves([(0.7, 0.7), (0, 0), (0.45, -0.8), (0, 0)]), [.right, .down])
+    }
+
+    func testLettingGoOfOneAxisTheOtherEngagesOnlyFromTheNextSample() {
+        var stick = StickGate()
+        XCTAssertEqual(stick.update(x: 0.6, y: 0), .right)
+        XCTAssertNil(stick.update(x: 0.2, y: 0.8), "right let go: up not in the same sample")
+        XCTAssertEqual(stick.update(x: 0.2, y: 0.8), .up, "held there, it is up from the next one")
+        stick = StickGate()
+        XCTAssertEqual(stick.update(x: 0.6, y: 0), .right)
+        XCTAssertEqual(stick.update(x: -0.7, y: 0), .left, "a flick through the middle still turns at once")
+    }
+
+    func testLeftAndRightFeelAsBefore() {
+        XCTAssertEqual(moves([(0.52, 0), (0, 0), (-0.52, 0.3)]), [.right, .left])
+        XCTAssertEqual(StickGate.engage, 0.5)
+        XCTAssertEqual(StickGate.release, 0.3)
+    }
+
+    func testUpAndDownOnTheStickWaitLongerBeforeRepeating() {
+        XCTAssertEqual(StickGate.verticalFirstDelay, 0.55, accuracy: 1e-9)
+        let up = KeyRepeat.times(within: 0.5, firstDelay: StickGate.verticalFirstDelay)
+        XCTAssertEqual(up, [0], "a push up held a little longer than a flick moves once")
+        let held = KeyRepeat.times(within: 0.6, firstDelay: StickGate.verticalFirstDelay)
+        XCTAssertEqual(held.count, 2, "held on, it repeats")
+        XCTAssertEqual(held[1], 0.55, accuracy: 1e-9)
+        XCTAssertEqual(KeyRepeat.delay(beforeRepeat: 2, firstDelay: StickGate.verticalFirstDelay), KeyRepeat.interval, accuracy: 1e-9, "then the usual pace")
+        XCTAssertEqual(KeyRepeat.times(within: 0.45).count, 2, "the D-pad, the keys and left and right keep 0.40 s")
     }
 }
 
