@@ -172,6 +172,20 @@ extension AppModel {
                 }
             default: break
             }
+        case .confirmQuit:
+            switch command {
+            case .up, .left: move(-1, count: 2)
+            case .down, .right: move(1, count: 2)
+            case .back, .options: closeOverlay()
+            case .select:
+                if menuIndex == 1 {
+                    Sounds.shared.play(.select)
+                    quitApp()
+                } else {
+                    closeOverlay()
+                }
+            default: break
+            }
         case .profileMenu:
             let items = profileMenuItems()
             switch command {
@@ -455,7 +469,7 @@ struct GameMenuCard: View {
     }
 
     var body: some View {
-        let game = model.overlay == .homeMenu || model.overlay == .profileMenu ? nil : (model.selectedGame ?? model.runningGame)
+        let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit ? nil : (model.selectedGame ?? model.runningGame)
         ZStack {
             FrostFill(opacity: 0.6).ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -490,7 +504,7 @@ struct GameMenuCard: View {
 
     @ViewBuilder private func header(_ game: Game?) -> some View {
         HStack(alignment: .center, spacing: 18 * scale) {
-            if model.overlay == .homeMenu || model.overlay == .profileMenu {
+            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit {
                 ProfileTileAvatar(profile: model.currentProfile, picture: model.profilePicture, size: 64 * scale)
             } else if let game {
                 ZStack {
@@ -522,7 +536,7 @@ struct GameMenuCard: View {
     private var kicker: String {
         switch model.overlay {
         case .closeGame: return TH.text(.closeGame)
-        case .homeMenu: return TH.text(.homeMenuKicker)
+        case .homeMenu, .confirmQuit: return TH.text(.homeMenuKicker)
         case .profileMenu: return TPro.text(.menuKicker)
         default: return TH.text(.quickMenuKicker)
         }
@@ -532,6 +546,7 @@ struct GameMenuCard: View {
         switch model.overlay {
         case .closeGame: return TH.format(.closeGameTitle, game?.name ?? "")
         case .homeMenu, .profileMenu: return model.currentProfile?.name ?? model.preferences.profileName
+        case .confirmQuit: return TH.text(.quitQuestion)
         default: return game?.name ?? ""
         }
     }
@@ -616,6 +631,9 @@ struct GameMenuCard: View {
             let others = model.profileBook.profiles.count - 1
             return [Item(id: 0, title: TH.text(.switchProfile), detail: TPro.others(others), symbol: "person.2.circle"),
                     Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
+        case .confirmQuit:
+            return [Item(id: 0, title: T.text(.cancel), detail: TH.text(.quitStay), symbol: "arrow.uturn.backward"),
+                    Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         default:
@@ -677,7 +695,7 @@ struct GameMenuCard: View {
             Hint(keys: "↑ ↓", label: T.text(.hintMove))
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Spacer(minLength: 0)
-            if model.overlay == .homeMenu || model.overlay == .profileMenu {
+            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit {
                 Hint(keys: "esc / ○", label: T.text(.hintBack))
             } else {
                 Hint(keys: "PS / esc / ○", label: TH.text(.resume))
@@ -695,7 +713,7 @@ extension AppModel {
     /// The PS menus take every command while one is up.
     func gameMenuCommandIfOpen(_ command: Command) -> Bool? {
         switch overlay {
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu: return gameMenuCommand(command)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit: return gameMenuCommand(command)
         default: return nil
         }
     }

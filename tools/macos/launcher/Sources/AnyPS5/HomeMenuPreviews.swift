@@ -38,6 +38,15 @@ enum HomeMenuPreviews {
             model.overlay = .homeMenu
             model.menuIndex = 1
         }
+        // Esc on the home screen: Cancel has the focus.
+        render("menu-quit", .keyboard) { model in
+            model.overlay = .confirmQuit
+            model.menuIndex = 0
+        }
+        render("menu-quit-pad", .pad) { model in
+            model.overlay = .confirmQuit
+            model.menuIndex = 1
+        }
         render("shortcuts", .keyboard) { model in settings(model, "shortcuts", row: "shortcut-key-home") }
         render("shortcuts-pad", .pad) { model in
             var changed = model.preferences
