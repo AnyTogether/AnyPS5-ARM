@@ -409,7 +409,7 @@ extension AppModel {
     }
 }
 
-/// Share play's texts, in both languages.
+/// Share play's texts, from the language files (l10n).
 enum SP {
     enum Key: String, CaseIterable {
         case start = "sharePlayStart", startDetail = "sharePlayStartDetail", starting = "sharePlayStarting", started = "sharePlayStarted", couldNotStart = "sharePlayCouldNotStart", sharing = "sharePlaySharing", watching = "sharePlayWatching", letPlay = "sharePlayLetPlay", stopPlaying = "sharePlayStopPlaying", remove = "sharePlayRemove", invite = "sharePlayInvite", invitedAlready = "sharePlayInvitedAlready", invited = "sharePlayInvited"
@@ -430,86 +430,4 @@ enum SP {
         if let fps = link.framesPerSecond, let height = link.frameHeight { parts.append("\(height)p\(Int(fps.rounded()))") }
         return parts.joined(separator: " · ")
     }
-
-    static let english: [Key: String] = [
-        .start: "Share play: %@",
-        .startDetail: "Friends watch live; let one play as player 2, 3 or 4",
-        .starting: "Starting share play…",
-        .started: "Sharing %@",
-        .couldNotStart: "Share play did not start",
-        .sharing: "Sharing %@",
-        .watching: "%d of %d watching",
-        .letPlay: "Let %@ play as player %d",
-        .stopPlaying: "Stop %@ playing",
-        .remove: "Take %@ out",
-        .invite: "Invite %@ to watch",
-        .invitedAlready: "Invited",
-        .invited: "%@ is invited to watch",
-        .openToFriends: "Friends can walk in",
-        .openToFriendsDetail: "Off: only friends you invite",
-        .maxViewers: "Viewers at most",
-        .maxViewersDetail: "Your Mac uploads a stream to each; from 3 on each gets 540p",
-        .stop: "Stop share play",
-        .stopped: "Share play stopped",
-        .noPadFree: "Players 2 to 4 are all taken",
-        .nowPlays: "%@ plays as player %d",
-        .invitedYou: "%@ shares %@ with you",
-        .watchFriend: "Watch %@ play %@",
-        .watchDetail: "Full screen here; your controller plays once they let you",
-        .decline: "Not now, %@",
-        .player: "Player %d",
-        .onlyWatches: "Watching",
-        .connecting: "Connecting",
-        .direct: "Direct",
-        .relayed: "Through the relay",
-        .roundTrip: "%d ms",
-        .full: "Nobody else can watch right now",
-        .couldNotWatch: "Could not watch",
-        .youPlay: "You play as player %d",
-        .youWatch: "You watch again",
-        .tookYouOut: "%@ took you out",
-        .hostStopped: "%@ stopped sharing",
-        .leave: "Leave",
-    ]
-
-    static let turkish: [Key: String] = [
-        .start: "Birlikte oyna: %@",
-        .startDetail: "Arkadaşların canlı izler; birini 2., 3. ya da 4. oyuncu yap",
-        .starting: "Birlikte oyna başlıyor…",
-        .started: "%@ paylaşılıyor",
-        .couldNotStart: "Birlikte oyna başlamadı",
-        .sharing: "%@ paylaşılıyor",
-        .watching: "%d/%d izliyor",
-        .letPlay: "%@, %d. oyuncu olsun",
-        .stopPlaying: "%@ artık oynamasın",
-        .remove: "%@ kişisini çıkar",
-        .invite: "%@ kişisini izlemeye davet et",
-        .invitedAlready: "Davet edildi",
-        .invited: "%@ izlemeye davet edildi",
-        .openToFriends: "Arkadaşlar davetsiz girebilir",
-        .openToFriendsDetail: "Kapalıyken yalnızca davet ettiklerin",
-        .maxViewers: "En çok izleyici",
-        .maxViewersDetail: "Mac her birine ayrı yayın gönderir; 3 ve üstünde her biri 540p alır",
-        .stop: "Birlikte oynamayı durdur",
-        .stopped: "Birlikte oyna durdu",
-        .noPadFree: "2. ile 4. oyuncu arası dolu",
-        .nowPlays: "%@ artık %d. oyuncu",
-        .invitedYou: "%@ seninle %@ paylaşıyor",
-        .watchFriend: "İzle: %@, %@",
-        .watchDetail: "Burada tam ekran; izin verince kolunla oynarsın",
-        .decline: "Şimdi değil, %@",
-        .player: "%d. oyuncu",
-        .onlyWatches: "İzliyor",
-        .connecting: "Bağlanıyor",
-        .direct: "Doğrudan",
-        .relayed: "Aktarıcı üzerinden",
-        .roundTrip: "%d ms",
-        .full: "Şu an başka kimse izleyemez",
-        .couldNotWatch: "İzlenemedi",
-        .youPlay: "Artık %d. oyuncusun",
-        .youWatch: "Yeniden izliyorsun",
-        .tookYouOut: "%@ seni çıkardı",
-        .hostStopped: "%@ paylaşmayı bıraktı",
-        .leave: "Çık",
-    ]
 }
