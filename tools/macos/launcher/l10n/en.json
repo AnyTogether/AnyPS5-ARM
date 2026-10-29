@@ -1,8 +1,5 @@
 {
-  "@meta": {
-    "name": "English",
-    "consoleLanguage": 1
-  },
+  "languageName": "English",
   "welcome": "Welcome to AnyPS5",
   "welcomeSubtitle": "Play PS5 games on your Mac. Let's set a few things up first.",
   "chooseLanguage": "Language",

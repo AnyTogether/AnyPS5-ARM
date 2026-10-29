@@ -1,8 +1,10 @@
 import Foundation
 
-/// The launcher's language files (tools/macos/launcher/l10n, TRANSLATING.md there): one JSON object
-/// per language named by its code (de.json is German), its texts by key and its name and console
-/// language in "@meta". The same format and keys as AnyPS5-Desktop's assets/l10n.
+/// The launcher's language files (tools/macos/launcher/l10n, TRANSLATING.md there): one flat JSON
+/// object of texts per language, as Weblate keeps monolingual JSON, named by its locale code
+/// (de.json is German, pt-BR.json Brazilian Portuguese). The language's own name is the text
+/// "languageName"; the console language a game starts in comes from the code
+/// (ConsoleLanguage.forLocale). The same format and keys as AnyLauncher-Port's assets/l10n.
 public struct LanguageFile: Equatable, Sendable {
     public let code: String
     /// The language's name in itself, as Settings lists it.
@@ -20,8 +22,12 @@ public struct LanguageFile: Equatable, Sendable {
 }
 
 public enum LanguageFiles {
-    /// The reserved key of a file's name and console language; never a text.
-    public static let meta = "@meta"
+    /// The key of a language's own name ("Deutsch"), translated like every other text.
+    public static let nameKey = "languageName"
+    /// Where a file had its name and console language before the files were made for Weblate:
+    /// {"@meta": {"name": "Deutsch", "consoleLanguage": 4}}. A file in the user's Languages folder
+    /// may still have it, so it is read, and never a text.
+    public static let legacyMeta = "@meta"
     /// The console languages the engine knows (ConsoleLanguage in GameSettings.swift).
     public static let consoleLanguages = 22
     /// English, the language every other one falls back to.
@@ -32,8 +38,9 @@ public enum LanguageFiles {
         case notAnObject
     }
 
-    /// Reads one file of language [code]. Values that are not texts are left out; a missing or
-    /// broken "@meta" gives the code as the name and English's console language.
+    /// Reads one file of language [code]. Values that are not texts are left out. Without a
+    /// "languageName" (or an old file's "@meta" name) the language is named by its code; its console
+    /// language is the code's, else an old file's number, else English's.
     public static func parse(_ data: Data, code: String) throws -> LanguageFile {
         let json: Any
         do {
@@ -42,15 +49,15 @@ public enum LanguageFiles {
             throw Failure.notJSON(String(describing: error))
         }
         guard let object = json as? [String: Any] else { throw Failure.notAnObject }
-        let about = object[meta] as? [String: Any]
-        let name = (about?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let console = about?["consoleLanguage"] as? Int
+        let about = object[legacyMeta] as? [String: Any]
         var texts: [String: String] = [:]
-        for (key, value) in object where key != meta {
+        for (key, value) in object where key != legacyMeta {
             if let text = value as? String { texts[key] = text }
         }
+        let name = (texts[nameKey] ?? about?["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacyConsole = (about?["consoleLanguage"] as? Int).flatMap { (0..<consoleLanguages).contains($0) ? $0 : nil }
         return LanguageFile(code: code, name: name?.isEmpty == false ? name! : code,
-                            consoleLanguage: console.map { (0..<consoleLanguages).contains($0) ? $0 : 1 } ?? 1, texts: texts)
+                            consoleLanguage: ConsoleLanguage.forLocale(code) ?? legacyConsole ?? 1, texts: texts)
     }
 
     /// The language files in [folders], the first folder first: a file there comes before one of

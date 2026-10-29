@@ -104,10 +104,30 @@ public enum ConsoleLanguage {
         (11, "简体中文"), (10, "繁體中文"), (21, "العربية"),
     ]
 
+    static let tags = ["ja-JP", "en-US", "fr-FR", "es-ES", "de-DE", "it-IT", "nl-NL", "pt-PT", "ru-RU", "ko-KR", "zh-Hant",
+                       "zh-Hans", "fi-FI", "sv-SE", "da-DK", "no-NO", "pl-PL", "pt-BR", "en-GB", "tr-TR", "es-419", "ar-AE"]
+
     /// The locale tag of a console language number, as the engine's trophy library maps them.
     public static func tag(_ number: Int) -> String? {
-        let tags = ["ja-JP", "en-US", "fr-FR", "es-ES", "de-DE", "it-IT", "nl-NL", "pt-PT", "ru-RU", "ko-KR", "zh-Hant",
-                    "zh-Hans", "fi-FI", "sv-SE", "da-DK", "no-NO", "pl-PL", "pt-BR", "en-GB", "tr-TR", "es-419", "ar-AE"]
-        return tags.indices.contains(number) ? tags[number] : nil
+        tags.indices.contains(number) ? tags[number] : nil
+    }
+
+    /// Locale codes the console has its own language for, beyond the tags above.
+    static let aliases = ["en": 1, "es": 3, "pt": 7, "zh": 11, "zh-tw": 10, "zh-hk": 10, "zh-mo": 10, "zh-cn": 11,
+                          "zh-sg": 11, "no": 15, "nb": 15, "nn": 15, "es-mx": 20, "es-ar": 20, "es-co": 20, "es-cl": 20]
+
+    /// The console language a launcher language starts games in, by its file's locale code (de,
+    /// pt-BR, zh-Hant, es_419): the code itself, then its language alone; nil when the console has
+    /// no language of that code (games start in English then). The same map as AnyLauncher-Port's
+    /// ConsoleLanguage.forLocale.
+    public static func forLocale(_ code: String) -> Int? {
+        let wanted = code.replacingOccurrences(of: "_", with: "-").lowercased()
+        func find(_ tag: String) -> Int? {
+            tags.firstIndex { $0.lowercased() == tag } ?? aliases[tag]
+        }
+        if let exact = find(wanted) { return exact }
+        let language = String(wanted.split(separator: "-").first ?? "")
+        if let alone = find(language) { return alone }
+        return tags.firstIndex { $0.lowercased().hasPrefix(language + "-") }
     }
 }

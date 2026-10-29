@@ -1,42 +1,37 @@
 # Translating the Mac launcher
 
 The Mac launcher (AnyPS5.app) reads every text it shows from one file per language in this
-folder: `en.json` is English, `tr.json` is Turkish. They are the same kind of file as the
-Windows/Linux launcher's, in
-[AnyPS5-Desktop's `assets/l10n`](https://github.com/AnyTogether/AnyLauncher-Port/tree/main/assets/l10n),
-and follow the same rules: its
-[TRANSLATING.md](https://github.com/AnyTogether/AnyLauncher-Port/blob/main/TRANSLATING.md) is the
-guide. In short:
+folder: `en.json` is English, the source, and `tr.json` is Turkish. The guide for translating
+every AnyPS5 app, this one included, is
+[TRANSLATING.md in AnyLauncher-Port](https://github.com/AnyTogether/AnyLauncher-Port/blob/main/TRANSLATING.md).
+A hosted Weblate project is coming, where several people can translate one language at once; the
+files stay the same.
 
-- Copy `en.json`, name the copy after the language's code (`de.json`, `pt-BR.json`) and fill in
-  `"@meta"`: the language's own `name` and the `consoleLanguage` number from the guide's table.
-- Translate the text after each colon; keep the keys, the placeholders (`%@`, `%d`, `%%`, and
-  `%1$@` to change their order) and the JSON quotes and commas.
+In short:
+
+- Copy `en.json`, name the copy after the language's code (`de.json`, `pt-BR.json`,
+  `zh-Hant.json`) and translate the text after each colon. `languageName` is the language's
+  own name (`Deutsch`), as Settings lists it. The language games start in comes from the file's
+  name, so nothing else goes in the file.
+- Keep the keys, the placeholders (`%@`, `%d`, `%%`, `%1$@` to change their order, and this
+  launcher's `%02d` and `%.1f`) and the JSON quotes and commas.
 - A text you leave out shows in English.
+- Try it: put the file in `~/Library/Application Support/AnyPS5/Languages` (create the folder
+  if it is not there), open AnyPS5 again and choose the language in **Settings › Language**. A
+  file there comes before the built-in one of the same code. A file from an older launcher, with
+  an `"@meta"` part at the top, still works there; for the repository, use `languageName`.
 
-## The same keys on both launchers
+## The same keys in every app
 
-A key means the same text on the Mac and on Windows/Linux, so a translation of one file carries
-over to the other. Some texts say Mac where the other launcher says PC (`stepRelink`,
-`themesOnMac`): translate each file's own English. Texts only the Mac launcher shows have keys of
-their own here, and the other launcher's file has keys this one does not use. To start from the
-other launcher's translation, copy its texts for the keys this `en.json` has, then fill in the
-rest.
-
-The Mac launcher also uses a few placeholders the other one does not, such as `%02d` (a number
-with two digits) and `%.1f` (a number with one decimal): keep them as they are.
-
-## Try it
-
-Put your file in `~/Library/Application Support/AnyPS5/Languages` (create the folder if it is not
-there) and open AnyPS5 again; then choose your language in **Settings › Language**. A file there
-comes before the built-in one of the same code, so a changed `tr.json` can be tried the same way.
-A text whose placeholders are not English's is shown in English instead, and a file that is not
-valid JSON is left out.
+A key means the same text on the Mac, on Windows/Linux and on the phone, so a translation of one
+file carries over to the others. Some texts say Mac where the other launcher says PC
+(`stepRelink`, `themesOnMac`): translate each file's own English. Numbers follow macOS's
+formatting for the language's code, so this launcher has no number texts.
 
 ## The check
 
-`swift test` in `tools/macos/launcher` (the Mac launcher's CI job runs it) checks the files here:
-every key of `en.json` is in `tr.json`, no file has a key English lacks, each text has English's
-placeholders, and every key the launcher's code uses is in `en.json`. Other languages may leave
-keys out; the check says how much of each is translated.
+`swift test --filter "LanguageCheckTests|LanguageFilesTests"` in `tools/macos/launcher` (the Mac
+launcher's CI job runs all of `swift test`) checks the files here: one flat JSON object of texts
+per file (no `"@meta"`), named by a language code, every key of `en.json` in `tr.json`, no key
+English lacks, each text with English's placeholders, and every key the launcher's code uses in
+`en.json`. Other languages may leave keys out; the check says how much of each is translated.
