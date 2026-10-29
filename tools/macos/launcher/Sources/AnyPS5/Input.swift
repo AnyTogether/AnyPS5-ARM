@@ -48,6 +48,7 @@ final class Input {
     private var held: Command?
     private var heldKey: UInt16?
     private var repeats = 0
+    private var heldFirstDelay = KeyRepeat.firstDelay
     private var edge = EdgeBump()
     /// Each controller's D-pad and stick, the D-pad winning while it is pressed.
     private var dpads: [AnyHashable: Command] = [:]
@@ -468,7 +469,9 @@ final class Input {
         guard command != held || heldKey != nil else { return }
         guard let command, NSApp.isActive, capture == nil else { return hold(nil) }
         _ = dispatch(command, repeat: false)
-        hold(command)
+        // Up and down on the stick wait longer before repeating (StickGate).
+        let fromStick = dpads[id] == nil
+        hold(command, firstDelay: fromStick && StickGate.isVertical(command) ? StickGate.verticalFirstDelay : KeyRepeat.firstDelay)
     }
 
     /// Hands a command to the screens; a direction that did nothing bumps (once per hold).
@@ -482,18 +485,19 @@ final class Input {
         return used
     }
 
-    /// Starts repeating `command` (nil stops): the first repeat after 0.40 s, then faster.
-    private func hold(_ command: Command?, key: UInt16? = nil) {
+    /// Starts repeating `command` (nil stops): the first repeat after 0.40 s (`firstDelay`), then faster.
+    private func hold(_ command: Command?, key: UInt16? = nil, firstDelay: TimeInterval = KeyRepeat.firstDelay) {
         repeatTimer?.invalidate()
         repeatTimer = nil
         held = command
         heldKey = command == nil ? nil : key
         repeats = 0
+        heldFirstDelay = firstDelay
         if command != nil { scheduleRepeat() }
     }
 
     private func scheduleRepeat() {
-        repeatTimer = Timer.scheduledTimer(withTimeInterval: KeyRepeat.delay(beforeRepeat: repeats + 1), repeats: false) { [weak self] _ in
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: KeyRepeat.delay(beforeRepeat: repeats + 1, firstDelay: heldFirstDelay), repeats: false) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let held = self.held else { return }
                 // The hold ends when a dialog or a binding takes the keys, or the launcher goes behind.

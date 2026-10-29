@@ -15,18 +15,19 @@ public enum KeyRepeat {
     /// Repeats at `interval` before the pace picks up.
     public static let fastAfter = 6
 
-    /// The wait before repeat number `repeatNumber` (1 is the first) since the move before it.
-    public static func delay(beforeRepeat repeatNumber: Int) -> TimeInterval {
-        repeatNumber <= 1 ? firstDelay : repeatNumber <= fastAfter ? interval : fastInterval
+    /// The wait before repeat number `repeatNumber` (1 is the first) since the move before it;
+    /// `first` in place of `firstDelay` before the first (the stick's up and down, StickGate).
+    public static func delay(beforeRepeat repeatNumber: Int, firstDelay first: TimeInterval = firstDelay) -> TimeInterval {
+        repeatNumber <= 1 ? first : repeatNumber <= fastAfter ? interval : fastInterval
     }
 
     /// When a hold of `duration` seconds moves: 0 for the press, then each repeat.
-    public static func times(within duration: TimeInterval) -> [TimeInterval] {
+    public static func times(within duration: TimeInterval, firstDelay first: TimeInterval = firstDelay) -> [TimeInterval] {
         var times: [TimeInterval] = [0]
         var time: TimeInterval = 0
         var repeatNumber = 1
         while true {
-            time += delay(beforeRepeat: repeatNumber)
+            time += delay(beforeRepeat: repeatNumber, firstDelay: first)
             guard time <= duration + 1e-9 else { return times }
             times.append(time)
             repeatNumber += 1
@@ -34,36 +35,65 @@ public enum KeyRepeat {
     }
 }
 
-/// The left stick as a direction with hysteresis: it engages past 0.5 and lets go only below 0.3,
-/// so a stick resting near the line does not flutter; the other axis takes over only when it
-/// leads by a quarter (no jumping near the diagonal); a flick through the middle turns at once.
+/// The left stick as a direction with hysteresis: left and right engage past 0.5 and let go only
+/// below 0.3, so a stick resting near the line does not flutter; a flick through the middle turns
+/// at once.
+///
+/// Up and down are harder to reach, as on Home one of them leaves the tiles for the top bar or the
+/// buttons: they engage only past 0.65 and with the stick clearly upright (Y at least 1.2 times X;
+/// a diagonal goes sideways), let go below 0.4, take over from a held left or right only when Y
+/// leads by half again, and repeat first after `verticalFirstDelay`. A thumb sweeping in an arc on
+/// its way to the side, a light push or a wobble moved up or down before. Letting go of one axis,
+/// the other engages only from the next sample.
 public struct StickGate: Sendable {
     public static let engage = 0.5
     public static let release = 0.3
+    public static let verticalEngage = 0.65
+    public static let verticalRelease = 0.4
+    /// How much Y must lead X for up or down to engage.
+    public static let verticalLead = 1.2
+    /// How much the other axis must lead to take over a held direction: left or right from up or
+    /// down, up or down from left or right.
     public static let switchRatio = 1.25
+    public static let verticalSwitchRatio = 1.5
+    /// Up and down held on the stick repeat first after this (the D-pad and the keys, and left and
+    /// right, after KeyRepeat.firstDelay).
+    public static let verticalFirstDelay: TimeInterval = 0.55
 
     public private(set) var held: Command?
 
     public init() {}
 
+    public static func isVertical(_ direction: Command) -> Bool { direction == .up || direction == .down }
+
     /// `x` right positive, `y` up positive, both -1 to 1.
     public mutating func update(x: Double, y: Double) -> Command? {
         if let direction = held {
-            let horizontal = direction == .left || direction == .right
+            let vertical = Self.isVertical(direction)
             let along = Self.along(direction, x: x, y: y)
-            if along >= Self.release {
-                let other = horizontal ? y : x
-                if abs(other) >= Self.engage && abs(other) > along * Self.switchRatio {
-                    held = horizontal ? (other > 0 ? .up : .down) : (other > 0 ? .right : .left)
+            if along >= (vertical ? Self.verticalRelease : Self.release) {
+                let other = vertical ? x : y
+                let takesOver = vertical
+                    ? abs(other) >= Self.engage && abs(other) > along * Self.switchRatio
+                    : abs(other) >= Self.verticalEngage && abs(other) > along * Self.verticalSwitchRatio
+                if takesOver {
+                    held = vertical ? (other > 0 ? .right : .left) : (other > 0 ? .up : .down)
                 }
                 return held
             }
             held = nil
+            // The other axis waits for the next sample; the same axis turns at once (a flick).
+            if let next = Self.engaged(x: x, y: y), Self.isVertical(next) == vertical { held = next }
+            return held
         }
-        if max(abs(x), abs(y)) >= Self.engage {
-            held = abs(x) >= abs(y) ? (x > 0 ? .right : .left) : (y > 0 ? .up : .down)
-        }
+        held = Self.engaged(x: x, y: y)
         return held
+    }
+
+    static func engaged(x: Double, y: Double) -> Command? {
+        if abs(y) >= verticalEngage && abs(y) >= abs(x) * verticalLead { return y > 0 ? .up : .down }
+        if abs(x) >= engage && abs(x) >= abs(y) { return x > 0 ? .right : .left }
+        return nil
     }
 
     static func along(_ direction: Command, x: Double, y: Double) -> Double {
