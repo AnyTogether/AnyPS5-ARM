@@ -37,7 +37,7 @@ struct Backdrop: View {
             // Over the see-through window the key art is laid only when asked for (Show Game Art
             // Behind), and lets some of the desktop through.
             let artwork = look.seeThrough ? preferences.glassArtwork == true : preferences.gameArtwork
-            if preferences.onboarded, artwork, model.overlay != .settings, let game = model.selectedGame, let background = game.background {
+            if preferences.onboarded, artwork, model.overlay != .settings, let game = model.backdropGame, let background = game.background {
                 Group {
                     if look.glass {
                         FrostedArtwork(url: background, animated: !look.reduceMotion && !paused, solid: look.solid)
@@ -50,7 +50,7 @@ struct Backdrop: View {
                 .transition(.opacity)
             }
         }
-        .animation(Motion.fade, value: model.selectedGame?.id)
+        .animation(Motion.fade, value: model.backdropGame?.id)
         .animation(Motion.fade, value: preferences.theme)
         .animation(Motion.fade, value: model.activeDesign?.background)
         .ignoresSafeArea()
