@@ -2,7 +2,8 @@
 import XCTest
 
 /// The language files' reading: a user folder before the built-in one, English as the fallback,
-/// "@meta" names and the placeholder rules of AnyPS5-Desktop's check_translations.dart.
+/// the "languageName" text (or an old file's "@meta" name), the console language from the file's
+/// code and the placeholder rules of AnyLauncher-Port's check_translations.dart.
 final class LanguageFilesTests: XCTestCase {
     var root: URL!
 
@@ -23,9 +24,9 @@ final class LanguageFilesTests: XCTestCase {
     func folders() -> [URL] { [root.appendingPathComponent("user"), root.appendingPathComponent("builtin")] }
 
     func testFilesAreFoundAndListedEnglishFirstThenByName() throws {
-        try write("builtin", "tr.json", #"{"@meta": {"name": "Türkçe", "consoleLanguage": 19}, "back": "Geri"}"#)
-        try write("builtin", "en.json", #"{"@meta": {"name": "English", "consoleLanguage": 1}, "back": "Back", "games": "Games"}"#)
-        try write("user", "de.json", #"{"@meta": {"name": "Deutsch", "consoleLanguage": 4}, "back": "Zurück"}"#)
+        try write("builtin", "tr.json", #"{"languageName": "Türkçe", "back": "Geri"}"#)
+        try write("builtin", "en.json", #"{"languageName": "English", "back": "Back", "games": "Games"}"#)
+        try write("user", "de.json", #"{"languageName": "Deutsch", "back": "Zurück"}"#)
         try write("builtin", "notes.txt", "not a language")
         let languages = LanguageFiles.load(folders())
         XCTAssertEqual(languages.map(\.code), ["en", "de", "tr"])
@@ -39,17 +40,17 @@ final class LanguageFilesTests: XCTestCase {
     }
 
     func testTheUserFolderComesBeforeTheBuiltInFileOfItsCode() throws {
-        try write("builtin", "en.json", #"{"@meta": {"name": "English", "consoleLanguage": 1}, "back": "Back"}"#)
-        try write("builtin", "tr.json", #"{"@meta": {"name": "Türkçe", "consoleLanguage": 19}, "back": "Geri"}"#)
-        try write("user", "tr.json", #"{"@meta": {"name": "Türkçe (deneme)", "consoleLanguage": 19}, "back": "Geri dön"}"#)
+        try write("builtin", "en.json", #"{"languageName": "English", "back": "Back"}"#)
+        try write("builtin", "tr.json", #"{"languageName": "Türkçe", "back": "Geri"}"#)
+        try write("user", "tr.json", #"{"languageName": "Türkçe (deneme)", "back": "Geri dön"}"#)
         let texts = LanguageTexts(LanguageFiles.load(folders()))
         XCTAssertEqual(texts.text("back", in: "tr"), "Geri dön")
         XCTAssertEqual(texts.language("tr")?.name, "Türkçe (deneme)")
     }
 
     func testABrokenFileIsLeftOutForTheNextOneOfItsCode() throws {
-        try write("builtin", "en.json", #"{"@meta": {"name": "English", "consoleLanguage": 1}, "back": "Back"}"#)
-        try write("builtin", "tr.json", #"{"@meta": {"name": "Türkçe", "consoleLanguage": 19}, "back": "Geri"}"#)
+        try write("builtin", "en.json", #"{"languageName": "English", "back": "Back"}"#)
+        try write("builtin", "tr.json", #"{"languageName": "Türkçe", "back": "Geri"}"#)
         try write("user", "tr.json", #"{"back": "Geri""#)
         try write("user", "fr.json", #"["not", "an", "object"]"#)
         var log: [String] = []
@@ -59,11 +60,39 @@ final class LanguageFilesTests: XCTestCase {
         XCTAssertEqual(log.count, 2)
     }
 
-    func testMissingMetaGivesTheCodeAndEnglishConsoleLanguage() throws {
+    func testWithoutItsNameALanguageIsListedByItsCode() throws {
         let file = try LanguageFiles.parse(Data(#"{"back": "Tillbaka", "count": 3}"#.utf8), code: "sv")
         XCTAssertEqual(file.name, "sv")
-        XCTAssertEqual(file.consoleLanguage, 1)
+        XCTAssertEqual(file.consoleLanguage, 13, "Swedish, from the code")
         XCTAssertEqual(file.texts, ["back": "Tillbaka"], "a value that is not a text is left out")
+        let unknown = try LanguageFiles.parse(Data(#"{"languageName": "Esperanto"}"#.utf8), code: "eo")
+        XCTAssertEqual(unknown.name, "Esperanto")
+        XCTAssertEqual(unknown.consoleLanguage, 1, "a code the console does not know starts games in English")
+    }
+
+    func testTheConsoleLanguageComesFromTheCode() {
+        XCTAssertEqual(ConsoleLanguage.forLocale("tr"), 19)
+        XCTAssertEqual(ConsoleLanguage.forLocale("de"), 4)
+        XCTAssertEqual(ConsoleLanguage.forLocale("de-AT"), 4)
+        XCTAssertEqual(ConsoleLanguage.forLocale("en"), 1)
+        XCTAssertEqual(ConsoleLanguage.forLocale("en-GB"), 18)
+        XCTAssertEqual(ConsoleLanguage.forLocale("pt"), 7)
+        XCTAssertEqual(ConsoleLanguage.forLocale("pt-BR"), 17)
+        XCTAssertEqual(ConsoleLanguage.forLocale("pt_BR"), 17)
+        XCTAssertEqual(ConsoleLanguage.forLocale("zh-Hant"), 10)
+        XCTAssertEqual(ConsoleLanguage.forLocale("zh"), 11)
+        XCTAssertEqual(ConsoleLanguage.forLocale("es-419"), 20)
+        XCTAssertEqual(ConsoleLanguage.forLocale("nb"), 15)
+        XCTAssertNil(ConsoleLanguage.forLocale("eo"))
+    }
+
+    func testAnOldFileStillWorks() throws {
+        let old = try LanguageFiles.parse(Data(#"{"@meta": {"name": "Deutsch (alt)", "consoleLanguage": 4}, "back": "Zurück"}"#.utf8), code: "de")
+        XCTAssertEqual(old.name, "Deutsch (alt)")
+        XCTAssertEqual(old.consoleLanguage, 4)
+        XCTAssertEqual(old.texts, ["back": "Zurück"], "\"@meta\" is never a text")
+        let pirate = try LanguageFiles.parse(Data(#"{"@meta": {"name": "Pirate", "consoleLanguage": 18}}"#.utf8), code: "x-pirate")
+        XCTAssertEqual(pirate.consoleLanguage, 18, "a code the console does not know keeps its file's number")
     }
 
     func testATranslationWithOtherPlaceholdersShowsTheEnglishText() throws {

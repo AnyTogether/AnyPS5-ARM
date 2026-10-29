@@ -383,6 +383,10 @@ jobs:
           cache: true
       - run: flutter pub get
       - run: flutter analyze
+      # The language files in mobile/assets/l10n (TRANSLATING.md in AnyLauncher-Port): flat JSON
+      # for Weblate, no unknown keys, English's placeholders, and no texts left in lib.
+      - name: Check the language files in assets/l10n and the texts in lib
+        run: dart run tool/check_translations.dart
       - run: flutter test
 
   mobile-android:

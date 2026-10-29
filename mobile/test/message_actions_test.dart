@@ -302,10 +302,6 @@ void main() {
         'GG',
       ]);
     });
-
-    test('every chat text is there in both languages', () {
-      expect(chatTextKeys('tr'), unorderedEquals(chatTextKeys('en')));
-    });
   });
 
   group('who may edit', () {

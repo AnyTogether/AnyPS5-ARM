@@ -1,8 +1,5 @@
 {
-  "@meta": {
-    "name": "Türkçe",
-    "consoleLanguage": 19
-  },
+  "languageName": "Türkçe",
   "welcome": "AnyPS5'e hoş geldin",
   "welcomeSubtitle": "PS5 oyunlarını Mac'inde oyna. Önce birkaç şeyi ayarlayalım.",
   "chooseLanguage": "Dil",

@@ -2,10 +2,11 @@
 import AnyPS5Core
 import XCTest
 
-/// The check of the language files in l10n (l10n/TRANSLATING.md), as AnyPS5-Desktop's
-/// tool/check_translations.dart does it for its own: every file a JSON object with a "@meta", no
-/// key English lacks, English's placeholders in each text, Turkish complete, and en.json holding
-/// exactly the keys the code reads.
+/// The check of the language files in l10n (l10n/TRANSLATING.md), as AnyLauncher-Port's
+/// tool/check_translations.dart does it for its own: every file one flat JSON object of texts
+/// (Weblate's monolingual JSON, so no "@meta"), named by a locale code, its own name under
+/// "languageName", no key English lacks, English's placeholders in each text, Turkish complete,
+/// and en.json holding exactly the keys the code reads.
 final class LanguageCheckTests: XCTestCase {
     let folder = T.sourceFolder
 
@@ -29,11 +30,10 @@ final class LanguageCheckTests: XCTestCase {
                 XCTFail("\(code).json is not one JSON object: { \"key\": \"text\", ... }")
                 continue
             }
-            let about = object[LanguageFiles.meta] as? [String: Any]
-            XCTAssertFalse((about?["name"] as? String ?? "").trimmingCharacters(in: .whitespaces).isEmpty, "\(code).json: \"@meta\" needs \"name\", the language's own name")
-            let console = about?["consoleLanguage"] as? Int ?? -1
-            XCTAssertTrue((0..<LanguageFiles.consoleLanguages).contains(console), "\(code).json: \"@meta\" needs \"consoleLanguage\", a number from 0 to \(LanguageFiles.consoleLanguages - 1)")
-            for (key, value) in object where key != LanguageFiles.meta && !(value is String) {
+            XCTAssertNil(object[LanguageFiles.legacyMeta], "\(code).json has the old \"@meta\" object, which Weblate cannot read: write \"\(LanguageFiles.nameKey)\": \"…\" instead (the console language comes from the file name)")
+            XCTAssertTrue(code.range(of: #"^[a-z]{2,3}([-_]([A-Z][a-z]{3}|[A-Z]{2}|[0-9]{3}))?$"#, options: .regularExpression) != nil, "\(code).json has to be named by its language code: de.json, pt-BR.json, zh-Hant.json")
+            XCTAssertFalse((object[LanguageFiles.nameKey] as? String ?? "x").trimmingCharacters(in: .whitespaces).isEmpty, "\(code).json: \"\(LanguageFiles.nameKey)\" is the language's own name and cannot be empty")
+            for (key, value) in object where !(value is String) {
                 XCTFail("\(code).json: \"\(key)\" has to be a text in quotes")
             }
             let language = try file(code)
@@ -48,6 +48,8 @@ final class LanguageCheckTests: XCTestCase {
     func testTurkishHasEveryEnglishKey() throws {
         let english = try file("en").texts, turkish = try file("tr").texts
         XCTAssertEqual(english.keys.filter { turkish[$0] == nil }.sorted(), [], "keys of en.json missing from tr.json")
+        XCTAssertEqual(english[LanguageFiles.nameKey], "English")
+        XCTAssertEqual(turkish[LanguageFiles.nameKey], "Türkçe")
         XCTAssertEqual(try file("en").name, "English")
         XCTAssertEqual(try file("tr").name, "Türkçe")
         XCTAssertEqual(try file("tr").consoleLanguage, 19)
@@ -55,10 +57,11 @@ final class LanguageCheckTests: XCTestCase {
 
     func testEnglishHasEveryKeyTheCodeUsesAndNoOther() throws {
         let english = try file("en").texts
-        let used = Set(T.codeKeys)
+        // The language's own name is read by Language.displayName, not through a texts enum.
+        let used = Set(T.codeKeys + [LanguageFiles.nameKey])
         XCTAssertEqual(used.subtracting(english.keys).sorted(), [], "keys the code uses that en.json lacks")
         XCTAssertEqual(Set(english.keys).subtracting(used).sorted(), [], "keys of en.json no code uses (remove them from every file)")
-        XCTAssertEqual(T.codeKeys.count, used.count, "two code keys share one JSON key")
+        XCTAssertEqual(T.codeKeys.count + 1, used.count, "two code keys share one JSON key")
     }
 
     /// A texts enum the list in T.codeKeys does not name would escape the check above.

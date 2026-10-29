@@ -101,6 +101,7 @@ downloads/
 !demo/web/i18n/*.json
 !tools/macos/patches/*.json
 !tools/macos/launcher/l10n/*.json
+!mobile/assets/l10n/*.json
 
 !/assets/*.jpg
 !/assets/*.png
