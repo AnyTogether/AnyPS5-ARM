@@ -653,10 +653,15 @@ struct EmptyLibrary: View {
                 .foregroundStyle(.white.opacity(0.8))
             Text(model.scanning ? T.text(.scanning) : T.text(.emptyLibraryTitle)).font(.display(34 * scale, .light)).foregroundStyle(.white).legible(16)
             Text(T.text(.emptyLibraryText)).font(.display(17 * scale)).foregroundStyle(.white.opacity(0.75)).legible(12)
-            if let folder = model.preferences.gamesFolder {
-                Text(folder).font(.display(13 * scale)).foregroundStyle(.white.opacity(0.7)).truncationMode(.middle).lineLimit(1).legible(10)
+            // The folders looked in, a drive that is not plugged in said so.
+            ForEach(model.preferences.libraryFolders.prefix(4), id: \.self) { folder in
+                let missing = model.libraryFolders.first { $0.url.path == folder }?.connected == false
+                Text(missing ? folder + " · " + T.text(.folderNotConnected) : folder).font(.display(13 * scale)).foregroundStyle(.white.opacity(missing ? 0.5 : 0.7))
+                    .truncationMode(.middle).lineLimit(1).legible(10)
             }
-            ConsoleButton(title: T.text(.changeFolder), symbol: "folder", focused: true) { model.pickGamesFolder() }
+            // Another folder joins the list; the folders themselves are in Settings → Game Library.
+            let none = model.preferences.libraryFolders.isEmpty
+            ConsoleButton(title: none ? T.text(.pickFolder) : T.text(.addFolder), symbol: none ? "folder" : "folder.badge.plus", focused: true) { model.pickGamesFolder() }
                 .padding(.top, 10 * scale)
             Spacer()
         }

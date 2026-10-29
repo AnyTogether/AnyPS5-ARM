@@ -62,7 +62,7 @@ enum PreviewRenderer {
         preferences.glassTransparency = ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_GLASS_TRANSPARENCY"].flatMap(Int.init)
         if ProcessInfo.processInfo.environment["ANYPS5_PREVIEW_GLASS_ARTWORK"] == "1" { preferences.glassArtwork = true }
         preferences.onboarded = true
-        preferences.gamesFolder = root.path
+        preferences.libraryFolders = [root.path]
         preferences.sounds = false
         preferences.profileName = "Robin"
         // ANYPS5_PREVIEW_LANGUAGE=tr draws the screens in Turkish.
@@ -505,11 +505,12 @@ enum PreviewRenderer {
         renderRingBanner(TogetherRinging(callId: "call2", from: people[0], device: "sess-f1"), output.appendingPathComponent("call-banner.png"))
         renderNewGame(preferences, found, root, still, output)
         renderPrepare(preferences, found, root, still, output)
+        renderFolders(preferences, found, root, still, output)
         var fresh = preferences
         fresh.onboarded = false
-        fresh.gamesFolder = nil
+        fresh.libraryFolders = []
         for step in 0..<3 {
-            if step == 2 { fresh.gamesFolder = root.path }
+            if step == 2 { fresh.libraryFolders = [root.path] }
             render(fresh, step == 2 ? found : [], root, still, output.appendingPathComponent("onboarding\(step).png")) { model in model.onboardingStep = step }
         }
         SocialPreviews.run(preferences, found, root, still, output)
@@ -810,6 +811,33 @@ enum PreviewRenderer {
             }
             print(String(format: "%@: background shader %.3f ms GPU a frame at 1600x900, home screen offscreen at 2x %.1f ms CPU", theme.title, shader, interface))
         }
+    }
+
+    /// Settings → Game Library with a second games folder on a drive that is not plugged in: the
+    /// folders, the question removing one asks, and the empty library with only that folder left.
+    static func renderFolders(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
+        var two = preferences
+        let unplugged = "/Volumes/Games Drive/PS5"
+        two.libraryFolders = [root.path, unplugged]
+        func library(_ model: AppModel, row: String) {
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { $0.id == "library" } ?? 0
+            model.panelInRows = true
+            model.panelRow = model.panelCategories()[model.panelCategory].rows.firstIndex { $0.id == row } ?? 0
+        }
+        render(two, games, root, still, output.appendingPathComponent("folders-settings.png")) { model in library(model, row: "folder-" + unplugged) }
+        render(two, games, root, still, output.appendingPathComponent("folders-add.png")) { model in library(model, row: "addFolder") }
+        render(two, games, root, still, output.appendingPathComponent("folders-remove.png")) { model in
+            library(model, row: "addFolder")
+            model.askingRow = "folder-" + unplugged
+            model.panelRow = model.panelCategories()[model.panelCategory].rows.firstIndex { $0.id == "folder-" + unplugged + "-cancel" } ?? 0
+        }
+        var missing = preferences
+        missing.libraryFolders = [unplugged]
+        render(missing, [], root, still, output.appendingPathComponent("folders-empty.png"))
+        var none = preferences
+        none.libraryFolders = []
+        render(none, [], root, still, output.appendingPathComponent("folders-none.png"))
     }
 
     static func render(_ preferences: Preferences, _ games: [Game], _ root: URL, _ still: NSImage?, _ file: URL, configure: (AppModel) -> Void = { _ in }) {
