@@ -904,7 +904,7 @@ extension AppModel {
             return controllerTestCommand(command)
         case .browserPlay:
             return browserPlayCommand(command)
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu:
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .launcherReport:
             return gameMenuCommand(command)
         case .profilePicker:
             return pickerCommand(command)

@@ -172,6 +172,14 @@ extension AppModel {
                 }
             default: break
             }
+        case .launcherReport:
+            switch command {
+            case .up, .left: move(-1, count: 2)
+            case .down, .right: move(1, count: 2)
+            case .back, .options: closeOverlay()
+            case .select: menuIndex == 0 ? sendLauncherReport() : putLauncherReportAside()
+            default: break
+            }
         case .profileMenu:
             let items = profileMenuItems()
             switch command {
@@ -455,7 +463,7 @@ struct GameMenuCard: View {
     }
 
     var body: some View {
-        let game = model.overlay == .homeMenu || model.overlay == .profileMenu ? nil : (model.selectedGame ?? model.runningGame)
+        let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .launcherReport ? nil : (model.selectedGame ?? model.runningGame)
         ZStack {
             FrostFill(opacity: 0.6).ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -492,6 +500,15 @@ struct GameMenuCard: View {
         HStack(alignment: .center, spacing: 18 * scale) {
             if model.overlay == .homeMenu || model.overlay == .profileMenu {
                 ProfileTileAvatar(profile: model.currentProfile, picture: model.profilePicture, size: 64 * scale)
+            } else if model.overlay == .launcherReport {
+                // The launcher's own trouble: its mark, not a game's.
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(Color(red: 1, green: 0.62, blue: 0.3).opacity(0.16))
+                    Image(systemName: model.launcherReport?.problem.kind == .crash ? "bolt.trianglebadge.exclamationmark.fill" : "hourglass")
+                        .font(.system(size: 28 * scale, weight: .semibold)).foregroundStyle(Color(red: 1, green: 0.7, blue: 0.4))
+                }
+                .frame(width: 64 * scale, height: 64 * scale)
+                .shadow(color: Color(red: 1, green: 0.55, blue: 0.25).opacity(0.35), radius: 18 * scale)
             } else if let game {
                 ZStack {
                     RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(Color.white.opacity(0.08))
@@ -524,6 +541,7 @@ struct GameMenuCard: View {
         case .closeGame: return TH.text(.closeGame)
         case .homeMenu: return TH.text(.homeMenuKicker)
         case .profileMenu: return TPro.text(.menuKicker)
+        case .launcherReport: return TC.text(.launcherReportWhen)
         default: return TH.text(.quickMenuKicker)
         }
     }
@@ -532,6 +550,7 @@ struct GameMenuCard: View {
         switch model.overlay {
         case .closeGame: return TH.format(.closeGameTitle, game?.name ?? "")
         case .homeMenu, .profileMenu: return model.currentProfile?.name ?? model.preferences.profileName
+        case .launcherReport: return model.launcherReport?.headline ?? ""
         default: return game?.name ?? ""
         }
     }
@@ -616,6 +635,9 @@ struct GameMenuCard: View {
             let others = model.profileBook.profiles.count - 1
             return [Item(id: 0, title: TH.text(.switchProfile), detail: TPro.others(others), symbol: "person.2.circle"),
                     Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
+        case .launcherReport:
+            return [Item(id: 0, title: TC.text(.launcherReportSend), detail: TC.text(.launcherReportSendDetail), symbol: "paperplane.fill"),
+                    Item(id: 1, title: TC.text(.launcherReportLater), detail: TC.text(.launcherReportLaterDetail), symbol: "clock.arrow.circlepath")]
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         default:
@@ -653,6 +675,8 @@ struct GameMenuCard: View {
             }
             .foregroundStyle(foreground.opacity(item.disabled ? 0.45 : 1))
             .padding(.horizontal, 20 * scale)
+            // A detail of several lines keeps clear of the row's edges.
+            .padding(.vertical, 10 * scale)
             .frame(maxWidth: .infinity, minHeight: 56 * scale)
             .background {
                 let shape = RoundedRectangle(cornerRadius: 14 * scale, style: .continuous)
@@ -677,7 +701,7 @@ struct GameMenuCard: View {
             Hint(keys: "↑ ↓", label: T.text(.hintMove))
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Spacer(minLength: 0)
-            if model.overlay == .homeMenu || model.overlay == .profileMenu {
+            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .launcherReport {
                 Hint(keys: "esc / ○", label: T.text(.hintBack))
             } else {
                 Hint(keys: "PS / esc / ○", label: TH.text(.resume))
@@ -695,7 +719,7 @@ extension AppModel {
     /// The PS menus take every command while one is up.
     func gameMenuCommandIfOpen(_ command: Command) -> Bool? {
         switch overlay {
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu: return gameMenuCommand(command)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .launcherReport: return gameMenuCommand(command)
         default: return nil
         }
     }

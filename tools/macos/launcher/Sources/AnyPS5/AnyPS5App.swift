@@ -278,8 +278,8 @@ struct RootView: View {
             if let game = model.selectedGame {
                 Gallery(game: game, shots: model.galleryShots).transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu:
-            GameMenuCard().id(model.overlay == .homeMenu ? "home" : model.overlay == .profileMenu ? "options" : "game").transition(.opacity)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .launcherReport:
+            GameMenuCard().id(model.overlay == .homeMenu ? "home" : model.overlay == .profileMenu ? "options" : model.overlay == .launcherReport ? "report" : "game").transition(.opacity)
         case .profilePicker:
             ProfilePickerView().transition(.opacity.combined(with: .scale(scale: 1.02)))
         case .addProfile:

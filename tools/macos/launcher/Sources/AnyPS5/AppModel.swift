@@ -228,6 +228,8 @@ enum Overlay: Equatable {
     case closeGame
     /// PS held in the launcher: Switch Profile, Quit AnyPS5.
     case homeMenu
+    /// The launcher's own crash or stall last time: Send Report, Not Now (LauncherReport.swift).
+    case launcherReport
     /// "Who's playing?": the profiles' tiles and Add Profile (Profiles.swift).
     case profilePicker
     /// A new profile: its name, then offline or online.
@@ -293,6 +295,7 @@ final class AppModel: ObservableObject {
                 // Friends' private picture links run out (6 to 12 hours): the list is read again.
                 if let overlay, [.friends, .party, .profile].contains(overlay), togetherUser != nil, identityBook.learnedAt != nil, identityBook.stale() { refreshFriends() }
                 askingRow = nil
+                if overlay == nil { offerLauncherReportSoon() }
                 if rowEditor.editing != nil { rowEditor.stop() }
                 if shortcutCapture != nil { endShortcutCapture() }
             }
@@ -345,6 +348,10 @@ final class AppModel: ObservableObject {
     @Published var galleryIndex = 0
     /// One screenshot over the whole screen, instead of the grid.
     @Published var galleryViewing = false
+    /// The launcher's own crash or stall last time, until offered (LauncherReport.swift).
+    var launcherReport: LauncherReportState?
+    /// Opens a link in the browser; the tests keep it.
+    var openLink: (URL) -> Void = { NSWorkspace.shared.open($0) }
     @Published private(set) var galleryShots: [URL] = []
     @Published var onboardingStep = 0
     @Published var onboardingChoices: [Int: Int] = [:]
@@ -547,7 +554,7 @@ final class AppModel: ObservableObject {
         apply()
         changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
         startPowerWatch()
-        if persists { loadEngines(); loadProfilePicture(); watchFullScreen() }
+        if persists { loadEngines(); loadProfilePicture(); watchFullScreen(); watchLauncher() }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
             OnlinePlayHost.configure(transport: { OnlinePeerMesh(context: $0) }, signal: { [weak self] to, device, session, kind, data in
@@ -587,6 +594,8 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated {
                 self?.preparer?.cancel()
                 self?.installer?.cancel()
+                // Quit as it should: no crash to offer next time.
+                LauncherWatch.shared.quitting()
             }
         }
         // A games folder on an external drive: watched again and scanned when the drive comes or goes.
