@@ -41,15 +41,14 @@ enum AccentColor: String, Codable, CaseIterable, Identifiable {
     }
 
     var title: String {
-        let turkish = T.language == .turkish
         switch self {
-        case .blue: return turkish ? "Mavi" : "Blue"
-        case .mint: return turkish ? "Nane" : "Mint"
-        case .coral: return turkish ? "Mercan" : "Coral"
-        case .violet: return turkish ? "Mor" : "Violet"
-        case .gold: return turkish ? "Altın" : "Gold"
-        case .white: return turkish ? "Beyaz" : "White"
-        case .ice: return turkish ? "Buz" : "Ice"
+        case .blue: return T.text(.accentBlue)
+        case .mint: return T.text(.accentMint)
+        case .coral: return T.text(.accentCoral)
+        case .violet: return T.text(.accentViolet)
+        case .gold: return T.text(.accentGold)
+        case .white: return T.text(.accentWhite)
+        case .ice: return T.text(.accentIce)
         }
     }
 

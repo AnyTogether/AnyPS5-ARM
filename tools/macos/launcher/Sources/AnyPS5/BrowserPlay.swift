@@ -315,57 +315,15 @@ enum QRCode {
     }
 }
 
-/// Play from a browser's texts, in both languages.
+/// Play from a browser's texts, from the language files (l10n).
 enum TW {
-    enum Key {
-        case title, subtitle, rowDetail, offDetail, showCode, showCodeDetail, keepOn, keepOnDetail
-        case step1, step2, step3, playing, asking, newCode, done, renews, noNetwork, starting
+    enum Key: String, CaseIterable {
+        case title = "browserPlay", subtitle = "browserPlaySubtitle", rowDetail = "browserPlayDetail", offDetail = "browserPlayOff", showCode = "browserPlayShow", showCodeDetail = "browserPlayShowDetail", keepOn = "browserPlayKeep", keepOnDetail = "browserPlayKeepDetail"
+        case step1 = "browserPlayStep1", step2 = "browserPlayStep2", step3 = "browserPlayStep3", playing = "browserPlayPlaying", asking = "browserPlayAsking", newCode = "browserPlayNewCode", done = "browserPlayDone", renews = "browserPlayRenewsIn", noNetwork = "browserPlayNoNetwork", starting = "browserPlayStarting"
     }
 
-    static func text(_ key: Key) -> String { (T.language == .turkish ? turkish : english)[key] ?? english[key] ?? "" }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
-
-    static let english: [Key: String] = [
-        .title: "Play from a browser",
-        .subtitle: "Any phone becomes a controller, no app needed. Up to four players with the phone app's seats.",
-        .rowDetail: "A phone scans a QR code and its browser is the pad",
-        .offDetail: "Off: nothing is served on the network",
-        .showCode: "Show QR code",
-        .showCodeDetail: "Scan it with the phone's camera",
-        .keepOn: "Keep browser play on",
-        .keepOnDetail: "Phones let in before can come back without a new code while AnyPS5 is open",
-        .step1: "Join the same Wi-Fi as this Mac.",
-        .step2: "Scan the code with the phone's camera and open the link.",
-        .step3: "Allow the phone here when it asks. The same code shows on both screens.",
-        .playing: "playing",
-        .asking: "waiting to be allowed",
-        .newCode: "New Code",
-        .done: "Done",
-        .renews: "A new code in %d:%02d · each one works once",
-        .noNetwork: "No local network.\nJoin Wi-Fi or Ethernet.",
-        .starting: "Starting…",
-    ]
-
-    static let turkish: [Key: String] = [
-        .title: "Tarayıcıdan oyna",
-        .subtitle: "Her telefon kumandaya dönüşür, uygulama gerekmez. Telefon uygulamasının yer kurallarıyla dört oyuncuya kadar.",
-        .rowDetail: "Telefon QR kodu tarar, tarayıcısı kumanda olur",
-        .offDetail: "Kapalı: ağda hiçbir şey sunulmaz",
-        .showCode: "QR kodu göster",
-        .showCodeDetail: "Telefonun kamerasıyla tara",
-        .keepOn: "Tarayıcıdan oynamayı açık tut",
-        .keepOnDetail: "Daha önce izin verilen telefonlar AnyPS5 açıkken yeni kod olmadan dönebilir",
-        .step1: "Bu Mac ile aynı Wi-Fi'a bağlan.",
-        .step2: "Kodu telefonun kamerasıyla tara ve bağlantıyı aç.",
-        .step3: "Telefon sorunca buradan izin ver. İki ekranda da aynı kod görünür.",
-        .playing: "oynuyor",
-        .asking: "izin bekliyor",
-        .newCode: "Yeni Kod",
-        .done: "Tamam",
-        .renews: "%d:%02d sonra yeni kod · her biri bir kez çalışır",
-        .noNetwork: "Yerel ağ yok.\nWi-Fi'a ya da Ethernet'e bağlan.",
-        .starting: "Başlatılıyor…",
-    ]
 }
 
 /// Play from a browser drawn offscreen for `--render-preview`: the code with one browser playing

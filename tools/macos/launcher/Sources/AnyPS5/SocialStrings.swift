@@ -1,231 +1,34 @@
 import Foundation
 
 /// The texts of AnyTogether's social screens (activity, leaderboards, notifications, community
-/// compatibility), in both languages; kept apart from `T` so they grow without touching its table.
+/// compatibility), from the language files (l10n); kept apart from `T`.
 /// `TS.text(.key)` reads the launcher's current language.
 enum TS {
-    static func text(_ key: Key) -> String {
-        let table = T.language == .turkish ? turkish : english
-        return table[key] ?? english[key] ?? key.rawValue
-    }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
     static func format(_ key: Key, _ arguments: CVarArg...) -> String {
         String(format: text(key), arguments: arguments)
     }
 
-    enum Key: String {
+    enum Key: String, CaseIterable {
         // Activity
-        case feedTitle, feedSubtitle, feedRow, feedRowDetail, feedEmpty, feedFailed, feedLoading, feedMore
-        case feedTrophy, feedTrophies, feedPlatinum, feedFirstPlay, feedLongSession, feedFriendship, feedOther
-        case feedMilestoneTrophies, feedMilestonePlatinums, feedMilestoneGames, feedMilestoneHours
-        case feedAndMore, feedRare, hintReact, hintProfile
-        case profileActivity, profileNoActivity
+        case feedTitle = "socialFeedTitle", feedSubtitle = "socialFeedSubtitle", feedRow = "socialFeedRow", feedRowDetail = "socialFeedRowDetail", feedEmpty = "socialFeedEmpty", feedFailed = "socialFeedFailed", feedLoading = "socialFeedLoading", feedMore = "socialFeedMore"
+        case feedTrophy = "socialFeedTrophy", feedTrophies = "socialFeedTrophies", feedPlatinum = "socialFeedPlatinum", feedFirstPlay = "socialFeedFirstPlay", feedLongSession = "socialFeedLongSession", feedFriendship = "socialFeedFriendship", feedOther = "socialFeedOther"
+        case feedMilestoneTrophies = "socialFeedMilestoneTrophies", feedMilestonePlatinums = "socialFeedMilestonePlatinums", feedMilestoneGames = "socialFeedMilestoneGames", feedMilestoneHours = "socialFeedMilestoneHours"
+        case feedAndMore = "socialFeedAndMore", feedRare = "socialFeedRare", hintReact = "socialHintReact", hintProfile = "socialHintProfile"
+        case profileActivity = "socialProfileActivity", profileNoActivity = "socialProfileNoActivity"
         // Leaderboards
-        case boardTitle, boardOverall, boardPoints, boardTime, boardCompletion, scopeFriends, scopeGlobal, boardYourRank, boardOf, boardPointsValue
-        case boardEmpty, boardFailed, boardLoading, boardNoGame, boardUnlisted, boardWouldBe, boardNothing, boardRowDetail, boardGameRowDetail
-        case hintBoard, hintScope, boardYou, boardPlayers
+        case boardTitle = "socialBoardTitle", boardOverall = "socialBoardOverall", boardPoints = "socialBoardPoints", boardTime = "socialBoardTime", boardCompletion = "socialBoardCompletion", scopeFriends = "socialScopeFriends", scopeGlobal = "socialScopeGlobal", boardYourRank = "socialBoardYourRank", boardOf = "socialBoardOf", boardPointsValue = "socialBoardPointsValue"
+        case boardEmpty = "socialBoardEmpty", boardFailed = "socialBoardFailed", boardLoading = "socialBoardLoading", boardNoGame = "socialBoardNoGame", boardUnlisted = "socialBoardUnlisted", boardWouldBe = "socialBoardWouldBe", boardNothing = "socialBoardNothing", boardRowDetail = "socialBoardRowDetail", boardGameRowDetail = "socialBoardGameRowDetail"
+        case hintBoard = "socialHintBoard", hintScope = "socialHintScope", boardYou = "socialBoardYou", boardPlayers = "socialBoardPlayers"
         // Notifications
-        case notifTitle, notifEmpty, notifMarkAll, notifMore, notifFailed, notifLoading, notifUnread, notifSignIn
-        case notifFriendRequest, notifFriendAccepted, notifMessage, notifMessages, notifPartyInvite, notifGameInvite, notifMissedCall, notifWarning, notifOther
+        case notifTitle = "socialNotifTitle", notifEmpty = "socialNotifEmpty", notifMarkAll = "socialNotifMarkAll", notifMore = "socialNotifMore", notifFailed = "socialNotifFailed", notifLoading = "socialNotifLoading", notifUnread = "socialNotifUnread", notifSignIn = "socialNotifSignIn"
+        case notifFriendRequest = "socialNotifFriendRequest", notifFriendAccepted = "socialNotifFriendAccepted", notifMessage = "socialNotifMessage", notifMessages = "socialNotifMessages", notifPartyInvite = "socialNotifPartyInvite", notifGameInvite = "socialNotifGameInvite", notifMissedCall = "socialNotifMissedCall", notifWarning = "socialNotifWarning", notifOther = "socialNotifOther"
         // Theme Hub
-        case hubSharing, hubShared, hubSharedVersion, hubShareDetail, hubTooLarge, hubBadTheme, hubNoPreview, hubNoTheme
+        case hubSharing = "socialHubSharing", hubShared = "socialHubShared", hubSharedVersion = "socialHubSharedVersion", hubShareDetail = "socialHubShareDetail", hubTooLarge = "socialHubTooLarge", hubBadTheme = "socialHubBadTheme", hubNoPreview = "socialHubNoPreview", hubNoTheme = "socialHubNoTheme"
         // Compatibility
-        case compatAsk, compatSubtitle, compatNothing, compatBoots, compatMenus, compatIngame, compatPlayable
-        case compatNothingDetail, compatBootsDetail, compatMenusDetail, compatIngameDetail, compatPlayableDetail
-        case compatLater, compatNever, compatNeverDetail, compatWhat, compatThanks, compatCommunity, compatReports, compatReportRow, compatNone
+        case compatAsk = "socialCompatAsk", compatSubtitle = "socialCompatSubtitle", compatNothing = "socialCompatNothing", compatBoots = "socialCompatBoots", compatMenus = "socialCompatMenus", compatIngame = "socialCompatIngame", compatPlayable = "socialCompatPlayable"
+        case compatNothingDetail = "socialCompatNothingDetail", compatBootsDetail = "socialCompatBootsDetail", compatMenusDetail = "socialCompatMenusDetail", compatIngameDetail = "socialCompatIngameDetail", compatPlayableDetail = "socialCompatPlayableDetail"
+        case compatLater = "socialCompatLater", compatNever = "socialCompatNever", compatNeverDetail = "socialCompatNeverDetail", compatWhat = "socialCompatWhat", compatThanks = "socialCompatThanks", compatCommunity = "socialCompatCommunity", compatReports = "socialCompatReports", compatReportRow = "socialCompatReportRow", compatNone = "socialCompatNone"
     }
-
-    static let english: [Key: String] = [
-        .feedTitle: "Activity",
-        .feedSubtitle: "What your friends have been playing",
-        .feedRow: "Activity",
-        .feedRowDetail: "Friends' trophies, first plays and milestones",
-        .feedEmpty: "Nothing from your friends yet. Trophies, first plays and long sessions show up here.",
-        .feedFailed: "Couldn't read the activity",
-        .feedLoading: "Reading the activity…",
-        .feedMore: "Older activity…",
-        .feedTrophy: "earned a trophy in %@",
-        .feedTrophies: "earned %2$d trophies in %1$@",
-        .feedPlatinum: "earned the platinum in %@",
-        .feedFirstPlay: "played %@ for the first time",
-        .feedLongSession: "played %1$@ for %2$@",
-        .feedFriendship: "is now friends with %@",
-        .feedOther: "did something new",
-        .feedMilestoneTrophies: "reached %d trophies",
-        .feedMilestonePlatinums: "reached %d platinums",
-        .feedMilestoneGames: "has played %d games",
-        .feedMilestoneHours: "has played for %d hours",
-        .feedAndMore: "+%d more",
-        .feedRare: "Rare",
-        .hintReact: "React",
-        .hintProfile: "Profile",
-        .profileActivity: "Recent activity",
-        .profileNoActivity: "No activity yet",
-        .boardTitle: "Leaderboard",
-        .boardOverall: "Trophy points",
-        .boardPoints: "Points",
-        .boardTime: "Play time",
-        .boardCompletion: "Completion",
-        .scopeFriends: "Friends",
-        .scopeGlobal: "Everyone",
-        .boardYourRank: "Your rank",
-        .boardOf: "of %d",
-        .boardPointsValue: "%@ pts",
-        .boardEmpty: "No one to rank yet",
-        .boardFailed: "Couldn't read the leaderboard",
-        .boardLoading: "Reading the leaderboard…",
-        .boardNoGame: "No one has played this on AnyTogether yet",
-        .boardUnlisted: "You're not on this board: it only lists people whose trophies and library are public",
-        .boardWouldBe: "You'd be #%d",
-        .boardNothing: "Nothing to rank yet: play and earn trophies to get on the board",
-        .boardRowDetail: "Trophy points among friends or everyone",
-        .boardGameRowDetail: "Points, play time and completion, among friends or everyone",
-        .hintBoard: "Board",
-        .hintScope: "Friends / Everyone",
-        .boardYou: "You",
-        .boardPlayers: "%d players",
-        .notifTitle: "Notifications",
-        .notifEmpty: "You're all caught up",
-        .notifMarkAll: "Mark all as read",
-        .notifMore: "Older notifications",
-        .notifFailed: "Couldn't read the notifications",
-        .notifLoading: "Reading the notifications…",
-        .notifUnread: "%d unread",
-        .notifSignIn: "Sign in to AnyTogether to get notifications",
-        .notifFriendRequest: "%@ wants to be friends",
-        .notifFriendAccepted: "%@ accepted your friend request",
-        .notifMessage: "%@ wrote to you",
-        .notifMessages: "%1$@ sent you %2$d messages",
-        .notifPartyInvite: "%@ invited you to their party",
-        .notifGameInvite: "%1$@ invited you to play %2$@",
-        .notifMissedCall: "Missed call from %@",
-        .notifWarning: "A moderator warned you",
-        .notifOther: "Something new on AnyTogether",
-        .hubSharing: "Sharing %@ on the Hub…",
-        .hubShared: "%@ is on the Hub",
-        .hubSharedVersion: "%1$@ is on the Hub, version %2$d",
-        .hubShareDetail: "Uploads it to AnyTogether's Theme Hub",
-        .hubTooLarge: "The theme is too big for the Hub (at most 50 MB)",
-        .hubBadTheme: "The Hub didn't take this theme file",
-        .hubNoPreview: "The Hub needs a picture of the theme",
-        .hubNoTheme: "That theme isn't on the Hub",
-        .compatAsk: "How did %@ run?",
-        .compatSubtitle: "One tap tells everyone how far it gets on a Mac",
-        .compatNothing: "Nothing",
-        .compatBoots: "Boots",
-        .compatMenus: "Menus",
-        .compatIngame: "In game",
-        .compatPlayable: "Playable",
-        .compatNothingDetail: "Nothing showed, or it closed at once",
-        .compatBootsDetail: "It started but stopped before the menus",
-        .compatMenusDetail: "The menus work, the game itself doesn't",
-        .compatIngameDetail: "It plays, with problems",
-        .compatPlayableDetail: "It plays well, start to finish",
-        .compatLater: "Not now",
-        .compatNever: "Don't ask after games",
-        .compatNeverDetail: "Reports can still be sent from the game's options",
-        .compatWhat: "Sent with it",
-        .compatThanks: "Thanks, the report is in",
-        .compatCommunity: "Community",
-        .compatReports: "%d reports",
-        .compatReportRow: "How does it run?",
-        .compatNone: "No reports yet: tell the community",
-    ]
-
-    static let turkish: [Key: String] = [
-        .feedTitle: "Etkinlikler",
-        .feedSubtitle: "Arkadaşların neler oynuyor",
-        .feedRow: "Etkinlikler",
-        .feedRowDetail: "Arkadaşlarının kupaları, ilk oyunları ve dönüm noktaları",
-        .feedEmpty: "Arkadaşlarından henüz bir şey yok. Kupalar, ilk oyunlar ve uzun oturumlar burada görünür.",
-        .feedFailed: "Etkinlikler okunamadı",
-        .feedLoading: "Etkinlikler okunuyor…",
-        .feedMore: "Daha eski etkinlikler…",
-        .feedTrophy: "%@ oyununda bir kupa kazandı",
-        .feedTrophies: "%1$@ oyununda %2$d kupa kazandı",
-        .feedPlatinum: "%@ oyununda platini aldı",
-        .feedFirstPlay: "%@ oyununu ilk kez oynadı",
-        .feedLongSession: "%1$@ oyununu %2$@ oynadı",
-        .feedFriendship: "%@ ile arkadaş oldu",
-        .feedOther: "yeni bir şey yaptı",
-        .feedMilestoneTrophies: "%d kupaya ulaştı",
-        .feedMilestonePlatinums: "%d platine ulaştı",
-        .feedMilestoneGames: "%d oyun oynadı",
-        .feedMilestoneHours: "%d saat oynadı",
-        .feedAndMore: "+%d tane daha",
-        .feedRare: "Nadir",
-        .hintReact: "Tepki ver",
-        .hintProfile: "Profil",
-        .profileActivity: "Son etkinlikler",
-        .profileNoActivity: "Henüz etkinlik yok",
-        .boardTitle: "Sıralama",
-        .boardOverall: "Kupa puanları",
-        .boardPoints: "Puan",
-        .boardTime: "Oynama süresi",
-        .boardCompletion: "Tamamlama",
-        .scopeFriends: "Arkadaşlar",
-        .scopeGlobal: "Herkes",
-        .boardYourRank: "Sıran",
-        .boardOf: "%d kişi içinde",
-        .boardPointsValue: "%@ puan",
-        .boardEmpty: "Henüz sıralanacak kimse yok",
-        .boardFailed: "Sıralama okunamadı",
-        .boardLoading: "Sıralama okunuyor…",
-        .boardNoGame: "Bunu AnyTogether'da henüz kimse oynamadı",
-        .boardUnlisted: "Bu sıralamada değilsin: yalnızca kupaları ve kütüphanesi herkese açık olanlar listelenir",
-        .boardWouldBe: "#%d olurdun",
-        .boardNothing: "Henüz sıralanacak bir şeyin yok: oyna ve kupa kazan, sıralamaya gir",
-        .boardRowDetail: "Arkadaşlar ya da herkes arasında kupa puanları",
-        .boardGameRowDetail: "Arkadaşlar ya da herkes arasında puan, oynama süresi ve tamamlama",
-        .hintBoard: "Tablo",
-        .hintScope: "Arkadaşlar / Herkes",
-        .boardYou: "Sen",
-        .boardPlayers: "%d oyuncu",
-        .notifTitle: "Bildirimler",
-        .notifEmpty: "Hepsini gördün",
-        .notifMarkAll: "Tümünü okundu say",
-        .notifMore: "Daha eski bildirimler",
-        .notifFailed: "Bildirimler okunamadı",
-        .notifLoading: "Bildirimler okunuyor…",
-        .notifUnread: "%d okunmamış",
-        .notifSignIn: "Bildirim almak için AnyTogether'a giriş yap",
-        .notifFriendRequest: "%@ arkadaş olmak istiyor",
-        .notifFriendAccepted: "%@ arkadaşlık isteğini kabul etti",
-        .notifMessage: "%@ sana yazdı",
-        .notifMessages: "%1$@ sana %2$d mesaj gönderdi",
-        .notifPartyInvite: "%@ seni partisine davet etti",
-        .notifGameInvite: "%1$@ seni %2$@ oynamaya davet etti",
-        .notifMissedCall: "Cevapsız arama: %@",
-        .notifWarning: "Bir moderatör seni uyardı",
-        .notifOther: "AnyTogether'da yeni bir şey var",
-        .hubSharing: "%@ Hub'da paylaşılıyor…",
-        .hubShared: "%@ Hub'da",
-        .hubSharedVersion: "%1$@ Hub'da, sürüm %2$d",
-        .hubShareDetail: "AnyTogether'ın Tema Hub'ına yükler",
-        .hubTooLarge: "Tema Hub için çok büyük (en çok 50 MB)",
-        .hubBadTheme: "Hub bu tema dosyasını kabul etmedi",
-        .hubNoPreview: "Hub temanın bir resmini istiyor",
-        .hubNoTheme: "Bu tema Hub'da yok",
-        .compatAsk: "%@ nasıl çalıştı?",
-        .compatSubtitle: "Tek dokunuşla herkese Mac'te nereye kadar gittiğini söyle",
-        .compatNothing: "Hiç",
-        .compatBoots: "Açılıyor",
-        .compatMenus: "Menüler",
-        .compatIngame: "Oyun içi",
-        .compatPlayable: "Oynanabilir",
-        .compatNothingDetail: "Hiçbir şey görünmedi ya da hemen kapandı",
-        .compatBootsDetail: "Açıldı ama menülerden önce durdu",
-        .compatMenusDetail: "Menüler çalışıyor, oyunun kendisi çalışmıyor",
-        .compatIngameDetail: "Oynanıyor, sorunlarla",
-        .compatPlayableDetail: "Baştan sona iyi oynanıyor",
-        .compatLater: "Şimdi değil",
-        .compatNever: "Oyunlardan sonra sorma",
-        .compatNeverDetail: "Rapor yine oyunun seçeneklerinden gönderilebilir",
-        .compatWhat: "Birlikte gönderilen",
-        .compatThanks: "Teşekkürler, rapor gönderildi",
-        .compatCommunity: "Topluluk",
-        .compatReports: "%d rapor",
-        .compatReportRow: "Nasıl çalışıyor?",
-        .compatNone: "Henüz rapor yok: topluluğa söyle",
-    ]
 }

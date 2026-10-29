@@ -228,7 +228,7 @@ struct FeedView: View {
         .padding(.vertical, 56 * scale)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .screenFrost(0.74)
-        .environment(\.locale, Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US"))
+        .environment(\.locale, T.locale)
     }
 
     private var header: some View {

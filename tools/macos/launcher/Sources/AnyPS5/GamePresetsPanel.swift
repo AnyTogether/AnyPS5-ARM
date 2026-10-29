@@ -1,55 +1,16 @@
 import AnyPS5Core
 import Foundation
 
-/// The texts of Settings → Game Presets, in both languages; kept apart from `T` like `TPrep`.
+/// The texts of Settings → Game Presets, from the language files (l10n); kept apart from `T` like `TPrep`.
 enum TPresets {
-    static func text(_ key: Key) -> String {
-        let table = T.language == .turkish ? turkish : english
-        return table[key] ?? english[key] ?? key.rawValue
-    }
+    static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
     enum Key: String, CaseIterable {
-        case title, intro, gameDefault, difficulty, easiest, easy, normal, hard, hardest
-        case priority, priorityDetail, performance, resolution
-        case invertVerticalFirst, invertHorizontalFirst, invertVerticalThird, invertHorizontalThird
-        case subtitles, show, hide, audioLanguage, reset
+        case title = "presetsTitle", intro = "presetsIntro", gameDefault = "presetGameDefault", difficulty = "presetDifficulty", easiest = "presetEasiest", easy = "presetEasy", normal = "presetNormal", hard = "presetHard", hardest = "presetHardest"
+        case priority = "presetPriority", priorityDetail = "presetPriorityDetail", performance = "presetPerformance", resolution = "presetResolution"
+        case invertVerticalFirst = "presetInvertVerticalFirst", invertHorizontalFirst = "presetInvertHorizontalFirst", invertVerticalThird = "presetInvertVerticalThird", invertHorizontalThird = "presetInvertHorizontalThird"
+        case subtitles = "presetSubtitles", show = "presetShow", hide = "presetHide", audioLanguage = "presetAudioLanguage", reset = "presetsReset"
     }
-
-    static let english: [Key: String] = [
-        .title: "Game Presets",
-        .intro: "Games that support Game Presets start with these settings. A game that keeps its own settings uses those once you change them in it.",
-        .gameDefault: "Game Default",
-        .difficulty: "Difficulty",
-        .easiest: "Easiest", .easy: "Easy", .normal: "Normal", .hard: "Hard", .hardest: "Hardest",
-        .priority: "Performance Mode or Resolution Mode",
-        .priorityDetail: "Favour a higher frame rate, or a sharper picture",
-        .performance: "Performance Mode", .resolution: "Resolution Mode",
-        .invertVerticalFirst: "Invert Vertical View · First-Person",
-        .invertHorizontalFirst: "Invert Horizontal View · First-Person",
-        .invertVerticalThird: "Invert Vertical View · Third-Person",
-        .invertHorizontalThird: "Invert Horizontal View · Third-Person",
-        .subtitles: "Subtitles", .show: "Show", .hide: "Hide",
-        .audioLanguage: "Audio Language",
-        .reset: "Reset Game Presets",
-    ]
-
-    static let turkish: [Key: String] = [
-        .title: "Oyun Ön Ayarları",
-        .intro: "Oyun Ön Ayarları'nı destekleyen oyunlar bu ayarlarla başlar. Kendi ayarlarını saklayan bir oyun, onları oyunda değiştirdiğinde kendininkileri kullanır.",
-        .gameDefault: "Oyunun Varsayılanı",
-        .difficulty: "Zorluk",
-        .easiest: "En Kolay", .easy: "Kolay", .normal: "Normal", .hard: "Zor", .hardest: "En Zor",
-        .priority: "Performans Modu ya da Çözünürlük Modu",
-        .priorityDetail: "Daha yüksek kare hızı ya da daha keskin görüntü",
-        .performance: "Performans Modu", .resolution: "Çözünürlük Modu",
-        .invertVerticalFirst: "Dikey Bakışı Ters Çevir · Birinci Şahıs",
-        .invertHorizontalFirst: "Yatay Bakışı Ters Çevir · Birinci Şahıs",
-        .invertVerticalThird: "Dikey Bakışı Ters Çevir · Üçüncü Şahıs",
-        .invertHorizontalThird: "Yatay Bakışı Ters Çevir · Üçüncü Şahıs",
-        .subtitles: "Altyazılar", .show: "Göster", .hide: "Gizle",
-        .audioLanguage: "Ses Dili",
-        .reset: "Oyun Ön Ayarlarını Sıfırla",
-    ]
 }
 
 extension AppModel {

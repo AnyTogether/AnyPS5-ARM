@@ -148,7 +148,7 @@ struct LevelCard: View {
     static func number(_ value: Int) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .decimal
-        formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+        formatter.locale = T.locale
         return formatter.string(from: NSNumber(value: value)) ?? "\(value)"
     }
 }

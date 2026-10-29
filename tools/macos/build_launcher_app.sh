@@ -55,6 +55,10 @@ cp "$source/Fonts/OFL.txt" "$app/Contents/Resources/licenses/Noto-OFL.txt"
 # AnyPS5-Desktop serves a copy of the same file.
 mkdir -p "$app/Contents/Resources/browser-pad"
 cp "$source/BrowserPad/index.html" "$app/Contents/Resources/browser-pad/index.html"
+# The launcher's texts, one JSON file per language (l10n/TRANSLATING.md); AnyPS5-Desktop has the
+# same format and keys in its assets/l10n.
+mkdir -p "$app/Contents/Resources/l10n"
+cp "$source"/l10n/*.json "$app/Contents/Resources/l10n/"
 
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT

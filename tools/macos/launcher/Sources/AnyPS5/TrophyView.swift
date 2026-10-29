@@ -168,7 +168,7 @@ struct TrophyRow: View {
 
     static func date(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+        formatter.locale = T.locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)

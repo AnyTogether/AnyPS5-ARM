@@ -176,7 +176,7 @@ struct ProfileView: View {
             if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
         }
         // Capitals in the launcher's language: "PROFİLİM", not "PROFILIM".
-        .environment(\.locale, Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US"))
+        .environment(\.locale, T.locale)
     }
 
     // MARK: Card
@@ -349,14 +349,14 @@ struct ProfileView: View {
 
     static func relative(_ date: Date) -> String {
         let formatter = RelativeDateTimeFormatter()
-        formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+        formatter.locale = T.locale
         formatter.unitsStyle = .full
         return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     static func day(_ date: Date) -> String {
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+        formatter.locale = T.locale
         formatter.dateStyle = .medium
         return formatter.string(from: date)
     }
@@ -538,7 +538,7 @@ struct ProfileTrophyRow: View {
     static func percent(_ share: Double) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .percent
-        formatter.locale = Locale(identifier: T.language == .turkish ? "tr_TR" : "en_US")
+        formatter.locale = T.locale
         formatter.minimumFractionDigits = 1
         formatter.maximumFractionDigits = 1
         return formatter.string(from: NSNumber(value: share)) ?? "\(Int(share * 100))%"
