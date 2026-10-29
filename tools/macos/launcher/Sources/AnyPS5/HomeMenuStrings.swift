@@ -9,7 +9,7 @@ enum TH {
         case pauseOnMenu, pauseOnMenuDetail
         case resume = "quickResume", closeGame = "quickCloseGame", paused = "quickPaused", stillRunning = "menuStillRunning", quickMenuKicker = "menuQuickMenuKicker"
         case closeGameTitle, closeGameText = "menuCloseGameText"
-        case homeMenuKicker = "menuHomeMenuKicker", switchProfile, quitApp = "quitLauncher", quitWithGame = "menuQuitWithGame"
+        case homeMenuKicker = "menuHomeMenuKicker", switchProfile, quitApp = "quitLauncher", quitWithGame = "menuQuitWithGame", quitQuestion, quitStay
         case shortcuts, shortcutsIntro = "menuShortcutsIntro", keyboard = "menuKeyboard", controller = "menuController", held = "shortcutHeld", notSet = "menuNotSet", pressButtons = "menuPressButtons", inGameToo = "menuInGameToo"
         case actionHome = "menuActionHome", actionQuickMenu = "shortcutQuickMenu", actionScreenshot = "shortcutScreenshot", actionClip = "menuActionClip", actionFullScreen = "shortcutFullscreen", actionPrevious = "shortcutPreviousSection", actionNext = "shortcutNextSection"
         case conflictSame = "menuConflictSame", conflictNavigationKey = "menuConflictNavigationKey", conflictNavigationButton = "menuConflictNavigationButton", conflictReservedKey = "menuConflictReservedKey", conflictNeedsModifier = "menuConflictNeedsModifier", refused = "menuRefused", cleared = "menuCleared"

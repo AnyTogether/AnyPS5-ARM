@@ -228,6 +228,8 @@ enum Overlay: Equatable {
     case closeGame
     /// PS held in the launcher: Switch Profile, Quit AnyPS5.
     case homeMenu
+    /// Esc on the home screen: "Quit AnyPS5?", Cancel first.
+    case confirmQuit
     /// The launcher's own crash or stall last time: Send Report, Not Now (LauncherReport.swift).
     case launcherReport
     /// "Who's playing?": the profiles' tiles and Add Profile (Profiles.swift).
@@ -348,6 +350,8 @@ final class AppModel: ObservableObject {
     @Published var galleryIndex = 0
     /// One screenshot over the whole screen, instead of the grid.
     @Published var galleryViewing = false
+    /// What the mouse's Forward button opens again (BackForward.swift).
+    var forwardStep: ForwardStep?
     /// The launcher's own crash or stall last time, until offered (LauncherReport.swift).
     var launcherReport: LauncherReportState?
     /// Opens a link in the browser; the tests keep it.

@@ -186,6 +186,13 @@ struct RootView: View {
             Input.shared.activity = { [weak model] in (model?.changeCount ?? 0) &+ Sounds.shared.requests }
             Input.shared.rightClickHandler = { [weak model] in model?.homeRightClick() ?? false }
             Input.shared.menuHandler = { [weak model] in model?.homeRightClick() ?? false }
+            Input.shared.escapeHandler = { [weak model] in model?.escape() ?? false }
+            Input.shared.sideButtonHandler = { [weak model] button in
+                switch button {
+                case .back: model?.mouseBack()
+                case .forward: model?.mouseForward()
+                }
+            }
             Input.shared.scrollHandler = { [weak model] command in
                 guard let model, model.preferences.onboarded, model.overlay == nil else { return false }
                 model.moveSelection(command == .left ? -1 : 1)
@@ -278,8 +285,8 @@ struct RootView: View {
             if let game = model.selectedGame {
                 Gallery(game: game, shots: model.galleryShots).transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .launcherReport:
-            GameMenuCard().id(model.overlay == .homeMenu ? "home" : model.overlay == .profileMenu ? "options" : model.overlay == .launcherReport ? "report" : "game").transition(.opacity)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport:
+            GameMenuCard().id(model.overlay == .homeMenu ? "home" : model.overlay == .profileMenu ? "options" : model.overlay == .confirmQuit ? "quit" : model.overlay == .launcherReport ? "report" : "game").transition(.opacity)
         case .profilePicker:
             ProfilePickerView().transition(.opacity.combined(with: .scale(scale: 1.02)))
         case .addProfile:
