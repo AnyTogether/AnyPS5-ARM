@@ -107,6 +107,9 @@ struct Preferences: Codable, Equatable {
     /// Settings → Battery & Heat (PowerProfiles); nil for the defaults.
     var powerProfiles: PowerProfiles?
     var games: [String: GameSettings] = [:]
+    /// Settings › Default Display, for every game that leaves its display at Default; nil until
+    /// changed (the built-in values). Machine-wide, like the game settings.
+    var displayDefaults: DisplayDefaults?
     var lastPlayed: [String: Date] = [:]
 
     var accentColor: Color { (accent ?? theme.defaultAccent).color }
@@ -130,7 +133,10 @@ struct Preferences: Codable, Equatable {
     }
 
     func save() {
-        if let data = try? JSONEncoder().encode(self) { UserDefaults.standard.set(data, forKey: Preferences.key) }
+        // Every game's display keys as before, so an older launcher still reads the file.
+        let encoder = JSONEncoder()
+        encoder.userInfo[GameSettings.legacyDisplayKeys] = true
+        if let data = try? encoder.encode(self) { UserDefaults.standard.set(data, forKey: Preferences.key) }
     }
 }
 
@@ -1255,6 +1261,20 @@ final class AppModel: ObservableObject {
         preferences.games[game.id] ?? GameSettings()
     }
 
+    var displayDefaults: DisplayDefaults { preferences.displayDefaults ?? DisplayDefaults() }
+
+    /// The settings a game starts with: its own, and Settings › Default Display for the display
+    /// choices it left at Default.
+    func launchSettings(for game: Game) -> GameSettings {
+        settings(for: game).withDefaults(displayDefaults)
+    }
+
+    func updateDisplayDefaults(_ change: (inout DisplayDefaults) -> Void) {
+        var value = displayDefaults
+        change(&value)
+        preferences.displayDefaults = value.isBuiltIn ? nil : value
+    }
+
     func update(_ game: Game, _ change: (inout GameSettings) -> Void) {
         var value = settings(for: game)
         let language = value.language
@@ -1609,7 +1629,7 @@ final class AppModel: ObservableObject {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         configuration.createsNewApplicationInstance = false
-        var settings = settings(for: game)
+        var settings = launchSettings(for: game)
         // Settings → Controllers → Stick Dead Zone, for a game that set none of its own.
         if let deadzone = preferences.stickDeadzone, deadzone > 0 { settings.tuning = StickDeadzone.tuning(settings.tuning, percent: deadzone) }
         // Settings → Battery & Heat: one resolution step down while a profile asks for it.

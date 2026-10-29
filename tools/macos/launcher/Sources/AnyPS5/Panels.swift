@@ -342,6 +342,7 @@ extension AppModel {
             PanelCategory(id: "behaviour", title: T.text(.behaviour), symbol: "slider.horizontal.3", rows: behaviour),
             PanelCategory(id: "power", title: TPow.text(.title), symbol: "battery.75percent", rows: powerRows()),
             PanelCategory(id: "controllers", title: TP.text(.title), symbol: "gamecontroller", rows: controllerRows()),
+            PanelCategory(id: "display", title: T.text(.displayDefaults), symbol: "macwindow", rows: displayDefaultRows()),
             PanelCategory(id: "presets", title: TPresets.text(.title), symbol: "dial.medium", rows: gamePresetRows()),
             PanelCategory(id: "shortcuts", title: TH.text(.shortcuts), symbol: "command", rows: shortcutRows()),
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
@@ -365,15 +366,7 @@ extension AppModel {
                 self?.update(game) { $0.resolution = index == 0 ? nil : choices[index - 1] }
             }))
         }
-        rows.append(PanelRow(id: "display", title: T.text(.display), symbol: "macwindow", kind: .choice(options: [T.text(.windowed), T.text(.fullscreen)], selected: settings.fullscreen ? 1 : 0) { [weak self] index in
-            self?.update(game) { $0.fullscreen = index == 1 }
-        }))
-        if !settings.fullscreen {
-            rows.append(PanelRow(id: "size", title: T.text(.windowSize), symbol: "arrow.up.left.and.arrow.down.right", kind: .stepper(value: settings.windowSize, range: 40...100, step: 5, format: { "\($0)%" }) { [weak self] value in
-                self?.update(game) { $0.windowSize = value }
-            }))
-        }
-        rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path", kind: .toggle(settings.vsync || settings.frameGeneration == true) { [weak self] value in self?.update(game) { $0.vsync = value } }))
+        rows += gameDisplayRows(game, settings)
         rows.append(PanelRow(id: "frameGeneration", title: T.text(.frameGeneration), detail: T.text(lowPowerNotice != nil ? .frameGenerationLowPower : .frameGenerationDetail), symbol: "square.stack.3d.forward.dottedline",
                              kind: .toggle(settings.frameGeneration == true) { [weak self] value in self?.update(game) { $0.frameGeneration = value ? true : nil } }))
         rows.append(PanelRow(id: "controls", title: T.text(.controls), symbol: "keyboard", kind: .action(destructive: false) { [weak self] in self?.open(.controls) }))

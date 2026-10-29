@@ -133,6 +133,7 @@ enum T {
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder
         case gameSettings, resolution, resolutionDefault, display, windowed, fullscreen, windowSize, vsync, on, off
+        case displayDefaults, displayDefaultsDetail, followDefault, useDisplayDefaults, useDisplayDefaultsDetail
         case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, linkNoGame, folderNoGames, useGamesFolder, useGamesFolderDetail, useGamesFolderConfirm, addFolder, addFolderDetail, removeFolder, removeFolderAsk, folderRemoved, folderNotConnected, folderGames, folderOneGame, copyLink, linkCopied, saveSync, saveSyncDetail, saveSyncNoFolder, syncFolder, syncFolderICloud, syncFolderNone, savesSyncedFrom, saveSyncFailed, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved = "clipSavedTitle", clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
         case newGame, newGames, newGameDetail
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared

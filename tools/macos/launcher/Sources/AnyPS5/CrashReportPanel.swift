@@ -49,7 +49,7 @@ extension AppModel {
         sessionReport = SessionReportState(game: game, afterCrash: afterCrash)
         open(.crashReport)
         let facts = lastSessions[game.id]
-        let settings = settings(for: game)
+        let settings = launchSettings(for: game)
         let unlockedWith = installedRecords[game.id]?.toolkit
         let engineNow = engineVersion(for: game)
         let diagnosis = diagnoses[game.id]
