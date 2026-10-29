@@ -1291,6 +1291,8 @@
   "switchProfile": "Profil Değiştir",
   "quitLauncher": "AnyPS5'ten Çık",
   "menuQuitWithGame": "Önce %@ kapanır",
+  "quitQuestion": "AnyPS5'ten çıkılsın mı?",
+  "quitStay": "Ana ekranda kal",
   "shortcuts": "Kısayollar",
   "menuShortcutsIntro": "Bir satır seç ve yeni tuşa ya da tuşlara bas. Basılı tutma atamak için tuşları basılı tut; Esc ya da ○ vazgeçer, △ satırı temizler.",
   "menuKeyboard": "Klavye",

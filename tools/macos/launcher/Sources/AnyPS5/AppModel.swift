@@ -234,6 +234,8 @@ enum Overlay: Equatable {
     case closeGame
     /// PS held in the launcher: Switch Profile, Quit AnyPS5.
     case homeMenu
+    /// Esc on the home screen: "Quit AnyPS5?", Cancel first.
+    case confirmQuit
     /// "Who's playing?": the profiles' tiles and Add Profile (Profiles.swift).
     case profilePicker
     /// A new profile: its name, then offline or online.
@@ -351,6 +353,8 @@ final class AppModel: ObservableObject {
     @Published var galleryIndex = 0
     /// One screenshot over the whole screen, instead of the grid.
     @Published var galleryViewing = false
+    /// What the mouse's Forward button opens again (BackForward.swift).
+    var forwardStep: ForwardStep?
     @Published private(set) var galleryShots: [URL] = []
     @Published var onboardingStep = 0
     @Published var onboardingChoices: [Int: Int] = [:]

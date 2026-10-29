@@ -1291,6 +1291,8 @@
   "switchProfile": "Switch Profile",
   "quitLauncher": "Quit AnyPS5",
   "menuQuitWithGame": "Closes %@ first",
+  "quitQuestion": "Quit AnyPS5?",
+  "quitStay": "Stay on the home screen",
   "shortcuts": "Shortcuts",
   "menuShortcutsIntro": "Choose a row and press the new key or buttons. Hold buttons to bind a hold; Esc or ○ cancels, △ clears a row.",
   "menuKeyboard": "Keyboard",

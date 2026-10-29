@@ -14,6 +14,10 @@ final class Input {
     var scrollHandler: ((Command) -> Bool)?
     /// A right click on Home opens the Options menu; true when it took the click.
     var rightClickHandler: (() -> Bool)?
+    /// Esc (the key, not Circle): true when the screen took it as more than Back ("Quit AnyPS5?").
+    var escapeHandler: (() -> Bool)?
+    /// The mouse's side buttons, once a capture or a text field has had its say.
+    var sideButtonHandler: ((SideButton) -> Void)?
     /// Options/Start on Home opens the same menu (△ stays the game's settings); true when it
     /// took the press, else it is Options as ever.
     var menuHandler: (() -> Bool)?
@@ -75,6 +79,11 @@ final class Input {
             // Text fields keep their keys.
             if let responder = event.window?.firstResponder as? NSTextView, responder.isEditable { return event }
             if self.keyShortcut(event) { return nil }
+            if event.keyCode == UInt16(kVK_Escape), Input.modifiers(event.modifierFlags).isEmpty, self.escapeHandler?() == true {
+                Feel.shared.usedKeyboard()
+                InputModeState.shared.usedKeyboard()
+                return nil
+            }
             guard let command = Input.command(for: event) else { return event }
             Feel.shared.usedKeyboard()
             InputModeState.shared.usedKeyboard()
@@ -87,7 +96,13 @@ final class Input {
             }
             return self.dispatch(command, repeat: false) ? nil : event
         }
-        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .mouseMoved]) { [weak self] event in
+        mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .mouseMoved]) { [weak self] event in
+            if event.type == .otherMouseDown, let button = Input.sideButton(event.buttonNumber), !Input.belongsToPanel(event) {
+                Feel.shared.usedKeyboard()
+                InputModeState.shared.usedKeyboard()
+                self?.side(button, in: event.window)
+                return nil
+            }
             if event.type == .rightMouseDown, !Input.belongsToPanel(event), self?.rightClickHandler?() == true {
                 Feel.shared.usedKeyboard()
                 InputModeState.shared.usedKeyboard()
@@ -124,6 +139,39 @@ final class Input {
         apply(shortcuts)
         GCController.controllers().forEach(attach)
         GCController.startWirelessControllerDiscovery {}
+    }
+
+    /// The mouse's side buttons: Back is Circle wherever the user is, Forward opens again the
+    /// screen Back just closed, as in a browser.
+    enum SideButton: Equatable {
+        case back, forward
+    }
+
+    /// macOS numbers the side buttons 3 (Back) and 4 (Forward); 2 is the middle button.
+    static func sideButton(_ number: Int) -> SideButton? {
+        switch number {
+        case 3: return .back
+        case 4: return .forward
+        default: return nil
+        }
+    }
+
+    /// Esc as a key event, for a capture waiting for a key: Back gives it up as Esc does.
+    static let escapeEvent = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                                              characters: "\u{1b}", charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: UInt16(kVK_Escape))
+
+    /// A side button pressed: a key or chord being waited for is given up and a text field being
+    /// typed in lets go first, as Esc does; else the screens take it.
+    private func side(_ button: SideButton, in window: NSWindow?) {
+        if capture != nil || padCapture != nil {
+            if button == .back, let escape = Input.escapeEvent { _ = capture?(escape) }
+            return
+        }
+        if button == .back, let window, let text = window.firstResponder as? NSTextView, text.isEditable {
+            window.makeFirstResponder(nil)
+            return
+        }
+        sideButtonHandler?(button)
     }
 
     /// Whether a flagsChanged event is a modifier key going down rather than up.
