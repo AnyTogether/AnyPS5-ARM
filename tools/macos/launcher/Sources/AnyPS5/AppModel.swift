@@ -1513,8 +1513,8 @@ final class AppModel: ObservableObject {
                     try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: error.localizedDescription, titleID: game.titleID)
                 }
                 done(result)
-                // Ready without some of the dump's modules: which, and why.
-                if case .success = result, let text = AppModel.leftOutText(game, installer.leftOut) {
+                // Ready without some of the dump's modules: one short sentence.
+                if case .success = result, let text = AppModel.leftOutText(game.name, installer.leftOut) {
                     self.show(text, symbol: "exclamationmark.triangle.fill")
                 }
             }
@@ -1522,13 +1522,13 @@ final class AppModel: ObservableObject {
         return installer
     }
 
-    /// What an unlock that left modules of the dump out says once the game is ready: which files,
-    /// and why (still encrypted in the dump, or the relinker could not convert them).
-    static func leftOutText(_ game: Game, _ leftOut: [LeftOutModule]) -> String? {
+    /// What an unlock that left modules of the dump out says once the game is ready: one short
+    /// sentence, encrypted files first since dumping again fixes those. The files themselves are in
+    /// the unlock's log; a list of them here was too long to read before the notice went.
+    nonisolated static func leftOutText(_ name: String, _ leftOut: [LeftOutModule]) -> String? {
         guard !leftOut.isEmpty else { return nil }
-        let encrypted = leftOut.filter { $0.reason == .encrypted }.map(\.path)
-        let files = (encrypted.isEmpty ? leftOut.map(\.path) : encrypted).joined(separator: ", ")
-        return T.format(encrypted.isEmpty ? .unlockLeftOutNotRelinked : .unlockLeftOutEncrypted, game.name, files)
+        let encrypted = leftOut.contains { $0.reason == .encrypted }
+        return T.format(encrypted ? .unlockLeftOutEncrypted : .unlockLeftOutNotRelinked, name)
     }
 
     /// The update the Play prompt offers: unlock the game again, then start it.
