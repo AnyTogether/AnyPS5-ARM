@@ -53,6 +53,93 @@ public struct InstallError: LocalizedError {
     public var errorDescription: String? { message }
 }
 
+/// A tool that ended with an error: its exit code and what it printed. The relinker ends a
+/// failed conversion with `FAIL: <reason>` and, when one file caused it, `Input: <path>`.
+public struct ToolFailed: LocalizedError {
+    public let tool: String
+    public let code: Int32
+    /// Everything the tool printed (its last lines).
+    public let lines: [String]
+    /// Its working directory: an `Input:` path inside it is said relative to it, as the dump has
+    /// the file (the work folder it names is gone once the unlock stops).
+    public let directory: URL?
+
+    /// What it says, made while the work folder is there to resolve the `Input:` path against.
+    private let message: String
+
+    public init(tool: String, code: Int32, lines: [String], directory: URL? = nil) {
+        self.tool = tool
+        self.code = code
+        self.lines = lines
+        self.directory = directory
+        let fail = lines.lastIndex { $0.hasPrefix("FAIL:") }
+        let tail = fail.map { Array(lines[$0...]) } ?? (lines.last.map { [$0] } ?? [])
+        let shown = tail.map { line -> String in
+            guard let directory, line.hasPrefix("Input:") else { return line }
+            return "Input: " + ToolFailed.inside(line.dropFirst(6).trimmingCharacters(in: .whitespaces), directory)
+        }
+        message = "\(tool) failed (\(code))" + (shown.isEmpty ? "" : ": " + shown.joined(separator: "\n"))
+    }
+
+    private var failIndex: Int? { lines.lastIndex { $0.hasPrefix("FAIL:") } }
+
+    /// The lines that say what went wrong: from the last `FAIL:` line on, else the last line.
+    public var tail: [String] {
+        if let failIndex { return Array(lines[failIndex...]) }
+        return lines.last.map { [$0] } ?? []
+    }
+
+    /// The reason after `FAIL:`, nil when the tool printed none.
+    public var reason: String? {
+        failIndex.map { lines[$0].dropFirst(5).trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// The file the relinker names after its `FAIL:` line, nil when it names none.
+    public var input: String? {
+        guard let failIndex else { return nil }
+        return lines[(failIndex + 1)...].first { $0.hasPrefix("Input:") }.map { $0.dropFirst(6).trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// `path` relative to `folder` with / separators when it is inside it (links resolved, so
+    /// /var and /private/var are one), else as it is.
+    static func inside(_ path: String, _ folder: URL) -> String {
+        let file = URL(fileURLWithPath: path, relativeTo: folder).standardizedFileURL
+        for base in [folder.standardizedFileURL.path, folder.resolvingSymlinksInPath().standardizedFileURL.path] {
+            for candidate in [file.path, file.resolvingSymlinksInPath().path] where candidate.hasPrefix(base + "/") {
+                return String(candidate.dropFirst(base.count + 1))
+            }
+        }
+        return path
+    }
+
+    public var errorDescription: String? { message }
+}
+
+/// A module of the dump the unlock left out. The engine starts a game without a module it imports
+/// nothing from, answers the game's own load of it with an error, and uses its own library of
+/// that name where it has one (libSceNpCppWebApi); one the executable imports from and the engine
+/// lacks stops the game at its start.
+public struct LeftOutModule: Codable, Equatable, Sendable {
+    public enum Reason: String, Codable, Sendable {
+        /// Neither an ELF nor a SELF container that can be unwrapped: still encrypted in the dump.
+        case encrypted
+        /// The relinker could not convert it.
+        case notRelinked
+    }
+
+    /// Relative to the dump.
+    public let path: String
+    public let reason: Reason
+    /// The relinker's reason, or the unwrap's.
+    public let detail: String?
+
+    public init(_ path: String, _ reason: Reason, _ detail: String? = nil) {
+        self.path = path
+        self.reason = reason
+        self.detail = detail
+    }
+}
+
 /// Unlocks a game: unwraps its executable and modules, relinks them for macOS and makes the
 /// bundle the launcher starts, the same bundle tools/package_macos_app.py makes.
 public final class Installer: @unchecked Sendable {
@@ -74,6 +161,11 @@ public final class Installer: @unchecked Sendable {
     private var cancelled = false
     private var paused = false
     private var isBackground = false
+    private var leftOutModules: [LeftOutModule] = []
+    /// The dump's modules the last run left out (encrypted, or the relinker could not convert
+    /// them); the game was unlocked without them.
+    public var leftOut: [LeftOutModule] { lock.withLock { leftOutModules } }
+    private func leaveOut(_ module: LeftOutModule) { lock.withLock { leftOutModules.append(module) } }
     /// The free bytes on the games folder's drive (FreeSpace.available); replaceable in tests.
     public var freeSpace: @Sendable (URL) -> Int64? = { FreeSpace.available(at: $0) }
 
@@ -302,6 +394,7 @@ public final class Installer: @unchecked Sendable {
         let space = Installer.plan(game: game, toolkit: toolkit, root: root)
         if let shortage = space.shortage(free: freeSpace(root), volume: FreeSpace.volumeName(at: root)) { throw shortage }
 
+        lock.withLock { leftOutModules = [] }
         let modules = Installer.modules(of: game)
         let key = Installer.relinkKey(game: game, toolkit: toolkit, modules: modules)
         let keeps = Installer.keepsRelinks(root: root)
@@ -310,6 +403,7 @@ public final class Installer: @unchecked Sendable {
             // Nothing the relinker depends on changed since the last unlock: its output is reused.
             log("\(game.titleID): the executable and modules are unchanged, the relinked ones are reused")
             relinked = reusable
+            for module in Installer.keptLeftOut(reusable) { leaveOut(module) }
             progress(.unwrap, 1)
             progress(.relink, 1)
         } else {
@@ -317,13 +411,15 @@ public final class Installer: @unchecked Sendable {
             progress(.unwrap, 0)
             let source = work.appendingPathComponent("source")
             try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
+            // Only what the dump holds goes in: a fresh folder each time, the output beside it.
             let inputs = [URL(fileURLWithPath: "eboot.bin")] + modules
+            var placed: [String] = []
             for (index, relative) in inputs.enumerated() {
                 try checkCancelled()
                 let original = Installer.source(relative, of: game)
                 let target = source.appendingPathComponent(relative.relativePath)
                 try fileManager.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try unwrap(original, to: target)
+                if try unwrap(original, to: target, relative: relative.relativePath), index > 0 { placed.append(relative.relativePath) }
                 progress(.unwrap, Double(index + 1) / Double(inputs.count))
             }
 
@@ -332,11 +428,25 @@ public final class Installer: @unchecked Sendable {
             let output = work.appendingPathComponent("out")
             let estimate = RelinkProgress()
             let moduleDirectories = Installer.moduleDirectories(modules).flatMap { ["--module-dir", $0] }
-            try runTool(toolkit.relinker, ["--macos", "--to-rosetta"] + moduleDirectories + ["eboot.bin", output.appendingPathComponent("eboot").path], in: source) { segment in
-                if let fraction = estimate.read(segment) { self.progress(.relink, fraction) }
+            // A module the relinker cannot convert is left out and the relink runs again: the
+            // game starts without it, as without an encrypted one. A failure in the executable stops.
+            while true {
+                do {
+                    try runTool(toolkit.relinker, ["--macos", "--to-rosetta"] + moduleDirectories + ["eboot.bin", output.appendingPathComponent("eboot").path], in: source) { segment in
+                        if let fraction = estimate.read(segment) { self.progress(.relink, fraction) }
+                    }
+                    break
+                } catch let failure as ToolFailed {
+                    guard let module = Installer.failedModule(failure, source: source, modules: placed) else { throw failure }
+                    placed.removeAll { $0 == module }
+                    try? fileManager.removeItem(at: source.appendingPathComponent(module))
+                    try? fileManager.removeItem(at: output)
+                    leaveOut(LeftOutModule(module, .notRelinked, failure.reason))
+                    log("\(module): the relinker could not convert it (\(failure.reason ?? "")); it is left out and the relink runs again without it")
+                }
             }
             guard fileManager.fileExists(atPath: output.appendingPathComponent("eboot").path) else { throw InstallError("relinker wrote no executable") }
-            relinked = keeps ? Installer.keep(output, key: key, for: game, root: root) : output
+            relinked = keeps ? Installer.keep(output, key: key, leftOut: leftOut, for: game, root: root) : output
             progress(.relink, 1)
         }
 
@@ -350,7 +460,8 @@ public final class Installer: @unchecked Sendable {
         let app0 = resources.appendingPathComponent("game/app0")
         try fileManager.createDirectory(at: macOS.appendingPathComponent("libs"), withIntermediateDirectories: true)
         try fileManager.createDirectory(at: app0, withIntermediateDirectories: true)
-        try cloneTree(game.folder, into: app0, linkWithoutClone: true) { fraction in self.progress(.copy, fraction) }
+        // A relinker's output left in the dump is from another relink: only this one's goes in.
+        try cloneTree(game.folder, into: app0, linkWithoutClone: true, skip: Installer.isRelinkerOutput) { fraction in self.progress(.copy, fraction) }
         let guestModules = relinked.appendingPathComponent("app0")
         if fileManager.fileExists(atPath: guestModules.path) { try cloneTree(guestModules, into: app0) { _ in } }
         try linkGuestModuleLibraries(in: app0)
@@ -417,13 +528,30 @@ public final class Installer: @unchecked Sendable {
 
     /// Moves the relinker's output into the store for the next unlock (a rename on the same
     /// drive) and returns where it is now; where that fails, it stays in the work folder.
-    static func keep(_ output: URL, key: String, for game: Game, root: URL) -> URL {
+    /// Beside the kept output: the modules its relink left out, said again when it is reused.
+    static let leftOutName = "left-out.json"
+
+    static func keptLeftOut(_ out: URL) -> [LeftOutModule] {
+        guard let data = try? Data(contentsOf: out.deletingLastPathComponent().appendingPathComponent(leftOutName)) else { return [] }
+        return (try? JSONDecoder().decode([LeftOutModule].self, from: data)) ?? []
+    }
+
+    /// The module of the source tree `source` the relinker named in `failure`, relative to it;
+    /// nil when it named none, or the executable.
+    static func failedModule(_ failure: ToolFailed, source: URL, modules: [String]) -> String? {
+        guard let input = failure.input else { return nil }
+        let relative = ToolFailed.inside(input, source)
+        return modules.first { $0 == relative }
+    }
+
+    static func keep(_ output: URL, key: String, leftOut: [LeftOutModule] = [], for game: Game, root: URL) -> URL {
         let fileManager = FileManager.default
         let kept = keptRelink(for: game, root: root)
         try? fileManager.removeItem(at: kept)
         do {
             try fileManager.createDirectory(at: kept, withIntermediateDirectories: true)
             try fileManager.moveItem(at: output, to: kept.appendingPathComponent("out"))
+            if !leftOut.isEmpty, let json = try? JSONEncoder().encode(leftOut) { try? json.write(to: kept.appendingPathComponent(leftOutName)) }
             try key.write(to: kept.appendingPathComponent("key.txt"), atomically: true, encoding: .utf8)
             return kept.appendingPathComponent("out")
         } catch {
@@ -502,7 +630,16 @@ public final class Installer: @unchecked Sendable {
         }
     }
 
-    /// Every .prx and .sprx of the dump outside sce_sys, relative to its folder.
+    /// The suffix the relinker gives the modules it converts (libX.prx becomes libX.prx.guest.prx).
+    static let guestSuffix = ".guest.prx"
+
+    /// Whether the file `name` is a module the relinker wrote, never one of its inputs.
+    static func isRelinkerOutput(_ name: String) -> Bool {
+        (name as NSString).lastPathComponent.lowercased().hasSuffix(guestSuffix)
+    }
+
+    /// Every .prx and .sprx of the dump outside sce_sys, relative to its folder; a relinker's
+    /// output (isRelinkerOutput) is left out.
     static func modules(in folder: URL) -> [URL] {
         guard let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey], options: [.skipsHiddenFiles]) else { return [] }
         var found: [URL] = []
@@ -517,7 +654,9 @@ public final class Installer: @unchecked Sendable {
             // Nothing below the third level counts: a game's thousands of data files are not walked.
             if depth == 3, (try? file.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true { enumerator.skipDescendants(); continue }
             let name = file.lastPathComponent.lowercased()
-            guard name.hasSuffix(".prx") || name.hasSuffix(".sprx") else { continue }
+            // A relinker's output left in the dump (a relink by hand writes them into app0's
+            // sce_module, the dump's own folder) is no module of the game.
+            guard name.hasSuffix(".prx") || name.hasSuffix(".sprx"), !Installer.isRelinkerOutput(name) else { continue }
             found.append(URL(fileURLWithPath: relative))
         }
         return found.sorted { $0.relativePath < $1.relativePath }
@@ -557,30 +696,45 @@ public final class Installer: @unchecked Sendable {
         }
     }
 
-    /// An ELF as it is, a re-signed one from its .esbak, a SELF container unwrapped.
-    func unwrap(_ original: URL, to target: URL) throws {
+    /// An ELF as it is, a re-signed one from its .esbak, a SELF container unwrapped. A module
+    /// (`relative` other than eboot.bin) still encrypted in the dump is left out (leftOut) and
+    /// false returned: the engine starts a game without one of its modules (the game gets an
+    /// error when it loads it), while it cannot start one without its executable.
+    @discardableResult
+    func unwrap(_ original: URL, to target: URL, relative: String = "eboot.bin") throws -> Bool {
+        let executable = relative == "eboot.bin"
+        var refused: String?
         if Elf.isElf(original) {
             try FileManager.default.copyItem(at: original, to: target)
+            return true
         } else if Elf.isElf(original.appendingPathExtension("esbak")) {
             try FileManager.default.copyItem(at: original.appendingPathExtension("esbak"), to: target)
             log(original.lastPathComponent + ": from .esbak")
+            return true
         } else if SelfUnwrap.isContainer(original) {
             do {
                 let size = try SelfUnwrap.unwrap(original, to: target)
                 log(original.lastPathComponent + ": unwrapped, \(size) bytes")
+                return true
             } catch {
-                throw InstallError(original.lastPathComponent + ": " + error.localizedDescription)
+                if executable { throw InstallError(original.lastPathComponent + ": " + error.localizedDescription) }
+                refused = error.localizedDescription
+                try? FileManager.default.removeItem(at: target)
             }
-        } else {
-            throw InstallError(original.lastPathComponent + " is neither an ELF nor a decrypted SELF container (an encrypted dump cannot be used)")
         }
+        if executable {
+            throw InstallError("eboot.bin in the dump is encrypted (neither an ELF nor a decrypted SELF container): dump the game again with a dumper that decrypts it")
+        }
+        leaveOut(LeftOutModule(relative, .encrypted, refused))
+        log("\(relative) in the dump is encrypted (\(refused ?? "neither an ELF nor a decrypted SELF container")): it is left out, and the game is unlocked without it")
+        return false
     }
 
     /// Copies a tree with clonefile where the volume allows it, reporting the share of bytes done.
-    func cloneTree(_ source: URL, into target: URL, linkWithoutClone: Bool = false, progress: (Double) -> Void) throws {
+    func cloneTree(_ source: URL, into target: URL, linkWithoutClone: Bool = false, skip: ((String) -> Bool)? = nil, progress: (Double) -> Void) throws {
         let link = linkWithoutClone && !Installer.clones(from: source, to: target)
         if link { log("\(game.titleID): the games folder cannot clone, so the game links to its dump instead of copying it") }
-        try Installer.copyTree(source, into: target, link: link, cancelled: checkCancelled, progress: progress)
+        try Installer.copyTree(source, into: target, link: link, skip: skip, cancelled: checkCancelled, progress: progress)
     }
 
     /// Whether files from `source` can be cloned into `target`: on one volume that clones (APFS),
@@ -596,7 +750,7 @@ public final class Installer: @unchecked Sendable {
     /// is not possible), or with `link`, a link to the source file, so nothing takes space twice
     /// on a disk that cannot clone. The game only reads its files, as /app0 is read-only on the
     /// console, so a link serves as well as a copy; the dump has to stay where it is.
-    static func copyTree(_ source: URL, into target: URL, link: Bool, cancelled: () throws -> Void, progress: (Double) -> Void) throws {
+    static func copyTree(_ source: URL, into target: URL, link: Bool, skip: ((String) -> Bool)? = nil, cancelled: () throws -> Void, progress: (Double) -> Void) throws {
         let fileManager = FileManager.default
         let base = source.resolvingSymlinksInPath().standardizedFileURL.path
         var files: [(URL, String, Int64)] = []
@@ -611,6 +765,8 @@ public final class Installer: @unchecked Sendable {
             if values.isDirectory == true {
                 try fileManager.createDirectory(at: target.appendingPathComponent(relative), withIntermediateDirectories: true)
             } else {
+                // A file `skip` names is left out (a relinker's output left in the dump).
+                if skip?(relative) == true { continue }
                 let size = Int64(values.fileSize ?? 0)
                 files.append((item, relative, size))
                 total += size
@@ -708,7 +864,7 @@ public final class Installer: @unchecked Sendable {
         if wasCancelled { throw CancellationError() }
         guard process.terminationStatus == 0 else {
             if quiet { for line in collected.lines { log(line) } }
-            throw InstallError("\(tool.lastPathComponent) failed (\(process.terminationStatus)): \(collected.lines.last ?? "")")
+            throw ToolFailed(tool: tool.lastPathComponent, code: process.terminationStatus, lines: collected.lines, directory: directory)
         }
     }
 

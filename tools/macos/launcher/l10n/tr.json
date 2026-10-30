@@ -167,6 +167,8 @@
   "hintBack": "Geri",
   "hintOptions": "Seçenekler",
   "unlockFailed": "Kilit açılamadı",
+  "unlockLeftOutEncrypted": "%@, %@ olmadan hazır: dosya dump'ta şifreli. Oyun açılmazsa şifreyi çözen bir dumper ile yeniden dump al.",
+  "unlockLeftOutNotRelinked": "%@, %@ olmadan hazır: AnyPS5 bu dosyayı dönüştüremedi, varsa AnyPS5'in aynı adlı kendi kütüphanesi kullanılır.",
   "startFailed": "Oyun başlatılamadı",
   "gameEnded": "Oyun kapandı",
   "logTitle": "Günlük",

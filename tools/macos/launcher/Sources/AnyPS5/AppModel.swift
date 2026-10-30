@@ -1513,9 +1513,22 @@ final class AppModel: ObservableObject {
                     try? GameLog.writeUnlockLog(self.installLog[id] ?? [], failure: error.localizedDescription, titleID: game.titleID)
                 }
                 done(result)
+                // Ready without some of the dump's modules: which, and why.
+                if case .success = result, let text = AppModel.leftOutText(game, installer.leftOut) {
+                    self.show(text, symbol: "exclamationmark.triangle.fill")
+                }
             }
         }
         return installer
+    }
+
+    /// What an unlock that left modules of the dump out says once the game is ready: which files,
+    /// and why (still encrypted in the dump, or the relinker could not convert them).
+    static func leftOutText(_ game: Game, _ leftOut: [LeftOutModule]) -> String? {
+        guard !leftOut.isEmpty else { return nil }
+        let encrypted = leftOut.filter { $0.reason == .encrypted }.map(\.path)
+        let files = (encrypted.isEmpty ? leftOut.map(\.path) : encrypted).joined(separator: ", ")
+        return T.format(encrypted.isEmpty ? .unlockLeftOutNotRelinked : .unlockLeftOutEncrypted, game.name, files)
     }
 
     /// The update the Play prompt offers: unlock the game again, then start it.
