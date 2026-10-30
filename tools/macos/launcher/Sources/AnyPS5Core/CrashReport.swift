@@ -104,6 +104,7 @@ extension GameSettings {
         parts.append(fullscreen ? "Fullscreen" : "Windowed \(windowSize)%")
         parts.append("V-sync " + (vsync || frameGeneration == true ? "on" : "off"))
         parts.append("Frame generation " + (frameGeneration == true ? "on" : "off"))
+        parts.append(upscaler == .fsr1 ? String(format: "Upscaling FSR 1 (sharpness %.1f)", sharpness) : "Upscaling bilinear")
         let corners: [Overlay: String] = [.topLeft: "top left", .topRight: "top right", .bottomLeft: "bottom left", .bottomRight: "bottom right"]
         parts.append(corners[overlay].map { "Overlay \($0) (\(style.rawValue))" } ?? "Overlay off")
         parts.append("Language " + (language.map { number in ConsoleLanguage.all.first { $0.number == number }.map { "\($0.name) (\(number))" } ?? "\(number)" } ?? "follows the launcher"))

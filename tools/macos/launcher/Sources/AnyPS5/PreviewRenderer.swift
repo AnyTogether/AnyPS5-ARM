@@ -103,6 +103,11 @@ enum PreviewRenderer {
             if let game = model.selectedGame { model.previewStarting(game) }
         }
         render(preferences, found, root, still, output.appendingPathComponent("game-settings.png")) { model in signedIn(model); model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1 }
+        render(preferences, found, root, still, output.appendingPathComponent("game-settings-fsr.png")) { model in
+            signedIn(model)
+            if let game = model.selectedGame { model.update(game) { $0.upscaler = .fsr1 } }
+            model.overlay = .gameSettings; model.panelInRows = true; model.panelRow = 1
+        }
         render(preferences, found, root, still, output.appendingPathComponent("controls.png")) { model in signedIn(model); model.overlay = .controls; model.panelInRows = true; model.panelRow = 1 }
         render(preferences, found, root, still, output.appendingPathComponent("controls-gyro.png")) { model in
             signedIn(model)

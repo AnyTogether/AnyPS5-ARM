@@ -107,6 +107,23 @@ public struct GameSettings: Codable, Equatable, Sendable {
     /// A generated frame between each two of the game's (ANYPS5_FRAME_GEN), with vertical sync;
     /// nil is off.
     public var frameGeneration: Bool?
+    /// How the game's image is brought up to a larger window (ANYPS5_UPSCALER): bilinear, or AMD
+    /// FidelityFX Super Resolution 1, which only helps where the game renders below the window.
+    public enum Upscaler: String, Codable, CaseIterable, Sendable {
+        case bilinear, fsr1
+    }
+    /// nil is bilinear.
+    public var upscaler: Upscaler?
+    /// FSR 1's sharpening in AMD's stops (ANYPS5_FSR_SHARPNESS): 0 is the sharpest, each stop
+    /// halves it; nil is AMD's 0.2.
+    public var fsrSharpness: Double?
+    public static let defaultFsrSharpness = 0.2
+    public static let fsrSharpnessRange = 0.0...2.0
+    /// The sharpness a start passes, within the range and to a tenth of a stop.
+    public var sharpness: Double {
+        let value = min(Self.fsrSharpnessRange.upperBound, max(Self.fsrSharpnessRange.lowerBound, fsrSharpness ?? Self.defaultFsrSharpness))
+        return (value * 10).rounded() / 10
+    }
     /// The console language number (ANYPS5_LANGUAGE), nil to follow the launcher's language.
     public var language: Int?
     /// Keys moved from the launcher's layout (Controls), by pad action. Optional so settings saved
@@ -131,7 +148,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case settingsVersion, ownDisplay
         case resolution, ownFullscreen = "fullscreen", ownWindowSize = "windowSize", ownVsync = "vsync"
-        case overlay, overlayStyle, frameGeneration, language, controls, tuning, shaderCache, phoneLayout, engine, trace, gyro
+        case overlay, overlayStyle, frameGeneration, upscaler, fsrSharpness, language, controls, tuning, shaderCache, phoneLayout, engine, trace, gyro
     }
 
     /// The JSONEncoder of the launcher's own preferences sets this: there every display key is
@@ -165,6 +182,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
         overlay = try container.decodeIfPresent(Overlay.self, forKey: .overlay) ?? .off
         overlayStyle = try container.decodeIfPresent(OverlayStyle.self, forKey: .overlayStyle)
         frameGeneration = try container.decodeIfPresent(Bool.self, forKey: .frameGeneration)
+        upscaler = (try? container.decodeIfPresent(Upscaler.self, forKey: .upscaler)) ?? nil
+        fsrSharpness = (try? container.decodeIfPresent(Double.self, forKey: .fsrSharpness)) ?? nil
         language = try container.decodeIfPresent(Int.self, forKey: .language)
         controls = try container.decodeIfPresent([String: [String]].self, forKey: .controls)
         tuning = try container.decodeIfPresent(InputTuning.self, forKey: .tuning)
@@ -193,6 +212,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
         try container.encode(overlay, forKey: .overlay)
         try container.encodeIfPresent(overlayStyle, forKey: .overlayStyle)
         try container.encodeIfPresent(frameGeneration, forKey: .frameGeneration)
+        try container.encodeIfPresent(upscaler, forKey: .upscaler)
+        try container.encodeIfPresent(fsrSharpness, forKey: .fsrSharpness)
         try container.encodeIfPresent(language, forKey: .language)
         try container.encodeIfPresent(controls, forKey: .controls)
         try container.encodeIfPresent(tuning, forKey: .tuning)
@@ -231,6 +252,10 @@ public struct GameSettings: Codable, Equatable, Sendable {
         if let fonts { environment["ANYPS5_SYSTEM_FONTS"] = fonts.path }
         if shaderCache == false { environment["ANYPS5_NO_SHADER_CACHE"] = "1" }
         if frameGeneration == true { environment["ANYPS5_FRAME_GEN"] = "1" }
+        if upscaler == .fsr1 {
+            environment["ANYPS5_UPSCALER"] = Upscaler.fsr1.rawValue
+            environment["ANYPS5_FSR_SHARPNESS"] = String(format: "%.1f", sharpness)
+        }
         if let aim = gyro?.environment { environment["ANYPS5_GYRO_AIM"] = aim }
         if trace || self.trace == true { environment.merge(TraceMode.environment) { own, _ in own } }
         return environment
