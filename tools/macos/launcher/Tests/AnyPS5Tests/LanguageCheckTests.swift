@@ -77,6 +77,27 @@ final class LanguageCheckTests: XCTestCase {
         XCTAssertEqual(enums, listed)
     }
 
+    func testAGameReadyWithoutSomeFilesSaysSoInOneShortSentenceWithoutTheFiles() {
+        let saved = T.language
+        defer { T.language = saved }
+        T.language = .english
+        XCTAssertNil(AppModel.leftOutText("Orbit Runner", []))
+        XCTAssertEqual(
+            AppModel.leftOutText("Orbit Runner", [
+                LeftOutModule("sce_module/libSceNpCppWebApi.prx", .notRelinked, "bad"),
+                LeftOutModule("sce_module/libSceNpWebApi.prx", .notRelinked, "bad"),
+            ]),
+            "Orbit Runner is ready. A few of its files could not be converted and were left out."
+        )
+        XCTAssertEqual(
+            AppModel.leftOutText("Orbit Runner", [
+                LeftOutModule("sce_module/libSceNpCppWebApi.prx", .notRelinked),
+                LeftOutModule("sce_module/libSceFace.prx", .encrypted),
+            ]),
+            "Orbit Runner is ready, but some of its files are encrypted in the dump. If it does not start, dump it again."
+        )
+    }
+
     func testFormatsFillTheirArgumentsInBothLanguages() {
         let saved = T.language
         defer { T.language = saved }
