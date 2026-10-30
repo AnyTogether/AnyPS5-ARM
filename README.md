@@ -77,6 +77,7 @@ Each game keeps its own settings, applied at every start:
 - **Window or full screen**, and the window size.
 - **Vertical sync.**
 - **Frame generation** (experimental): a frame made between each two of the game's, from the motion between them, so a 60 fps game shows 120 on a 120 Hz display. It needs vertical sync and turns itself off where it would cost the game frames (a 60 Hz display, or Low Power Mode, which holds the display at 60 Hz).
+- **Upscaling: Bilinear or FSR 1.** With AMD FidelityFX Super Resolution 1 (EASU upscaling, then RCAS sharpening) a game image smaller than the window is brought up to the window sharp instead of blurred. It only pays where the game renders below the window, so pair it with a lower **Output resolution** (1280x720 in a 1080p window, say) for more frames on a weaker Mac. **FSR Sharpness** is in AMD's stops, 0 the sharpest and 2 the softest (0.2 by default). With frame generation on, the frame is upscaled first and the generated frames are made from the upscaled ones. Without the launcher: `ANYPS5_UPSCALER=fsr1` and `ANYPS5_FSR_SHARPNESS=0.2`; FSR 1 works on SDR output and leaves an HDR10 presentation bilinear.
 - **Controls** (below).
 - **Trophies** (below).
 - **Advanced** (below).
@@ -352,6 +353,7 @@ Each branch is its own project, with its own README:
 - **[AnyPS5](https://github.com/boykopovar/AnyPS5) by boykopovar** is where the core comes from: the relinker that turns a PS5 executable into a native program and the reimplemented system libraries. AnyPS5-ARM is its port to Apple silicon Macs, and every engine feature here starts from that work.
 - **[mugurc's community macOS port](https://github.com/mugurc/AnyPS5/tree/macos-port)** of AnyPS5 is the port AnyPS5-ARM builds on.
 - **[MoltenVK](https://github.com/KhronosGroup/MoltenVK)** (Khronos, Apache-2.0) runs the PS5 graphics driver's Vulkan on Metal, and **[SDL](https://github.com/libsdl-org/SDL)** (zlib) reads the controllers in games and in AnyLauncher Port.
+- **[AMD FidelityFX Super Resolution 1](https://github.com/GPUOpen-Effects/FidelityFX-FSR)** (Copyright (c) 2021 Advanced Micro Devices, Inc., MIT) is the FSR 1 upscaler: its `ffx_a.h` and `ffx_fsr1.h` are in [3rdparty/FidelityFX-FSR](3rdparty/FidelityFX-FSR) unchanged, with AMD's licence.
 
 **Online play**
 

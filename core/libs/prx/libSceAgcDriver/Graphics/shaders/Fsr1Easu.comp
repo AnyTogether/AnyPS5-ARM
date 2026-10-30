@@ -1,0 +1,38 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+
+// AMD FidelityFX Super Resolution 1 (EASU), from 3rdparty/FidelityFX-FSR (MIT, Copyright (c) 2021
+// Advanced Micro Devices, Inc.): the source image upscaled to `size`.
+
+#define A_GPU 1
+#define A_GLSL 1
+#include "ffx_a.h"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D source;
+#ifdef WIDE
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D target;
+#else
+layout(set = 0, binding = 1, rgba8) uniform writeonly image2D target;
+#endif
+layout(push_constant) uniform Constants {
+    uvec4 con0;
+    uvec4 con1;
+    uvec4 con2;
+    uvec4 con3;
+    uvec2 size;
+} constants;
+
+#define FSR_EASU_F 1
+AF4 FsrEasuRF(AF2 p) { return textureGather(source, p, 0); }
+AF4 FsrEasuGF(AF2 p) { return textureGather(source, p, 1); }
+AF4 FsrEasuBF(AF2 p) { return textureGather(source, p, 2); }
+#include "ffx_fsr1.h"
+
+void main() {
+    uvec2 pixel = gl_GlobalInvocationID.xy;
+    if (any(greaterThanEqual(pixel, constants.size))) return;
+    AF3 color;
+    FsrEasuF(color, pixel, constants.con0, constants.con1, constants.con2, constants.con3);
+    imageStore(target, ivec2(pixel), vec4(color, 1.0));
+}

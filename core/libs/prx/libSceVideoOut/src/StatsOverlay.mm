@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 extern "C" std::uint64_t AgcDriverGeneratedFrames_nid_postfix();
+extern "C" std::uint64_t AgcDriverUpscaledSource_nid_postfix();
 extern "C" bool AgcDriverMinimalOverlayShown_nid_postfix();
 extern "C" int AgcDriverOverlayCorner_nid_postfix();
 extern "C" std::uint64_t AgcDriverProcessFootprint_nid_postfix();
@@ -61,6 +62,7 @@ struct Figures {
     double fps = 0;
     // Frames generated between the game's, per second (frame generation); fps counts them too.
     double generated = 0;
+    std::uint64_t upscaled = 0;
     double frameMs = 0;
     std::optional<double> gpu;
     double cpu = 0;
@@ -84,6 +86,7 @@ struct Sampler {
         Figures figures;
         const auto generated = AgcDriverGeneratedFrames_nid_postfix();
         figures.generated = static_cast<double>(generated - generatedSince) / seconds;
+        figures.upscaled = AgcDriverUpscaledSource_nid_postfix();
         figures.fps = static_cast<double>(frames) / seconds + figures.generated;
         figures.frameMs = frames > 0 ? seconds * 1000.0 / static_cast<double>(frames) : 0;
         generatedSince = generated;
@@ -136,6 +139,7 @@ NSAttributedString* Line(const Figures& figures) {
     NSColor* health = figures.fps >= 55 ? Green() : figures.fps >= 28 ? Amber() : Red();
     item(@"FPS", [NSString stringWithFormat:@"%.0f", figures.fps], nil, health);
     if (figures.generated >= 0.5) item(@"FG", [NSString stringWithFormat:@"+%.0f", figures.generated], nil, white);
+    if (figures.upscaled != 0) item(@"FSR", [NSString stringWithFormat:@"%llu\u00d7%llu", static_cast<unsigned long long>(figures.upscaled >> 32), static_cast<unsigned long long>(figures.upscaled & 0xffffffffu)], nil, white);
     item(nil, [NSString stringWithFormat:@"%.1f", figures.frameMs], @" ms", white);
     if (figures.gpu) item(@"GPU", [NSString stringWithFormat:@"%.0f", *figures.gpu], @" %", white);
     item(@"CPU", [NSString stringWithFormat:@"%.0f", figures.cpu], @" %", white);

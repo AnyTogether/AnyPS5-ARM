@@ -25,6 +25,8 @@
 #include "prx/libSceAgcDriver/Execution/include/SubgroupClock.hpp"
 #include "prx/libSceAgcDriver/Execution/include/ShaderDeviceProfile.hpp"
 #include "prx/libSceAgcDriver/Execution/include/FrameGeneration.hpp"
+#include "prx/libSceAgcDriver/Execution/include/Fsr1Upscaler.hpp"
+#include "prx/libSceAgcDriver/Execution/include/UpscalerSetting.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PowerControl.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PresentMode.hpp"
 #include "prx/libSceAgcDriver/Execution/include/SwapchainImages.hpp"
@@ -351,6 +353,17 @@ bool PrepareFrameGeneration(VkSwapchainCreateInfoKHR& create, const VkSurfaceCap
     return true;
 }
 
+const UpscalerSetting& RequestedUpscaler() {
+    static const UpscalerSetting setting = [] {
+        const auto requested = UpscalerRequested(std::getenv("ANYPS5_UPSCALER"), std::getenv("ANYPS5_FSR_SHARPNESS"));
+        if (requested.upscaler == Upscaler::Fsr1) std::fprintf(stderr, "[present] upscaling: FSR 1 (sharpness %.2f) where the game's image is smaller than the window\n", requested.sharpness);
+        return requested;
+    }();
+    return setting;
+}
+
+std::atomic<std::uint64_t> upscaledSource{0};
+
 }
 
 struct VulkanDevice::State {
@@ -379,6 +392,8 @@ struct VulkanDevice::State {
     FrameGenerationGovernor frameGenerationGovernor;
     bool frameGenerationShown = false;
     bool frameGenerationPaused = false;
+    std::unique_ptr<Fsr1Upscaler> upscaler;
+    bool upscalerFailed = false;
     bool realPending = false;
     VkFence realFence = VK_NULL_HANDLE;
     bool realAcquired = false;
@@ -966,6 +981,7 @@ struct VulkanDevice::State {
             colorTransfer.reset();
             overlay.reset();
             frameGenerator.reset();
+            upscaler.reset();
             planePass.reset();
             keyboard.reset();
             presentation.reset();
@@ -2327,6 +2343,7 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
         swapchain.presentMode = state->presentMode;
         swapchain.clipped = VK_FALSE;
         state->frameGeneration = PrepareFrameGeneration(swapchain, surface);
+        static_cast<void>(RequestedUpscaler());
         check(state->DeviceFunction<PFN_vkCreateSwapchainKHR>("vkCreateSwapchainKHR")(state->device, &swapchain, nullptr, &state->swapchain), "vkCreateSwapchainKHR");
         std::uint32_t imageCount = 0;
         auto getImages = state->DeviceFunction<PFN_vkGetSwapchainImagesKHR>("vkGetSwapchainImagesKHR");
@@ -3216,6 +3233,7 @@ void VulkanDevice::recreateSwapchain(std::uint32_t width, std::uint32_t height, 
     create.presentMode = state->presentMode;
     create.oldSwapchain = state->swapchain;
     state->frameGeneration = PrepareFrameGeneration(create, surface);
+    static_cast<void>(RequestedUpscaler());
     // An image acquired for the game's frame after a generated one belongs to the retired swapchain.
     state->realAcquired = false;
     state->realPending = false;
@@ -3726,6 +3744,34 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
     if (state->presentSlots[state->presentCursor].inFlight) RetirePresents(state->presentSlots.size() - 1);
     auto& slot = state->presentSlots[state->presentCursor];
     require(!slot.inFlight, "presentation slot is still in flight");
+    const auto fitted = clearOnly ? AspectFitRect{} : ComputeContainRect_nid_postfix(width, height, state->extent.width, state->extent.height);
+    const auto upscale = [&] {
+        if (clearOnly || uniform != nullptr || state->upscalerFailed || RequestedUpscaler().upscaler != Upscaler::Fsr1) return false;
+        const VkExtent2D source{width, height};
+        const VkExtent2D output{fitted.width, fitted.height};
+        if (!Fsr1Upscaler::Upscales(source, output)) return false;
+        if (passthrough || state->surfaceColorSpace != VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+            static std::once_flag told;
+            std::call_once(told, [] { std::fprintf(stderr, "[present] FSR 1 upscales SDR output only; an HDR10 presentation is scaled bilinearly\n"); });
+            return false;
+        }
+        if (drawn && dumpFrame && (state->nextDumpScreenshot ? 1u : DumpScale()) != 1u) return false;
+        if (state->upscaler && state->upscaler->Matches(source, output)) return true;
+        try {
+            if (state->upscaler) RetirePresents(0);
+            else state->upscaler = std::make_unique<Fsr1Upscaler>(graphicsContext(), state->surfaceFormat, RequestedUpscaler().sharpness);
+            state->upscaler->Resize(source, output);
+            std::fprintf(stderr, "[present] FSR 1: %ux%u upscaled to %ux%u\n", width, height, output.width, output.height);
+        } catch (const std::exception& error) {
+            state->upscalerFailed = true;
+            state->upscaler.reset();
+            std::fprintf(stderr, "[present] FSR 1 off, scaling bilinearly: %s\n", error.what());
+            return false;
+        }
+        return true;
+    }();
+    const bool drawnToWindow = drawn && !upscale;
+    if (!clearOnly) upscaledSource.store(upscale ? static_cast<std::uint64_t>(width) << 32 | height : 0, std::memory_order_relaxed);
     // The minimal overlay is the window's to draw, not the frame's.
     const bool overlay = PerformanceOverlay::Visible() && PerformanceOverlay::Style() == OverlayStyle::Detailed;
     if (plane != nullptr && state->surfaceColorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT) {
@@ -3809,7 +3855,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         bindPlane();
         state->planePass->RecordOverlay(commands, planeSlot, image, format, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR, extent, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     };
-    if (!drawn) {
+    if (!drawnToWindow) {
         pipelineBarrier(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         Graphics::Recorder::CountBarriers(CommandClass::PresentBlit);
     }
@@ -3856,10 +3902,17 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
         }
         if (drawn) {
             state->presentation->Bind(slotIndex, resident->Image(), width, height, display->pixelFormat, whiteNits, residentLayer);
-            state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawsOver ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            if (drawnToWindow) {
+                state->presentation->RecordPresent(commands, slotIndex, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawsOver ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+            } else {
+                state->presentation->RecordDumpImage(commands, slotIndex, 1);
+                scaler->RecordLetterbox(commands, width, height, barrier.image, state->extent.width, state->extent.height);
+                state->upscaler->Record(commands, state->presentation->DumpImage(slotIndex), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, 0, barrier.image, {fitted.x, fitted.y});
+            }
         } else {
             scaler->RecordLetterbox(commands, width, height, barrier.image, state->extent.width, state->extent.height);
-            if (direct) PresentationScaler::RecordBlitFrom(graphicsContext(), commands, resident->Image(), VK_IMAGE_LAYOUT_GENERAL, width, height, residentFilter, barrier.image, state->extent.width, state->extent.height, residentLayer);
+            if (upscale) state->upscaler->Record(commands, direct ? resident->Image() : scaler->SourceImage(), direct ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, direct ? residentLayer : 0, barrier.image, {fitted.x, fitted.y});
+            else if (direct) PresentationScaler::RecordBlitFrom(graphicsContext(), commands, resident->Image(), VK_IMAGE_LAYOUT_GENERAL, width, height, residentFilter, barrier.image, state->extent.width, state->extent.height, residentLayer);
             else scaler->RecordBlit(commands, barrier.image, state->extent.width, state->extent.height);
         }
         if (dumpFrame) {
@@ -3877,7 +3930,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
             const auto dumpBytes = static_cast<std::size_t>(slot.dumpWidth) * slot.dumpHeight * 4;
             if (!slot.dumpBuffer || slot.dumpBuffer->Bytes().size() != dumpBytes) slot.dumpBuffer = std::make_unique<Graphics::Buffer>(graphicsContext(), dumpBytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT);
             if (drawn) {
-                state->presentation->RecordDumpImage(commands, slotIndex, scale);
+                if (!upscale) state->presentation->RecordDumpImage(commands, slotIndex, scale);
                 blendPlaneInto(state->presentation->DumpImage(slotIndex), VK_FORMAT_B8G8R8A8_UNORM, state->presentation->DumpImageExtent(slotIndex));
                 state->presentation->RecordDumpReadback(commands, slotIndex, slot.dumpBuffer->Handle());
             } else if (direct) {
@@ -3900,7 +3953,7 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
     }
     if (plane != nullptr) {
         bindPlane();
-        state->planePass->RecordOverlay(commands, planeSlot, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawn ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, overlay || keyboard ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+        state->planePass->RecordOverlay(commands, planeSlot, barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawnToWindow ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, overlay || keyboard ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
         if (planeSource.resident != nullptr) {
             planeBarrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
             planeBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -3910,13 +3963,13 @@ bool VulkanDevice::present(std::uint32_t width, std::uint32_t height, bool opaqu
     }
     if (keyboard) {
         if (!state->keyboard) state->keyboard = std::make_unique<PerformanceOverlay>(graphicsContext(), state->presentSlots.size());
-        state->keyboard->RecordRects(commands, static_cast<std::size_t>(&slot - state->presentSlots.data()), barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawn || plane != nullptr ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, overlay ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, LayOutKeyboard(*keyboardView, state->extent));
+        state->keyboard->RecordRects(commands, static_cast<std::size_t>(&slot - state->presentSlots.data()), barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawnToWindow || plane != nullptr ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, overlay ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, LayOutKeyboard(*keyboardView, state->extent));
     }
     if (overlay) {
         if (!state->overlay) state->overlay = std::make_unique<PerformanceOverlay>(graphicsContext(), state->presentSlots.size());
         state->overlay->NotePresent(std::chrono::steady_clock::now(), clearOnly ? VkExtent2D{} : VkExtent2D{width, height}, OverlayPresentInfo{std::exchange(state->presentedAddress, 0), state->presentMode, presentCounters.acquireDrops});
-        state->overlay->Record(commands, static_cast<std::size_t>(&slot - state->presentSlots.data()), barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawn || plane != nullptr || keyboard ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    } else if (!drawn && plane == nullptr && !keyboard) {
+        state->overlay->Record(commands, static_cast<std::size_t>(&slot - state->presentSlots.data()), barrier.image, state->surfaceFormat, state->surfaceColorSpace, state->extent, drawnToWindow || plane != nullptr || keyboard ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    } else if (!drawnToWindow && plane == nullptr && !keyboard) {
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = 0;
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -4036,6 +4089,10 @@ VulkanDevice::PresentStatistics VulkanDevice::PresentCounts() {
 // Frames generated so far (FrameGeneration.hpp), for the overlay to count beside the game's.
 extern "C" std::uint64_t AgcDriverGeneratedFrames_nid_postfix() {
     return presentCounters.generated;
+}
+
+extern "C" std::uint64_t AgcDriverUpscaledSource_nid_postfix() {
+    return upscaledSource.load(std::memory_order_relaxed);
 }
 
 bool VulkanDevice::PresentWaitsForSlots(const DisplayBuffer* buffer) const {
