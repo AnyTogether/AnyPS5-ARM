@@ -167,6 +167,8 @@
   "hintBack": "Back",
   "hintOptions": "Options",
   "unlockFailed": "Could not unlock",
+  "unlockLeftOutEncrypted": "%@ is ready without %@: the file is encrypted in the dump. If the game does not start, dump it again with a dumper that decrypts it.",
+  "unlockLeftOutNotRelinked": "%@ is ready without %@: AnyPS5 could not convert it, so the game uses AnyPS5's own library of that name where there is one.",
   "startFailed": "The game could not start",
   "gameEnded": "The game closed",
   "logTitle": "Log",

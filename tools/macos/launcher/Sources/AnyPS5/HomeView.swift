@@ -532,10 +532,13 @@ struct HeroInfo: View {
                     .padding(.leading, 10 * scale)
                     .transition(.opacity)
                 } else if case .failed(let message) = state {
+                    // The relinker's reason and the file it names, wrapped; selectable to copy, and
+                    // the game's log (Options) has all the relinker printed.
                     Text(message)
                         .font(.display(14 * scale))
                         .foregroundStyle(Color(red: 1, green: 0.7, blue: 0.65))
-                        .lineLimit(2)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
                         .frame(maxWidth: 520 * scale, alignment: .leading)
                         .legible(12)
                 } else if let diagnosis = model.diagnoses[game.id] {

@@ -144,6 +144,7 @@ enum T {
         case emptyLibraryTitle, emptyLibraryText, scanning, allGames, sortName, playTime
         case themeCosmic, themeAurora, themeSunset, themeGlass, hintMove, hintGame, hintSelect, hintBack, hintOptions
         case unlockFailed, startFailed, gameEnded, logTitle, close, quit, confirm
+        case unlockLeftOutEncrypted, unlockLeftOutNotRelinked
         case unreadableDump
         case togetherIntro, togetherIntroDetail, togetherEmail, togetherSendCode, togetherWithWebsite, togetherWithWebsiteDetail, togetherCodeSent, togetherCode, togetherSignIn, togetherOtherEmail, togetherTypeCode, togetherOpenWebsite, togetherWelcome, togetherSignOut, togetherOnline, togetherConnected, togetherConnecting, togetherSignedOutElsewhere, togetherEmailInvalid, togetherCodeWrong, togetherCodeExpired, togetherCodeLocked, togetherTooMany, togetherUnreachable
         case togetherWithPhone, togetherWithPhoneDetail, togetherOnPhone, togetherPhoneDeclined, togetherPhoneSignedIn
