@@ -1,8 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 
-// AMD FidelityFX Super Resolution 1 (EASU), from 3rdparty/FidelityFX-FSR (MIT, Copyright (c) 2021
-// Advanced Micro Devices, Inc.): the source image upscaled to `size`.
 
 #define A_GPU 1
 #define A_GLSL 1
