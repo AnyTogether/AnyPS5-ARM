@@ -2062,6 +2062,8 @@ final class AppModel: ObservableObject {
     /// NSWorkspace sends no termination notice for it: the process itself is watched.
     private func watchForExit(of pid: pid_t) {
         exitWatch?.cancel()
+        // A game that has already quit reports -1, and makeProcessSource traps on a negative pid.
+        guard pid > 0 else { return applicationEnded(pid) }
         let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
         source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.applicationEnded(pid) } }
         source.resume()
