@@ -609,7 +609,11 @@ struct AddonsCard: View {
     let addons: [GameAddon]
     @Environment(\.scale) private var scale
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         InfoCard(title: TAddons.format(.addons, addons.count), symbol: "shippingbox") {
             VStack(alignment: .leading, spacing: 2 * scale) {
                 ForEach(addons.prefix(addons.count > 2 ? 1 : 2), id: \.label) { addon in

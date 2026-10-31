@@ -1001,7 +1001,11 @@ struct KeyCaps: View {
     @Environment(\.scale) private var scale
     @State private var pulse = false
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         HStack(spacing: 6 * scale) {
             if capturing {
                 Text(prompt ?? T.text(.pressKey)).font(.display(15 * scale, .semibold))

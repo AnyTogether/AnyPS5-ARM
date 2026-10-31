@@ -165,6 +165,7 @@ struct RootView: View {
             }
             .environment(\.scale, scale)
             .environment(\.look, look)
+            .environment(\.languageCode, model.preferences.language.code)
             .environment(\.circleConfirms, model.preferences.confirmCircle == true)
             .animation(Motion.fade, value: look)
             .preferredColorScheme(.dark)

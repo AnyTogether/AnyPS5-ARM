@@ -336,11 +336,29 @@ extension View {
     }
 }
 
+/// The launcher's language, set at the root: a view whose texts come from T but that holds nothing
+/// that changes with the language reads it, so SwiftUI draws it again when the language changes
+/// (it skips a view whose own values are all the same).
+private struct LanguageCodeKey: EnvironmentKey {
+    static let defaultValue = "en"
+}
+
+extension EnvironmentValues {
+    var languageCode: String {
+        get { self[LanguageCodeKey.self] }
+        set { self[LanguageCodeKey.self] = newValue }
+    }
+}
+
 struct HintBar: View {
     var options = true
     @Environment(\.scale) private var scale
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         HStack(spacing: 22 * scale) {
             Hint(keys: "← → ↑ ↓", label: T.text(.hintMove))
             Hint(keys: "Q E / L1 R1", label: T.text(.hintGame))

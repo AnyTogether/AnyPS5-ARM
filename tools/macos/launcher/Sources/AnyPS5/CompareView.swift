@@ -267,7 +267,11 @@ struct CompareSideCell: View {
     let color: Color
     @Environment(\.scale) private var scale
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         VStack(alignment: .leading, spacing: 8 * scale) {
             if let side {
                 HStack(spacing: 8 * scale) {
