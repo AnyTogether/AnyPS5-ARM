@@ -184,6 +184,30 @@ foreach(agcFrameGenPass IN ITEMS Luma Coarse Fine Smooth Interpolate)
     )
     list(APPEND agcFrameGenHeaders ${agcFrameGenHeader})
 endforeach()
+set(agcFsrInclude ${CMAKE_SOURCE_DIR}/3rdparty/FidelityFX-FSR/ffx-fsr)
+foreach(agcFsrVariant IN ITEMS "Easu;;" "EasuWide;Easu;-DWIDE=1" "Rcas;;" "RcasWide;Rcas;-DWIDE=1")
+    list(GET agcFsrVariant 0 agcFsrName)
+    list(GET agcFsrVariant 1 agcFsrPass)
+    list(GET agcFsrVariant 2 agcFsrDefine)
+    if(agcFsrPass STREQUAL "")
+        set(agcFsrPass ${agcFsrName})
+    endif()
+    string(REGEX REPLACE "([a-z])([A-Z])" "\\1_\\2" agcFsrSymbol "${agcFsrName}")
+    string(TOUPPER "${agcFsrSymbol}" agcFsrSymbol)
+    set(agcFsrSource ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/shaders/Fsr1${agcFsrPass}.comp)
+    set(agcFsrSpv ${agcTextureDetileGeneratedDir}/Fsr1${agcFsrName}.spv)
+    set(agcFsrHeader ${agcTextureDetileGeneratedDir}/Fsr1${agcFsrName}_spv.h)
+    add_custom_command(
+            OUTPUT "${agcFsrHeader}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${agcTextureDetileGeneratedDir}"
+            COMMAND "$<TARGET_FILE:glslang-standalone>" -V --target-env vulkan1.1 ${agcFsrDefine} "-I${agcFsrInclude}" -o "${agcFsrSpv}" "${agcFsrSource}"
+            COMMAND ${CMAKE_COMMAND} -DINPUT=${agcFsrSpv} -DOUTPUT=${agcFsrHeader}
+            -DSYMBOL=FSR1_${agcFsrSymbol}_SPV -P "${CMAKE_CURRENT_SOURCE_DIR}/embed_spirv.cmake"
+            DEPENDS "${agcFsrSource}" "${agcFsrInclude}/ffx_a.h" "${agcFsrInclude}/ffx_fsr1.h" glslang-standalone
+            VERBATIM
+    )
+    list(APPEND agcFsrHeaders ${agcFsrHeader})
+endforeach()
 foreach(agcPresentationStage IN ITEMS Vert Frag)
     string(TOLOWER "${agcPresentationStage}" agcPresentationExtension)
     string(TOUPPER "${agcPresentationStage}" agcPresentationSymbol)
@@ -334,6 +358,8 @@ set(agcDriverSources
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PresentationPass.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/PerformanceOverlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/FrameGeneration.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/Fsr1Upscaler.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/UpscalerSetting.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/KeyboardOverlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Execution/src/Screenshot.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/Graphics/src/Draw.cpp
@@ -382,6 +408,7 @@ set(agcDriverSources
         ${agcMultisampleUploadHeader}
         ${agcCmaskClearShaderHeader}
         ${agcFrameGenHeaders}
+        ${agcFsrHeaders}
         ${agcMeshArgumentsShaderHeader}
         ${agcTextureDetileImageShaderHeader}
         ${agcTextureRepackShaderHeader}
@@ -420,6 +447,7 @@ add_dependencies(libSceAgcDriver agc_trace_revision)
 target_include_directories(libSceAgcDriver PRIVATE
         ${LIBS_INCLUDE_DIR}
         ${agcTextureDetileGeneratedRoot}
+        ${agcFsrInclude}
         ${CMAKE_SOURCE_DIR}/core/shader/recompiler/RdnaDecoder/include
         ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR}
         ${ANYPS5_SPIRV_HEADERS_INCLUDE_DIR}
@@ -2023,6 +2051,42 @@ if(BUILD_TESTING)
     set_target_properties(agc_frame_generation_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
     add_test(NAME agc_frame_generation COMMAND agc_frame_generation_tests)
     set_tests_properties(agc_frame_generation PROPERTIES SKIP_RETURN_CODE 77 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+endif()
+
+add_test_executable(agc_upscaler_tests EXCLUDE_FROM_ALL
+        tests/Upscaler.cpp
+)
+target_include_directories(agc_upscaler_tests PRIVATE
+        ${LIBS_INCLUDE_DIR}
+        ${CMAKE_SOURCE_DIR}/core/shader/recompiler
+        ${ANYPS5_VULKAN_HEADERS_INCLUDE_DIR}
+)
+target_link_libraries(agc_upscaler_tests PRIVATE
+        libSceAgcDriver
+        SDL2-static
+        libc
+)
+set_target_properties(agc_upscaler_tests PROPERTIES CXX_EXTENSIONS OFF)
+configure_windows_unwind(agc_upscaler_tests)
+if(BUILD_TESTING)
+    set_target_properties(agc_upscaler_tests PROPERTIES EXCLUDE_FROM_ALL OFF)
+    add_test(NAME agc_upscaler COMMAND agc_upscaler_tests)
+    set_tests_properties(agc_upscaler PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    if(WIN32)
+        set_tests_properties(agc_upscaler PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>;PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceAgcDriver>")
+    endif()
+
+    add_test_executable(agc_upscaler_setting_tests tests/UpscalerSetting.cpp Execution/src/UpscalerSetting.cpp)
+    target_include_directories(agc_upscaler_setting_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(agc_upscaler_setting_tests PRIVATE libc)
+    configure_windows_unwind(agc_upscaler_setting_tests)
+    add_test(NAME agc_upscaler_setting COMMAND agc_upscaler_setting_tests)
+    set_tests_properties(agc_upscaler_setting PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(agc_upscaler_setting PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
 endif()
 
 add_test_executable(agc_driver_presentation_pass_tests EXCLUDE_FROM_ALL

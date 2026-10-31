@@ -76,6 +76,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | Name | Kind | Source | Default | Description |
 |------|------|--------|---------|-------------|
 | `ANYPS5_FPS_CAP` | integer | `core/libs/prx/libSceAgcDriver/Execution/include/PowerControl.hpp` | 0 | frame rate cap at start (0 to 1000, 0 for none): flips are held at least 1/cap apart; ANYPS5_POWER_CONTROL's file overrides it once read |
+| `ANYPS5_FSR_SHARPNESS` | string | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` | 0.2 | FSR 1's RCAS sharpening in AMD's stops, from 0 (the sharpest) to 2; any other value is refused |
 | `ANYPS5_FULLSCREEN` | string | `core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp` | 0 | 1 opens the game window full screen; 0 or unset opens it windowed, and any other value is refused |
 | `ANYPS5_GPU` | string | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` |  | restricts physical device selection to device names containing this case-insensitive substring |
 | `ANYPS5_OVERLAY` | string | `core/libs/prx/libSceAgcDriver/Execution/src/PerformanceOverlay.cpp` | 0 | the performance overlay's page at start: 1 the overlay, 2 its detailed page; 0 or unset hides it, and any other value is refused |
@@ -86,6 +87,7 @@ The code reads environment names through `getenv`, `IsEnvironmentSet`, `kibSetti
 | `ANYPS5_REQUIRE_ROBUST2` | presence | `core/libs/prx/libSceAgcDriver/tests/execution/LdsMixedWidthAtomics.cpp` |  | fails the LDS lock-budget test when the device does not enable robustBufferAccess2, instead of only printing it |
 | `ANYPS5_REQUIRE_VULKAN` | presence | `core/libs/prx/libSceAgcDriver/tests/BdaDevice.cpp` |  | fails a test instead of skipping when no usable Vulkan device is present |
 | `ANYPS5_SCREENSHOTS` | string | `core/libs/prx/libSceAgcDriver/Execution/src/Screenshot.cpp` |  | directory the screenshot key saves its PNG files to, defaulting to anyps5-screenshots beside the executable |
+| `ANYPS5_UPSCALER` | string | `core/libs/prx/libSceAgcDriver/Execution/src/VulkanDevice.cpp` | bilinear | how an image smaller than the window is brought up to it: bilinear, or fsr1 for AMD FidelityFX Super Resolution 1 (EASU and RCAS, SDR output only); any other value is refused |
 | `ANYPS5_WINDOW_SIZE` | string | `core/libs/prx/libSceVideoOut/src/DisplayWindow.cpp` | 60 | the share of the usable display the first game window takes, a percent from 1 to 100 |
 | `APS5_AB` | string | `core/libs/prx/libSceAgcDriver/Graphics/src/RuntimeSwitches.cpp` |  | `<seconds>:<switch>[+<switch>...]`: alternates phase A (switches as the environment sets them) and phase B (the listed runtime switches toggled) at flip packets, each phase at least `<seconds>` long; prints `[ab]` lines; a name that is not a runtime switch fails the first flip |
 | `APS5_AB_SETTLE` | string | `core/libs/prx/libSceAgcDriver/Graphics/src/RuntimeSwitches.cpp` | 2 | seconds into a phase after which APS5_AB prints the phase's `settled` line; shorter than the phase |

@@ -366,6 +366,7 @@ extension AppModel {
                 self?.update(game) { $0.resolution = index == 0 ? nil : choices[index - 1] }
             }))
         }
+        rows += upscalingRows(game, settings)
         rows += gameDisplayRows(game, settings)
         rows.append(PanelRow(id: "frameGeneration", title: T.text(.frameGeneration), detail: T.text(lowPowerNotice != nil ? .frameGenerationLowPower : .frameGenerationDetail), symbol: "square.stack.3d.forward.dottedline",
                              kind: .toggle(settings.frameGeneration == true) { [weak self] value in self?.update(game) { $0.frameGeneration = value ? true : nil } }))
@@ -425,6 +426,25 @@ extension AppModel {
         rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))
         if case .installed = state {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
+        }
+        return rows
+    }
+
+    /// Upscaling, beside Resolution: FSR 1 brings a game resolution below the window's up to the
+    /// window sharply, with its sharpening in tenths of AMD's stops.
+    private func upscalingRows(_ game: Game, _ settings: GameSettings) -> [PanelRow] {
+        let upscalers = GameSettings.Upscaler.allCases
+        var rows = [PanelRow(id: "upscaling", title: T.text(.upscaling), detail: T.text(.upscalingDetail), symbol: "arrow.up.left.and.down.right.magnifyingglass",
+                             kind: .choice(options: [T.text(.upscalingBilinear), T.text(.upscalingFsr1)], selected: upscalers.firstIndex(of: settings.upscaler ?? .bilinear) ?? 0) { [weak self] index in
+                                 self?.update(game) { $0.upscaler = upscalers[index] == .bilinear ? nil : upscalers[index] }
+                             })]
+        if settings.upscaler == .fsr1 {
+            let range = GameSettings.fsrSharpnessRange
+            rows.append(PanelRow(id: "fsrSharpness", title: T.text(.fsrSharpness), detail: T.text(.fsrSharpnessDetail), symbol: "camera.filters",
+                                 kind: .stepper(value: Int((settings.sharpness * 10).rounded()), range: Int(range.lowerBound * 10)...Int(range.upperBound * 10), step: 1,
+                                                format: { (Double($0) / 10).formatted(.number.precision(.fractionLength(1)).locale(T.locale)) }) { [weak self] value in
+                                     self?.update(game) { $0.fsrSharpness = Double(value) / 10 }
+                                 }))
         }
         return rows
     }
