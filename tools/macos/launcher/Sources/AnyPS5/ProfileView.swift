@@ -20,6 +20,19 @@ extension AppModel {
     func openMyProfile() {
         guard let user = togetherUser else { return }
         openProfile(user.handle, card: TogetherPerson(userId: user.id, handle: user.handle, displayName: user.displayName, avatar: user.avatar))
+        // The name or handle may have changed on the website: read again, and a new handle's page.
+        guard togetherConnected, !ownProfileReading else { return }
+        if let read = ownProfileReadAt, Date().timeIntervalSince(read) < AppModel.ownProfileAgeShown { return }
+        ownProfileReading = true
+        Task {
+            defer { ownProfileReading = false }
+            guard let profile = try? await together.myProfile(), togetherUser?.id == user.id else { return }
+            ownProfileReadAt = Date()
+            togetherUser = together.user
+            followHandle(profile.handle)
+            guard profile.handle != user.handle, overlay == .profile, let now = togetherUser else { return }
+            openProfile(now.handle, card: TogetherPerson(userId: now.id, handle: now.handle, displayName: now.displayName, avatar: now.avatar))
+        }
     }
 
     func openProfile(_ handle: String, card: TogetherPerson) {
@@ -475,7 +488,11 @@ struct ProfileTrophyRow: View {
     let focused: Bool
     @Environment(\.scale) private var scale
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         let grade = TrophySet.Grade(name: trophy.grade)
         HStack(spacing: 16 * scale) {
             Image(systemName: "trophy.fill")

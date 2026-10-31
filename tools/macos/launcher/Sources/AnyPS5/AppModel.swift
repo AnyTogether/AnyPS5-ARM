@@ -604,6 +604,8 @@ final class AppModel: ObservableObject {
                 // without a restart.
                 if let self, self.lastUpdateCheck.map({ Date().timeIntervalSince($0) > 30 * 60 }) ?? false { self.checkForUpdate() }
                 if let self, let game = self.selectedGame { self.loadTrophies(game, again: true) }
+                // A name or handle changed on the website meanwhile.
+                self?.refreshOwnProfile()
             }
         }
         // The game settings say what Low Power Mode does as soon as it is turned on or off.
@@ -658,6 +660,13 @@ final class AppModel: ObservableObject {
             }
             updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.checkForUpdate() }
+            }
+            // The own profile, read again every few minutes while the launcher is in front.
+            ownProfileTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.active else { return }
+                    self.refreshOwnProfile(olderThan: AppModel.ownProfileAge)
+                }
             }
             let discord = self.discord
             DiscordGames.load { games in discord.use(games) }
@@ -991,6 +1000,10 @@ final class AppModel: ObservableObject {
     @Published var pictureCrop: PictureCrop?
     @Published var pictureBusy = false
     var profileDraft = ProfileDraft()
+    /// When the own profile was last read, and whether a read is on its way.
+    var ownProfileReadAt: Date?
+    var ownProfileReading = false
+    var ownProfileTimer: Timer?
     /// Messages: the conversations and threads, the row selected on the left, whether the thread
     /// has the focus (a quick reply, or the field at the end), and whether the field is typed in.
     @Published var inbox: TogetherInbox?
@@ -2822,6 +2835,8 @@ final class AppModel: ObservableObject {
         if next == .advanced || next == .updateRequired { panelRow = 1 }
         panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends || next == .party
         if next == .friends { refreshFriends() }
+        // The screens that show the own name and handle read them again first.
+        if next == .friends || next == .profile || next == .settings { refreshOwnProfile() }
         if next == .party {
             loadParty()
             if togetherFriends.isEmpty { refreshFriends() }

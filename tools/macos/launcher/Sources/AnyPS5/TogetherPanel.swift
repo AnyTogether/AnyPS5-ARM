@@ -211,6 +211,45 @@ extension AppModel {
         togetherProfile = profile
         profileDraft = ProfileDraft(name: profile.displayName, bio: profile.bio ?? "", country: profile.country ?? "", handle: profile.handle, loads: profileDraft.loads + 1)
         togetherUser = together.user
+        ownProfileReadAt = Date()
+    }
+
+    /// How old the own profile may get while the launcher is in front (the server sends no event
+    /// when the name, handle or picture changes on the website), and when the launcher comes back
+    /// in front or a screen showing them opens.
+    nonisolated static let ownProfileAge: TimeInterval = 5 * 60
+    nonisolated static let ownProfileAgeShown: TimeInterval = 20
+
+    /// Reads the own profile again when it is older than [age]: a name or handle changed on the
+    /// website shows here. What is being typed in Edit Profile stays.
+    func refreshOwnProfile(olderThan age: TimeInterval = AppModel.ownProfileAgeShown) {
+        guard togetherUser != nil, togetherConnected, !ownProfileReading else { return }
+        if let read = ownProfileReadAt, Date().timeIntervalSince(read) < age { return }
+        ownProfileReading = true
+        let who = togetherUser?.id
+        Task {
+            defer { ownProfileReading = false }
+            guard let profile = try? await together.myProfile(), togetherUser?.id == who else { return }
+            ownProfileReadAt = Date()
+            let before = togetherProfile
+            let draft = profileDraft
+            // An untouched draft follows the new profile; one being typed in is left alone.
+            let untouched = before.map { draft.name == $0.displayName && draft.bio == ($0.bio ?? "") && draft.country == ($0.country ?? "") && draft.handle == $0.handle } ?? true
+            if untouched {
+                keepProfile(profile)
+            } else {
+                togetherProfile = profile
+                togetherUser = together.user
+            }
+            followHandle(profile.handle)
+        }
+    }
+
+    /// The handle the profile picker shows under an online profile follows the account's.
+    func followHandle(_ handle: String) {
+        guard let profile = currentProfile, let account = profile.account, account.userId == togetherUser?.id, account.handle != handle else { return }
+        profiles.setAccount(profile.id, LauncherProfile.Account(userId: account.userId, handle: handle))
+        profilesChanged()
     }
 
     func saveTogetherProfile() {

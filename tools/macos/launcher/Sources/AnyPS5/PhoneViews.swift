@@ -62,7 +62,11 @@ struct PhoneIndicator: View {
     static let green = Color(red: 0.3, green: 0.85, blue: 0.45)
     static let orange = Color(red: 1, green: 0.62, blue: 0.2)
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         let color: Color? = phone != nil ? Self.green : connecting != nil ? Self.orange : nil
         HStack(spacing: 8 * scale) {
             if badges.isEmpty {

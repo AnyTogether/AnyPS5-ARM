@@ -61,7 +61,11 @@ struct LevelBadgeView: View {
     /// Light behind it (the level-up card, the user's own profile).
     var glow = false
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         let unit = size / 32
         let tier = badge.tier
         ZStack {
@@ -158,7 +162,11 @@ struct AppearingOfflineTag: View {
     var compact = false
     @Environment(\.scale) private var scale
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         Label(TL.text(.appearingOffline), systemImage: "moon.fill")
             .font(.display((compact ? 11 : 12) * scale, .semibold))
             .foregroundStyle(.white.opacity(0.78))

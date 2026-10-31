@@ -274,7 +274,11 @@ struct RingToast: View {
     @State private var shown = false
     @State private var swing = false
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         let visible = shown || still
         VStack {
             HStack(spacing: 16) {

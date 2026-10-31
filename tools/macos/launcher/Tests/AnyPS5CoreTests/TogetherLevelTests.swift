@@ -30,6 +30,22 @@ final class TogetherLevelTests: TogetherSignedInCase {
         XCTAssertTrue(mine.appearOffline)
     }
 
+    /// A name, handle or picture changed on the website: reading the own profile again (the
+    /// launcher does when it comes back in front) puts them in the session's user.
+    func testANameChangedOnTheWebsiteReplacesTheKeptOne() async throws {
+        var changed = Self.own()
+        var profile = changed["profile"] as! [String: Any]
+        profile["handle"] = "utku_h"
+        profile["displayName"] = "Utku H"
+        profile["avatar"] = "https://anytogether.test/a.jpg"
+        changed["profile"] = profile
+        FakeTogether.handler = { _, _ in (200, changed) }
+        _ = try await client.myProfile()
+        XCTAssertEqual(client.user?.handle, "utku_h")
+        XCTAssertEqual(client.user?.displayName, "Utku H")
+        XCTAssertEqual(client.user?.avatar, "https://anytogether.test/a.jpg")
+    }
+
     /// An older server sends neither: no level, and online.
     func testAnOlderServerHasNoLevelAndNoPresenceMode() async throws {
         FakeTogether.handler = { _, _ in (200, Self.own(level: nil, appearOffline: nil)) }

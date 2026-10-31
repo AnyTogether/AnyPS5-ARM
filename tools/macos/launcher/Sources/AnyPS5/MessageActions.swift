@@ -546,7 +546,11 @@ struct ConversationMarks: View {
     var labelled = false
     @Environment(\.scale) private var scale
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         if conversation.pinned || conversation.muted {
             HStack(spacing: 8 * scale) {
                 if conversation.pinned { mark("pin.fill", TChat.text(.pinned)) }
