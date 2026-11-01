@@ -113,8 +113,9 @@ final class EngineCheckoutTests: XCTestCase {
         XCTAssertEqual(found.git?.path, root.appendingPathComponent("bin/git").path)
         XCTAssertEqual(found.missing, ["Xcode Command Line Tools"])
         // /usr/bin/git without the Command Line Tools would ask to install them: never used.
+        // (Homebrew's git, where a Mac has one, is fine.)
         let bare = DevTools.find(environment: ["PATH": "/usr/bin"], developer: nil)
-        XCTAssertNil(bare.git)
+        XCTAssertNotEqual(bare.git?.path, "/usr/bin/git")
         XCTAssertEqual(DevTools().missing, ["Xcode Command Line Tools", "Git", "CMake", "Ninja"])
         XCTAssertTrue(tools.path(["PATH": "/usr/bin:/bin"]).hasPrefix("/tools:/dev/usr/bin:/usr/bin"))
         // The Command Line Tools keep clang in usr/bin, Xcode in its default toolchain.
