@@ -1,0 +1,174 @@
+# A nightly Windows and Linux engine for AnyPS5 Desktop, built from main once a day when core/
+# changed, and published as a GitHub pre-release for the launchers' Nightly update channel.
+#
+# The tag is named as tools/macos/publish_nightly.sh names the Mac's nightlies:
+# v<next>-arm-nightly.<YYYYMMDD>.<n>, <next> being the last release with its last number raised
+# and <n> counting that day's nightlies from 1 (UTC), Mac and CI alike. The launchers sort these
+# after the release before them and before the release they lead to.
+#
+# The build is engine-toolkits.yml's, called with the commit and the tag. The pre-release carries
+# AnyPS5-toolkit-windows-<commit>.zip, AnyPS5-toolkit-linux-<commit>.zip and .tar.gz.
+#
+# CI has no signing key (docs/dev/SIGNED_UPDATES.md), so the pre-release comes out unsigned, and
+# the launchers refuse it until tools/release/sign_nightly.sh <tag> has added SHA256SUMS and
+# SHA256SUMS.sig on the release Mac.
+#
+# The tag and the release are made with GITHUB_TOKEN. Events made with GITHUB_TOKEN start no other
+# workflow, so this tag does not start release.yml (`v*`, disabled in this repository anyway) or
+# anything else. engine-toolkits.yml's own tag trigger (`v*-arm`) does not match a nightly tag.
+name: Engine nightly
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even without core/ changes, or when today already has a CI nightly.
+        type: boolean
+        default: false
+      dry_run:
+        description: Plan and build, but make no tag and no release.
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-nightly
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Decide whether to build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          set -euo pipefail
+          git fetch -q --tags --force origin
+          sha="$(git rev-parse HEAD)"
+          skip() { echo "::notice::No nightly: $1"; echo "build=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # The last release: the highest vX.Y.Z-arm tag (nightly tags have more after -arm).
+          last="$(git tag -l 'v*-arm' | grep -E '^v[0-9]+(\.[0-9]+)*-arm$' | sed 's/^v//; s/-arm$//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
+          [ -n "$last" ] || { echo "::error::No release tag found"; exit 1; }
+          next="$(echo "$last" | awk -F. '{ $NF = $NF + 1; print }' OFS=.)"
+          day="$(date -u +%Y%m%d)"
+          count=1
+          for candidate in $(git tag -l "v$next-arm-nightly.$day.*"); do
+            n="${candidate##*.}"
+            case "$n" in *[!0-9]*|'') continue ;; esac
+            [ "$n" -ge "$count" ] && count=$((n + 1))
+          done
+          tag="v$next-arm-nightly.$day.$count"
+
+          # The newest nightly that carries the Windows and Linux engine (Mac nightlies may not).
+          toolkit_nightly="$(gh api "repos/$REPO/releases?per_page=50" --jq '
+            [.[] | select(.draft | not) | select(.prerelease) | select(.tag_name | test("-arm-nightly\\."))
+                 | select([.assets[].name | test("^AnyPS5-toolkit-windows-.*\\.zip$")] | any)
+                 | select([.assets[].name | test("^AnyPS5-toolkit-linux-.*\\.(zip|tar\\.gz)$")] | any)]
+            | sort_by(.created_at) | last | .tag_name // empty')"
+          echo "last release v$last-arm, last nightly with toolkits: ${toolkit_nightly:-none}, next tag $tag"
+
+          if [ -n "$toolkit_nightly" ] && [ "$(git rev-list -n 1 "$toolkit_nightly")" = "$sha" ]; then
+            skip "$toolkit_nightly already is main's nightly"
+          fi
+          # Changes are counted from that nightly when it is past the last release, else from the release.
+          base="v$last-arm"
+          if [ -n "$toolkit_nightly" ] && git merge-base --is-ancestor "$base" "$toolkit_nightly" &&
+            git merge-base --is-ancestor "$toolkit_nightly" HEAD; then
+            base="$toolkit_nightly"
+          fi
+          if [ "$FORCE" != true ]; then
+            case "$toolkit_nightly" in
+              *-arm-nightly."$day".*) skip "today already has $toolkit_nightly" ;;
+            esac
+            if git diff --quiet "$base" HEAD -- core/; then skip "core/ has not changed since $base"; fi
+          fi
+          {
+            echo "build=true"
+            echo "tag=$tag"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    uses: ./.github/workflows/engine-toolkits.yml
+    with:
+      ref: ${{ needs.plan.outputs.sha }}
+      tag: ${{ needs.plan.outputs.tag }}
+
+  publish:
+    name: Publish the pre-release
+    needs: [plan, build]
+    if: needs.plan.outputs.build == 'true' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: engine-toolkit-*
+          path: dist
+          merge-multiple: true
+      - name: Write the notes
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git fetch -q --tags --force origin
+          previous="$(git tag -l 'v*-arm' 'v*-arm-nightly.*' --sort=-creatordate --merged HEAD | head -n 1)"
+          {
+            echo "Nightly Windows and Linux engine from main, $(date -u +%Y-%m-%d), $(git rev-parse --short=12 HEAD). It may have new bugs. AnyPS5 Desktop offers it only on the Nightly update channel."
+            echo
+            echo "It is unsigned until it is signed on the release Mac (tools/release/sign_nightly.sh). The launchers refuse it until then."
+            echo
+            echo "Since ${previous:-the start}:"
+            echo
+            git log --no-merges --format='- %s' ${previous:+"$previous..HEAD"} | head -n 40
+            total="$(git rev-list --no-merges --count ${previous:+"$previous..HEAD"})"
+            [ "$total" -le 40 ] || echo "- … and $((total - 40)) more"
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+          ls -l dist
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          # A Mac nightly may have taken the name meanwhile: then nothing is published.
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG exists already"; exit 1
+          fi
+          # The tag is made on GitHub at the built commit.
+          gh release create "$TAG" dist/AnyPS5-toolkit-* --repo "$REPO" --target "$SHA" --prerelease --latest=false \
+            --title "AnyPS5-ARM $version (nightly)" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "published https://github.com/$REPO/releases/tag/$TAG"
