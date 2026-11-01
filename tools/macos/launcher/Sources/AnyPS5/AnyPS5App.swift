@@ -180,6 +180,7 @@ struct RootView: View {
         }
         .background(GlassWindowHook(recipe: look.window))
         .ignoresSafeArea()
+        .environment(\.layoutDirection, model.preferences.language.isRightToLeft ? .rightToLeft : .leftToRight)
         .onChange(of: look, initial: true) { _, now in Look.current = now }
         .onAppear {
             Input.shared.handler = { [weak model] command in model?.handle(command) ?? false }

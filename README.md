@@ -22,7 +22,7 @@ One line installs it into Applications (and Rosetta 2 if it is missing). A downl
 
 ### First start
 
-Three steps: the language (Türkçe or English), one of four animated themes (Cosmic, Aurora, Sunset, and Glass: a see-through window that shows your desktop and the windows behind it frosted, with Liquid Glass panels on macOS 26) and the games folder. The folder and its subfolders are scanned, and games you add later show up on their own.
+Three steps: the language (English, Türkçe or one of twelve more), one of four animated themes (Cosmic, Aurora, Sunset, and Glass: a see-through window that shows your desktop and the windows behind it frosted, with Liquid Glass panels on macOS 26) and the games folder. The folder and its subfolders are scanned, and games you add later show up on their own.
 
 <p align="center"><img src="docs/screenshots/launcher-themes.jpg" alt="Picking a theme on the first start" width="720"></p>
 
@@ -171,7 +171,7 @@ The **library** button shows every game as a grid. **Settings** hold:
   - **Theme Studio:** make your own theme: the motion, its color, highlight and lightness, the accent, a picture or video behind it and menu music. Every change shows behind the panel at once. **Save as a file** makes one `.anyps5theme` to give to anyone; opening one in Finder installs it.
   - **Themes:** the built-in themes, yours, and the ones people share on the **AnyPS5 Hub** ([`hub/`](hub/README.md)), installed with one press. **Share on the Hub** saves your theme and opens the page to send it. The phone wears the launcher's theme too.
 - **Library:** the games folder and scanning it again.
-- **Language:** Türkçe or English.
+- **Language:** English and Türkçe, and German, Spanish, French, Portuguese, Indonesian, Russian, Japanese, Hindi, Bengali, Bhojpuri, Arabic and Urdu by VK. Those twelve share their translations with the Windows/Linux launcher, so a text only the Mac has shows in English. Arabic and Urdu lay the screens out right to left.
 - **Behaviour:** the profile name, the volume of the interface sounds and of the selected game's theme song (the PS5 plays it while a game is selected, for games whose dump has one), hiding the launcher while a game runs, always showing hidden trophies, Discord, update checks, and installing Rosetta if it is missing. Also:
   - **Clips:** the launcher keeps the last 30 seconds, 1, 3 or 5 minutes of the game playing, picture and sound, in memory only (the row shows how much); **Create** on a DualSense (Share on a DualShock 4 or an Xbox pad), **⌥F12** or Create on the phone saves them as an MP4 beside the screenshots. Create held takes a screenshot. macOS asks once for the screen recording permission.
   - **Pause Game When Opening the Menu:** PS over a game raises the quick menu (Resume, Game Settings, Close Game) and first presses Options on player 1 in the game, whether a controller, the keyboard or a phone is player 1; PS held asks **Close game?**, and held in the launcher it opens **Quit AnyPS5**.
@@ -364,7 +364,7 @@ Each branch is its own project, with its own README:
 **Testing, feedback and translations**
 
 - **[Slick Daddy](https://github.com/slick-daddy)** tested the launchers and the website in depth and sent the detailed feedback behind many fixes: relink errors and full screen on Windows, the game's button that follows its state, the interface polish, and the website's settings, rate limits and pages.
-- **VK** translated the Windows/Linux launcher into German, Spanish, French, Portuguese, Indonesian, Russian, Japanese, Hindi, Bengali, Bhojpuri, Arabic and Urdu, and tested it: default display settings, the stick sensitivity on Home, language switching and the nightly builds request came from VK's reports.
+- **VK** translated the launchers into German, Spanish, French, Portuguese, Indonesian, Russian, Japanese, Hindi, Bengali, Bhojpuri, Arabic and Urdu (the Windows/Linux launcher, and the Mac launcher's texts that read the same), and tested them: default display settings, the stick sensitivity on Home, language switching and the nightly builds request came from VK's reports.
 
 Our code is written independently; where we followed someone's design or idea, it is named here.
 

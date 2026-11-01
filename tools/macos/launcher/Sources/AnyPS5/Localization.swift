@@ -38,6 +38,9 @@ struct Language: Hashable, Identifiable, Codable {
     /// The console language a game starts in when its own setting follows the launcher.
     var consoleLanguage: Int { T.texts.language(code)?.consoleLanguage ?? 1 }
 
+    /// Arabic and Urdu: the screens are laid out mirrored, and ← and → follow what they show.
+    var isRightToLeft: Bool { Locale.Language(identifier: code).characterDirection == .rightToLeft }
+
     /// The locale dates, numbers and capitals follow: tr_TR and en_US for the first two, as before.
     var locale: Locale {
         switch code {

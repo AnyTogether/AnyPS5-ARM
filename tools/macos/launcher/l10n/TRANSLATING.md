@@ -1,7 +1,20 @@
 # Translating the Mac launcher
 
 The Mac launcher (AnyPS5.app) reads every text it shows from one file per language in this
-folder: `en.json` is English, the source, and `tr.json` is Turkish. The guide for translating
+folder: `en.json` is English, the source, and `tr.json` is Turkish.
+
+| Language | File | Translated by |
+|---|---|---|
+| Turkish | `tr.json` | the AnyPS5 team |
+| German, Spanish, French, Portuguese, Indonesian, Russian, Japanese | `de`, `es`, `fr`, `pt`, `id`, `ru`, `ja` | VK |
+| Hindi, Bengali, Bhojpuri, Arabic, Urdu | `hi`, `bn`, `bho`, `ar`, `ur` | VK |
+
+VK translated these twelve for the Windows/Linux launcher. Their files here hold every text
+whose English reads the same in both launchers' `en.json`, carried over by
+`python3 -I scripts/import-port-translations.py <AnyLauncher-Port checkout>`. A text the Mac
+says in its own words (Mac where the Port says PC) is left out and shows in English until
+someone translates it here. Run the script again after the Port's files change. It keeps a text
+translated here for a key only the Mac has. The guide for translating
 every AnyPS5 app, this one included, is
 [TRANSLATING.md in AnyLauncher-Port](https://github.com/AnyTogether/AnyLauncher-Port/blob/main/TRANSLATING.md).
 A hosted Weblate project is coming, where several people can translate one language at once; the
