@@ -12,8 +12,10 @@ let package = Package(
         // The ATRAC9 decoder for games' theme songs (vendored LibAtrac9, see its README).
         .target(name: "CAtrac9", path: "Sources/CAtrac9", exclude: ["LICENSE", "README.md"],
                 cSettings: [.unsafeFlags(["-w"])]),
+        // macOS's own libarchive (/usr/lib), for games dumped as a zip (GameArchives.swift).
+        .systemLibrary(name: "CArchive", path: "Sources/CArchive"),
         // Game folders, SELF unwrapping, patches and the conversion into a Mac bundle: no UI.
-        .target(name: "AnyPS5Core", dependencies: ["CAtrac9"], path: "Sources/AnyPS5Core"),
+        .target(name: "AnyPS5Core", dependencies: ["CAtrac9", "CArchive"], path: "Sources/AnyPS5Core"),
         // Share play's audio device for WebRTC: the game's sound in, the received sound out.
         .target(name: "CShareAudio", dependencies: [.product(name: "WebRTC", package: "WebRTC")], path: "Sources/CShareAudio"),
         // Share play over WebRTC: the host's stream to each viewer and a viewer's side of it.
