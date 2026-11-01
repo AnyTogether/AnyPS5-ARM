@@ -66,6 +66,23 @@ To add files to a release that is already signed, sign all of them again and rep
 The Windows and Linux engine archives AnyPS5 Desktop downloads are added this way; how they are
 built is in [WINDOWS_LINUX_ENGINE.md](WINDOWS_LINUX_ENGINE.md).
 
+### Nightly Windows and Linux engines from CI
+
+`.github/workflows/engine-nightly.yml` builds the Windows and Linux engine from main once a day
+when `core/` changed. It publishes them as a pre-release named like the Mac's nightlies
+(`v<next>-arm-nightly.<YYYYMMDD>.<n>`). CI has no key, so that pre-release comes out unsigned.
+The launchers refuse it until it is signed.
+
+To sign it, run this on the release Mac:
+
+```sh
+tools/release/sign_nightly.sh v0.2.31-arm-nightly.20261102.1   # the nightly's tag
+```
+
+The script downloads the pre-release's files and signs them with `sign.sh`. It checks them with
+`verify.sh` and uploads `SHA256SUMS` and `SHA256SUMS.sig` to the release. `-k` is passed on to
+`sign.sh` during a key rotation.
+
 ## What the launchers check
 
 ### macOS launcher (`ReleaseSigning.swift`, CryptoKit)

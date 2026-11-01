@@ -33,6 +33,21 @@ tests, checks the Linux glibc floor and keeps the archives as the run's artifact
 the same by hand. Either way the archives are added to the release afterwards, then the whole
 release is signed again on the release Mac.
 
+Nightlies of main get them from the **Engine nightly** workflow
+(`.github/workflows/engine-nightly.yml`). It runs once a day and builds only when `core/` changed
+since the last nightly that has these archives (or since the last release). It calls the Engine
+toolkits workflow with the nightly's tag, so `relinker --version` names the nightly. Then it
+publishes an unsigned pre-release, `v<next>-arm-nightly.<YYYYMMDD>.<n>`, with
+`AnyPS5-toolkit-windows-<commit>.zip`, `AnyPS5-toolkit-linux-<commit>.zip` and
+`AnyPS5-toolkit-linux-<commit>.tar.gz`. Sign it on the release Mac with
+`tools/release/sign_nightly.sh <tag>` (see [SIGNED_UPDATES.md](SIGNED_UPDATES.md)). A run by hand
+can force a build (`gh workflow run engine-nightly.yml -f force=true -R AnyTogether/AnyPS5-ARM`) or
+build without publishing (`-f dry_run=true`).
+
+A release tag still builds its own archives. They cannot be taken from a nightly of the same
+commit: the relinker carries `git describe` (`relinker --version`), which is the nightly's tag
+there and the release's tag here.
+
 ## Windows (WinLibs GCC 15.2, the Release workflow's toolchain)
 
 WinLibs `15.2.0posix-14.0.0-ucrt-r7` unpacked so that `C:\dev\winlibs\mingw64\bin\g++.exe`
