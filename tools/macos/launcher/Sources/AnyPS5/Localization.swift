@@ -99,6 +99,7 @@ enum T {
         [
             T.Key.allCases.map(\.rawValue),
             TAddons.Key.allCases.map(\.rawValue),
+            TFiles.Key.allCases.map(\.rawValue),
             TK.Key.allCases.map(\.rawValue),
             TA.Key.allCases.map(\.rawValue),
             TB.Key.allCases.map(\.rawValue),
