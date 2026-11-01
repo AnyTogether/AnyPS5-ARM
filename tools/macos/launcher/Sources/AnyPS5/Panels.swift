@@ -117,6 +117,7 @@ extension AppModel {
             guard let (game, shortage) = spaceShortage else { return [] }
             return [PanelCategory(id: "noSpace", title: TPrep.text(.noSpaceTitle), symbol: "externaldrive.badge.exclamationmark", rows: noSpaceRows(game, shortage))]
         case .signIn: return [PanelCategory(id: "signin", title: "AnyTogether", symbol: "person.2.circle", rows: signInRows())]
+        case .gameFiles: return [PanelCategory(id: "files", title: gameFilesTitle, symbol: "archivebox", rows: gameFilesRows())]
         default: return []
         }
     }
@@ -393,6 +394,8 @@ extension AppModel {
             self?.update(game) { $0.language = index == 0 ? nil : languages[index - 1].number }
         }))
         rows.append(gameEngineRow(game))
+        rows.append(PanelRow(id: "addUpdate", title: TFiles.text(.addUpdate), detail: TFiles.text(.addUpdateDetail), symbol: "plus.square.on.square",
+                             kind: .action(destructive: false) { [weak self] in self?.addUpdate(game) }))
         let state = state(of: game)
         if case .installed = state {
             rows.append(PanelRow(id: "reinstall", title: T.text(.reinstall), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in

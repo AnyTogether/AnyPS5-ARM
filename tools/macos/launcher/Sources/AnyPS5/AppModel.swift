@@ -96,6 +96,11 @@ struct Preferences: Codable, Equatable {
     var engine: String?
     /// A toolkit folder the user built (Settings → Engine → Engine Folder), nil for none.
     var customToolkit: String?
+    /// A git checkout of AnyPS5-ARM chosen as the engine folder (EngineGitPanel.swift): Update
+    /// from Git pulls and builds it, and the engine made from its build is `customToolkit`.
+    var engineCheckout: String?
+    /// The commit each checkout was last built at by Update from Git.
+    var engineGitBuilt: [String: String]?
     /// Settings → Game Library: new games unlocked in the background (PrepareQueue); nil means on.
     var prepareNewGames: Bool?
     /// The window full screen at start (WindowStart): nil the first time, then as it was left.
@@ -246,6 +251,9 @@ enum Overlay: Equatable {
     case signIn
     /// Options (or a right click) on Home: the game's settings, Switch Profile, online or offline.
     case profileMenu
+    /// A zip in a games folder to unpack, or Game Settings › Add Update, and the job's progress
+    /// (GameFiles.swift).
+    case gameFiles
 }
 
 /// A newer launcher downloaded and checked, unpacked in a folder of its own, waiting for a restart.
@@ -294,6 +302,14 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var games: [Game] = []
     @Published private(set) var scanning = false
+    /// Zips in the games folders and updates added from a folder (GameFiles.swift).
+    @Published var gameFiles = GameFilesState()
+    let gameFilesWork = GameFilesWork()
+    /// Settings › Engine › Update from Git (EngineGitPanel.swift).
+    @Published var engineGit = EngineGitState()
+    var engineGitCancel: UnpackCancel?
+    /// A game is being unlocked or prepared, or waits to be: the engine it uses must stay as it is.
+    var unlockBusy: Bool { installer != nil || preparer != nil || !queue.isEmpty }
     @Published var selected = 0 {
         didSet { if selected != oldValue { selectionMoved(from: oldValue) } }
     }
@@ -1190,6 +1206,8 @@ final class AppModel: ObservableObject {
         }
         if !update.added.isEmpty { announceNewGames(update.added) }
         measureSelected()
+        // A zip dropped in (or one copied in further) is looked into.
+        filesScanned(roots)
     }
 
     /// "New game: <name>" (or "3 new games"): a toast while the launcher is in front, the banner
@@ -2821,7 +2839,7 @@ final class AppModel: ObservableObject {
         panelCategory = 0
         panelRow = 0
         panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport || next == .noSpace
-            || next == .updateRequired
+            || next == .updateRequired || next == .gameFiles
         // The controls panel opens on its first key, below the hint.
         if next == .controls {
             panelRow = 1
@@ -2841,7 +2859,10 @@ final class AppModel: ObservableObject {
             loadParty()
             if togetherFriends.isEmpty { refreshFriends() }
         }
-        if next == .settings { refreshEngines() }
+        if next == .settings {
+            refreshEngines()
+            refreshEngineTools()
+        }
         if next == .themes {
             panelRow = themeRows().firstIndex { row in row.id == "design-\(preferences.customTheme ?? "")" || row.id == "builtin-\(preferences.theme.rawValue)" && preferences.customTheme == nil } ?? 1
             loadHub()
@@ -2851,6 +2872,8 @@ final class AppModel: ObservableObject {
     }
 
     func closeOverlay() {
+        // A zip's question closed some other way than its rows: Not Now.
+        if overlay == .gameFiles, gameFiles.working == nil, let archive = gameFiles.asked?.archive { gameFilesWork.later.insert(archive.url.path) }
         endCapture()
         withAnimation(Motion.overlay) { overlay = nil }
         Sounds.shared.play(.back)

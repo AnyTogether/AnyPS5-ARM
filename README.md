@@ -83,6 +83,7 @@ Each game keeps its own settings, applied at every start:
 - **Advanced** (below).
 - **Performance overlay**, off or in any corner of the window: **Minimal**, one line in a small capsule (frames per second, generated frames, frame time, GPU and CPU use, memory), or **Detailed**, the panel with the frame-time graph.
 - **Game language**: the launcher's, or any of the console's languages.
+- **Add Update…**: the folder of the game's update dump goes next to the game as `<game folder>-UPDATE`, after a check that it is the same game and a newer version. A game dumped as a `.zip` into a games folder is offered for unpacking, with its free space checked first and progress you can stop ([guide](docs/user/GUIDE.md#the-anyps5-app)).
 - **Screenshots:** the game's F12 shots and clips in a grid, and one at a time over the whole screen, a clip playing.
 - **Back Up Saves** and **Restore Saves**: the game's saves and trophies as a zip in Documents → AnyPS5 → Backups; a restore backs up what the game had first.
 - **Unlock Again**, **Show in Finder**, **Open Log**, **Make a Report**, **Clear Shader Cache** and **Remove Installation**.
@@ -134,7 +135,7 @@ The launcher writes the layout to `~/Library/Application Support/AnyPS5/Controls
 - **Sharing:** **Export Settings** saves the game's keys and every setting as one file, and **Import Settings** applies a file someone shared. Post a setup that works for a game, or take one from a friend.
 - **Reset Advanced Settings** brings back the engine's defaults.
 
-**Engine versions:** **Settings → Engine** lists the engine builds published with this project's releases. Download one (it is checked before use) and choose it for every game or for one game only; a game unlocked with another engine offers **Update and Play**. **Engine Folder** uses an engine you built yourself. A game's options show which engine unlocked it.
+**Engine versions:** **Settings → Engine** lists the engine builds published with this project's releases. Download one (it is checked before use) and choose it for every game or for one game only; a game unlocked with another engine offers **Update and Play**. **Engine Folder** uses an engine you built yourself. Point it at a git checkout of this repository and **Update from Git** pulls, builds and uses it, then offers to relink the installed games. A game's options show which engine unlocked it.
 
 **Crash reports:** when a game stops on an error, **Export Report** saves the log, macOS's crash report and the game's settings in one file, and **Open Issue** opens a pre-filled GitHub issue (your name, email and sign-in tokens are removed first). **Detailed logging (trace)** in a game's settings records more for a hard bug.
 

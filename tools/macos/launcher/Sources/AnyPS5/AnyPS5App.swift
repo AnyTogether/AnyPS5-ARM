@@ -230,6 +230,9 @@ struct RootView: View {
                 SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: T.text(subtitleKey))
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+        case .gameFiles:
+            SidePanel(title: model.gameFilesTitle)
+                .transition(.move(edge: .trailing).combined(with: .opacity))
         case .updateRequired:
             SidePanel(title: TK.text(.updateRequiredTitle), subtitle: model.updateRequired.map { TK.format(.updateRequiredSubtitle, $0.minimum) })
                 .transition(.move(edge: .trailing).combined(with: .opacity))

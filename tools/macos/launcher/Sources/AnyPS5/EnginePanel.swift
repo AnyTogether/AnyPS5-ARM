@@ -150,14 +150,19 @@ extension AppModel {
         panel.prompt = TE.text(.engineFolderPick)
         guard panel.runModal() == .OK, let url = panel.url else { return }
         if let problem = Toolkit.layoutProblem(at: url) {
+            // A checkout of the engine's source: Update from Git builds it (EngineGitPanel.swift).
+            if let checkout = EngineCheckout.at(url) { return useEngineCheckout(checkout) }
             return show(TE.format(.engineFolderInvalid, problem), symbol: "exclamationmark.triangle.fill")
         }
+        preferences.engineCheckout = nil
         preferences.customToolkit = url.path
         loadCustomToolkit()
         show(TE.format(.engineFolderUsed, url.abbreviatedPath), symbol: "folder.badge.gearshape")
     }
 
     func forgetEngineFolder() {
+        preferences.engineCheckout = nil
+        engineGit = EngineGitState()
         preferences.customToolkit = nil
         customToolkit = nil
     }
@@ -232,9 +237,10 @@ extension AppModel {
                              kind: .action(destructive: false) { [weak self] in self?.refreshEngines(told: true) }))
         rows.append(PanelRow(id: "engineCustom", title: TE.text(.engineCustomSection), kind: .info("")))
         rows.append(PanelRow(id: "engineFolder", title: TE.text(.engineFolder),
-                             detail: preferences.customToolkit.map { URL(fileURLWithPath: $0).abbreviatedPath + (customToolkit.map { " · " + Toolkit.shortVersion($0.version) } ?? "") } ?? TE.text(.engineFolderNone),
+                             detail: (preferences.engineCheckout ?? preferences.customToolkit).map { URL(fileURLWithPath: $0).abbreviatedPath + (customToolkit.map { " · " + Toolkit.shortVersion($0.version) } ?? "") } ?? TE.text(.engineFolderNone),
                              symbol: "folder.badge.gearshape", kind: .action(destructive: false) { [weak self] in self?.chooseEngineFolder() }))
-        if preferences.customToolkit != nil {
+        rows += engineGitRows()
+        if preferences.customToolkit != nil || preferences.engineCheckout != nil {
             rows.append(PanelRow(id: "engineFolderReset", title: TE.text(.engineFolderReset), symbol: "xmark.circle", kind: .action(destructive: false) { [weak self] in self?.forgetEngineFolder() }))
         }
         rows.append(PanelRow(id: "engineHint", title: TE.text(.engineHint), kind: .info("")))
