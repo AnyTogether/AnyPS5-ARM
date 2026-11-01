@@ -143,8 +143,16 @@ public struct DevTools: Equatable, Sendable {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return nil }
         let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !path.isEmpty, FileManager.default.fileExists(atPath: path + "/usr/bin/clang") else { return nil }
+        guard !path.isEmpty, isDeveloperFolder(URL(fileURLWithPath: path)) else { return nil }
         return URL(fileURLWithPath: path)
+    }
+
+    /// Whether `folder` has a compiler: the Command Line Tools keep clang in usr/bin, Xcode in its
+    /// default toolchain.
+    public static func isDeveloperFolder(_ folder: URL) -> Bool {
+        ["usr/bin/clang", "Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"].contains {
+            FileManager.default.isExecutableFile(atPath: folder.appendingPathComponent($0).path)
+        }
     }
 
     /// PATH for the build: the tools' folders first (Ninja runs CMake again when the build files

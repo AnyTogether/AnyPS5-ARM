@@ -117,6 +117,12 @@ final class EngineCheckoutTests: XCTestCase {
         XCTAssertNil(bare.git)
         XCTAssertEqual(DevTools().missing, ["Xcode Command Line Tools", "Git", "CMake", "Ninja"])
         XCTAssertTrue(tools.path(["PATH": "/usr/bin:/bin"]).hasPrefix("/tools:/dev/usr/bin:/usr/bin"))
+        // The Command Line Tools keep clang in usr/bin, Xcode in its default toolchain.
+        try write("clt/usr/bin/clang", "#!/bin/sh", executable: true)
+        try write("Xcode/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang", "#!/bin/sh", executable: true)
+        XCTAssertTrue(DevTools.isDeveloperFolder(root.appendingPathComponent("clt")))
+        XCTAssertTrue(DevTools.isDeveloperFolder(root.appendingPathComponent("Xcode")))
+        XCTAssertFalse(DevTools.isDeveloperFolder(root.appendingPathComponent("bin")))
     }
 
     func testAnUpdatePullsBuildsAndMakesAnEngineGamesCanBeUnlockedWith() throws {
