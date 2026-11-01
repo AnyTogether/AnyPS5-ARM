@@ -361,6 +361,11 @@ Each branch is its own project, with its own README:
 - **Ideas AnyPlay shipped first** ([anyplaynet/launcher](https://github.com/anyplaynet/launcher), [anyplaynet/cloud](https://github.com/anyplaynet/cloud)): "Try anyway" on a Play Together version mismatch, retiring old launchers with "Update required", asking before leave party / remove friend and similar actions, the noise suppression switch, the public profile switch and the compatibility filters.
 - **A phone browser as a controller via a QR code** comes from [LudusCtrl](https://github.com/parl0v/ludusctrl)'s browser client by Josip Parlov (@parl0v), shipped in AnyPlay.
 
+**Testing, feedback and translations**
+
+- **[Slick Daddy](https://github.com/slick-daddy)** tested the launchers and the website in depth and sent the detailed feedback behind many fixes: relink errors and full screen on Windows, the game's button that follows its state, the interface polish, and the website's settings, rate limits and pages.
+- **VK** translated the Windows/Linux launcher into German, Spanish, French, Portuguese, Indonesian, Russian, Japanese, Hindi, Bengali, Bhojpuri, Arabic and Urdu, and tested it: default display settings, the stick sensitivity on Home, language switching and the nightly builds request came from VK's reports.
+
 Our code is written independently; where we followed someone's design or idea, it is named here.
 
 ## Disclaimer
