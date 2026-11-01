@@ -4,13 +4,26 @@
 # Windows, GCC 12 on Ubuntu 22.04 for Linux (glibc 2.35 at most). The online, remote pad,
 # AppContent, UserService and power control tests run on both before packaging. The archives are
 # artifacts only; they are signed with the rest of the release on the release Mac
-# (docs/dev/SIGNED_UPDATES.md), since the key never leaves it.
+# (docs/dev/SIGNED_UPDATES.md), since the key never leaves it. engine-nightly.yml calls it to build
+# a nightly from main: then `ref` is the commit and `tag` the nightly tag, made in the checkout so
+# that the relinker's --version (git describe) names the nightly, as tools/macos/publish_nightly.sh
+# does for the Mac.
 name: Engine toolkits
 
 on:
   push:
     tags: ['v*-arm']
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The commit to build.
+        required: true
+        type: string
+      tag:
+        description: The nightly tag the build is named after (not pushed from here).
+        required: true
+        type: string
   # Only when this workflow or the packaging changes, to check that it still builds.
   pull_request:
     paths:
@@ -46,8 +59,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # Empty outside a call: the pushed tag or the pull request, as before.
+          ref: ${{ inputs.ref }}
           submodules: recursive
           persist-credentials: false
+      - name: Name the build after the nightly tag
+        if: inputs.tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: git tag "$TAG" && git describe --tags
       - name: Install GCC 12, Ninja and the audio/display development files
         run: |
           sudo apt-get update
@@ -102,8 +122,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # Empty outside a call: the pushed tag or the pull request, as before.
+          ref: ${{ inputs.ref }}
           submodules: recursive
           persist-credentials: false
+      - name: Name the build after the nightly tag
+        if: inputs.tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: git tag "$TAG" && git describe --tags
       - name: Point the WinLibs CMake at the CA bundle of Git for Windows
         run: |
           for prefix in ucrt64 mingw64; do
