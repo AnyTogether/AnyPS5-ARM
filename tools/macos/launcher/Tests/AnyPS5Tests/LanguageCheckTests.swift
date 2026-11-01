@@ -124,6 +124,46 @@ final class LanguageCheckTests: XCTestCase {
         XCTAssertNil(Language(rawValue: "xx"))
     }
 
+    /// VK's twelve languages, carried over from AnyLauncher Port where both launchers' English
+    /// reads the same (scripts/import-port-translations.py): listed by their own names, partial,
+    /// and English wherever they have no text.
+    func testThePortsLanguagesAreListedAndFallBackToEnglish() throws {
+        let saved = T.language
+        defer { T.language = saved }
+        let names = ["ar": "العربية", "bho": "भोजपुरी", "bn": "বাংলা", "de": "Deutsch", "es": "Español", "fr": "Français",
+                     "hi": "हिन्दी", "id": "Bahasa Indonesia", "ja": "日本語", "pt": "Português", "ru": "Русский", "ur": "اردو"]
+        let english = try file("en").texts
+        for (code, name) in names {
+            let language = try XCTUnwrap(Language(rawValue: code), "\(code).json is listed")
+            XCTAssertEqual(language.displayName, name)
+            let texts = try file(code).texts
+            XCTAssertGreaterThan(texts.count, 500, "\(code).json carries the shared texts")
+            XCTAssertLessThan(texts.count, english.count, "\(code).json is partial")
+            for (key, text) in texts {
+                XCTAssertEqual(LanguageFiles.placeholders(text), LanguageFiles.placeholders(english[key] ?? ""), "\(code).json: \(key)")
+            }
+            // A key the language leaves out shows in English.
+            let missing = try XCTUnwrap(english.keys.sorted().first { texts[$0] == nil })
+            T.language = language
+            XCTAssertEqual(T.string(missing), english[missing])
+        }
+        T.language = try XCTUnwrap(Language(rawValue: "de"))
+        XCTAssertEqual(T.text(.back), "Zurück")
+        XCTAssertEqual(T.string("welcomeSubtitle"), english["welcomeSubtitle"], "the Mac's own words, which the Port says of a PC, stay English")
+    }
+
+    /// Arabic and Urdu mirror the screens, and ← and → then follow what is drawn.
+    func testRightToLeftLanguagesMirrorTheArrows() throws {
+        XCTAssertTrue(try XCTUnwrap(Language(rawValue: "ar")).isRightToLeft)
+        XCTAssertTrue(try XCTUnwrap(Language(rawValue: "ur")).isRightToLeft)
+        XCTAssertFalse(Language.english.isRightToLeft)
+        XCTAssertFalse(Language.turkish.isRightToLeft)
+        XCTAssertEqual(Command.left.mirrored, .right)
+        XCTAssertEqual(Command.right.mirrored, .left)
+        XCTAssertEqual(Command.select.mirrored, .select)
+        XCTAssertEqual(Command.nextGame.mirrored, .nextGame)
+    }
+
     func testPreferencesKeepTheLanguageAsItsCode() throws {
         let encoded = try JSONEncoder().encode(["language": Language.turkish])
         XCTAssertEqual(String(decoding: encoded, as: UTF8.self), #"{"language":"tr"}"#)

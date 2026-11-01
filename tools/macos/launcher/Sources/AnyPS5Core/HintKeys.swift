@@ -9,6 +9,16 @@ public enum Command: String, CaseIterable, Sendable {
     case home
     /// Create on a DualSense (Share on a DualShock 4), or ⌥F12: the last seconds as a clip.
     case capture
+
+    /// Left as right and right as left, for a screen laid out right to left (Arabic, Urdu): the
+    /// arrows then follow what is drawn, as the row of games and the panels are mirrored.
+    public var mirrored: Command {
+        switch self {
+        case .left: return .right
+        case .right: return .left
+        default: return self
+        }
+    }
 }
 
 /// The hint pills at the bottom of the screens ("↩ / ✕ Select"), read as the commands a click

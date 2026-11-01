@@ -789,6 +789,8 @@ extension AppModel {
 
     /// Home screen and library navigation; panels go through panelCommand.
     func handle(_ command: Command) -> Bool {
+        // Mirrored screens (Arabic, Urdu): → moves to what is drawn on the right.
+        let command = T.language.isRightToLeft ? command.mirrored : command
         if pairing != nil {
             if command == .select { answerPairing(true) }
             if command == .back { answerPairing(false) }
