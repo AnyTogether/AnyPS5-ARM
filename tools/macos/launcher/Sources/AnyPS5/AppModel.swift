@@ -131,10 +131,21 @@ struct Preferences: Codable, Equatable {
     static let key = "AnyPS5.preferences.v1"
 
     static func load() -> Preferences {
-        guard let data = UserDefaults.standard.data(forKey: key), var saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return Preferences() }
+        guard let data = UserDefaults.standard.data(forKey: key), var saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return firstStart() }
         // One games folder from an older launcher becomes a list of one.
         saved.libraryFolders = saved.libraryFolders
         return saved
+    }
+
+    /// The choices of a launcher started for the first time: the launcher's language is the first
+    /// of the Mac's languages (System Settings › General › Language & Region) it has a file for,
+    /// English when it has none of them.
+    static func firstStart(preferred: [String] = Locale.preferredLanguages) -> Preferences {
+        var preferences = Preferences()
+        if let code = LanguageFiles.match(preferred, codes: Language.allCases.map(\.code)), let language = Language(rawValue: code) {
+            preferences.language = language
+        }
+        return preferences
     }
 
     func save() {

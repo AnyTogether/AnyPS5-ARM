@@ -8,12 +8,19 @@ folder: `en.json` is English, the source, and `tr.json` is Turkish.
 | Turkish | `tr.json` | the AnyPS5 team |
 | German, Spanish, French, Portuguese, Indonesian, Russian, Japanese | `de`, `es`, `fr`, `pt`, `id`, `ru`, `ja` | VK |
 | Hindi, Bengali, Bhojpuri, Arabic, Urdu | `hi`, `bn`, `bho`, `ar`, `ur` | VK |
+| Czech, Danish, Hungarian, Norwegian, Romanian, Swedish, Filipino, Malay | `cs`, `da`, `hu`, `no`, `ro`, `sv`, `fil`, `ms` | VK |
+| Simplified Chinese, Traditional Chinese, Korean, Khmer, Lao, Amharic | `zh-Hans`, `zh-Hant`, `ko`, `km`, `lo`, `am` | VK |
 
-VK translated these twelve for the Windows/Linux launcher. Their files here hold every text
-whose English reads the same in both launchers' `en.json`, carried over by
-`python3 -I scripts/import-port-translations.py <AnyPS5-Desktop checkout>`. A text the Mac
-says in its own words (Mac where the Port says PC) is left out and shows in English until
-someone translates it here. Run the script again after the Port's files change. It keeps a text
+VK translated these for the Windows/Linux launcher. Their files here hold every text whose
+English reads the same in both launchers' `en.json` (capitals aside), carried over by
+`python3 -I scripts/import-port-translations.py <AnyPS5-Desktop checkout> [code ...]`. A text
+the Mac says in its own words (Mac where the Port says PC) is left out and shows in English until
+someone translates it here. Run the script again after the Port's files change. Name the codes to
+write only those languages.
+
+The launcher starts in the Mac's language the first time when it has a file for it. Chinese
+follows the script or region (zh-Hant for Taiwan, Hong Kong and Macau). Norwegian Bokmål and
+Nynorsk read `no.json`, and Tagalog reads `fil.json`. It keeps a text
 translated here for a key only the Mac has. The guide for translating
 every AnyPS5 app, this one included, is
 [TRANSLATING.md in AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop/blob/main/TRANSLATING.md).
