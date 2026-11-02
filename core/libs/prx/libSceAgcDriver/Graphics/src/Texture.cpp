@@ -4197,7 +4197,9 @@ void StorageTexture::markLayersPending(std::uint32_t first, std::uint32_t count)
             bool& flag;
             ~Restore() { flag = false; }
         } restore{deferUnsaved};
-        const auto stored = layerPending;
+        // layerPending is upstream's UnitFlags now: captureGuestBytes takes a vector<bool> of layers.
+        std::vector<bool> stored(layerPending.size());
+        for (std::size_t layer = 0; layer < stored.size(); ++layer) stored[layer] = layerPending[layer];
         WriteBack();
         if (!anyLayerPending()) {
             captureGuestBytes(&stored);

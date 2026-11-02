@@ -110,10 +110,14 @@ int APS5_VABI sceFreeTypeOlFtaSupportRendererSmoothLcdv_nid_no_patch() {
 }
 APS5_EXPORT("Ns9a-LjOcDw", sceFreeTypeOlFtaSupportRendererSmoothLcdv_nid_no_patch);
 
+// On macOS this library exports the bundled FreeType's own functions (ld64 has no --exclude-libs),
+// and this NID is one of them (FT_Attach_Stream): the stub would be a second export of it.
+#ifndef __APPLE__
 int APS5_VABI sceFreeTypeOlAttachStream_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
 }
 APS5_EXPORT("ZqvTX8u1bEc", sceFreeTypeOlAttachStream_nid_no_patch);
+#endif
 
 int APS5_VABI sceFreeTypeOlCMapDone_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
@@ -216,10 +220,14 @@ int APS5_VABI sceFreeTypeOlFtaExportModuleWinfonts_nid_no_patch() {
 }
 APS5_EXPORT("ZHsmiChQLTk", sceFreeTypeOlFtaExportModuleWinfonts_nid_no_patch);
 
+// On macOS this library exports the bundled FreeType's own functions (ld64 has no --exclude-libs),
+// and this NID is one of them (FT_Add_Module): the stub would be a second export of it.
+#ifndef __APPLE__
 int APS5_VABI sceFreeTypeOlAddModule_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
 }
 APS5_EXPORT("LonHHN98tMI", sceFreeTypeOlAddModule_nid_no_patch);
+#endif
 
 int APS5_VABI sceFreeTypeOlGetModuleInterface_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);

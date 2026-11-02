@@ -527,9 +527,12 @@ void SampleCurrentThread(const char* name) {
     }
 }
 
-void StartWorkerSampler() {
-    SampleCurrentThread("queue 0");
+// Every queue worker calls this with its queue id (upstream): only queue 0's worker is sampled here.
+void StartWorkerSampler(std::uint32_t queue) {
+    if (queue == 0) SampleCurrentThread("queue 0");
 }
+
+bool ReadableStackRegion(std::uint64_t, std::uint64_t&, std::uint64_t&) { return false; }
 
 void StopWorkerSampler() {
     if (!samplerThread.joinable()) return;
