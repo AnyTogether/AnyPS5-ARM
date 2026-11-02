@@ -3,7 +3,7 @@ import Foundation
 
 /// A launcher language: one file in the l10n folder (or the user's Languages folder) named by its
 /// locale code, de.json for German, its own name the text "languageName" and its console language
-/// found from the code. The same files as AnyLauncher-Port's; see l10n/TRANSLATING.md.
+/// found from the code. The same files as AnyPS5-Desktop's; see l10n/TRANSLATING.md.
 struct Language: Hashable, Identifiable, Codable {
     let code: String
 

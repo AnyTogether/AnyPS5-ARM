@@ -3,7 +3,7 @@ import XCTest
 
 /// The language files' reading: a user folder before the built-in one, English as the fallback,
 /// the "languageName" text (or an old file's "@meta" name), the console language from the file's
-/// code and the placeholder rules of AnyLauncher-Port's check_translations.dart.
+/// code and the placeholder rules of AnyPS5-Desktop's check_translations.dart.
 final class LanguageFilesTests: XCTestCase {
     var root: URL!
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Carries AnyLauncher Port's translations over to the Mac launcher's language files.
 
-    python3 -I scripts/import-port-translations.py <AnyLauncher-Port checkout>
+    python3 -I scripts/import-port-translations.py <AnyPS5-Desktop checkout>
 
 A key whose English text is the same in both launchers' en.json means the same thing, so its
 translation fits here too. A key whose English differs (the Port says PC where the Mac says Mac)

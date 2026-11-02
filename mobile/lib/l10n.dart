@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 /// The app's language files: one JSON object of texts by key per language in assets/l10n, named
 /// by its code (de.json is German), the same format as the launchers' (TRANSLATING.md in
-/// AnyLauncher-Port). English is the source: a text a language does not have is the English one,
+/// AnyPS5-Desktop). English is the source: a text a language does not have is the English one,
 /// and a key English lacks too is shown as itself.
 ///
 /// Placeholders are the launchers' too: %@ a word or a name, %d a number, filled in order;

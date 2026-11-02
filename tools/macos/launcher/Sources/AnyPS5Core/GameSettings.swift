@@ -291,7 +291,7 @@ public enum ConsoleLanguage {
 
     /// The console language a launcher language starts games in, by its file's locale code (de,
     /// pt-BR, zh-Hant, es_419): the code itself, then its language alone; nil when the console has
-    /// no language of that code (games start in English then). The same map as AnyLauncher-Port's
+    /// no language of that code (games start in English then). The same map as AnyPS5-Desktop's
     /// ConsoleLanguage.forLocale.
     public static func forLocale(_ code: String) -> Int? {
         let wanted = code.replacingOccurrences(of: "_", with: "-").lowercased()

@@ -2,7 +2,7 @@
 import AnyPS5Core
 import XCTest
 
-/// The check of the language files in l10n (l10n/TRANSLATING.md), as AnyLauncher-Port's
+/// The check of the language files in l10n (l10n/TRANSLATING.md), as AnyPS5-Desktop's
 /// tool/check_translations.dart does it for its own: every file one flat JSON object of texts
 /// (Weblate's monolingual JSON, so no "@meta"), named by a locale code, its own name under
 /// "languageName", no key English lacks, English's placeholders in each text, Turkish complete,
