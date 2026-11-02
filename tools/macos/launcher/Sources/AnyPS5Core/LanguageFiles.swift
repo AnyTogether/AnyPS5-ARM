@@ -101,6 +101,48 @@ public enum LanguageFiles {
         }
     }
 
+    /// Codes a system may give for a language whose file has another one: Norwegian Bokmål and
+    /// Nynorsk read the Norwegian file, Tagalog the Filipino one, and the old code for Indonesian
+    /// the Indonesian one.
+    static let sameLanguage = ["nb": "no", "nn": "no", "tl": "fil", "in": "id"]
+    /// The regions that write Chinese in traditional characters when the system gives no script.
+    static let traditionalRegions: Set<String> = ["TW", "HK", "MO"]
+
+    /// The first of [preferred] (locale names as macOS gives them, Locale.preferredLanguages:
+    /// zh-Hant-TW, nb-NO, fil-PH, en_US) one of [codes] (the files' codes: zh-Hans, pt-BR, no) is
+    /// for, or nil. A locale takes the file of its language and script or region (pt-BR), else its
+    /// language's (pt). Chinese takes zh-Hant for Taiwan, Hong Kong and Macau or the Hant script,
+    /// and zh-Hans otherwise. The same rules as AnyPS5-Desktop's Language.matchLocale.
+    public static func match(_ preferred: [String], codes: [String]) -> String? {
+        var byKey: [String: String] = [:]
+        for code in codes { byKey[code.replacingOccurrences(of: "_", with: "-").lowercased()] = code }
+        for name in preferred {
+            let locale = name.split(whereSeparator: { $0 == "." || $0 == "@" }).first.map(String.init) ?? ""
+            let parts = locale.split(whereSeparator: { $0 == "-" || $0 == "_" }).map(String.init)
+            guard let first = parts.first?.lowercased() else { continue }
+            let language = sameLanguage[first] ?? first
+            var script: String?
+            var region: String?
+            for part in parts.dropFirst() {
+                if part.count == 4, script == nil {
+                    script = part.prefix(1).uppercased() + part.dropFirst().lowercased()
+                } else if part.count == 2 || part.count == 3, region == nil {
+                    region = part.uppercased()
+                }
+            }
+            if language == "zh", script == nil { script = traditionalRegions.contains(region ?? "") ? "Hant" : "Hans" }
+            var candidates: [String] = []
+            if let script, let region { candidates.append("\(language)-\(script)-\(region)") }
+            if let script { candidates.append("\(language)-\(script)") }
+            if let region { candidates.append("\(language)-\(region)") }
+            candidates.append(language)
+            for candidate in candidates {
+                if let code = byKey[candidate.lowercased()] { return code }
+            }
+        }
+        return nil
+    }
+
     /// A text's placeholders as String(format:) fills them: (argument number, kind) for each,
     /// numbered in order, and each %1$@ by its own number; %% is a percent sign, not one. The kind
     /// is the conversion (@, d, f, …) with its length modifier (ld), not its width or precision; a
