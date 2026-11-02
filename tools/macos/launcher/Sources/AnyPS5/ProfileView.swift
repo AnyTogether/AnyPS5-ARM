@@ -204,7 +204,7 @@ struct ProfileView: View {
         return HStack(alignment: .center, spacing: 30 * scale) {
             ProfileAvatar(url: identity?.avatar, name: name, size: 128 * scale)
                 .overlay(alignment: .bottomTrailing) {
-                    if profile?.isMe == true, model.appearingOffline { AppearingOfflineDot(size: 34 * scale).offset(x: -4 * scale, y: -4 * scale) }
+                    if profile?.isMe == true { OwnPresenceDot(status: model.presenceStatus, size: 34 * scale).offset(x: -4 * scale, y: -4 * scale) }
                 }
             VStack(alignment: .leading, spacing: 10 * scale) {
                 Text(profile?.isMe == true ? T.text(.profileMine) : T.text(.profileTitle))

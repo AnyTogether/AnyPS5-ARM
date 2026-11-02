@@ -43,7 +43,20 @@ struct PanelRow: Identifiable {
 
 /// A person a row is about: avatar (or initial), and a dot for playing or online.
 struct PanelPerson {
-    enum Status { case playing, online, offline }
+    enum Status {
+        case playing, online, idle, doNotDisturb, offline
+
+        /// A friend's dot from their presence: their chosen status over a game, offline without one.
+        init(_ presence: TogetherFriend.Presence?) {
+            switch presence?.shown ?? .offline {
+            case .playing: self = .playing
+            case .online: self = .online
+            case .idle: self = .idle
+            case .doNotDisturb: self = .doNotDisturb
+            case .offline: self = .offline
+            }
+        }
+    }
 
     let name: String
     let avatar: String?
@@ -877,6 +890,9 @@ struct RowView: View {
                     .overlay(alignment: .bottomTrailing) {
                         if person.appearingOffline {
                             AppearingOfflineDot(size: 14 * scale).offset(x: 3 * scale, y: 3 * scale)
+                        } else if person.status == .idle || person.status == .doNotDisturb {
+                            PresenceStatusDot(kind: person.status == .idle ? .idle : .doNotDisturb, size: 12 * scale, ring: focused ? Color.white : Color(white: 0.1))
+                                .offset(x: 3 * scale, y: 3 * scale)
                         } else if let status = person.status, status != .offline {
                             Circle().fill(status == .playing ? model.accent : Color(red: 0.3, green: 0.85, blue: 0.45))
                                 .frame(width: 10 * scale, height: 10 * scale)

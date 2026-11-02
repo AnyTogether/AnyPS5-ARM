@@ -61,9 +61,9 @@ public enum LanguageFiles {
     }
 
     /// The language files in [folders], the first folder first: a file there comes before one of
-    /// the same code further on (the user's Languages folder before the built-in files), and one
-    /// that cannot be read is left out for the next of its code. English comes first, then the
-    /// others by name.
+    /// the same code further on (the user's Languages folder before the built-in files), a text it
+    /// lacks is the later file's, and one that cannot be read is left out. English comes first,
+    /// then the others by name.
     public static func load(_ folders: [URL], log: (String) -> Void = { _ in }) -> [LanguageFile] {
         var candidates: [String: [URL]] = [:]
         var order: [String] = []
@@ -76,15 +76,23 @@ public enum LanguageFiles {
                 candidates[code, default: []].append(file)
             }
         }
+        // Every readable file of a code is read: the first gives the name and its texts, a text it
+        // lacks comes from the next (a translator's older file over the built-in one), then English.
         var found: [LanguageFile] = []
         for code in order {
+            var first: LanguageFile?
+            var texts: [String: String] = [:]
             for file in candidates[code] ?? [] {
                 do {
-                    found.append(try parse(Data(contentsOf: file), code: code))
-                    break
+                    let language = try parse(Data(contentsOf: file), code: code)
+                    if first == nil { first = language }
+                    texts.merge(language.texts) { kept, _ in kept }
                 } catch {
                     log("the language file \(file.path) is left out: \(error)")
                 }
+            }
+            if let first {
+                found.append(LanguageFile(code: code, name: first.name, consoleLanguage: first.consoleLanguage, texts: texts))
             }
         }
         return found.sorted { a, b in

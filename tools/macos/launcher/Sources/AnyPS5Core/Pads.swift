@@ -78,25 +78,68 @@ public enum PadConnection: String, Codable, Sendable {
     }
 }
 
-/// A controller's battery: a percentage (rounded where the reader only gives levels) and
-/// whether it charges, where that is known.
+/// How full a battery is where the reader gives only a few levels (a DualShock 3's report), or
+/// a percentage rounded to one.
+public enum PadBatteryLevel: String, Codable, CaseIterable, Sendable {
+    case empty, low, medium, full
+
+    /// The level a percentage falls in: up to 15 nearly empty, up to 40 low, up to 80 medium.
+    public init(percent: Int) {
+        switch percent {
+        case ...15: self = .empty
+        case ...40: self = .low
+        case ...80: self = .medium
+        default: self = .full
+        }
+    }
+
+    /// The bars a battery icon shows: 0 to 4.
+    public var bars: Int {
+        switch self {
+        case .empty: return 0
+        case .low: return 1
+        case .medium: return 2
+        case .full: return 4
+        }
+    }
+}
+
+/// A controller's battery: an exact percentage where the reader gives one (GameController), a
+/// level where it gives only a few (a DualShock 3), and whether it charges, where that is known.
+/// A level is never shown as a percentage: it would look exact and is not.
 public struct PadBattery: Equatable, Codable, Sendable {
-    public var percent: Int
-    /// The reader gives only a few levels: the percentage is that level's middle.
-    public var approximate: Bool
+    /// The real percentage; nil when the reader gives only a level.
+    public var percent: Int?
+    /// The level the reader gave; nil when it says only that it charges.
+    public var level: PadBatteryLevel?
     public var charging: Bool?
 
-    public init(percent: Int, approximate: Bool = false, charging: Bool? = nil) {
-        self.percent = min(100, max(0, percent))
-        self.approximate = approximate
+    public init(percent: Int, charging: Bool? = nil) {
+        let clamped = min(100, max(0, percent))
+        self.percent = clamped
+        self.level = PadBatteryLevel(percent: clamped)
         self.charging = charging
     }
 
+    public init(level: PadBatteryLevel?, charging: Bool? = nil) {
+        self.percent = nil
+        self.level = level
+        self.charging = charging
+    }
+
+    /// The reader gives only a level.
+    public var approximate: Bool { percent == nil }
+
     /// Low enough to say so (the troubleshooter, the controller indicator).
-    public var low: Bool { percent <= 15 && charging != true }
+    public var low: Bool {
+        guard charging != true else { return false }
+        if let percent { return percent <= 15 }
+        return level == .empty
+    }
 
     public var reportText: String {
-        (approximate ? "about " : "") + "\(percent)%" + (charging == true ? " charging" : "")
+        let amount = percent.map { "\($0)%" } ?? level.map { "level \($0.rawValue)" }
+        return [amount, charging == true ? "charging" : nil].compactMap { $0 }.joined(separator: " ")
     }
 }
 

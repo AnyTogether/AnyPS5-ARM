@@ -308,18 +308,46 @@ public struct TogetherCompareView: Decodable, Equatable, Sendable {
     }
 }
 
-// MARK: Appear offline
+// MARK: Presence status
 
-/// `presence.mode` from the gateway: appearing offline was turned on or off on another device.
+/// What the user lets friends see of their presence, as Discord has it: online, idle (away), do
+/// not disturb (busy, quiet), or invisible (offline to friends while everything keeps working).
+public enum TogetherPresenceStatus: String, CaseIterable, Codable, Sendable {
+    case online, idle, dnd, invisible
+
+    /// The status a server gives as `status`; one without it (an older server) gives only
+    /// `appearOffline`, which is invisible or online.
+    public static func from(_ status: String?, appearOffline: Bool?) -> TogetherPresenceStatus? {
+        if let status, let known = TogetherPresenceStatus(rawValue: status) { return known }
+        return appearOffline.map { $0 ? .invisible : .online }
+    }
+}
+
+/// `presence.mode` from the gateway: the status was changed on another device.
 public struct TogetherPresenceMode: Equatable, Sendable {
-    public let appearOffline: Bool
+    public let status: TogetherPresenceStatus
 
-    public init(appearOffline: Bool) { self.appearOffline = appearOffline }
+    public init(status: TogetherPresenceStatus) { self.status = status }
+
+    public init(appearOffline: Bool) { self.init(status: appearOffline ? .invisible : .online) }
+
+    /// Friends see the user offline.
+    public var appearOffline: Bool { status == .invisible }
 
     public init?(_ event: TogetherSocket.Event) {
-        struct Mode: Decodable { let appearOffline: Bool }
-        guard event.type == "presence.mode", let mode = event.decode(Mode.self) else { return nil }
-        self.init(appearOffline: mode.appearOffline)
+        struct Mode: Decodable {
+            let appearOffline: Bool?
+            let status: String?
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                appearOffline = container.lenient(Bool.self, .appearOffline)
+                status = container.lenient(String.self, .status)
+            }
+            enum CodingKeys: String, CodingKey { case appearOffline, status }
+        }
+        guard event.type == "presence.mode", let mode = event.decode(Mode.self),
+              let status = TogetherPresenceStatus.from(mode.status, appearOffline: mode.appearOffline) else { return nil }
+        self.init(status: status)
     }
 }
 
@@ -346,10 +374,17 @@ extension TogetherClient {
         return try JSONDecoder.together.decode(TogetherCompareView.self, from: try await authorized("GET", "users/\(Self.path(handle))/trophies/compare?titleId=\(title)", nil))
     }
 
-    /// PATCH /me/presence: friends see the user offline while it is on. What the server keeps.
+    /// PATCH /me/presence: the status friends see. Both fields go: an older server reads only
+    /// appearOffline (and leaves status out), a newer one the status. What the server keeps.
+    public func setPresence(_ status: TogetherPresenceStatus) async throws -> TogetherPresenceStatus {
+        let answer = try await authorized("PATCH", "me/presence", ["appearOffline": status == .invisible, "status": status.rawValue])
+        let object = (try? JSONSerialization.jsonObject(with: answer)) as? [String: Any]
+        return TogetherPresenceStatus.from(object?["status"] as? String, appearOffline: object?["appearOffline"] as? Bool) ?? status
+    }
+
+    /// PATCH /me/presence with appear offline on or off.
     public func setAppearOffline(_ on: Bool) async throws -> Bool {
-        struct Mode: Decodable { let appearOffline: Bool }
-        return try JSONDecoder.together.decode(Mode.self, from: try await authorized("PATCH", "me/presence", ["appearOffline": on])).appearOffline
+        try await setPresence(on ? .invisible : .online) == .invisible
     }
 }
 

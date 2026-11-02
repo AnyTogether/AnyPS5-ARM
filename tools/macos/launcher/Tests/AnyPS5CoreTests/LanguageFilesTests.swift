@@ -48,6 +48,21 @@ final class LanguageFilesTests: XCTestCase {
         XCTAssertEqual(texts.language("tr")?.name, "Türkçe (deneme)")
     }
 
+    /// A translator's file in the Languages folder made for an older launcher lacks the newer
+    /// keys: those texts come from the built-in file of its code, not from English.
+    func testAUserFileWithoutSomeTextsTakesThemFromTheBuiltInFile() throws {
+        try write("builtin", "en.json", #"{"languageName": "English", "back": "Back", "hintMove": "Move", "hintSelect": "Select"}"#)
+        try write("builtin", "de.json", #"{"languageName": "Deutsch", "back": "Zurück", "hintMove": "Bewegen", "hintSelect": "Auswählen"}"#)
+        try write("user", "de.json", #"{"languageName": "Deutsch (Test)", "back": "Zurück!"}"#)
+        let languages = LanguageFiles.load(folders())
+        XCTAssertEqual(languages.map(\.code), ["en", "de"])
+        let texts = LanguageTexts(languages)
+        XCTAssertEqual(texts.text("back", in: "de"), "Zurück!", "the user's file comes first")
+        XCTAssertEqual(texts.text("hintMove", in: "de"), "Bewegen")
+        XCTAssertEqual(texts.text("hintSelect", in: "de"), "Auswählen")
+        XCTAssertEqual(texts.language("de")?.name, "Deutsch (Test)")
+    }
+
     func testABrokenFileIsLeftOutForTheNextOneOfItsCode() throws {
         try write("builtin", "en.json", #"{"languageName": "English", "back": "Back"}"#)
         try write("builtin", "tr.json", #"{"languageName": "Türkçe", "back": "Geri"}"#)

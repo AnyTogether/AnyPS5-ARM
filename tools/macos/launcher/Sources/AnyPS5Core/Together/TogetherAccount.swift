@@ -58,7 +58,13 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
     public var trophyLevel: TogetherTrophyLevel?
     /// Friends see the user offline (the socket and everything else keep working). False from an
     /// older server.
-    public var appearOffline: Bool
+    public var appearOffline: Bool {
+        get { presence == .invisible }
+        set { if newValue != appearOffline { presence = newValue ? .invisible : .online } }
+    }
+    /// Online, idle, do not disturb or invisible: what friends see. From an older server, which
+    /// has only appear offline, invisible or online.
+    public var presence: TogetherPresenceStatus
     /// Others see when the user has read their messages, and the user sees theirs. True from an
     /// older server.
     public var readReceipts: Bool
@@ -67,7 +73,8 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
     public var privateAvatar: String?
 
     public init(handle: String, displayName: String, bio: String?, avatar: String?, country: String?, handleChangeAt: Date?, privacy: TogetherPrivacy,
-                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, readReceipts: Bool = true, privateName: String? = nil, privateAvatar: String? = nil) {
+                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, presence: TogetherPresenceStatus? = nil, readReceipts: Bool = true,
+                privateName: String? = nil, privateAvatar: String? = nil) {
         self.handle = handle
         self.displayName = displayName
         self.bio = bio
@@ -76,13 +83,13 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         self.handleChangeAt = handleChangeAt
         self.privacy = privacy
         self.trophyLevel = trophyLevel
-        self.appearOffline = appearOffline
+        self.presence = presence ?? (appearOffline ? .invisible : .online)
         self.readReceipts = readReceipts
         self.privateName = privateName
         self.privateAvatar = privateAvatar
     }
 
-    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, readReceipts, privateName, privateAvatar }
+    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, status, readReceipts, privateName, privateAvatar }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -94,7 +101,8 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         handleChangeAt = try container.decodeIfPresent(Date.self, forKey: .handleChangeAt)
         privacy = try container.decodeIfPresent(TogetherPrivacy.self, forKey: .privacy) ?? .standard
         trophyLevel = container.lenient(TogetherTrophyLevel.self, .trophyLevel)
-        appearOffline = container.lenient(Bool.self, .appearOffline) ?? false
+        presence = TogetherPresenceStatus.from(container.lenient(String.self, .status),
+                                               appearOffline: container.lenient(Bool.self, .appearOffline) ?? false) ?? .online
         readReceipts = container.lenient(Bool.self, .readReceipts) ?? true
         privateName = container.lenient(String.self, .privateName)
         privateAvatar = container.lenient(String.self, .privateAvatar)

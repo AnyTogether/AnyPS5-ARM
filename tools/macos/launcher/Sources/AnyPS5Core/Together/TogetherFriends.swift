@@ -51,18 +51,35 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
         public let game: Game?
         /// The game they share for friends to watch.
         public let share: TogetherSharePresence?
+        /// The status they chose: online, idle, dnd (do not disturb) or invisible; nil from an
+        /// older server, where state alone says it.
+        public let status: String?
 
-        public init(state: String, titleId: String?, since: String?, party: Party? = nil, game: Game? = nil, share: TogetherSharePresence? = nil) {
+        public init(state: String, titleId: String?, since: String?, party: Party? = nil, game: Game? = nil, share: TogetherSharePresence? = nil,
+                    status: String? = nil) {
             self.state = state
             self.titleId = titleId
             self.since = since
             self.party = party
             self.game = game
             self.share = share
+            self.status = status
         }
 
-        public var playing: Bool { state == "in_game" }
-        public var online: Bool { state != "offline" }
+        public var online: Bool { state != "offline" && status != TogetherPresenceStatus.invisible.rawValue }
+        public var playing: Bool { online && state == "in_game" }
+
+        /// What their dot shows: offline (invisible too), do not disturb (over a game too), idle
+        /// (chosen, over a game too, or away), playing, or online.
+        public var shown: Shown {
+            guard online else { return .offline }
+            if status == TogetherPresenceStatus.dnd.rawValue { return .doNotDisturb }
+            if status == TogetherPresenceStatus.idle.rawValue { return .idle }
+            if playing { return .playing }
+            return state == "away" ? .idle : .online
+        }
+
+        public enum Shown: Equatable, Sendable { case playing, online, idle, doNotDisturb, offline }
     }
 
     public var id: String { userId }

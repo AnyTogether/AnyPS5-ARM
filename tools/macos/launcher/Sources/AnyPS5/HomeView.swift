@@ -208,15 +208,15 @@ struct TopBar: View {
                        index: 4, badge: model.partyInvites.count, ring: !model.voiceSpeaking.isEmpty) { model.open(.party) }
             iconButton(model.social.notifications.unread > 0 ? "bell.badge.fill" : "bell.fill", index: 5, badge: model.social.notifications.unread) { model.openNotifications() }
             // A controller running out of battery says so here (and in Settings → Controllers).
-            if let line = PadTroubleshooter.statusLine(Controllers.shared.pads) { PadStatusPill(text: line) }
+            if let pad = PadTroubleshooter.lowBatteryPad(Controllers.shared.pads) { PadStatusPill(pad: pad) }
             PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
                 let name = model.togetherUser?.displayName ?? model.preferences.profileName
                 ProfileAvatar(url: model.togetherUser?.avatar, name: name, size: 36 * scale, glow: false, picture: model.profilePicture)
                     .overlay(alignment: .bottomTrailing) {
-                        // Appearing offline: a moon where friends would see a dot.
-                        if model.togetherUser != nil, model.appearingOffline { AppearingOfflineDot(size: 15 * scale).offset(x: 3 * scale, y: 3 * scale) }
+                        // The status friends see: Idle, Do Not Disturb, or the moon of appearing offline.
+                        if model.togetherUser != nil { OwnPresenceDot(status: model.presenceStatus, size: 15 * scale).offset(x: 3 * scale, y: 3 * scale) }
                     }
                 Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9)).legible(12)
                 if let level = model.myLevel { LevelBadgeView(badge: level.badge, size: 30 * scale) }

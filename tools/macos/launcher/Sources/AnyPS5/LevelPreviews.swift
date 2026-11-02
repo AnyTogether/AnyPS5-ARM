@@ -14,9 +14,9 @@ enum LevelPreviews {
     static let mine = level(42, points: 2_520, start: 2_460, next: 2_520 + 45)
     static let miras = level(318, points: 52_200, start: 51_300, next: 52_200 + 630)
 
-    static func own(appearOffline: Bool) -> TogetherOwnProfile {
+    static func own(appearOffline: Bool, presence: TogetherPresenceStatus? = nil) -> TogetherOwnProfile {
         TogetherOwnProfile(handle: "robin", displayName: "Robin", bio: "Platinum hunter", avatar: nil, country: "TR", handleChangeAt: nil, privacy: .standard,
-                           trophyLevel: mine, appearOffline: appearOffline)
+                           trophyLevel: mine, appearOffline: appearOffline, presence: presence)
     }
 
     static func run(_ preferences: Preferences, _ found: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
@@ -76,6 +76,27 @@ enum LevelPreviews {
             model.overlay = .friends
             model.panelInRows = true
             model.panelRow = model.panelCategories().first?.rows.firstIndex { $0.id == "friend-f2" } ?? 0
+        }
+        // Idle and Do Not Disturb, chosen by friends and by the user: the yellow moon and the red dot.
+        render("presence-statuses") { model in
+            model.togetherProfile = own(appearOffline: false, presence: .dnd)
+            model.togetherFriends = [
+                TogetherFriend(userId: "f1", handle: "mira", displayName: "Mira", avatar: nil,
+                               presence: .init(state: "in_game", titleId: found.first?.titleID ?? "PPSA01234", since: nil, status: "dnd"), level: miras.badge),
+                TogetherFriend(userId: "f2", handle: "sol", displayName: "Sol", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil, status: "idle")),
+                TogetherFriend(userId: "f3", handle: "kenji", displayName: "Kenji", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil, status: "online")),
+                TogetherFriend(userId: "f4", handle: "ines", displayName: "Ines", avatar: nil, presence: .init(state: "offline", titleId: nil, since: nil, status: "invisible")),
+            ]
+            model.overlay = .friends
+            model.panelInRows = true
+            model.panelRow = model.panelCategories().first?.rows.firstIndex { $0.id == "friend-f3" } ?? 0
+        }
+        render("presence-settings") { model in
+            model.togetherProfile = own(appearOffline: false, presence: .idle)
+            model.overlay = .settings
+            model.panelCategory = model.panelCategories().firstIndex { category in category.rows.contains { $0.id == "together-presence" } } ?? 0
+            model.panelInRows = true
+            model.panelRow = model.panelCategories()[model.panelCategory].rows.firstIndex { $0.id == "together-presence" } ?? 0
         }
         let side = { (earned: Int, total: Int?, points: Int) in TogetherCompareSide(earned: earned, total: total, progress: total.map { earned * 100 / $0 }, points: points) }
         let games = [

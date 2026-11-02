@@ -178,6 +178,62 @@ struct AppearingOfflineTag: View {
     }
 }
 
+/// Idle and Do Not Disturb on a picture, as Discord draws them: a yellow moon, a red dot with a
+/// white bar. [ring] is the edge against what is behind.
+struct PresenceStatusDot: View {
+    enum Kind: Equatable { case idle, doNotDisturb }
+    let kind: Kind
+    let size: CGFloat
+    var ring = Color(white: 0.08)
+
+    static let idleYellow = Color(red: 0.98, green: 0.72, blue: 0.18)
+    static let doNotDisturbRed = Color(red: 0.94, green: 0.27, blue: 0.28)
+
+    var body: some View {
+        ZStack {
+            switch kind {
+            case .idle:
+                Circle().fill(ring)
+                Image(systemName: "moon.fill")
+                    .font(.system(size: size * 0.62, weight: .black))
+                    .foregroundStyle(Self.idleYellow)
+                    .rotationEffect(.degrees(-20))
+            case .doNotDisturb:
+                Circle().fill(Self.doNotDisturbRed)
+                Capsule().fill(.white).frame(width: size * 0.46, height: size * 0.15)
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(Circle().strokeBorder(ring, lineWidth: size * 0.14))
+    }
+}
+
+extension TogetherPresenceStatus {
+    /// The dot on the user's own picture: none online, the moon of appear offline invisible.
+    var dot: PresenceStatusDot.Kind? {
+        switch self {
+        case .idle: return .idle
+        case .dnd: return .doNotDisturb
+        case .online, .invisible: return nil
+        }
+    }
+}
+
+/// The user's own status on their picture: Idle and Do Not Disturb as friends see them, the
+/// moon of appearing offline while invisible, nothing online.
+struct OwnPresenceDot: View {
+    let status: TogetherPresenceStatus
+    let size: CGFloat
+
+    var body: some View {
+        if status == .invisible {
+            AppearingOfflineDot(size: size)
+        } else if let kind = status.dot {
+            PresenceStatusDot(kind: kind, size: size)
+        }
+    }
+}
+
 /// The moon on the user's avatar while they appear offline.
 struct AppearingOfflineDot: View {
     let size: CGFloat

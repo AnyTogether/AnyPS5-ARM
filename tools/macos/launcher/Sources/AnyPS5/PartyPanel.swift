@@ -85,7 +85,7 @@ extension AppModel {
         if !invitable.isEmpty, party.members.count < TogetherParty.maxSize {
             rows.append(PanelRow(id: "party-invite-title", title: T.text(.partyInviteFriends), symbol: "person.badge.plus", kind: .info("")))
             for friend in invitable {
-                let status: PanelPerson.Status = friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline
+                let status = PanelPerson.Status(friend.presence)
                 if invited.contains(friend.userId) {
                     rows.append(PanelRow(id: "party-invited-\(friend.userId)", title: shown(friend).name, detail: handleLine(friend) + " · " + T.text(.partyInvited), symbol: "hourglass", kind: .info(""),
                                          person: panelPerson(friend, status: status)))
@@ -286,7 +286,7 @@ extension AppModel {
         case "party.invite":
             let name = event.decode(InviteData.self)?.from.displayName ?? ""
             show(T.format(.partyInvitedYou, name), symbol: "person.3.fill")
-            if !NSApp.isActive { TrophyBanner.shared.notice(T.format(.partyInvitedYou, name), detail: T.text(.partyTitle), symbol: "person.3.fill", sounds: preferences.sounds) }
+            if !NSApp.isActive, !doNotDisturb { TrophyBanner.shared.notice(T.format(.partyInvitedYou, name), detail: T.text(.partyTitle), symbol: "person.3.fill", sounds: preferences.sounds) }
             loadParty()
         case "party.updated":
             guard let next = event.decode(TogetherParty.self), next.id == party?.id || party == nil else { return }

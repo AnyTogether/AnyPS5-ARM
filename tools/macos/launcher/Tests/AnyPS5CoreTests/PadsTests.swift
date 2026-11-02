@@ -117,10 +117,35 @@ final class PadRosterTests: XCTestCase {
 
     func testBatteryText() {
         XCTAssertEqual(PadBattery(percent: 80).reportText, "80%")
-        XCTAssertEqual(PadBattery(percent: 55, approximate: true, charging: true).reportText, "about 55% charging")
+        XCTAssertEqual(PadBattery(level: .medium, charging: true).reportText, "level medium charging")
+        XCTAssertEqual(PadBattery(level: nil, charging: true).reportText, "charging")
         XCTAssertTrue(PadBattery(percent: 10).low)
         XCTAssertFalse(PadBattery(percent: 10, charging: true).low)
         XCTAssertEqual(PadBattery(percent: 140).percent, 100)
+        XCTAssertEqual(PadBattery(percent: 80).level, .medium)
+        XCTAssertFalse(PadBattery(percent: 80).approximate)
+    }
+
+    /// A reader that gives only levels (a DualShock 3) gives a level and no percentage, so no
+    /// level reads as an exact number; only the lowest one counts as low.
+    func testALevelIsNoPercentage() {
+        func report(_ byte: UInt8) -> [UInt8] { var data = [UInt8](repeating: 0, count: 49); data[0] = 0x01; data[30] = byte; return data }
+        XCTAssertEqual(DualShock3Report.battery(report(0)), PadBattery(level: .empty, charging: false))
+        XCTAssertEqual(DualShock3Report.battery(report(1)), PadBattery(level: .empty, charging: false))
+        XCTAssertEqual(DualShock3Report.battery(report(2)), PadBattery(level: .low, charging: false))
+        XCTAssertEqual(DualShock3Report.battery(report(3)), PadBattery(level: .medium, charging: false))
+        XCTAssertEqual(DualShock3Report.battery(report(5)), PadBattery(level: .full, charging: false))
+        XCTAssertEqual(DualShock3Report.battery(report(0xEF)), PadBattery(level: .full, charging: false))
+        XCTAssertEqual(DualShock3Report.battery(report(0xEE)), PadBattery(level: nil, charging: true))
+        for byte: UInt8 in [0, 1, 2, 3, 4, 5, 0xEE, 0xEF] {
+            XCTAssertNil(DualShock3Report.battery(report(byte))?.percent, "byte \(byte)")
+        }
+        XCTAssertTrue(DualShock3Report.battery(report(1))!.low)
+        XCTAssertFalse(DualShock3Report.battery(report(2))!.low)
+        XCTAssertFalse(DualShock3Report.battery(report(0xEE))!.low)
+        let ds3 = PadInfo(id: "d", name: "DualShock 3", kind: .dualShock3, battery: DualShock3Report.battery(report(0)), driver: "IOHID (DualShock 3)")
+        XCTAssertEqual(PadTroubleshooter.diagnose(.init(pads: [ds3])).first, .lowBattery("DualShock 3", nil))
+        XCTAssertEqual(PadTroubleshooter.lowBatteryPad([ds3])?.id, "d")
     }
 }
 
@@ -201,8 +226,8 @@ final class DualShock3ReportTests: XCTestCase {
 
     func testBattery() {
         XCTAssertEqual(DualShock3Report.battery(report(battery: 0xEE))?.charging, true)
-        XCTAssertEqual(DualShock3Report.battery(report(battery: 0x05))?.percent, 100)
-        XCTAssertEqual(DualShock3Report.battery(report(battery: 0x01))?.percent, 20)
+        XCTAssertEqual(DualShock3Report.battery(report(battery: 0x05))?.level, .full)
+        XCTAssertEqual(DualShock3Report.battery(report(battery: 0x01))?.level, .empty)
         XCTAssertNil(DualShock3Report.battery(report(battery: 0x77)))
     }
 
@@ -241,8 +266,8 @@ final class PadTroubleshooterTests: XCTestCase {
         let pad = PadInfo(id: "a", name: "DualSense", kind: .dualSense, battery: PadBattery(percent: 8), driver: "GameController")
         let findings = PadTroubleshooter.diagnose(.init(pads: [pad], running: ["com.apple.finder", "com.valvesoftware.steam"]))
         XCTAssertEqual(findings, [.lowBattery("DualSense", 8), .steamRunning, .dualShock3])
-        XCTAssertEqual(PadTroubleshooter.statusLine([pad]), "DualSense · 8%")
-        XCTAssertNil(PadTroubleshooter.statusLine([]))
+        XCTAssertEqual(PadTroubleshooter.lowBatteryPad([pad])?.id, "a")
+        XCTAssertNil(PadTroubleshooter.lowBatteryPad([]))
     }
 }
 

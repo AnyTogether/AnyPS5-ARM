@@ -96,6 +96,11 @@ final class LanguageCheckTests: XCTestCase {
             ]),
             "Orbit Runner is ready, but some of its files are encrypted in the dump. If it does not start, dump it again."
         )
+        // Gran Turismo 7 with its wheel module neither an ELF nor a SELF: the same short note.
+        XCTAssertEqual(
+            AppModel.leftOutText("Gran Turismo 7", [LeftOutModule("sce_module/pdiWheel_0.prx", .encrypted)]),
+            "Gran Turismo 7 is ready, but some of its files are encrypted in the dump. If it does not start, dump it again."
+        )
     }
 
     func testFormatsFillTheirArgumentsInBothLanguages() {

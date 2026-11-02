@@ -75,7 +75,9 @@ extension AppModel {
             var rows = [
                 PanelRow(id: "together-user", title: "@\(user.handle)", detail: appearingOffline ? user.displayName + " · " + TL.text(.appearingOffline) : user.displayName,
                          symbol: "person.crop.circle.badge.checkmark", kind: .info(""),
-                         person: PanelPerson(name: user.displayName, avatar: user.avatar, level: togetherProfile?.trophyLevel?.badge, appearingOffline: appearingOffline)),
+                         person: PanelPerson(name: user.displayName, avatar: user.avatar,
+                                             status: presenceStatus == .idle ? .idle : presenceStatus == .dnd ? .doNotDisturb : nil,
+                                             level: togetherProfile?.trophyLevel?.badge, appearingOffline: appearingOffline)),
                 PanelRow(id: "together-profile", title: T.text(.profileMine), detail: T.text(.profileMineDetail), symbol: "person.text.rectangle", kind: .action(destructive: false) { [weak self] in
                     self?.openMyProfile()
                 }),

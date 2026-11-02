@@ -29,14 +29,18 @@ public enum DualShock3Report {
                         l2: Double(data[18]) / 255, r2: Double(data[19]) / 255)
     }
 
-    /// The battery byte (30): 0xEE charging, 0xEF charged, 0 to 5 a level; nil when the
-    /// report has none.
+    /// The battery byte (30): 0xEE charging (how full it is not said), 0xEF charged, 0 to 5 a
+    /// level (Linux's hid-sony reads them as 0, 1, 25, 50, 75 and 100 %); nil when the report has
+    /// none. Levels, not percentages: shown as words.
     public static func battery(_ data: [UInt8]) -> PadBattery? {
         guard data.count > 30, data[0] == 0x01 else { return nil }
         switch data[30] {
-        case 0xEE: return PadBattery(percent: 50, approximate: true, charging: true)
-        case 0xEF, 0xF1: return PadBattery(percent: 100, approximate: true, charging: false)
-        case 0...5: return PadBattery(percent: Int(data[30]) * 20, approximate: true, charging: false)
+        case 0xEE: return PadBattery(level: nil, charging: true)
+        case 0xEF, 0xF1: return PadBattery(level: .full, charging: false)
+        case 0, 1: return PadBattery(level: .empty, charging: false)
+        case 2: return PadBattery(level: .low, charging: false)
+        case 3, 4: return PadBattery(level: .medium, charging: false)
+        case 5: return PadBattery(level: .full, charging: false)
         default: return nil
         }
     }

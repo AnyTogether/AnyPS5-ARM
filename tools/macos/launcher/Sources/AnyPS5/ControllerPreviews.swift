@@ -11,7 +11,7 @@ enum ControllerPreviews {
                                battery: PadBattery(percent: 80), driver: "GameController", vendor: 0x054C, product: 0x0CE6, hasRumble: true, hasLight: true)
     static let xbox = PadInfo(id: "xbox", name: "Xbox Wireless Controller", kind: .xbox, connection: .usb, driver: "GameController", hasRumble: true)
     static let ds3 = PadInfo(id: "ds3", name: "PLAYSTATION(R)3 Controller", kind: .dualShock3, connection: .usb,
-                             battery: PadBattery(percent: 50, approximate: true, charging: true), driver: "IOHID (DualShock 3)", hasRumble: true)
+                             battery: PadBattery(level: .low, charging: false), driver: "IOHID (DualShock 3)", hasRumble: true)
 
     static func run(_ preferences: Preferences, _ found: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
         let render = { (name: String, preferences: Preferences, configure: (AppModel) -> Void) in
@@ -61,6 +61,12 @@ enum ControllerPreviews {
             var low = sense
             low.battery = PadBattery(percent: 9)
             Controllers.shared.preview([low], playerOne: "sense")
+        }
+        // A reader that gives only levels: a word and the battery's bars, never a made-up percent.
+        render("controllers-home-low-battery-level", preferences) { _ in
+            var low = ds3
+            low.battery = PadBattery(level: .empty, charging: false)
+            Controllers.shared.preview([low], playerOne: "ds3")
         }
         Controllers.shared.preview([])
     }

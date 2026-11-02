@@ -258,7 +258,7 @@ extension AppModel {
             withAnimation(Motion.overlay) { share.invites.append(invite) }
             let text = SP.format(.invitedYou, invite.from?.displayName ?? "", invite.title ?? gameName(invite.titleId))
             show(text, symbol: "shareplay")
-            if !NSApp.isActive { TrophyBanner.shared.notice(text, detail: T.text(.friendsTitle), symbol: "shareplay", sounds: preferences.sounds) }
+            if !NSApp.isActive, !doNotDisturb { TrophyBanner.shared.notice(text, detail: T.text(.friendsTitle), symbol: "shareplay", sounds: preferences.sounds) }
         case "share_play.ended":
             let id = event.data["sharePlayId"]
             withAnimation(Motion.overlay) { share.invites.removeAll { $0.sharePlayId == id } }
