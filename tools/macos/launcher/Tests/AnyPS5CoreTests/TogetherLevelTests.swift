@@ -271,7 +271,7 @@ final class TogetherLevelTests: TogetherSignedInCase {
         }
     }
 
-    // MARK: Appear offline
+    // MARK: Presence status
 
     func testAppearingOffline() async throws {
         FakeTogether.handler = { _, body in
@@ -282,9 +282,64 @@ final class TogetherLevelTests: TogetherSignedInCase {
         XCTAssertTrue(on)
         XCTAssertEqual(last(), "PATCH /api/v1/me/presence")
         XCTAssertEqual(body()?["appearOffline"] as? Bool, true)
-        XCTAssertEqual(body()?.count, 1)
+        XCTAssertEqual(body()?["status"] as? String, "invisible")
         let off = try await client.setAppearOffline(false)
         XCTAssertFalse(off)
+    }
+
+    /// Idle and Do Not Disturb go as `status` with appearOffline beside it: a server that knows
+    /// only appearOffline (and answers only it) keeps the user visible, a newer one the status.
+    func testAStatusGoesWithAppearOfflineBesideIt() async throws {
+        FakeTogether.handler = { _, body in
+            let asked = (try? JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any]) ?? [:]
+            return (200, ["appearOffline": asked["appearOffline"] as? Bool ?? false, "status": asked["status"] as? String ?? "online"])
+        }
+        let dnd = try await client.setPresence(.dnd)
+        XCTAssertEqual(dnd, .dnd)
+        XCTAssertEqual(body()?["status"] as? String, "dnd")
+        XCTAssertEqual(body()?["appearOffline"] as? Bool, false)
+        let got1 = try await client.setPresence(.idle)
+        XCTAssertEqual(got1, .idle)
+        let got2 = try await client.setPresence(.invisible)
+        XCTAssertEqual(got2, .invisible)
+        XCTAssertEqual(body()?["appearOffline"] as? Bool, true)
+
+        // An older server: it answers appearOffline alone, which is all it keeps.
+        FakeTogether.handler = { _, body in
+            let asked = (try? JSONSerialization.jsonObject(with: body ?? Data()) as? [String: Any])?["appearOffline"] as? Bool ?? false
+            return (200, ["appearOffline": asked])
+        }
+        let got3 = try await client.setPresence(.dnd)
+        XCTAssertEqual(got3, .online)
+        let got4 = try await client.setPresence(.invisible)
+        XCTAssertEqual(got4, .invisible)
+    }
+
+    func testTheOwnProfileReadsTheStatusAndWithoutItAppearOffline() async throws {
+        var profile = Self.own(appearOffline: false)
+        var inner = profile["profile"] as! [String: Any]
+        inner["status"] = "idle"
+        profile["profile"] = inner
+        FakeTogether.handler = { [profile] _, _ in (200, profile) }
+        var mine = try await client.myProfile()
+        XCTAssertEqual(mine.presence, .idle)
+        XCTAssertFalse(mine.appearOffline)
+        mine.appearOffline = true
+        XCTAssertEqual(mine.presence, .invisible)
+        mine.appearOffline = false
+        XCTAssertEqual(mine.presence, .online)
+
+        FakeTogether.handler = { _, _ in (200, Self.own(appearOffline: true)) }
+        let hidden = try await client.myProfile()
+        XCTAssertEqual(hidden.presence, .invisible)
+        FakeTogether.handler = { _, _ in (200, Self.own(appearOffline: nil)) }
+        let older = try await client.myProfile()
+        XCTAssertEqual(older.presence, .online)
+        inner["status"] = "away-from-keyboard"
+        profile["profile"] = inner
+        FakeTogether.handler = { [profile] _, _ in (200, profile) }
+        let unknown = try await client.myProfile()
+        XCTAssertEqual(unknown.presence, .online, "a status this launcher does not know falls back to appearOffline")
     }
 
     /// A server without it yet answers 404, which the launcher reads as "not available".
@@ -305,5 +360,33 @@ final class TogetherLevelTests: TogetherSignedInCase {
         XCTAssertEqual(TogetherPresenceMode(off)?.appearOffline, false)
         XCTAssertNil(TogetherPresenceMode(TogetherSocket.event(["op": "event", "id": "e3", "type": "presence.updated", "data": ["appearOffline": true]])!))
         XCTAssertNil(TogetherPresenceMode(TogetherSocket.event(["op": "event", "id": "e4", "type": "presence.mode", "data": [:]])!))
+        let dnd = TogetherSocket.event(["op": "event", "id": "e5", "type": "presence.mode", "data": ["appearOffline": false, "status": "dnd"]])!
+        XCTAssertEqual(TogetherPresenceMode(dnd)?.status, .dnd)
+        XCTAssertEqual(TogetherPresenceMode(dnd)?.appearOffline, false)
+        let idle = TogetherSocket.event(["op": "event", "id": "e6", "type": "presence.mode", "data": ["status": "idle"]])!
+        XCTAssertEqual(TogetherPresenceMode(idle)?.status, .idle)
+        let invisible = TogetherSocket.event(["op": "event", "id": "e7", "type": "presence.mode", "data": ["appearOffline": true, "status": "invisible"]])!
+        XCTAssertEqual(TogetherPresenceMode(invisible), TogetherPresenceMode(appearOffline: true))
+    }
+
+    /// Friends' dots: Do Not Disturb and Idle over a game too, invisible as offline, and a
+    /// presence without a status (an older server) as before.
+    func testAFriendsStatusAndWithoutIt() throws {
+        func presence(_ json: [String: Any]) throws -> TogetherFriend.Presence {
+            try JSONDecoder.together.decode(TogetherFriend.Presence.self, from: JSONSerialization.data(withJSONObject: json))
+        }
+        XCTAssertEqual(try presence(["state": "in_game", "titleId": "PPSA01234", "status": "dnd"]).shown, .doNotDisturb)
+        XCTAssertEqual(try presence(["state": "in_game", "titleId": "PPSA01234", "status": "idle"]).shown, .idle)
+        XCTAssertEqual(try presence(["state": "online", "status": "idle"]).shown, .idle)
+        XCTAssertEqual(try presence(["state": "online", "status": "online"]).shown, .online)
+        XCTAssertEqual(try presence(["state": "online", "status": "invisible"]).shown, .offline)
+        XCTAssertFalse(try presence(["state": "in_game", "titleId": "PPSA01234", "status": "invisible"]).online)
+        XCTAssertEqual(try presence(["state": "offline", "status": "dnd"]).shown, .offline)
+        // Without a status: as before.
+        XCTAssertEqual(try presence(["state": "in_game", "titleId": "PPSA01234"]).shown, .playing)
+        XCTAssertEqual(try presence(["state": "online"]).shown, .online)
+        XCTAssertEqual(try presence(["state": "away"]).shown, .idle)
+        XCTAssertEqual(try presence(["state": "offline"]).shown, .offline)
+        XCTAssertTrue(try presence(["state": "in_game", "titleId": "PPSA01234"]).playing)
     }
 }

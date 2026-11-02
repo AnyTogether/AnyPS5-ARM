@@ -115,6 +115,23 @@ final class RelinkInputsTests: XCTestCase {
         XCTAssertEqual(runs(inputs), [["eboot.bin", "sce_module/libgame.prx"]])
     }
 
+    /// Gran Turismo 7's dump (a report from another launcher's user): sce_module/pdiWheel_0.prx
+    /// is neither an ELF nor a SELF container. The game unlocks with that one module left out.
+    func testAWheelModuleThatIsNeitherAnElfNorASelfIsLeftOutAndTheGameUnlocks() throws {
+        let (game, toolkit, root, inputs) = try fixture()
+        var generator = SystemRandomNumberGenerator()
+        var bytes = (0..<4096).map { _ in UInt8.random(in: 0...255, using: &generator) }
+        bytes[0] = 0x8C  // never an ELF's or a SELF's first byte
+        try Data(bytes).write(to: game.folder.appendingPathComponent("sce_module/pdiWheel_0.prx"))
+        let lines = Locked<[String]>([])
+        let unlocking = installer(game, toolkit, lines: lines)
+        let unlocked = try unlocking.run(root: root)
+        XCTAssertTrue(fm.fileExists(atPath: unlocked.path))
+        XCTAssertEqual(unlocking.leftOut, [LeftOutModule("sce_module/pdiWheel_0.prx", .encrypted)])
+        XCTAssertTrue(lines.withLock { $0 }.contains("sce_module/pdiWheel_0.prx in the dump is encrypted (neither an ELF nor a decrypted SELF container): it is left out, and the game is unlocked without it"))
+        XCTAssertEqual(runs(inputs), [["eboot.bin", "sce_module/libgame.prx"]], "the relinker never sees it")
+    }
+
     func testAnEncryptedExecutableStopsInPlainWords() throws {
         let (game, toolkit, root, _) = try fixture()
         try Data([9, 9, 9, 9]).write(to: game.folder.appendingPathComponent("eboot.bin"))

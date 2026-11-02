@@ -31,7 +31,8 @@ In short:
 - A text you leave out shows in English.
 - Try it: put the file in `~/Library/Application Support/AnyPS5/Languages` (create the folder
   if it is not there), open AnyPS5 again and choose the language in **Settings › Language**. A
-  file there comes before the built-in one of the same code. A file from an older launcher, with
+  file there comes before the built-in one of the same code. A text it leaves out comes from the
+  built-in file, then from English. A file from an older launcher, with
   an `"@meta"` part at the top, still works there; for the repository, use `languageName`.
 
 ## The same keys in every app

@@ -7,10 +7,10 @@ enum TP {
         case title = "padTitle", noneConnected = "padNone", noneConnectedDetail = "padNoneDetail", playerOne = "padPlayerOne", testInputs = "padTest", testInputsDetail = "padTestDetail", testVibration = "padVibrate", testVibrationDetail = "padVibrateDetail"
         case light = "padLight", lightDetail = "padLightDetail", lightTheme = "padLight_theme", lightBlue = "padLight_blue", lightRed = "padLight_red", lightGreen = "padLight_green", lightPurple = "padLight_purple", lightPink = "padLight_pink", lightOrange = "padLight_orange", lightWhite = "padLight_white", lightOff = "padLight_off"
         case confirm = "padConfirm", confirmDetail = "padConfirmDetail", confirmCross = "padConfirmCross", confirmCircle = "padConfirmCircle", deadzone = "padDeadzone", deadzoneDetail = "padDeadzoneDetail"
-        case usb = "padUsb", bluetooth = "padBluetooth", connectionUnknown = "padConnected", battery = "padBattery", batteryAbout = "padBatteryAbout", charging = "padCharging", generic = "padGeneric"
+        case usb = "padUsb", bluetooth = "padBluetooth", connectionUnknown = "padConnected", battery = "padBattery", batteryLevel = "padBatteryLevel", levelEmpty = "padLevelEmpty", levelLow = "padLevelLow", levelMedium = "padLevelMedium", levelFull = "padLevelFull", charging = "padCharging", generic = "padGeneric"
         case troubleshoot = "padTroubleshoot", allGood = "padAllGood", allGoodDetail = "padAllGoodLauncherDetail"
         case noControllers = "padFinding_noControllers", noControllersDetail = "padFinding_noControllersDetail", usbCable = "padFinding_usbCable", usbCableDetail = "padFinding_usbCableDetail", bluetoothPairing = "padFinding_bluetoothPairing", bluetoothPairingDetail = "padFinding_bluetoothPairingDetail"
-        case dualShock3 = "padDualShock3", dualShock3Detail = "padDualShock3Detail", unmapped = "padFinding_unmapped", unmappedDetail = "padFinding_unmappedDetail", lowBattery = "padFinding_lowBattery", lowBatteryDetail = "padFinding_lowBatteryDetail", steamRunning = "padFinding_steamRunning", steamRunningDetail = "padFinding_steamRunningDetail"
+        case dualShock3 = "padDualShock3", dualShock3Detail = "padDualShock3Detail", unmapped = "padFinding_unmapped", unmappedDetail = "padFinding_unmappedDetail", lowBattery = "padFinding_lowBattery", lowBatteryLevel = "padFinding_lowBatteryLevel", lowBatteryDetail = "padFinding_lowBatteryDetail", steamRunning = "padFinding_steamRunning", steamRunningDetail = "padFinding_steamRunningDetail"
         case testTitle = "padTestTitle", testHoldToLeave = "padHoldToLeave", testLeave = "padLeave", testNoPad = "padTestNoPad", testSticks = "padSticks", testTriggers = "padTriggers", vibrated = "padVibrating", noVibration = "padNoVibration"
         case connected = "padArrived", disconnected = "padLeft"
     }
@@ -42,11 +42,27 @@ enum TP {
         }
     }
 
-    /// "DualSense · Bluetooth · 80% · charging".
+    static func level(_ level: PadBatteryLevel) -> String {
+        switch level {
+        case .empty: return text(.levelEmpty)
+        case .low: return text(.levelLow)
+        case .medium: return text(.levelMedium)
+        case .full: return text(.levelFull)
+        }
+    }
+
+    /// "80%" where the reader gives a percentage, "Low" where it gives only a level; nil when it
+    /// says only that it charges.
+    static func amount(_ battery: PadBattery) -> String? {
+        if let percent = battery.percent { return format(.battery, percent) }
+        return battery.level.map(level)
+    }
+
+    /// "DualSense · Bluetooth · 80% · charging", "DualShock 3 · USB · Battery: Low".
     static func summary(_ pad: PadInfo) -> String {
         var parts = [kind(pad.kind), connection(pad.connection)]
         if let battery = pad.battery {
-            parts.append(format(battery.approximate ? .batteryAbout : .battery, battery.percent))
+            if let amount = amount(battery) { parts.append(battery.percent == nil ? format(.batteryLevel, amount) : amount) }
             if battery.charging == true { parts.append(text(.charging)) }
         }
         return parts.joined(separator: " · ")
@@ -60,7 +76,8 @@ enum TP {
         case .bluetoothPairing: return (text(.bluetoothPairing), text(.bluetoothPairingDetail))
         case .dualShock3: return (text(.dualShock3), text(.dualShock3Detail))
         case .unmapped(let name): return (format(.unmapped, name), text(.unmappedDetail))
-        case .lowBattery(let name, let percent): return (format(.lowBattery, name, percent), text(.lowBatteryDetail))
+        case .lowBattery(let name, let percent?): return (format(.lowBattery, name, percent), text(.lowBatteryDetail))
+        case .lowBattery(let name, nil): return (format(.lowBatteryLevel, name), text(.lowBatteryDetail))
         case .steamRunning: return (text(.steamRunning), text(.steamRunningDetail))
         }
     }

@@ -402,20 +402,65 @@ struct PadSilhouette: Shape {
 }
 
 /// The top bar's controller line, shown only when there is something to say (a controller's
-/// battery nearly empty): the controller's name and what is left.
+/// battery nearly empty): a battery with its bars, the controller's name and what is left, a
+/// percentage only where the reader gives a real one ("Nearly empty" where it gives a level).
 struct PadStatusPill: View {
-    let text: String
+    let pad: PadInfo
     @Environment(\.scale) private var scale
     @Environment(\.look) private var look
 
+    /// Read so the view is drawn again in another language (its texts come from T).
+    @Environment(\.languageCode) private var languageCode
+
     var body: some View {
+        let _ = languageCode
         HStack(spacing: 8 * scale) {
-            Image(systemName: "battery.25percent").font(.system(size: 14 * scale, weight: .semibold)).foregroundStyle(PhoneIndicator.orange)
-            Text(text).font(.display(14 * scale, .semibold)).lineLimit(1)
+            BatteryBars(level: pad.battery?.level ?? .empty, color: PhoneIndicator.orange)
+                .frame(width: 22 * scale, height: 11 * scale)
+            Text(pad.name).font(.display(14 * scale, .semibold)).lineLimit(1)
+            if let battery = pad.battery, let amount = TP.amount(battery) {
+                Text(amount).font(.display(14 * scale, .medium)).foregroundStyle(.white.opacity(0.62)).lineLimit(1).fixedSize()
+            }
         }
         .foregroundStyle(.white.opacity(0.9))
         .padding(.horizontal, 14 * scale)
         .frame(height: 36 * scale)
         .background(Capsule().fill(look.seeThrough ? Ice.navy.opacity(GlassWindowRecipe.plateOpacity) : Color.white.opacity(0.1)))
+    }
+}
+
+/// A battery drawn with four bars, as many lit as its level has (none nearly empty, where its
+/// shell takes the colour): a level reads as a level, not as an exact number.
+struct BatteryBars: View {
+    let level: PadBatteryLevel
+    var color: Color = .white
+
+    var body: some View {
+        GeometryReader { geometry in
+            let height = geometry.size.height, width = geometry.size.width
+            let tip = max(1.5, width * 0.08), line = max(1, height * 0.12), gap = max(0.8, height * 0.1)
+            let body = width - tip - gap / 2
+            let inner = body - line * 2 - gap * 2
+            let bar = (inner - gap * 3) / 4
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: height * 0.26)
+                    .strokeBorder(level == .empty ? color : Color.white.opacity(0.78), lineWidth: line)
+                    .frame(width: body, height: height)
+                RoundedRectangle(cornerRadius: tip / 2)
+                    .fill(Color.white.opacity(0.78))
+                    .frame(width: tip, height: height * 0.4)
+                    .offset(x: body + gap / 2)
+                HStack(spacing: gap) {
+                    ForEach(0..<4, id: \.self) { index in
+                        RoundedRectangle(cornerRadius: bar * 0.25)
+                            .fill(index < level.bars ? color : Color.clear)
+                            .frame(width: max(0, bar))
+                    }
+                }
+                .padding(line + gap)
+                .frame(width: body, height: height)
+            }
+        }
+        .accessibilityHidden(true)
     }
 }

@@ -4,35 +4,73 @@ import SwiftUI
 
 /// Trophy levels, a profile's showcase, comparing trophies with someone, and appearing offline.
 extension AppModel {
-    // MARK: Appear offline
+    // MARK: Presence status
 
     /// Friends see the user offline (set here or on another device).
     var appearingOffline: Bool { togetherProfile?.appearOffline == true }
 
-    /// Settings → AnyTogether: Online or Appear offline, once the profile is read.
+    /// Online, Idle, Do Not Disturb or Invisible, as friends see the user.
+    var presenceStatus: TogetherPresenceStatus { togetherProfile?.presence ?? .online }
+
+    /// Do Not Disturb: messages and invites show in the launcher only, with no sound and no
+    /// banner over a game or another app.
+    var doNotDisturb: Bool { presenceStatus == .dnd }
+
+    /// The choices of Settings → AnyTogether → Show me as, in order.
+    static let presenceChoices: [TogetherPresenceStatus] = [.online, .idle, .dnd, .invisible]
+
+    static func presenceName(_ status: TogetherPresenceStatus) -> String {
+        switch status {
+        case .online: return TL.text(.presenceOnline)
+        case .idle: return TL.text(.presenceIdle)
+        case .dnd: return TL.text(.presenceDnd)
+        case .invisible: return TL.text(.presenceInvisible)
+        }
+    }
+
+    static func presenceDetail(_ status: TogetherPresenceStatus) -> String {
+        switch status {
+        case .online: return TL.text(.presenceOnlineDetail)
+        case .idle: return TL.text(.presenceIdleDetail)
+        case .dnd: return TL.text(.presenceDndDetail)
+        case .invisible: return TL.text(.presenceHint)
+        }
+    }
+
+    /// Settings → AnyTogether: Online, Idle, Do Not Disturb or Invisible, once the profile is read.
     func presenceRows() -> [PanelRow] {
         guard togetherProfile != nil else { return [] }
-        return [PanelRow(id: "together-presence", title: TL.text(.presenceTitle), detail: TL.text(.presenceHint), symbol: appearingOffline ? "moon.fill" : "circle.fill",
-                         kind: .choice(options: [TL.text(.presenceOnline), TL.text(.presenceOffline)], selected: appearingOffline ? 1 : 0) { [weak self] index in
-                             self?.setAppearOffline(index == 1)
+        let status = presenceStatus
+        let symbol: String
+        switch status {
+        case .online: symbol = "circle.fill"
+        case .idle: symbol = "moon.fill"
+        case .dnd: symbol = "minus.circle.fill"
+        case .invisible: symbol = "circle.dashed"
+        }
+        return [PanelRow(id: "together-presence", title: TL.text(.presenceTitle), detail: Self.presenceDetail(status), symbol: symbol,
+                         kind: .choice(options: Self.presenceChoices.map(Self.presenceName), selected: Self.presenceChoices.firstIndex(of: status) ?? 0) { [weak self] index in
+                             self?.setPresence(Self.presenceChoices[index])
                          })]
     }
 
+    func setAppearOffline(_ on: Bool) { setPresence(on ? .invisible : .online) }
+
     /// Shown changed at once; put back with a short note when the server says no (a server
     /// without it answers 404). The socket and its heartbeats stay as they are.
-    func setAppearOffline(_ on: Bool) {
-        guard togetherProfile != nil, appearingOffline != on else { return }
-        let before = !on
-        withAnimation(Motion.overlay) { togetherProfile?.appearOffline = on }
+    func setPresence(_ status: TogetherPresenceStatus) {
+        guard togetherProfile != nil, presenceStatus != status else { return }
+        let before = presenceStatus
+        withAnimation(Motion.overlay) { togetherProfile?.presence = status }
         Task {
             do {
-                let kept = try await together.setAppearOffline(on)
-                withAnimation(Motion.overlay) { togetherProfile?.appearOffline = kept }
+                let kept = try await together.setPresence(status)
+                withAnimation(Motion.overlay) { togetherProfile?.presence = kept }
             } catch let problem as TogetherProblem where problem.status == 404 {
-                withAnimation(Motion.overlay) { togetherProfile?.appearOffline = before }
+                withAnimation(Motion.overlay) { togetherProfile?.presence = before }
                 show(TL.text(.presenceUnavailable), symbol: "moon")
             } catch {
-                withAnimation(Motion.overlay) { togetherProfile?.appearOffline = before }
+                withAnimation(Motion.overlay) { togetherProfile?.presence = before }
                 show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
             }
         }

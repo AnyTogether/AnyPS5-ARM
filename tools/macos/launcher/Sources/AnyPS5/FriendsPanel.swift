@@ -47,7 +47,7 @@ extension AppModel {
                                      self?.openProfile(friend.handle, card: TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar,
                                                                                            privateName: friend.privateName, privateAvatar: friend.privateAvatar))
                                  },
-                                 person: panelPerson(friend, status: friend.presence?.playing == true ? .playing : friend.presence?.online == true ? .online : .offline, level: friend.level)))
+                                 person: panelPerson(friend, status: PanelPerson.Status(friend.presence), level: friend.level)))
             // Online friends can be called, unless the user is in a call with them already.
             if friend.presence?.online == true, callFriend?.userId != friend.userId, familyAllows(.voiceChat) {
                 let person = TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar)
@@ -75,6 +75,9 @@ extension AppModel {
 
     private func stateText(_ presence: TogetherFriend.Presence?) -> String {
         guard let presence, presence.online else { return T.text(.friendsOffline) }
+        // A chosen Do Not Disturb or Idle in words when they play nothing (over a game, the dot says it).
+        if !presence.playing, presence.shown == .doNotDisturb { return TL.text(.presenceDnd) }
+        if !presence.playing, presence.status == TogetherPresenceStatus.idle.rawValue { return TL.text(.presenceIdle) }
         guard presence.playing, let title = presence.titleId else { return presence.state == "away" ? T.text(.friendsAway) : T.text(.friendsOnline) }
         let name = games.first { $0.titleID == title }?.name ?? title
         let minutes = presence.since.flatMap { ISO8601DateFormatter().date(from: $0) }.map { max(1, Int(Date().timeIntervalSince($0) / 60)) }
@@ -137,7 +140,7 @@ extension AppModel {
         case "friend.request":
             let name = event.data["displayName"] ?? event.data["handle"] ?? ""
             show(T.format(.friendsAsked, name), symbol: "person.badge.plus")
-            if !NSApp.isActive { TrophyBanner.shared.notice(T.format(.friendsAsked, name), detail: "@\(event.data["handle"] ?? "")", symbol: "person.badge.plus", sounds: preferences.sounds) }
+            if !NSApp.isActive, !doNotDisturb { TrophyBanner.shared.notice(T.format(.friendsAsked, name), detail: "@\(event.data["handle"] ?? "")", symbol: "person.badge.plus", sounds: preferences.sounds) }
             refreshFriends()
         case "friend.accepted":
             show(T.format(.friendsNowFriends, event.data["displayName"] ?? ""), symbol: "person.2.fill")
@@ -147,7 +150,7 @@ extension AppModel {
         case "level.up":
             if let up = TogetherLevelUp(event) { levelUp(up) }
         case "presence.mode":
-            if let mode = TogetherPresenceMode(event) { withAnimation(Motion.overlay) { togetherProfile?.appearOffline = mode.appearOffline } }
+            if let mode = TogetherPresenceMode(event) { withAnimation(Motion.overlay) { togetherProfile?.presence = mode.status } }
         case let type where type.hasPrefix("message.") || type.hasPrefix("conversation.") || type == "typing" || type == "messages.settings":
             messageEvent(event)
         case let type where type.hasPrefix("lfg.") || type == "discover.changed":

@@ -305,9 +305,9 @@ extension AppModel {
             let conversation = inbox?.conversations.first { $0.id == message.conversationId }
             guard conversation?.muted != true else { return }
             let author = conversation?.members.first { $0.userId == message.authorId }?.displayName ?? ""
-            Sounds.shared.play(.move)
+            if !doNotDisturb { Sounds.shared.play(.move) }
             show(T.format(.messagesFrom, author, text), symbol: "bubble.left.fill")
-            if !NSApp.isActive { TrophyBanner.shared.notice(author, detail: text, symbol: "bubble.left.fill", sounds: preferences.sounds) }
+            if !NSApp.isActive, !doNotDisturb { TrophyBanner.shared.notice(author, detail: text, symbol: "bubble.left.fill", sounds: preferences.sounds) }
         case "message.reactions":
             guard let changed = event.decode(TogetherMessageReactions.self) else { return }
             withAnimation(Motion.focus) { inbox?.react(changed.conversationId, seq: changed.seq, reactions: changed.reactions) }

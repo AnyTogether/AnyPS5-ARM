@@ -19,6 +19,6 @@ enum TL {
         case compareTrophies, compareTitle, compareLead, compareGameLead, compareNoGames, compareBoth, compareNotYet, compareNotPlayed
         case comparePrivate, compareFailed, compareLoading, compareYou, compareGames, compareBothPlay, hintCompare, hintTrophies, compareUnknownGame
         // Appear offline
-        case presenceTitle, presenceOnline, presenceOffline = "presenceAppearOffline", presenceHint, appearingOffline = "presenceAppearing", presenceUnavailable
+        case presenceTitle, presenceOnline, presenceIdle, presenceDnd, presenceInvisible, presenceOnlineDetail, presenceIdleDetail, presenceDndDetail, presenceHint, appearingOffline = "presenceAppearing", presenceUnavailable
     }
 }

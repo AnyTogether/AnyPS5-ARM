@@ -16,8 +16,9 @@ public enum PadTroubleshooter {
         /// A controller macOS lists as a HID game controller but has no profile for (it shows
         /// only to games through SDL); its name.
         case unmapped(String)
-        /// A controller's battery is nearly empty; its name and percentage.
-        case lowBattery(String, Int)
+        /// A controller's battery is nearly empty; its name and percentage (nil where the reader
+        /// gives only a level).
+        case lowBattery(String, Int?)
         /// Steam is running: with its PlayStation, Xbox or Switch support on, it can turn the pad
         /// into a mouse outside its own games.
         case steamRunning
@@ -87,10 +88,9 @@ public enum PadTroubleshooter {
         return findings
     }
 
-    /// One line for the controller indicator in the top bar: nil when there is nothing to say.
-    public static func statusLine(_ pads: [PadInfo]) -> String? {
-        guard !pads.isEmpty else { return nil }
-        if let low = pads.first(where: { $0.battery?.low == true }) { return "\(low.name) · \(low.battery!.percent)%" }
-        return nil
+    /// The controller the indicator in the top bar is about (its battery nearly empty): nil when
+    /// there is nothing to say.
+    public static func lowBatteryPad(_ pads: [PadInfo]) -> PadInfo? {
+        pads.first { $0.battery?.low == true }
     }
 }
