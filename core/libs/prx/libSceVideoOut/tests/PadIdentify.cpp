@@ -48,6 +48,14 @@ int RecordRumble(void*, Uint16 low, Uint16 high) {
     return 0;
 }
 
+// The fork seats a controller on its first press (multi-seat with phones and assist), not at connect.
+void Press(PadInput& padInput, const DisplayWindow& window, SDL_Joystick* joystick) {
+    Require(SDL_JoystickSetVirtualButton(joystick, SDL_CONTROLLER_BUTTON_A, 1) == 0, "the virtual controller presses A");
+    padInput.Update(window);
+    Require(SDL_JoystickSetVirtualButton(joystick, SDL_CONTROLLER_BUTTON_A, 0) == 0, "the virtual controller releases A");
+    padInput.Update(window);
+}
+
 void Pump(PadInput& padInput, const DisplayWindow& window, int milliseconds) {
     const auto end = Clock::now() + std::chrono::milliseconds(milliseconds);
     while (Clock::now() < end) {
@@ -74,6 +82,8 @@ int Run(const char* mode) {
     desc.Rumble = RecordRumble;
     const int device = SDL_JoystickAttachVirtualEx(&desc);
     Require(device >= 0 && SDL_IsGameController(device), "a virtual controller with a rumble callback attaches");
+    SDL_Joystick* stick = SDL_JoystickOpen(device);
+    Require(stick != nullptr, "the virtual controller opens");
 
     if (std::strcmp(mode, "invalid") == 0) {
         SetIdentifyMode("bogus");
@@ -83,6 +93,7 @@ int Run(const char* mode) {
             const std::string message = error.what();
             Require(message.find("ANYPS5_PAD_IDENTIFY") != std::string::npos && message.find("bogus") != std::string::npos,
                 "an invalid mode stops the start with an error naming the variable and the value");
+            SDL_JoystickClose(stick);
             SDL_JoystickDetachVirtual(device);
             SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
             return 0;
@@ -95,10 +106,11 @@ int Run(const char* mode) {
     else return 2;
 
     if (std::strcmp(mode, "rumble") == 0) Pad::SetVibration(0, 200, 200);
-    const auto bound = Clock::now();
     DisplayWindow window;
     {
         PadInput padInput;
+        const auto bound = Clock::now();
+        Press(padInput, window, stick);
         Require(padInput.SlotOccupied(0), "the virtual controller takes slot 0");
 
         if (std::strcmp(mode, "rumble") == 0) {
@@ -121,6 +133,7 @@ int Run(const char* mode) {
         }
     }
 
+    SDL_JoystickClose(stick);
     Require(SDL_JoystickDetachVirtual(device) == 0, "the virtual controller detaches");
     SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
     return 0;

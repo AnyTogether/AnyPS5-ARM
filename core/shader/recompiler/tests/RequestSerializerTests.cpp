@@ -595,7 +595,7 @@ int main() {
                         version43.pop_back();
                         version43[4] = 43u;
                         const auto replay43 = serializer.Deserialize(EncodeBase64(version43));
-                        Require(serializer.Serialize(replay43.request) == EncodeBase64(version53));
+                        Require(serializer.Serialize(replay43.request) == EncodeBase64(version54));
                         Require(replay43.request.graphics->tessellation->mergedHull == merged && replay43.request.context.vertex->pointList && replay43.request.context.vertex->pointSize == 3.0f && replay43.request.context.vertex->pointSizeMin == 1.0f && replay43.request.context.vertex->pointSizeMax == 8.0f);
                         auto version42 = version43;
                         version42.resize(version42.size() - 13u);
@@ -907,7 +907,7 @@ int main() {
         domain.target.tessellationEvaluationSubgroups = subgroups;
         const auto encoded = serializer.Serialize(domain);
         auto bytes = DecodeBase64(encoded);
-        Require(bytes.size() > 14u && bytes[4] == 54u && bytes.back() == 0u && bytes[bytes.size() - 5u] == 0xffu && bytes[bytes.size() - 6u] == 0u && bytes[bytes.size() - 7u] == (subgroups ? 1u : 0u));
+        Require(bytes.size() > 14u && bytes[4] == 54u && bytes.back() == 0u && bytes[bytes.size() - 5u] == 0xffu && bytes[bytes.size() - 6u] == 0u && bytes[bytes.size() - 7u] == 0u && bytes[bytes.size() - 8u] == (subgroups ? 1u : 0u));
         Require(serializer.Deserialize(encoded).request.target.tessellationEvaluationSubgroups == subgroups);
         bytes.resize(bytes.size() - 5u);
         bytes[4] = 53u;

@@ -50,6 +50,14 @@ void SendKey(PadInput& pad, DisplayWindow& window, Uint32 type, SDL_Scancode key
     pad.HandleEvent(event, window);
 }
 
+// The fork seats a controller on its first press (multi-seat with phones and assist), not at connect.
+void Press(PadInput& pad, DisplayWindow& window, SDL_Joystick* joystick) {
+    Require(SDL_JoystickSetVirtualButton(joystick, SDL_CONTROLLER_BUTTON_A, 1) == 0, "the virtual controller did not press A");
+    pad.Update(window);
+    Require(SDL_JoystickSetVirtualButton(joystick, SDL_CONTROLLER_BUTTON_A, 0) == 0, "the virtual controller did not release A");
+    pad.Update(window);
+}
+
 bool CrossPressed() {
     return (Pad::ReadState(0).buttons & static_cast<std::uint32_t>(Pad::PadButton::Cross)) != 0;
 }
@@ -73,9 +81,10 @@ std::chrono::milliseconds PumpUntil(PadInput& pad, DisplayWindow& window, std::c
     return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
 }
 
-void CheckDefaultKeepsPort0(DisplayWindow& window, int index, SDL_JoystickID id) {
+void CheckDefaultKeepsPort0(DisplayWindow& window, int index, SDL_JoystickID id, SDL_Joystick* stick) {
     SetPort0State(nullptr);
     PadInput pad;
+    Press(pad, window, stick);
     Require(pad.SlotOccupied(0), "the attached controller is bound to slot 0");
     Require(Pad::IsConnected(0), "default port 0 is connected with a controller");
     Send(pad, window, SDL_CONTROLLERDEVICEREMOVED, id);
@@ -85,12 +94,14 @@ void CheckDefaultKeepsPort0(DisplayWindow& window, int index, SDL_JoystickID id)
     Require(User0LoggedIn(), "default user 0 stays logged in after its controller is removed");
     Require(Pad::ReadState(0).connected, "default port 0 reads as connected after its controller is removed");
     Send(pad, window, SDL_CONTROLLERDEVICEADDED, index);
+    Press(pad, window, stick);
     Require(pad.SlotOccupied(0), "the controller is bound to slot 0 again");
 }
 
-void CheckControllerModeFollowsTheController(DisplayWindow& window, int index, SDL_JoystickID id) {
+void CheckControllerModeFollowsTheController(DisplayWindow& window, int index, SDL_JoystickID id, SDL_Joystick* stick) {
     SetPort0State("controller");
     PadInput pad;
+    Press(pad, window, stick);
     Require(pad.SlotOccupied(0), "the attached controller is bound to slot 0 in controller mode");
     Require(Pad::IsConnected(0) && User0LoggedIn(), "controller mode starts with the controller present");
 
@@ -103,6 +114,7 @@ void CheckControllerModeFollowsTheController(DisplayWindow& window, int index, S
     Require(!gone.connected && gone.buttons == 0 && gone.left_stick_x == 0 && gone.left_stick_y == 0, "a withdrawn port 0 reads zeroed");
 
     Send(pad, window, SDL_CONTROLLERDEVICEADDED, index);
+    Press(pad, window, stick);
     Require(pad.SlotOccupied(0), "the controller is bound to slot 0 again");
     PumpUntil(pad, window, std::chrono::seconds{5}, [] { return Pad::IsConnected(0); });
     Require(User0LoggedIn(), "user 0 logs in with its controller");
@@ -163,15 +175,18 @@ int main() {
     const int device = SDL_JoystickAttachVirtualEx(&desc);
     Require(device >= 0 && SDL_IsGameController(device), "virtual controller attach failed");
     const SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(device);
+    SDL_Joystick* stick = SDL_JoystickOpen(device);
+    Require(stick != nullptr, "virtual controller open failed");
 
     Require(sceUserServiceInitialize(nullptr) == USER_SERVICE_OK, "user service init failed");
     Pad::Initialize();
     DisplayWindow window;
-    CheckDefaultKeepsPort0(window, device, id);
-    CheckControllerModeFollowsTheController(window, device, id);
+    CheckDefaultKeepsPort0(window, device, id, stick);
+    CheckControllerModeFollowsTheController(window, device, id, stick);
     CheckKeyboardStaysOutOfWithdrawnPort0(window, device, id);
 
     SetPort0State(nullptr);
+    SDL_JoystickClose(stick);
     Require(SDL_JoystickDetachVirtual(device) == 0, "virtual controller detach failed");
     SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER | SDL_INIT_JOYSTICK);
     return 0;
