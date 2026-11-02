@@ -11,12 +11,12 @@ folder: `en.json` is English, the source, and `tr.json` is Turkish.
 
 VK translated these twelve for the Windows/Linux launcher. Their files here hold every text
 whose English reads the same in both launchers' `en.json`, carried over by
-`python3 -I scripts/import-port-translations.py <AnyLauncher-Port checkout>`. A text the Mac
+`python3 -I scripts/import-port-translations.py <AnyPS5-Desktop checkout>`. A text the Mac
 says in its own words (Mac where the Port says PC) is left out and shows in English until
 someone translates it here. Run the script again after the Port's files change. It keeps a text
 translated here for a key only the Mac has. The guide for translating
 every AnyPS5 app, this one included, is
-[TRANSLATING.md in AnyLauncher-Port](https://github.com/AnyTogether/AnyLauncher-Port/blob/main/TRANSLATING.md).
+[TRANSLATING.md in AnyPS5-Desktop](https://github.com/AnyTogether/AnyPS5-Desktop/blob/main/TRANSLATING.md).
 A hosted Weblate project is coming, where several people can translate one language at once; the
 files stay the same.
 

@@ -4,7 +4,7 @@ import Foundation
 /// object of texts per language, as Weblate keeps monolingual JSON, named by its locale code
 /// (de.json is German, pt-BR.json Brazilian Portuguese). The language's own name is the text
 /// "languageName"; the console language a game starts in comes from the code
-/// (ConsoleLanguage.forLocale). The same format and keys as AnyLauncher-Port's assets/l10n.
+/// (ConsoleLanguage.forLocale). The same format and keys as AnyPS5-Desktop's assets/l10n.
 public struct LanguageFile: Equatable, Sendable {
     public let code: String
     /// The language's name in itself, as Settings lists it.

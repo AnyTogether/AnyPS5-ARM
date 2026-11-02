@@ -1,5 +1,5 @@
 // Checks the language files in assets/l10n and the code in lib (TRANSLATING.md in
-// AnyLauncher-Port): dart run tool/check_translations.dart [assets/l10n [lib]]
+// AnyPS5-Desktop): dart run tool/check_translations.dart [assets/l10n [lib]]
 //
 // Every file is one flat JSON object of texts, as Weblate keeps monolingual JSON: no key en.json
 // lacks, the same placeholders as English in each text, and the language's own name under
@@ -8,7 +8,7 @@
 // Turkish words in it, since those belong in the files. A line that has to compare the code for
 // something other than a text says so with the comment "// not a text".
 //
-// The same file is AnyLauncher-Port's and the phone app's (AnyPS5-ARM's mobile/tool); keep the two
+// The same file is AnyPS5-Desktop's and the phone app's (AnyPS5-ARM's mobile/tool); keep the two
 // the same.
 import 'dart:convert';
 import 'dart:io';
