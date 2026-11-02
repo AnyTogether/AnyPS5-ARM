@@ -2,6 +2,7 @@
 #include "prx/libSceNpManager/include/LegacyExports.hpp"
 #include "prx/libc/include/general/ExportMacros.hpp"
 #include "prx/libSceNpManager/include/Api.hpp"
+#include "prx/libSceNpManager/include/InGameMessageIds.hpp"
 #include <cstdint>
 #include <cstddef>
 #include "SceTypes.hpp"
@@ -12,7 +13,9 @@
 #include <cstring>
 #include <atomic>
 #include <mutex>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -43,6 +46,25 @@ static constexpr uint32_t NP_REACHABILITY_STATE_REACHABLE = 2;
 static constexpr uint32_t NP_GAME_PRESENCE_STATUS_OFFLINE = 0;
 
 static std::atomic<int> g_nextRequest{1};
+
+static constexpr int NP_IN_GAME_MESSAGE_ERROR_LIB_CONTEXT_NOT_FOUND = static_cast<int>(0x80552B03);
+static constexpr int NP_IN_GAME_MESSAGE_ERROR_HANDLE_NOT_FOUND = static_cast<int>(0x80552B05);
+
+namespace {
+struct InGameMessageContext {
+    std::set<std::int32_t> handles;
+};
+
+std::mutex inGameMessageMutex;
+std::map<std::int32_t, InGameMessageContext> inGameMessageContexts;
+std::int32_t nextInGameMessageContext = 1;
+std::int32_t nextInGameMessageHandle = 1;
+
+InGameMessageContext* FindInGameMessageContext(std::int32_t libCtxId) {
+    const auto found = inGameMessageContexts.find(libCtxId);
+    return found == inGameMessageContexts.end() ? nullptr : &found->second;
+}
+}
 
 namespace {
 std::mutex reachabilityMutex;
@@ -413,9 +435,11 @@ int APS5_VABI sceNpIdMapperOnlineIdToAccountId(int reqId, int userId, const void
     if (userId == USER_SERVICE_USER_ID_INVALID || !input || !output || value < 1 || value > 1000) return NP_ID_MAPPER_REFUSED_ARGUMENT;
     return SCE_NP_ERROR_SIGNED_OUT;
 }
-int APS5_VABI sceNpInGameMessageAbortHandle(void) {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpInGameMessageAbortHandle(std::int32_t libCtxId, std::int32_t handleId) {
+    std::lock_guard lock(inGameMessageMutex);
+    InGameMessageContext* context = FindInGameMessageContext(libCtxId);
+    if (!context) return NP_IN_GAME_MESSAGE_ERROR_LIB_CONTEXT_NOT_FOUND;
+    return context->handles.count(handleId) == 1 ? 0 : NP_IN_GAME_MESSAGE_ERROR_HANDLE_NOT_FOUND;
 }
 int APS5_VABI sceNpInGameMessageCheckCallback(void) {
     NotImplemented_nid_no_patch(__func__);
@@ -1263,19 +1287,29 @@ int APS5_VABI sceNpCheckCallbackForLib() {
 
 extern "C" {
 
-int APS5_VABI sceNpInGameMessageCreateHandle() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpInGameMessageCreateHandle(std::int32_t libCtxId) {
+    std::lock_guard lock(inGameMessageMutex);
+    InGameMessageContext* context = FindInGameMessageContext(libCtxId);
+    if (!context) return NP_IN_GAME_MESSAGE_ERROR_LIB_CONTEXT_NOT_FOUND;
+    const std::int32_t handleId = TakeInGameMessageId(nextInGameMessageHandle, __func__);
+    context->handles.insert(handleId);
+    return handleId;
 }
 
-int APS5_VABI sceNpInGameMessageDeleteHandle() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpInGameMessageDeleteHandle(std::int32_t libCtxId, std::int32_t handleId) {
+    std::lock_guard lock(inGameMessageMutex);
+    InGameMessageContext* context = FindInGameMessageContext(libCtxId);
+    if (!context) return NP_IN_GAME_MESSAGE_ERROR_LIB_CONTEXT_NOT_FOUND;
+    return context->handles.erase(handleId) == 1 ? 0 : NP_IN_GAME_MESSAGE_ERROR_HANDLE_NOT_FOUND;
 }
 
-int APS5_VABI sceNpInGameMessageInitialize() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpInGameMessageInitialize(std::size_t poolSize, void* option) {
+    (void)poolSize;
+    (void)option;
+    std::lock_guard lock(inGameMessageMutex);
+    const std::int32_t libCtxId = TakeInGameMessageId(nextInGameMessageContext, __func__);
+    inGameMessageContexts.emplace(libCtxId, InGameMessageContext{});
+    return libCtxId;
 }
 
 int APS5_VABI sceNpInGameMessagePrepare() {
@@ -1288,9 +1322,9 @@ int APS5_VABI sceNpInGameMessageSendData() {
     return 0;
 }
 
-int APS5_VABI sceNpInGameMessageTerminate() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpInGameMessageTerminate(std::int32_t libCtxId) {
+    std::lock_guard lock(inGameMessageMutex);
+    return inGameMessageContexts.erase(libCtxId) == 1 ? 0 : NP_IN_GAME_MESSAGE_ERROR_LIB_CONTEXT_NOT_FOUND;
 }
 
 int APS5_VABI sceNpSnsFacebookCreateRequest() {

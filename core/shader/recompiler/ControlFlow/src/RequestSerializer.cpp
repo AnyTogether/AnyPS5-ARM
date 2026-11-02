@@ -898,7 +898,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     std::string buffer;
     Writer writer(buffer);
     writer.WriteU32(0x41505335u);
-    writer.WriteU32(53u);
+    writer.WriteU32(54u);
     writeShaderBinary(writer, request.shader);
     writeGuestContext(writer, request.context);
     writeSpirvTarget(writer, request.target);
@@ -942,6 +942,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     writer.WriteBool(request.target.fragmentBarycentricBuiltins);
     writer.WriteBool(request.target.tessellationEvaluationSubgroups);
     writer.WriteBool(request.target.hostInterpolationFirst);
+    writer.WriteBool(request.target.shaderImageMinLod);
     writer.WriteU32(request.target.subgroupStages);
     writer.WriteBool(request.target.meshAsCompute);
     return base64Encode(buffer);
@@ -952,7 +953,7 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     Reader reader(decoded);
     if (reader.ReadU32() != 0x41505335u) throw std::runtime_error("invalid recompile request signature");
     const auto version = reader.ReadU32();
-    if (version < 1u || version > 53u || version == 50u) throw std::runtime_error("unsupported recompile request serialization version");
+    if (version < 1u || version > 54u || version == 50u) throw std::runtime_error("unsupported recompile request serialization version");
     DeserializedRequest result{};
     result.request.shader = readShaderBinary(reader, result.shaderCode, result.shaderHeader);
     result.request.context = readGuestContext(reader, result, version);
@@ -1020,9 +1021,10 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
     if (version >= 48u) result.request.target.fragmentBarycentricBuiltins = reader.ReadBool();
     if (version >= 51u) result.request.target.tessellationEvaluationSubgroups = reader.ReadBool();
     if (version >= 52u) result.request.target.hostInterpolationFirst = reader.ReadBool();
-    // The fork's fields, version 53 on (after upstream's 52). The fork's earlier version 49
+    if (version >= 53u) result.request.target.shaderImageMinLod = reader.ReadBool();
+    // The fork's fields, version 54 on (after upstream's 53). The fork's earlier version 49
     // (ours after upstream's 48) collides with upstream's 49 and is read as upstream's.
-    if (version >= 53u) {
+    if (version >= 54u) {
         result.request.target.subgroupStages = reader.ReadU32();
         result.request.target.meshAsCompute = reader.ReadBool();
     }
