@@ -111,8 +111,7 @@ int RenderGlyphIndexToSurface(FontObj& obj, std::uint32_t glyphIndex, FontRender
 
 int Font::RenderFaceGlyphToSurface(FT_Face face, FT_UInt glyphIndex, FT_Vector shift, FontRenderSurface* surface, float x, float y, FontGlyphMetrics* metrics, FontRenderOutput* result) {
     ClearRenderOutputs(metrics, result);
-    const bool emptyExtent = surface->width == 0 || surface->height == 0;
-    if (!surface->buffer || surface->width < 0 || surface->height < 0 || surface->widthByte < 0 || (!emptyExtent && surface->widthByte == 0) || surface->pixelSizeByte <= 0) return SCE_FONT_ERROR_NO_SUPPORT_SURFACE;
+    if (!surface->buffer || surface->width < 0 || surface->height < 0 || surface->widthByte < 0 || surface->pixelSizeByte <= 0) return SCE_FONT_ERROR_NO_SUPPORT_SURFACE;
     const int bytesPerPixel = surface->pixelSizeByte;
     if (bytesPerPixel != 1 && bytesPerPixel != 4) return SCE_FONT_ERROR_NO_SUPPORT_SURFACE;
     if (!face || !face->size) return SCE_FONT_ERROR_NO_SUPPORT_GLYPH;

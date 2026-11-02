@@ -81,11 +81,12 @@ int main(int argc, char** argv) {
     Require(presets.invert_horizontal_view_for_3rd_person_view == 1);
     Require(presets.display_sub_titles == 1);
     Require(presets.audio_language == 20);
-    // Every signed-in user gets them; a user that is not there gets nothing.
+    // Only a signed-in user gets them (upstream's login check): the second user is not signed in
+    // here, and a user that is not there gets nothing.
     auto second = Untouched();
-    Require(sceUserServiceGetGamePresets(USER_SERVICE_INITIAL_USER_ID + 1, &second) == USER_SERVICE_OK && second.difficulty == 4);
+    Require(sceUserServiceGetGamePresets(USER_SERVICE_INITIAL_USER_ID + 1, &second) == USER_SERVICE_ERROR_NOT_LOGGED_IN && second.difficulty == 0x5a5a5a5au);
     auto nobody = Untouched();
-    Require(sceUserServiceGetGamePresets(0, &nobody) == USER_SERVICE_ERROR_INVALID_ARGUMENT && nobody.difficulty == 0x5a5a5a5au);
+    Require(sceUserServiceGetGamePresets(0, &nobody) == USER_SERVICE_ERROR_NOT_LOGGED_IN && nobody.difficulty == 0x5a5a5a5au);
     std::puts("Game presets passed");
     return 0;
 }

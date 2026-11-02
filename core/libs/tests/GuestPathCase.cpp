@@ -68,10 +68,10 @@ int main() {
         try { CheckRead("data/settings.ini", 'x'); } catch (const std::runtime_error&) { ambiguous = true; }
         Require(ambiguous);
         std::filesystem::remove(directory / "Data" / "SETTINGS.INI");
-        std::filesystem::remove(directory / "Data" / "Settings.ini");
-        { std::ofstream file(directory / "Data" / "SETTINGS.ini"); file << 'n'; }
-        CheckRead("data/settings.ini", 'n');
     }
+    std::filesystem::remove(directory / "Data" / "Settings.ini");
+    { std::ofstream file(directory / "Data" / "SETTINGS.ini"); file << 'n'; }
+    CheckRead("data/settings.ini", 'n');
     std::filesystem::create_symlink("absent", directory / "Dangling");
     Require(sceKernelOpen("dangling", SCE_KERNEL_O_RDONLY, 0) == static_cast<int>(0x80020002u));
 #endif

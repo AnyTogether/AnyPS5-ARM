@@ -35,8 +35,7 @@
 #include <sys/mman.h>
 #endif
 #ifdef __APPLE__
-#include <mach/mach.h>
-#include <mach/mach_vm.h>
+#include "prx/libSceAgcDriver/Execution/include/Driver/DriverMemory.hpp"
 #endif
 
 namespace AgcDriver::DriverDetail {
@@ -59,9 +58,15 @@ void PrintFailure(std::exception_ptr error) {
     std::fflush(stderr);
 }
 
+#ifdef __APPLE__
+constexpr std::uint64_t DriverMemoryAddress = MacOsDriverMemoryBase;
+constexpr std::size_t DriverMemoryBytes = DriverMemorySpan;
+constexpr std::uint64_t FsTableAddress = RetargetPs5DriverMemory(0xfe0040000ull);
+#else
 constexpr std::uint64_t DriverMemoryAddress = 0xfe0000000ull + GuestArena::GuestAddressOffset;
 constexpr std::size_t DriverMemoryBytes = 2u << 20u;
 constexpr std::uint64_t FsTableAddress = DriverMemoryAddress + 0x40000ull;
+#endif
 constexpr std::uint64_t FsTableSlotBytes = 16u;
 constexpr std::uint64_t FsTableSlots = 6u;
 constexpr std::uint64_t FsRoutineRecords = 8u;
@@ -81,15 +86,15 @@ void MapDriverMemory() {
     mapped = reinterpret_cast<void*>(DriverMemoryAddress);
     GuestArena::GuestArenaCommit_nid_postfix(mapped, DriverMemoryBytes, PAGE_READWRITE, DriverMemoryBytes);
 #elif defined(__APPLE__)
-    // macOS has no MAP_FIXED_NOREPLACE; a fixed mach_vm_allocate fails instead of replacing a mapping.
-    // Rosetta keeps 0xF_C0000000-0x10_00000000 unmappable (maximum protection none), so there the
-    // table is left out and FS table calls stay unlinked.
-    mach_vm_address_t address = DriverMemoryAddress;
-    if (const auto result = mach_vm_allocate(mach_task_self(), &address, DriverMemoryBytes, VM_FLAGS_FIXED); result != KERN_SUCCESS) {
-        std::fprintf(stderr, "[gpu] the AGC FS table at 0x%llx cannot be mapped (mach_vm_allocate %d); FS table calls stay unlinked\n", static_cast<unsigned long long>(DriverMemoryAddress), result);
+    // macOS has no MAP_FIXED_NOREPLACE; a plain address hint does not replace another mapping. If the
+    // block cannot be placed at its address, FS table calls stay unlinked instead of failing the driver.
+    mapped = mmap(reinterpret_cast<void*>(DriverMemoryAddress), DriverMemoryBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (mapped == MAP_FAILED || reinterpret_cast<std::uint64_t>(mapped) != DriverMemoryAddress) {
+        const int error = mapped == MAP_FAILED ? errno : 0;
+        if (mapped != MAP_FAILED) munmap(mapped, DriverMemoryBytes);
+        std::fprintf(stderr, "[gpu] the AGC FS table at 0x%llx cannot be mapped (mmap errno %d); FS table calls stay unlinked\n", static_cast<unsigned long long>(DriverMemoryAddress), error);
         return;
     }
-    mapped = reinterpret_cast<void*>(address);
 #else
     mapped = mmap(reinterpret_cast<void*>(DriverMemoryAddress), DriverMemoryBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
     if (mapped == MAP_FAILED) throw std::system_error(errno, std::generic_category(), "map the AGC driver memory");
@@ -125,13 +130,9 @@ bool StackHoldsImport() {
         std::uintptr_t high = 0;
         Bounds() {
 #ifdef __APPLE__
-            // macOS has no pthread_getattr_np; the stack address is its top.
-            const auto top = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
-            const auto size = pthread_get_stacksize_np(pthread_self());
-            if (top != 0 && size <= top) {
-                low = top - size;
-                high = top;
-            }
+            const auto self = pthread_self();
+            high = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(self));
+            low = high - pthread_get_stacksize_np(self);
 #else
             pthread_attr_t attributes;
             if (pthread_getattr_np(pthread_self(), &attributes) != 0) return;

@@ -23,7 +23,7 @@
 #include <dlfcn.h>
 #include <mach-o/getsect.h>
 #include <mach-o/loader.h>
-#else
+#elif !defined(__EMSCRIPTEN__)
 #include <string_view>
 #include "prx/libc/include/specifics/linux/HostMapping.hpp"
 #endif
@@ -111,7 +111,7 @@ extern "C" void ForgetUnloadedUnwindImages_nid_no_patch() {
   std::lock_guard lock(unwindImagesMutex);
   for (const auto base : unloaded) UnwindImages().erase(base);
 }
-#else
+#elif !defined(__APPLE__) && !defined(__EMSCRIPTEN__)
 
 namespace {
 struct ImageSearch {
@@ -181,7 +181,10 @@ int APS5_VABI sceKernelDlsym(KernelModule handle, const char* symbol, void** add
 int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleInfoForUnwind* info) {
   (void)flags;
   if (!info) return SCE_KERNEL_ERROR_EFAULT;
-#ifdef _WIN32
+#if defined(__EMSCRIPTEN__)
+  static_cast<void>(addr);
+  NotImplemented_nid_no_patch(__func__);
+#elif defined(_WIN32)
   if (FillKnownUnwindImage(addr, info)) return 0;
   MEMORY_BASIC_INFORMATION mbi{};
   if (!VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi))) return SCE_KERNEL_ERROR_ESRCH;
@@ -245,10 +248,7 @@ int APS5_VABI sceKernelGetModuleInfoForUnwind(uint64_t addr, int flags, ModuleIn
     search.found = true;
     return 1;
   }, &search);
-  if (search.found) {
-    if (IsRelinkedImage(addr)) FillGuestUnwindInfo(addr, info);
-    return 0;
-  }
+  if (search.found) return 0;
   Dl_info image {};
   if (!dladdr(reinterpret_cast<void*>(addr), &image) || image.dli_fbase == nullptr) return SCE_KERNEL_ERROR_ESRCH;
   unsigned long textSize = 0;

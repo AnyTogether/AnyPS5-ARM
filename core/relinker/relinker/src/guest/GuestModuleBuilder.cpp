@@ -110,13 +110,20 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     const auto neededNames = ReadNeededNames(dynamic);
     std::set<std::string> missingNeeded;
     std::map<std::string, std::filesystem::path> neededAliases;
+    std::map<std::string, std::filesystem::path> ambiguousAliases;
     for (const auto& name : neededNames) {
         if (excludedModules.contains(name)) continue;
         if (std::any_of(paths.begin(), paths.end(), [&](const auto& path) { return Io::Utf8Path(path.filename()) == name || (windows && FoldFilename(Io::Utf8Path(path.filename())) == FoldFilename(name)); })) continue;
         const auto stem = ModuleStem(name, windows);
-        const auto alias = stem.empty() ? paths.end() : std::find_if(paths.begin(), paths.end(), [&](const auto& path) { return ModuleStem(Io::Utf8Path(path.filename()), windows) == stem; });
-        if (alias != paths.end()) neededAliases.emplace(name, *alias);
-        else missingNeeded.insert(name);
+        const auto matchesStem = [&](const auto& path) { return ModuleStem(Io::Utf8Path(path.filename()), windows) == stem; };
+        const auto alias = stem.empty() ? paths.end() : std::find_if(paths.begin(), paths.end(), matchesStem);
+        if (alias == paths.end()) {
+            missingNeeded.insert(name);
+            continue;
+        }
+        neededAliases.emplace(name, *alias);
+        const auto other = std::find_if(std::next(alias), paths.end(), matchesStem);
+        if (other != paths.end()) ambiguousAliases.emplace(name, *other);
     }
     const auto matchesIdentity = [](const std::string& name, const std::vector<std::string>& identities) {
         const auto stem = std::string_view(name).substr(0, name.size() - Domain::ModuleSuffix(name).size());
@@ -169,6 +176,8 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     }
     for (const auto& [name, path] : neededAliases) {
         if (guestNames.contains(name)) continue;
+        if (const auto other = ambiguousAliases.find(name); other != ambiguousAliases.end())
+            throw Domain::RelinkerException("Ambiguous needed module: " + name + " (" + Io::Utf8Path(path) + " and " + Io::Utf8Path(other->second) + ")");
         const auto image = std::find_if(images.begin(), images.end(), [&](const auto& candidate) { return candidate.SourcePath == path; });
         if (image == images.end()) throw Domain::RelinkerException("Needed module alias has no guest image: " + name);
         const auto index = static_cast<std::size_t>(image - images.begin());
@@ -292,7 +301,8 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
         }
         if (needed != 1) rejectSharedImport(base, Io::Utf8Path(inputPath));
         const auto found = exports.find(name);
-        if (!windows && found != exports.end()) {
+        const auto declared = windows || executableModules[offset / 24].empty() ? guestNames.end() : findGuest(executableModules[offset / 24]);
+        if (!windows && found != exports.end() && (declared == guestNames.end() || std::any_of(found->second.begin(), found->second.end(), [&](const auto& candidate) { return candidate.Provider == declared->second; }))) {
             rename(dynamic.DynSymData, dynamic.DynStrData, offset / 24, name);
             if (executableReferences[offset / 24] && found->second.size() == 1) executableProviders.insert(found->second.front().Provider);
         }
@@ -342,7 +352,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
                 if (provider->Type == 6 && (symbol.Info & 15) == 0 && referencedSymbols.contains(symbolIndex)) throw Domain::RelinkerException("Non-TLS relocation against guest TLS export: " + symbol.Name);
                 if (provider->Provider != index && referencedSymbols.contains(symbolIndex)) dependencies[index].insert(provider->Provider);
             } else if (windows && (symbol.Info & 15) == 6) throw Domain::RelinkerException("Windows guest TLS import requires a guest TLS export: " + symbol.Name);
-            if (provider == nullptr && macos && found != exports.end() && found->second.size() == 1 && found->second.front().Provider != index)
+            if (provider == nullptr && macos && declared == guestNames.end() && found != exports.end() && found->second.size() == 1 && found->second.front().Provider != index)
                 guestWins.emplace_back(index, found->second.front().Provider);
             if (provider == nullptr) systemImports[index].insert(symbolIndex);
         }
@@ -387,7 +397,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     for (const auto provider : executableProviders) require(provider);
     for (std::size_t index = 0; index < images.size(); ++index) {
         if (!isRuntime(index)) require(index);
-        if (windows) for (const auto dependency : dependencies[index]) require(dependency);
+        if (windows) for (const auto dependency : dependencies[index]) if (standardDirectory(dependency)) require(dependency);
     }
     const auto deferred = [&](const std::size_t index) {
         return !required[index] && isRuntime(index);
@@ -398,11 +408,15 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     };
     if (!windows) {
         const auto executableExports = macos ? std::set<std::string>{} : ExportedNames(dynamic);
-        for (auto& image : images) {
+        for (std::size_t module = 0; module < images.size(); ++module) {
+            auto& image = images[module];
             for (std::size_t index = 1; index < image.Symbols.size(); ++index) {
                 const auto& symbol = image.Symbols[index];
                 const bool exported = symbol.Section != 0 && (symbol.Info >> 4) != 0 && symbol.Visibility != 1 && symbol.Visibility != 2;
-                if (((symbol.Section == 0 && !declaresHost(symbol.Library, symbol.Name)) || exported) && exports.contains(symbol.Name)) rename(image.Dynamic.DynSymData, image.Dynamic.DynStrData, index, symbol.Name);
+                // An import declared from a bundled guest module that does not export it keeps its plain NID. On macOS an
+                // import declared from a host library is not one: a guest export wins it (guestWins above).
+                const bool guestModuleImport = systemImports[module].contains(index) && !symbol.Library.empty() && findGuest(symbol.Library) != guestNames.end();
+                if (((symbol.Section == 0 && !declaresHost(symbol.Library, symbol.Name) && !guestModuleImport) || exported) && exports.contains(symbol.Name)) rename(image.Dynamic.DynSymData, image.Dynamic.DynStrData, index, symbol.Name);
             }
             if (!macos) BindNamedImportsByNid(image, executableExports);
         }
