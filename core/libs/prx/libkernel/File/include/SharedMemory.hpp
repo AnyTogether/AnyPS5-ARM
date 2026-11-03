@@ -24,7 +24,7 @@ int CloseSharedMemoryDescriptor_nid_no_patch(int descriptor);
 int ReplaceSharedMemoryDescriptor_nid_no_patch(int source, int destination);
 #endif
 #ifdef __APPLE__
-bool IsNamedSharedMemoryDescriptor(int descriptor);
+extern "C" bool IsNamedSharedMemoryDescriptor_nid_no_patch(int descriptor);
 void ForgetNamedSharedMemoryDescriptor(int descriptor);
 #endif
 #ifndef _WIN32

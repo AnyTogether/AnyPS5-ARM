@@ -876,7 +876,7 @@ int UnlinkNamed(const char* path) {
 namespace File {
 
 #ifdef __APPLE__
-bool IsNamedSharedMemoryDescriptor(int descriptor) {
+bool IsNamedSharedMemoryDescriptor_nid_no_patch(int descriptor) {
     std::lock_guard lock(namedDescriptorMutex);
     return namedDescriptors.contains(descriptor);
 }
