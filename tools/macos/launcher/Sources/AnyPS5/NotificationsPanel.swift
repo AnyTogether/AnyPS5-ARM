@@ -43,8 +43,10 @@ extension AppModel {
 
     var notificationsSubtitle: String? {
         guard togetherUser != nil else { return nil }
-        let unread = social.notifications.unread
-        return unread > 0 ? TS.format(.notifUnread, unread) : TS.text(.notifEmpty)
+        let center = social.notifications
+        if center.unread > 0 { return TS.format(.notifUnread, center.unread) }
+        // An empty list says it in its own row: the title says nothing beside it.
+        return center.loaded && !center.items.isEmpty ? TS.text(.notifEmpty) : nil
     }
 
     func notificationRows() -> [PanelRow] {
@@ -64,7 +66,7 @@ extension AppModel {
         if !center.loaded {
             rows.append(PanelRow(id: "notes-state", title: TS.text(social.notificationsFailed ? .notifFailed : .notifLoading), symbol: social.notificationsFailed ? "wifi.exclamationmark" : "hourglass", kind: .info("")))
         } else if center.items.isEmpty {
-            rows.append(PanelRow(id: "notes-none", title: TS.text(.notifEmpty), symbol: "bell", kind: .info("")))
+            rows.append(PanelRow(id: "notes-none", title: TS.text(.notifNothingNew), symbol: "bell", kind: .info("")))
         }
         for note in center.items {
             // An unread one starts with a dot.

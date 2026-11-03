@@ -334,6 +334,7 @@ final class AppModel: ObservableObject {
                 askingRow = nil
                 if overlay == nil { offerLauncherReportSoon() }
                 if rowEditor.editing != nil { rowEditor.stop() }
+                if typingRow != nil { typingRow = nil }
                 if shortcutCapture != nil { endShortcutCapture() }
             }
             // The controller test takes the pads' buttons: only PS acts while it is open.
@@ -347,7 +348,19 @@ final class AppModel: ObservableObject {
         didSet {
             if !keepingFocus { panelFocusID = nil }
             if panelRow != oldValue, rowEditor.editing != nil { rowEditor.stop() }
+            if panelRow != oldValue, typingRow != nil { typingRow = nil }
         }
+    }
+    /// The stepper whose number is being typed (PanelRow.typable), by its row's id.
+    @Published var typingRow: String?
+
+    /// What was typed into `row`'s number: kept when it is a number, held in the row's range.
+    func typeStepper(_ row: PanelRow, _ text: String) {
+        guard typingRow == row.id else { return }
+        typingRow = nil
+        guard case .stepper(let value, _, _, _, let set) = row.kind, let typed = row.typed(text), typed != value else { return }
+        set(typed)
+        Sounds.shared.play(.move)
     }
     /// The item the panel's focus is on, so rows coming in above it do not move it to another.
     var panelFocusID: String?

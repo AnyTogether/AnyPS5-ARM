@@ -175,6 +175,12 @@ extension TogetherClient {
         _ = try await authorized("DELETE", "me/friends/\(userId)", nil)
     }
 
+    /// Takes back a request the user sent and `userId` has not answered: the same call as
+    /// removing a friend, which the website's Cancel uses too.
+    public func cancelFriendRequest(_ userId: String) async throws {
+        try await removeFriend(userId)
+    }
+
     public func searchPeople(_ query: String) async throws -> [TogetherPerson] {
         struct Found: Decodable { let users: [TogetherPerson] }
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query

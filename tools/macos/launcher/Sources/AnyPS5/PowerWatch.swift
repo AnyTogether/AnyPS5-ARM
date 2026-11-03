@@ -234,7 +234,7 @@ extension AppModel {
         }
         var rows = [PanelRow(id: id + "On", title: TPow.text(title), detail: TPow.text(detail), symbol: symbol, kind: .toggle(profile.on) { value in change { $0.on = value }() })]
         guard profile.on else { return rows }
-        let caps = PowerProfile.frameCaps
+        let caps = PowerProfile.frameCaps(displayHz: NSScreen.main?.maximumFramesPerSecond ?? 60, keeping: profile.frameCap)
         rows += [
             PanelRow(id: id + "Cap", title: TPow.text(.frameCap), detail: TPow.text(.frameCapDetail), symbol: "speedometer",
                      kind: .choice(options: caps.map { $0 == 0 ? T.text(.off) : TPow.format(.fps, $0) }, selected: caps.firstIndex(of: profile.frameCap) ?? 0) { index in

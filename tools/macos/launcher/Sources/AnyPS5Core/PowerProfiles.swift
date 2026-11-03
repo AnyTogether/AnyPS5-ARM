@@ -77,8 +77,20 @@ public struct PowerReading: Equatable, Sendable {
 
 /// What one profile does while it holds.
 public struct PowerProfile: Codable, Equatable, Sendable {
-    /// The frame caps offered; 0 is none.
+    /// The frame caps offered on any display; 0 is none.
     public static let frameCaps = [0, 30, 40, 45]
+    /// The higher caps, each offered when the display shows that many frames a second.
+    public static let higherFrameCaps = [60, 90, 120, 144, 165, 240]
+
+    /// The caps offered on a display of `displayHz`: the low ones, the higher ones up to its
+    /// refresh rate and the rate itself. Whether a battery lasts is the user's choice. The cap
+    /// `keeping` is offered too, so one chosen on a faster display still shows.
+    public static func frameCaps(displayHz: Int, keeping current: Int = 0) -> [Int] {
+        var caps = frameCaps + higherFrameCaps.filter { $0 <= displayHz }
+        if displayHz > (caps.last ?? 0) { caps.append(displayHz) }
+        if current > 0, !caps.contains(current) { caps.append(current) }
+        return caps.sorted()
+    }
 
     public var on: Bool
     /// The game's frame rate cap, 0 for none.

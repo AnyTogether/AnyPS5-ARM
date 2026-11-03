@@ -205,6 +205,15 @@ final class PowerProfilesTests: XCTestCase {
         XCTAssertEqual(PowerProfile.frameCaps, [0, 30, 40, 45])
     }
 
+    func testFrameCapsGoUpToTheDisplaysRefreshRate() {
+        XCTAssertEqual(PowerProfile.frameCaps(displayHz: 60), [0, 30, 40, 45, 60])
+        XCTAssertEqual(PowerProfile.frameCaps(displayHz: 120), [0, 30, 40, 45, 60, 90, 120], "ProMotion")
+        XCTAssertEqual(PowerProfile.frameCaps(displayHz: 240), [0, 30, 40, 45, 60, 90, 120, 144, 165, 240])
+        XCTAssertEqual(PowerProfile.frameCaps(displayHz: 100), [0, 30, 40, 45, 60, 90, 100], "the display's own rate")
+        XCTAssertEqual(PowerProfile.frameCaps(displayHz: 60, keeping: 120), [0, 30, 40, 45, 60, 120], "a cap chosen on a faster display stays")
+        XCTAssertEqual(PowerProfile.frameCaps(displayHz: 30), [0, 30, 40, 45])
+    }
+
     // MARK: Resolution
 
     func testLowerResolutionIsTheNextChoiceDown() {

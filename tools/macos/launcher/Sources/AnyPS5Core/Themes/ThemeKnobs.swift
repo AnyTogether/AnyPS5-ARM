@@ -4,7 +4,7 @@ import Foundation
 /// light it is, and the accent's hue. They make the four colors, and are read back from any
 /// theme's colors, so an installed theme can be changed with them too.
 public struct ThemeKnobs: Equatable, Sendable {
-    /// Degrees, 0 to 355.
+    /// Degrees, 0 to 359.
     public var hue: Double
     /// Degrees the bright tone turns from the hue, -90 to 90.
     public var highlight: Double
