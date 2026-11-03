@@ -1347,11 +1347,14 @@ int runTests(int argc, char** argv) {
 
 int main(int argc, char** argv) {
 #ifdef __APPLE__
+    // Aps5StartGuest moves the main thread off its first stack and gives that stack back, and argv
+    // lives on it: the guest thread reads copies.
     static int arguments;
-    static char** values;
+    static std::vector<char*> values;
     arguments = argc;
-    values = argv;
-    Aps5StartGuest_nid_no_patch([](void*, void*) { std::exit(runTests(arguments, values)); }, nullptr);
+    for (int index = 0; index < argc; ++index) values.push_back(strdup(argv[index]));
+    values.push_back(nullptr);
+    Aps5StartGuest_nid_no_patch([](void*, void*) { std::exit(runTests(arguments, values.data())); }, nullptr);
 #else
     return runTests(argc, argv);
 #endif
