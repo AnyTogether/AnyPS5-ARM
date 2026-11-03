@@ -24,6 +24,7 @@ linux   guest_sysmodule(_maps_scan)?    Aborts on Linux on main (passes on macOS
 linux   agc_driver_sampled_cache_budget(_without_storage_image_multisample)?  The runner's lavapipe heap gives a sampled texture budget below the 2 GiB floor the test asks for.
 linux   agc_driver                      Fails on main on lavapipe ("a small copy whose source the GPU still stores into was not recorded on the GPU"); needs a look.
 linux   agc_driver_optimize_on_fiber    Needs SPIRV-Tools, which the fork's builds leave off (it would only report a skip). With SPIRV-Tools on, agc_spirv_optimizer* and agc_driver_pixel_sample_iteration fail on main too.
+linux   agc_driver_image_sample_lod_clamp_shader_lane  Upstream test (#12980, its Linux job did not run), fails on lavapipe on upstream's own tree too: a filtered image_sample_lz through an S# that holds the LOD at 0 reads one mip level off. #15333 widened one check, the trilinear case still fails.
 
 # Windows: real failures on main, to fix (WinLibs GCC 15.2, as the owner's Windows builds).
 windows prx_thread_local_destructors    libkernel (dl*_nid_postfix, LoadFailure) and AgcDriver (LockStats) register thread_local destructors, which run after emulated TLS is freed on Windows; they belong in HostThreadLocal.

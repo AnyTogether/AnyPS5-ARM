@@ -24,14 +24,21 @@ int main(int argc, char** argv) {
     const auto minimumElapsedMicros = elapsedMicros * 19 / 20;
     if (argc > 1 && std::strcmp(argv[1], "rdtsc") == 0) {
         const std::uint64_t frequency = sceKernelGetTscFrequency();
+        // The ticks are held against the time that really passed, not the nominal sleep: a loaded
+        // runner (or a macOS background thread, whose timers coalesce) oversleeps by half or more.
+        const auto hostStart = std::chrono::steady_clock::now();
         const std::uint64_t nativeStart = __rdtsc();
         const std::uint64_t readStart = sceKernelReadTsc();
         const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds(sleptMicros);
         while (std::chrono::steady_clock::now() < until) std::this_thread::sleep_until(until);
-        const std::uint64_t nativeMicros = (__rdtsc() - nativeStart) * 1000000 / frequency;
-        const std::uint64_t readMicros = (sceKernelReadTsc() - readStart) * 1000000 / frequency;
-        Require(nativeMicros >= minimumElapsedMicros && nativeMicros < elapsedMicros * 3 / 2, "native rdtsc ticks over the reported TSC frequency do not follow the time scale");
-        Require(readMicros >= minimumElapsedMicros && readMicros < elapsedMicros * 3 / 2, "sceKernelReadTsc ticks over the reported TSC frequency do not follow the time scale");
+        const std::uint64_t nativeEnd = __rdtsc();
+        const std::uint64_t readEnd = sceKernelReadTsc();
+        const auto hostMicros = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - hostStart).count());
+        const auto passedMicros = static_cast<std::uint64_t>(static_cast<double>(hostMicros) * (scale > 0.0 ? scale : 1.0));
+        const std::uint64_t nativeMicros = (nativeEnd - nativeStart) * 1000000 / frequency;
+        const std::uint64_t readMicros = (readEnd - readStart) * 1000000 / frequency;
+        Require(nativeMicros >= minimumElapsedMicros && nativeMicros >= passedMicros * 19 / 20 && nativeMicros < passedMicros * 3 / 2, "native rdtsc ticks over the reported TSC frequency do not follow the time scale");
+        Require(readMicros >= minimumElapsedMicros && readMicros >= passedMicros * 19 / 20 && readMicros < passedMicros * 3 / 2, "sceKernelReadTsc ticks over the reported TSC frequency do not follow the time scale");
         return 0;
     }
     const auto slept = std::chrono::steady_clock::now() + std::chrono::microseconds(sleptMicros);

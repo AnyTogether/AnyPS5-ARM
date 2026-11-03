@@ -58,6 +58,10 @@ if(BUILD_TESTING)
             ${LIBS_INCLUDE_DIR}/tests/AvPlayerHttpServer.py $<TARGET_FILE:guest_http_client_tests> client)
         set_tests_properties(guest_http_client PROPERTIES
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/guest_http_client TIMEOUT 20)
+        if(APPLE)
+            # Rosetta translates the libraries at the first start (see libSceAvPlayer's HTTP tests).
+            set_tests_properties(guest_http_client PROPERTIES TIMEOUT 90)
+        endif()
         if(WIN32)
             set_tests_properties(guest_http_client PROPERTIES ENVIRONMENT_MODIFICATION
                 "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceHttp>")

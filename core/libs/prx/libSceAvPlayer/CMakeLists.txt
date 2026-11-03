@@ -30,6 +30,11 @@ if(BUILD_TESTING)
             ${LIBS_INCLUDE_DIR}/tests/AvPlayerHttpServer.py $<TARGET_FILE:avplayer_http_transport_tests> transport)
         set_tests_properties(avplayer_http_transport PROPERTIES
             WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/avplayer_http_transport TIMEOUT 10)
+        if(APPLE)
+            # Under Rosetta on a fresh runner the first start of a test spends seconds translating the
+            # libraries in dyld, before the test does anything: the runner ran out of these timeouts.
+            set_tests_properties(guest_avplayer_http avplayer_http_transport PROPERTIES TIMEOUT 90)
+        endif()
         if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
             add_test_executable(avplayer_http_patched_modules_tests ${LIBS_INCLUDE_DIR}/tests/AvPlayerHttpModules.cpp)
             target_link_libraries(avplayer_http_patched_modules_tests PRIVATE ${CMAKE_DL_LIBS})
