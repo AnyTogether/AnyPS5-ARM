@@ -6,13 +6,17 @@
 #include "prx/libScePad/include/KeyboardMouse.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/Pad.hpp"
+#include "prx/libScePad/include/PadIdentify.hpp"
 #include "prx/libSceVideoOut/include/PadOutputPacing.hpp"
 #include "prx/libSceVideoOut/include/GyroAim.hpp"
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
+#include "prx/libSceVideoOut/include/Port0Presence.hpp"
+#include "prx/libSceAgcDriver/Execution/include/PadStatus.hpp"
 #include <array>
 #include <chrono>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 #include "prx/libSceVideoOut/include/Telemetry.hpp"
 
@@ -27,6 +31,8 @@ class PadInput {
 public:
     PadInput();
     ~PadInput();
+    PadInput(const PadInput&) = delete;
+    PadInput& operator=(const PadInput&) = delete;
     void HandleEvent(const SDL_Event& event, DisplayWindow& window);
     void Update(const DisplayWindow& window);
     bool MouseModeEnabled() const { return keyboardMouse.MouseMode(); }
@@ -48,6 +54,10 @@ private:
         PadInputState aimed{};
         std::optional<GyroAim::Aim> aim;
         std::chrono::steady_clock::time_point aimedAt{};
+        // ANYPS5_PAD_IDENTIFY's pulse, and what the pad status panel shows for it.
+        Pad::IdentifyScheduler identify;
+        AgcDriver::PadKind kind = AgcDriver::PadKind::Unknown;
+        std::string name;
     };
     struct Remote {
         std::unique_ptr<RemotePad::Channel> channel;
@@ -87,8 +97,15 @@ private:
     bool sensorsWanted(bool motionEnabled) const { return motionEnabled || gyro.has_value(); }
     int playerOf(const Controller& controller) const;
     void type(const RemotePad::TypedText& text);
+    void identify(Controller& controller, int player);
+    AgcDriver::PadStatusSnapshot statusSnapshot() const;
+    void reportStatus();
+    bool port0Bound() const;
+    void updatePort0();
+    void applyPort0(bool connected);
 
     Pad::KeyboardMouse keyboardMouse;
+    Pad::IdentifyMode identifyMode = Pad::IdentifyMode::Off;
     std::vector<Controller> controllers;
     std::vector<Remote> remotes;
     RemotePad::Seats seats;
@@ -105,6 +122,11 @@ private:
     // Gyro aiming for every device (ANYPS5_GYRO_AIM), nil while off.
     std::optional<GyroAim::Settings> gyro;
     VideoOutTelemetry::PadChangeFilter telemetryFilter;
+    AgcDriver::PadStatusProvider statusProvider;
+    Port0Presence::Mode port0Mode;
+    Port0Presence::Presence port0;
+    bool padCaptured = false;
+    bool hostFocusSynced = false;
 };
 
 #endif

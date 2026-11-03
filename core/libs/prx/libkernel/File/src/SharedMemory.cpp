@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <unordered_set>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -43,9 +44,20 @@ extern "C" _invalid_parameter_handler _set_thread_local_invalid_parameter_handle
 #include <sys/file.h>
 #include <sys/uio.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <filesystem>
+#include <sys/param.h>
+#endif
 #endif
 
 namespace {
+
+#ifdef __APPLE__
+// Descriptors of named objects, for fpathconf: their backing files keep a name, so the path test below
+// cannot tell them, and their reads and writes stay those of the host file.
+std::mutex namedDescriptorMutex;
+std::unordered_set<int> namedDescriptors;
+#endif
 
 #ifdef _WIN32
 std::mutex sharedDescriptorAccessMutex;
@@ -121,6 +133,20 @@ bool IsHostSharedMemoryDescriptor(int descriptor) {
         return std::all_of(value.begin(), value.end(), [](wchar_t character) { return character >= L'0' && character <= L'9'; });
     };
     return decimal(suffix.substr(0, separator)) && decimal(suffix.substr(separator + 1));
+#elif defined(__APPLE__)
+    struct stat status{};
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink != 0) return false;
+    char objectPath[MAXPATHLEN];
+    if (::fcntl(descriptor, F_GETPATH, objectPath) != 0) return false;
+    const std::string_view path(objectPath);
+    const auto slash = path.rfind('/');
+    if (slash == std::string_view::npos || !path.substr(slash + 1).starts_with("anyps5-shm-")) return false;
+    static const std::string directory = [] {
+        std::error_code error;
+        auto canonical = std::filesystem::canonical(std::filesystem::temp_directory_path(error), error);
+        return error ? std::string{} : canonical.string();
+    }();
+    return !directory.empty() && std::string_view(objectPath, slash) == directory;
 #else
     (void)descriptor;
     return false;
@@ -293,7 +319,7 @@ void EnsurePrivateWindowsDirectory(const std::filesystem::path& path, bool objec
 
 DWORD SetWindowsNamedPermissions(HANDLE handle, int mode) {
     std::wstring policy = L"D:P(A;OICI;FA;;;SY)(A;;WD;;;OW)";
-    if ((mode & 0400) != 0) policy += L"(A;;GRWD;;;OW)";
+    if ((mode & 0400) != 0) policy += L"(A;;GRGXWD;;;OW)";
     if ((mode & 0200) != 0) policy += L"(A;;GWSDWD;;;OW)";
     PSECURITY_DESCRIPTOR descriptor = nullptr;
     if (!::ConvertStringSecurityDescriptorToSecurityDescriptorW(policy.c_str(), SDDL_REVISION_1, &descriptor, nullptr))
@@ -611,6 +637,9 @@ int OpenNamedFile(const char* path, int flags, int mode) {
     int validationError = 0;
     const auto hostName = NamedHostName(path, validationError);
     if (validationError != 0) return Fail(NamedGuestError(validationError) ? NamedGuestError(validationError) : GuestInvalid);
+#ifdef __APPLE__
+    NotImplemented_nid_no_patch("shm_open");
+#endif
     HostShmLock namespaceLock;
     if (namespaceLock.Error() != 0) {
         errno = namespaceLock.Error();
@@ -650,15 +679,36 @@ int OpenNamedFile(const char* path, int flags, int mode) {
 int CreateAnonymousFile() {
 #ifdef _WIN32
     static std::atomic<unsigned> sequence{0};
-    const auto directory = std::filesystem::temp_directory_path();
-    const auto seed = std::to_string(std::random_device{}());
+    const auto root = std::filesystem::path(WindowsNamedRoot());
+    EnsurePrivateWindowsDirectory(root.parent_path());
+    EnsurePrivateWindowsDirectory(root, true);
+    std::random_device random;
     for (int attempt = 0; attempt < 64; ++attempt) {
-        const auto path = directory / ("anyps5-shm-" + seed + "-" + std::to_string(sequence++));
+        std::vector<std::uint8_t> seed;
+        for (int index = 0; index < 8; ++index) {
+            const auto value = random();
+            for (int shift = 0; shift < 32; shift += 8) seed.push_back(static_cast<std::uint8_t>(value >> shift));
+        }
+        const auto process = ::GetCurrentProcessId();
+        const auto serial = sequence.fetch_add(1, std::memory_order_relaxed);
+        const std::uint32_t identifiers[] = {static_cast<std::uint32_t>(process), static_cast<std::uint32_t>(serial)};
+        for (const auto value : identifiers)
+            for (int shift = 0; shift < 32; shift += 8) seed.push_back(static_cast<std::uint8_t>(value >> shift));
+        const auto digest = Nid::Sha1(seed);
+        std::string name;
+        for (const auto byte : digest) {
+            name += "0123456789abcdef"[byte >> 4];
+            name += "0123456789abcdef"[byte & 15];
+        }
+        const auto path = root / (name + ".dat");
         int descriptor = -1;
         const int error = _wsopen_s(&descriptor, path.c_str(),
                                     _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY | _O_TEMPORARY | _O_SHORT_LIVED | _O_NOINHERIT,
                                     _SH_DENYNO, _S_IREAD | _S_IWRITE);
-        if (error == 0) return descriptor;
+        if (error == 0) {
+            File::TrackSharedMemoryDescriptor_nid_no_patch(descriptor, true);
+            return descriptor;
+        }
         if (error != EEXIST) {
             errno = error;
             return -1;
@@ -667,12 +717,9 @@ int CreateAnonymousFile() {
     errno = EEXIST;
     return -1;
 #elif defined(__APPLE__)
-    // macOS has no memfd: an unlinked temporary file is the anonymous object.
-    char path[] = "/tmp/anyps5-shm-XXXXXX";
-    const int descriptor = ::mkstemp(path);
-    if (descriptor < 0) return -1;
-    ::unlink(path);
-    ::fcntl(descriptor, F_SETFD, FD_CLOEXEC);
+    auto path = (std::filesystem::temp_directory_path() / "anyps5-shm-XXXXXX").string();
+    const int descriptor = mkostemp(path.data(), O_CLOEXEC);
+    if (descriptor >= 0) ::unlink(path.c_str());
     return descriptor;
 #else
     const int descriptor = memfd_create("anyps5 shm_open", MFD_CLOEXEC);
@@ -803,6 +850,10 @@ int OpenNamed(const char* path, int flags) {
         errno = error;
         return HostFailure("truncating the named object");
     }
+    {
+        std::lock_guard lock(namedDescriptorMutex);
+        namedDescriptors.insert(descriptor);
+    }
     return descriptor;
 }
 
@@ -823,6 +874,18 @@ int UnlinkNamed(const char* path) {
 }
 
 namespace File {
+
+#ifdef __APPLE__
+bool IsNamedSharedMemoryDescriptor_nid_no_patch(int descriptor) {
+    std::lock_guard lock(namedDescriptorMutex);
+    return namedDescriptors.contains(descriptor);
+}
+
+void ForgetNamedSharedMemoryDescriptor(int descriptor) {
+    std::lock_guard lock(namedDescriptorMutex);
+    namedDescriptors.erase(descriptor);
+}
+#endif
 
 bool IsSharedMemoryDescriptor_nid_no_patch(int descriptor) {
     return IsHostSharedMemoryDescriptor(descriptor);
@@ -1180,6 +1243,9 @@ extern "C" int APS5_VABI shm_unlink_nid_postfix(const char* path) {
     int validationError = 0;
     const auto hostName = NamedHostName(path, validationError);
     if (validationError != 0) return Fail(NamedGuestError(validationError) ? NamedGuestError(validationError) : GuestInvalid);
+#ifdef __APPLE__
+    NotImplemented_nid_no_patch("shm_unlink");
+#endif
     HostShmLock namespaceLock;
     if (namespaceLock.Error() != 0) {
         errno = namespaceLock.Error();

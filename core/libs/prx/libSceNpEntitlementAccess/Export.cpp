@@ -23,6 +23,7 @@ static constexpr int SCE_NP_ENTITLEMENT_ACCESS_ERROR_PARAMETER = static_cast<int
 static constexpr int SCE_NP_ENTITLEMENT_ACCESS_ERROR_NOT_FOUND = static_cast<int>(0x80558007);
 static constexpr int SCE_NP_ERROR_SIGNED_OUT = static_cast<int>(0x80550006);
 static constexpr uint32_t SKU_FLAG_FULL = 3;
+static constexpr std::int32_t USER_ID_INVALID = -1;
 
 namespace {
 
@@ -147,15 +148,13 @@ int APS5_VABI sceNpEntitlementAccessInitialize(const NpEntitlementAccessInitPara
 int APS5_VABI sceNpEntitlementAccessAbortRequest(std::int64_t requestId) {
     Online::Call call("libSceNpEntitlementAccess", __func__);
     call.Args([&](Online::Fields& in) { in.Int("requestId", static_cast<std::int64_t>(requestId)); });
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNpEntitlementAccessDeleteRequest(std::int64_t requestId) {
     Online::Call call("libSceNpEntitlementAccess", __func__);
     call.Args([&](Online::Fields& in) { in.Int("requestId", static_cast<std::int64_t>(requestId)); });
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return call.Return(0);
 }
 
 int APS5_VABI sceNpEntitlementAccessGenerateTransactionId(NpEntitlementAccessTransactionId* transactionId) {
@@ -249,24 +248,37 @@ int APS5_VABI sceNpEntitlementAccessRequestUnifiedEntitlementInfoList(std::int32
     return call.Return(SCE_NP_ERROR_SIGNED_OUT);
 }
 
-int APS5_VABI sceNpEntitlementAccessGetAddcontEntitlementInfoIndividual() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpEntitlementAccessGetAddcontEntitlementInfoIndividual(std::int32_t user_id, uint32_t service_label, const NpUnifiedEntitlementLabel* entitlement_label, NpEntitlementAccessAddcontEntitlementInfo* info) {
+    if (user_id == USER_ID_INVALID) return SCE_NP_ENTITLEMENT_ACCESS_ERROR_PARAMETER;
+    return sceNpEntitlementAccessGetAddcontEntitlementInfo(service_label, entitlement_label, info);
 }
 
-int APS5_VABI sceNpEntitlementAccessPollConsumableEntitlementInfo() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpEntitlementAccessPollConsumableEntitlementInfo(int64_t requestId, int32_t* result, void* info) {
+    (void)requestId;
+    (void)result;
+    (void)info;
+    return SCE_NP_ERROR_SIGNED_OUT;
 }
 
-int APS5_VABI sceNpEntitlementAccessRequestConsumableEntitlementInfo() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpEntitlementAccessRequestConsumableEntitlementInfo(
+    int32_t userId, uint32_t serviceLabel, const NpUnifiedEntitlementLabel* entitlementLabel, int64_t* requestId) {
+    (void)userId;
+    (void)serviceLabel;
+    (void)entitlementLabel;
+    (void)requestId;
+    return SCE_NP_ERROR_SIGNED_OUT;
 }
 
-int APS5_VABI sceNpEntitlementAccessRequestConsumeEntitlement() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+int APS5_VABI sceNpEntitlementAccessRequestConsumeEntitlement(
+    int32_t userId, uint32_t serviceLabel, const void* entitlementLabel, const void* transactionId, int32_t useCount,
+    int64_t* requestId) {
+    (void)userId;
+    (void)serviceLabel;
+    (void)entitlementLabel;
+    (void)transactionId;
+    (void)useCount;
+    (void)requestId;
+    return SCE_NP_ERROR_SIGNED_OUT;
 }
 
 }

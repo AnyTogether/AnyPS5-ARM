@@ -40,10 +40,12 @@ static void CheckContentDelete() {
 }
 
 static void CheckVideoRecording() {
+    // Without an open recorder upstream's calls return SCE_VIDEO_RECORDING_ERROR_NOT_OPEN.
+    constexpr int NotOpen = static_cast<int>(0x80a80006u);
     Require(sceVideoRecordingGetStatus() == 0);
-    Require(Throws<std::logic_error>([] { sceVideoRecordingStart(); }));
-    Require(Throws<std::logic_error>([] { sceVideoRecordingStop(); }));
-    Require(Throws<std::logic_error>([] { sceVideoRecordingClose(1); }));
+    Require(sceVideoRecordingStart() == NotOpen);
+    Require(sceVideoRecordingStop() == NotOpen);
+    Require(sceVideoRecordingClose(1) == NotOpen);
 }
 
 int main() {

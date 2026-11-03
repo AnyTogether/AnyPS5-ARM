@@ -20,6 +20,7 @@ struct SpirvTargetOptions {
     std::span<const std::uint32_t> supportedCapabilities;
     std::span<const std::string_view> supportedExtensions;
     bool nonConstantImageOffsets = false;
+    bool shaderImageMinLod = false;
     bool narrowSubgroupClock = false;
     std::uint32_t subgroupStages = 0xffffffffu;
     bool float64DenormPreserve = false;
@@ -46,11 +47,15 @@ struct SpirvTargetOptions {
     bool largePixelFunctionLdsBuffer = false;
     std::uint32_t pixelFunctionStorageDwords = 4096u;
     bool deviceScopeLdsMemoryBarriers = false;
+    bool ldsLockFences = false;
+    bool meshWindowBuffer = false;
 };
 
 struct SpirvEmitInfo {
     bool fullSubgroups = false;
     bool functionLdsBuffer = false;
+    bool meshWindowBuffer = false;
+    std::uint32_t scratchPoolSlotDwords = 0;
 };
 
 struct SpannedWaveUnsupported : std::runtime_error {

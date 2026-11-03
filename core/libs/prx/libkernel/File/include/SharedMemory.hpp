@@ -9,7 +9,7 @@
 
 namespace File {
 
-bool IsSharedMemoryDescriptor_nid_no_patch(int descriptor);
+extern "C" bool IsSharedMemoryDescriptor_nid_no_patch(int descriptor);
 std::int64_t WriteSharedMemory_nid_no_patch(int descriptor, const void* buffer, std::size_t size);
 std::int64_t PwriteSharedMemory_nid_no_patch(int descriptor, const void* buffer, std::size_t size, std::int64_t offset);
 std::int64_t SeekSharedMemory_nid_no_patch(int descriptor, std::int64_t offset, int whence);
@@ -22,6 +22,10 @@ void ForgetSharedMemoryDescriptor_nid_no_patch(int descriptor);
 void DuplicateSharedMemoryDescriptor_nid_no_patch(int source, int destination);
 int CloseSharedMemoryDescriptor_nid_no_patch(int descriptor);
 int ReplaceSharedMemoryDescriptor_nid_no_patch(int source, int destination);
+#endif
+#ifdef __APPLE__
+extern "C" bool IsNamedSharedMemoryDescriptor_nid_no_patch(int descriptor);
+void ForgetNamedSharedMemoryDescriptor(int descriptor);
 #endif
 #ifndef _WIN32
 std::int64_t WritevSharedMemory_nid_no_patch(int descriptor, const struct iovec* vectors, int count);

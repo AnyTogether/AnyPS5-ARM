@@ -59,5 +59,8 @@ int main() {
     Require(iconSize == 0);
     Require(sceNpTrophy2GetRewardIcon(1, 1, 1, nullptr, nullptr) == SCE_NP_TROPHY2_ERROR_ICON_FILE_NOT_FOUND);
 
-    Require(sceNpTrophy2ShowTrophyList(1) == 0);
+    int handle = -1;
+    Require(sceNpTrophy2CreateHandle(&handle) == SCE_NP_TROPHY2_OK);
+    Require(handle == NP_TROPHY2_HANDLE_DEFAULT);
+    Require(sceNpTrophy2DestroyHandle(handle) == SCE_NP_TROPHY2_OK);
 }

@@ -28,6 +28,7 @@
 namespace AgcDriver::Graphics {
 
 class Buffer;
+class DeviceBuffer;
 
 // Accumulates GPU work across guest commands so the CPU does not wait for each one. Dispatches and the
 // copies that feed them record into one open batch; Submit sends it to the queue without waiting and
@@ -60,8 +61,6 @@ public:
     // (the [barriers] line counts the merges). The call clears the mask (whatever the caller
     // records is assumed uncovered until it marks); a new batch starts uncovered.
     VkCommandBuffer Commands(VkAccessFlags* coveredAccess = nullptr);
-    // The open batch, opened if need be, without ending a render pass a draw left open.
-    void EnsureBatch();
     // The open batch's prologue (opened if need be): for transfers that read nothing an earlier command
     // of the batch writes and write only memory no earlier command uses. They run before the batch's
     // other commands, and the barrier recorded at Submit makes their writes visible to all of them.
@@ -72,10 +71,28 @@ public:
     // destination access mask.
     void MarkCovered(VkAccessFlags access);
     void MarkShaderReadsCovered() { MarkCovered(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT); }
+    static bool DispatchOverlapEnabled();
+    static void SetDispatchOrder(std::uint32_t queueKey, bool unordered);
+    static std::uint32_t TakeDispatchOrder(bool& unordered);
+    static constexpr std::uint64_t RunAccessWritten = 1, RunAccessImage = 2;
+    using RunAccess = std::array<std::uint64_t, 3>;
+    static std::uint32_t PeekUnorderedDispatch();
+    VkCommandBuffer OverlapCommands(std::uint32_t queueKey, std::span<const void* const> owners, std::span<const RunAccess> accesses, VkAccessFlags* coveredAccess, bool& overlapped);
+    void DeferDispatchBarrier(std::uint32_t queueKey, std::span<const void* const> owners, std::span<const RunAccess> accesses);
+    VkCommandBuffer RunCommands(std::uint32_t queueKey, const void* owner, std::span<const RunAccess> accesses, bool& inRun, VkAccessFlags* coveredAccess);
+    void OpenBatch() { ensureOpen(); }
+    bool RunOpen() const { return open != nullptr && open->deferredDispatchQueue != 0; }
+    void AfterRun(std::function<void(Recorder&)> work);
+    bool CloseRunOwing(const void* owner);
+    struct OverlapStatistics {
+        std::uint64_t deferred, overlapped, flushed;
+    };
+    static OverlapStatistics OverlapCounts();
     struct DrawPassStart {
         VkCommandBuffer commands = VK_NULL_HANDLE;
         bool continued = false;
         bool barrier = true;
+        PassBreak reason = PassBreak::Continued;
     };
     DrawPassStart StartDrawPass(std::uint64_t key, bool forced, bool fenced, const PassAccess& access);
     void LeaveRenderPassOpen(std::uint64_t key, std::uint32_t timing, bool fenced, const PassAccess& access, std::function<void(VkCommandBuffer)> afterPass = {});
@@ -103,6 +120,9 @@ public:
     void Keep(std::shared_ptr<void> object, std::size_t bytes = 0);
     void KeepThroughHold(std::shared_ptr<void> object);
     void KeepBytes(const void* owner, std::size_t bytes);
+    enum class UploadScratch : std::uint8_t { Tiled = 0, Linear, Count };
+    std::shared_ptr<DeviceBuffer> UploadScratchBuffer(UploadScratch kind, std::size_t bytes);
+    static constexpr VkPipelineStageFlags UploadScratchReuseStages = VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     std::size_t OpenKeptBytes() const { return open != nullptr ? open->keptBytes : 0; }
     void FlushDeferredReleases();
     static constexpr std::size_t KeptBytesBudget = std::size_t{512} << 20u;
@@ -164,7 +184,7 @@ public:
     // on the open batch, no snapshot: the only reader holds the mutex. `kind` names the reader for
     // the [recorder] hit counters. APS5_COPY_READ_TRACKING=0 notes nothing (ReadTracking() is then
     // false and the CPU copy falls back to Idle()).
-    enum class ReadKind : std::uint8_t { DispatchElement = 0, GpuCopy, AddressBased, Indirect, StorageUpload, CopySource, DrawInput, Count };
+    enum class ReadKind : std::uint8_t { DispatchElement = 0, GpuCopy, AddressBased, Indirect, StorageUpload, CopySource, DrawInput, AddressBasedReadOnly, Count };
     static bool ReadTracking();
     void NotePendingRead(std::uint64_t address, std::size_t bytes, ReadKind kind);
     void NotePendingReads(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges, ReadKind kind);
@@ -197,6 +217,7 @@ public:
     bool OpenWriteOverlaps(std::uint64_t address, std::size_t bytes) const;
     std::uint64_t PendingWriterSerial(std::uint64_t address, std::size_t bytes) const;
     std::uint64_t PendingWriterSerial(std::uint64_t address, std::size_t bytes, std::span<const std::uint64_t> exceptNotes) const;
+    std::uint64_t PendingLeaseSerial(std::uint64_t address, std::size_t bytes) const;
     // What SyncThrough(address, bytes) would wait for, for the [hooksync] attribution: the newest
     // batch whose noted range overlaps the access (the open batch counts first, with the serial it
     // will get), whether that batch's fence has already signaled (its GPU work is done, so the
@@ -360,6 +381,11 @@ public:
     static std::optional<LabelHit> LookupLabel(std::uint64_t address, std::size_t bytes, std::uint64_t afterStamp, LabelRefusal* refusal = nullptr);
     // The value alone, for callers asking whether any label is pending in a dword (afterStamp 0).
     static std::optional<std::uint64_t> LookupLabelValue(std::uint64_t address, std::size_t bytes, std::uint64_t afterStamp);
+    struct OwnLabel {
+        std::uint64_t value = 0;
+        std::uint64_t mask = 0;
+    };
+    static OwnLabel UnlandedOwnLabel(std::uint64_t address, std::size_t bytes, std::uint32_t queue);
     static bool WideLabelIn(std::uint64_t address, std::size_t bytes);
     // A label a queue worker decoded but has not recorded yet (Driver.cpp DeferredLabels): it
     // enters the table with no batch, and only a lookup made on the noting thread (a WAIT_REG_MEM
@@ -378,6 +404,7 @@ public:
     // The function the flush hook calls, on the accessing thread (which may hold the GPU mutex),
     // when an access overlaps one of that thread's queued labels; it records them. Set once.
     static void SetQueuedLabelRecorder(void (*recorder)());
+    static void FailNextSubmitsForTest(unsigned count);
     // Whether the lock-free pending-write snapshot (open, in-flight and finishing batches) overlaps
     // the range: false means no recorded work writes it, so a wait on it has nothing to submit.
     static bool SnapshotWriteOverlaps(std::uint64_t address, std::size_t bytes);
@@ -436,6 +463,7 @@ public:
     // and for helpers that must not recycle resources the recorded work still uses.
     static Recorder* Active();
     VkDevice Device() const { return context.device; }
+    std::uint64_t Id() const { return id; }
     // Whether the calling thread runs inside a batch's completion action (finish()): a store made
     // there must not have a publish recorded for it (UnitShadow), see SyncThrough.
     static bool InCompletion();
@@ -540,6 +568,9 @@ public:
     // Presentations so far (never reset): a frame clock for policies that count per frame, such as
     // StorageTexture's write-back hysteresis.
     static std::uint64_t Presents();
+    static void NoteFrameGpuBusy(double milliseconds);
+    static std::pair<std::uint64_t, double> FrameGpuBusy();
+    static void RequestBatchStamps();
 
     // What the presenter learns about finished batches (Driver::Present's [present] line and the
     // frame record): finish() writes an entry per submitted batch into a ring of the last 128,
@@ -578,6 +609,7 @@ private:
         std::vector<std::shared_ptr<void>> kept;
         std::size_t keptBytes = 0;
         std::unordered_set<const void*> keptOwners;
+        std::array<std::shared_ptr<DeviceBuffer>, static_cast<std::size_t>(UploadScratch::Count)> uploadScratch;
         std::vector<std::function<void()>> completions;
         std::vector<std::pair<std::uint64_t, std::uint64_t>> writes;
         std::vector<std::uint64_t> writeNotes;
@@ -666,6 +698,10 @@ private:
         } run;
         // See Commands(): the accesses the last recorded command's trailing barrier covers.
         VkAccessFlags coveredAccess = 0;
+        std::uint32_t deferredDispatchQueue = 0;
+        std::vector<const void*> deferredRun;
+        std::vector<RunAccess> runAccess;
+        std::vector<std::function<void(Recorder&)>> afterRun;
         // The hazard tracker's accesses since its last simulated barrier (see NoteAccess).
         struct Tracker {
             struct Range {
@@ -688,6 +724,7 @@ private:
             std::uint64_t key = 0;
             std::uint32_t timing = NoTiming;
             std::function<void(VkCommandBuffer)> afterPass;
+            PassBreak closedBy = PassBreak::NewBatch;
         } renderPass;
         PassHazards passHazards;
         // A pass ended in this batch: Submit records the host-read barrier its draws left out.
@@ -787,6 +824,9 @@ private:
     void recordBarrier(VkCommandBuffer commands, VkPipelineStageFlags sourceStage, VkPipelineStageFlags destinationStage, VkAccessFlags sourceAccess, VkAccessFlags destinationAccess) const;
     // Opens a batch when none is open, without closing a store run (Commands() does both).
     void ensureOpen();
+    void flushDeferredDispatch();
+    bool runConflict(std::span<const RunAccess> accesses) const;
+    bool joinsRun(std::uint32_t queueKey, std::span<const void* const> owners, std::span<const RunAccess> accesses) const;
     void dropStaleHoldKept();
     // Records the run's pending store (vkCmdUpdateBuffer), if any.
     void flushPendingStore();
@@ -795,7 +835,7 @@ private:
     // form, toward the host only); returns whether the batch's host-read barrier was included.
     bool closeStoreRun(bool atSubmit = false);
     // Ends the render pass a draw left open (vkCmdEndRenderPass, the pass's trailing barrier).
-    void endOpenRenderPass(bool barrier = true);
+    void endOpenRenderPass(PassBreak by, bool barrier = true);
     // Records the queued key stores as one run (`forWriter`: before a command writing, reading or
     // labelling over one, not at Submit).
     void recordKeyStores(bool forWriter);
@@ -842,6 +882,7 @@ private:
     std::uint64_t writtenBackSequence = 0;
     // PendingLabel without the table mutex (the caller holds it, or the GPU mutex).
     std::optional<LabelHit> lookupLabel(std::uint64_t address, std::size_t bytes, std::uint64_t afterStamp, LabelRefusal* refusal) const;
+    OwnLabel unlandedOwnLabel(std::uint64_t address, std::size_t bytes, std::uint32_t queue) const;
     // Whether the in-flight batch with that serial has not signaled its fence (false when it is
     // not in flight any more): what makes a wait for it a real GPU wait (ThreadHookWaits).
     bool unsignaled(std::uint64_t serial) const;
@@ -881,9 +922,7 @@ private:
     std::uint64_t writeNoteCount = 0;
     std::shared_ptr<Buffer> drawUpload;
     VkDeviceSize drawUploadUsed = 0;
-    // Command buffers and fences of completed batches, reused by later ones (hundreds of batches per
-    // frame would otherwise allocate and free their objects each time).
-    std::vector<std::pair<VkCommandBuffer, VkFence>> spare;
+    std::vector<VkFence> spare;
     std::vector<VkCommandBuffer> sparePrologues;
     std::vector<VkQueryPool> sparePools;
     mutable AgcDriver::Mutex completedMutex;

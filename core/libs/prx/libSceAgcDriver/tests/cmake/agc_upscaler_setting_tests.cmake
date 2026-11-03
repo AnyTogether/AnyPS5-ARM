@@ -1,0 +1,12 @@
+if(BUILD_TESTING)
+    add_test_executable(agc_upscaler_setting_tests tests/UpscalerSetting.cpp Execution/src/UpscalerSetting.cpp)
+    target_include_directories(agc_upscaler_setting_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(agc_upscaler_setting_tests PRIVATE libc)
+    configure_windows_unwind(agc_upscaler_setting_tests)
+    add_test(NAME agc_upscaler_setting COMMAND agc_upscaler_setting_tests)
+    set_tests_properties(agc_upscaler_setting PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(agc_upscaler_setting PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
+    endif()
+endif()
