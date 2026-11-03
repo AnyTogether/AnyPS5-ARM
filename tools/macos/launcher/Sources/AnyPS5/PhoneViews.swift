@@ -41,8 +41,8 @@ struct PairingCard: View {
     }
 }
 
-/// mController, the phone, in the top bar: an empty ring with no phone, orange while one
-/// connects, green with its latency once it is connected.
+/// mController, the phone, in the top bar while one is there: orange while it connects, green
+/// with its latency once it is connected. With no phone the top bar leaves it out.
 /// A connected phone in the indicator: its player number, or nil while it is none yet.
 struct PhoneBadge: Identifiable, Equatable {
     let id: String

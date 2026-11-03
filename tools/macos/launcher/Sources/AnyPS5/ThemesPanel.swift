@@ -95,18 +95,20 @@ extension AppModel {
             PanelRow(id: "motion", title: T.text(.themeMotion), symbol: "wind", kind: .choice(options: Theme.allCases.map(\.title), selected: min(Theme.allCases.count - 1, max(0, design.style))) { [weak self] index in
                 self?.edit { $0.style = index }
             }),
-            PanelRow(id: "hue", title: T.text(.themeHue), symbol: "paintpalette", kind: .stepper(value: Int(knobs.hue), range: 0...355, step: 5, format: degrees) { [weak self] value in
+            // Players: from 300° to 50° took fifty presses. A press now turns 15° and the colour
+            // wheel goes round, and at the keyboard the number can be typed.
+            PanelRow(id: "hue", title: T.text(.themeHue), symbol: "paintpalette", kind: .stepper(value: Int(knobs.hue) % 360, range: 0...359, step: 15, format: degrees) { [weak self] value in
                 self?.turn { $0.hue = Double(value) }
-            }),
-            PanelRow(id: "highlight", title: T.text(.themeHighlight), symbol: "sparkles", kind: .stepper(value: Int(knobs.highlight), range: -90...90, step: 5, format: degrees) { [weak self] value in
+            }, cycle: 360, typable: true),
+            PanelRow(id: "highlight", title: T.text(.themeHighlight), symbol: "sparkles", kind: .stepper(value: Int(knobs.highlight), range: -90...90, step: 10, format: degrees) { [weak self] value in
                 self?.turn { $0.highlight = Double(value) }
-            }),
+            }, typable: true),
             PanelRow(id: "depth", title: T.text(.themeDepth), symbol: "sun.max", kind: .stepper(value: knobs.depth, range: 1...10, step: 1, format: String.init) { [weak self] value in
                 self?.turn { $0.depth = value }
-            }),
-            PanelRow(id: "accent", title: T.text(.themeAccent), symbol: "circle.lefthalf.filled", kind: .stepper(value: Int(knobs.accentHue), range: 0...355, step: 5, format: degrees) { [weak self] value in
+            }, typable: true),
+            PanelRow(id: "accent", title: T.text(.themeAccent), symbol: "circle.lefthalf.filled", kind: .stepper(value: Int(knobs.accentHue) % 360, range: 0...359, step: 15, format: degrees) { [weak self] value in
                 self?.turn { $0.accentHue = Double(value) }
-            }),
+            }, cycle: 360, typable: true),
             PanelRow(id: "background", title: T.text(.themeBackground), detail: design.background == nil ? T.text(.themeNoFile) : T.text(design.backgroundIsVideo ? .backgroundVideo : .backgroundImage),
                      symbol: "photo.on.rectangle", kind: .action(destructive: false) { [weak self] in self?.chooseThemeFile(music: false) }),
         ]

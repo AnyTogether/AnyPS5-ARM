@@ -137,6 +137,13 @@ enum PreviewRenderer {
                 model.overlay = overlay; model.panelInRows = true; model.panelRow = row
             }
         }
+        // A studio number being typed (a click on it, or Return at the keyboard).
+        render(preferences, found, root, BackgroundView.still(theme: .cosmic, palette: neon.palette, width: Int(size.width), height: Int(size.height), time: 260),
+               output.appendingPathComponent("studio-typing.png")) { model in
+            model.previewThemes([neon], active: neon, hub: [])
+            model.overlay = .studio; model.panelInRows = true; model.panelRow = 3
+            model.typingRow = "hue"
+        }
         do {
             var plain = preferences
             plain.gameArtwork = false
@@ -182,6 +189,14 @@ enum PreviewRenderer {
             ]
             model.togetherRequests = TogetherRequests(incoming: [TogetherPerson(userId: "f4", handle: "ines", displayName: "Ines", avatar: nil)], outgoing: [])
             model.overlay = .friends; model.panelInRows = true; model.panelRow = 0
+        }
+        // A request sent and not answered yet, with the row that takes it back.
+        render(preferences, found, root, still, output.appendingPathComponent("friends-sent.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.togetherFriends = [TogetherFriend(userId: "f2", handle: "sol", displayName: "Sol", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil))]
+            model.togetherRequests = TogetherRequests(incoming: [], outgoing: [TogetherPerson(userId: "f5", handle: "ada", displayName: "Ada", avatar: nil)])
+            model.overlay = .friends; model.panelInRows = true
+            model.panelRow = model.friendRows().firstIndex { $0.id == "cancel-f5" } ?? 0
         }
         let ago = { (hours: Double) in Date().addingTimeInterval(-hours * 3600) }
         let library: [TogetherPlayedGame] = found.prefix(3).enumerated().map { index, game in

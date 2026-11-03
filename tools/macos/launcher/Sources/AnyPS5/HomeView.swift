@@ -209,7 +209,11 @@ struct TopBar: View {
             iconButton(model.social.notifications.unread > 0 ? "bell.badge.fill" : "bell.fill", index: 5, badge: model.social.notifications.unread) { model.openNotifications() }
             // A controller running out of battery says so here (and in Settings → Controllers).
             if let pad = PadTroubleshooter.lowBatteryPad(Controllers.shared.pads) { PadStatusPill(pad: pad) }
-            PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
+            // Only while a phone connects or plays: with none, the pill would only take room.
+            if model.phone != nil || model.phoneConnecting != nil || !model.phoneBadges.isEmpty {
+                PhoneIndicator(phone: model.phone, connecting: model.phoneConnecting, badges: model.phoneBadges)
+                    .transition(.opacity.combined(with: .scale(scale: 0.9)))
+            }
             HStack(spacing: 10 * scale) {
                 // Signed in to AnyTogether: the avatar and name others see.
                 let name = model.togetherUser?.displayName ?? model.preferences.profileName
@@ -225,6 +229,7 @@ struct TopBar: View {
         }
         .glassGroup(look, spacing: 10 * scale)
         .animation(Motion.overlay, value: model.showsUpdateNotice)
+        .animation(Motion.overlay, value: model.phone != nil || model.phoneConnecting != nil || !model.phoneBadges.isEmpty)
     }
 
     private func iconButton(_ symbol: String, index: Int, badge: Int = 0, ring: Bool = false, action: @escaping () -> Void) -> some View {

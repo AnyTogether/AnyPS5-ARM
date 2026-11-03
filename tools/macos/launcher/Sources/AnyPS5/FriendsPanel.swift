@@ -58,6 +58,9 @@ extension AppModel {
         for person in togetherRequests.outgoing {
             rows.append(PanelRow(id: "waiting-\(person.userId)", title: person.displayName, detail: "@\(person.handle) · \(T.text(.friendsWaiting))", symbol: "hourglass", kind: .info(""),
                                  person: PanelPerson(name: person.displayName, avatar: person.avatar)))
+            // A request sent by mistake is taken back here, as on the website.
+            rows.append(PanelRow(id: "cancel-\(person.userId)", title: T.format(.friendsCancelRequest, person.displayName), symbol: "xmark.circle",
+                                 kind: .action(destructive: true) { [weak self] in self?.cancelFriendRequest(person) }))
         }
         return rows
     }
@@ -121,6 +124,18 @@ extension AppModel {
         Task {
             try? await together.answerFriend(person.userId, accept: accept)
             if accept { show(T.format(.friendsNowFriends, person.displayName), symbol: "person.2.fill") }
+            refreshFriends()
+        }
+    }
+
+    func cancelFriendRequest(_ person: TogetherPerson) {
+        Task {
+            do {
+                try await together.cancelFriendRequest(person.userId)
+                show(T.format(.friendsRequestCancelled, person.displayName), symbol: "person.badge.minus")
+            } catch {
+                show(T.text(.togetherUnreachable), symbol: "exclamationmark.triangle.fill")
+            }
             refreshFriends()
         }
     }

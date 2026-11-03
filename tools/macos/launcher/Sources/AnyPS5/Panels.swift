@@ -25,6 +25,29 @@ struct PanelRow: Identifiable {
     var person: PanelPerson?
     /// The detail is advice to read whole (the controller troubleshooter): no line limit.
     var wraps = false
+    /// A stepper's value that goes round, as degrees do: past one end it comes back at the other.
+    var cycle: Int?
+    /// A stepper whose number can be typed: at the keyboard, Return or a click opens a field.
+    var typable = false
+
+    /// A stepper's value `delta` steps on from `value`: held at the ends, or round for a cycle.
+    func stepped(_ value: Int, by delta: Int) -> Int {
+        guard case .stepper(_, _, let step, _, _) = kind else { return value }
+        return fitted(value + delta * step)
+    }
+
+    /// A typed number for the stepper (a unit typed with it is fine), nil when it is none.
+    func typed(_ text: String) -> Int? {
+        let digits = text.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "°%").union(.whitespaces))
+        guard case .stepper = kind, let number = Int(digits) else { return nil }
+        return fitted(number)
+    }
+
+    private func fitted(_ value: Int) -> Int {
+        guard case .stepper(_, let range, _, _, _) = kind else { return value }
+        guard let cycle else { return min(range.upperBound, max(range.lowerBound, value)) }
+        return range.lowerBound + ((value - range.lowerBound) % cycle + cycle) % cycle
+    }
 
     var focusable: Bool {
         if case .info = kind { return false }
@@ -362,9 +385,10 @@ extension AppModel {
             PanelCategory(id: "together", title: "AnyTogether", symbol: "person.2.circle", rows: togetherRows()),
             PanelCategory(id: "broadcast", title: TB.text(.title), symbol: "dot.radiowaves.left.and.right", rows: broadcastSettingsRows()),
             PanelCategory(id: "engine", title: TE.text(.engineTitle), symbol: "gearshape.2", rows: engineRows()),
-            PanelCategory(id: "fonts", title: TF.text(.title), symbol: "textformat", rows: fontRows()),
             PanelCategory(id: "advanced", title: T.text(.advanced), symbol: "wrench.and.screwdriver", rows: advanced),
             PanelCategory(id: "steam", title: TSteam.text(.title), symbol: "gamecontroller.fill", rows: steamRows()),
+            // Players rarely need the system fonts: they come last, just before About.
+            PanelCategory(id: "fonts", title: TF.text(.title), symbol: "textformat", rows: fontRows()),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]
     }
@@ -697,8 +721,8 @@ extension AppModel {
         case .toggle(let value, let set):
             if (delta > 0) != value { set(delta > 0); Sounds.shared.play(.move) }
             return true
-        case .stepper(let value, let range, let step, _, let set):
-            let next = min(range.upperBound, max(range.lowerBound, value + delta * step))
+        case .stepper(let value, _, _, _, let set):
+            let next = row.stepped(value, by: delta)
             if next != value { set(next); Sounds.shared.play(.move) }
             return true
         default:
@@ -715,7 +739,13 @@ extension AppModel {
             set(!value)
             Sounds.shared.play(.move)
         case .stepper(let value, let range, let step, _, let set):
-            set(value + step > range.upperBound ? range.lowerBound : value + step)
+            // At the keyboard (and with the mouse) a number that can be typed opens its field.
+            if row.typable && InputModeState.shared.mode == .keyboard {
+                typingRow = row.id
+                Sounds.shared.play(.select)
+                return
+            }
+            set(row.cycle == nil && value + step > range.upperBound ? range.lowerBound : row.stepped(value, by: 1))
             Sounds.shared.play(.move)
         case .action(_, let run):
             Sounds.shared.play(.select)
@@ -946,13 +976,20 @@ struct RowView: View {
             .modifier(EditRing(editing: editing))
         case .toggle(let value, let set):
             Switch(on: value, accent: model.accent, focused: focused) { set(!value); Sounds.shared.play(.move) }
-        case .stepper(let value, let range, let step, let format, let set):
+        case .stepper(let value, let range, _, let format, let set):
+            let typing = model.typingRow == row.id
             HStack(spacing: 12 * scale) {
-                chevron("minus", enabled: value > range.lowerBound) { set(max(range.lowerBound, value - step)) }
-                Text(format(value)).font(.display(16 * scale, .semibold)).monospacedDigit().frame(minWidth: 70 * scale)
-                chevron("plus", enabled: value < range.upperBound) { set(min(range.upperBound, value + step)) }
+                chevron("minus", enabled: row.cycle != nil || value > range.lowerBound) { model.typingRow = nil; set(row.stepped(value, by: -1)) }
+                if typing {
+                    StepperField(value: value, unit: format(value).replacingOccurrences(of: String(value), with: ""), preview: previewRender,
+                                 commit: { model.typeStepper(row, $0) }, cancel: { model.typingRow = nil })
+                        .frame(minWidth: 70 * scale)
+                } else {
+                    Text(format(value)).font(.display(16 * scale, .semibold)).monospacedDigit().frame(minWidth: 70 * scale)
+                }
+                chevron("plus", enabled: row.cycle != nil || value < range.upperBound) { model.typingRow = nil; set(row.stepped(value, by: 1)) }
             }
-            .modifier(EditRing(editing: editing))
+            .modifier(EditRing(editing: editing || typing))
         case .action:
             Image(systemName: "chevron.right").font(.system(size: 14 * scale, weight: .semibold)).opacity(0.6)
         case .info(let value):
@@ -987,6 +1024,45 @@ struct RowView: View {
         .opacity(shown ? (enabled ? 0.85 : 0.25) : 0)
         .disabled(!enabled || !shown)
         .animation(Motion.focus, value: shown)
+    }
+}
+
+/// A stepper's number being typed: the number and its unit, Return keeps it, Esc leaves it as
+/// it was, and a click elsewhere keeps what was typed.
+struct StepperField: View {
+    let value: Int
+    let unit: String
+    var preview = false
+    let commit: (String) -> Void
+    let cancel: () -> Void
+    @State private var text = ""
+    @FocusState private var focused: Bool
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        HStack(spacing: 1 * scale) {
+            if preview {
+                // A text field does not draw offscreen: the number with a caret after it.
+                Text(String(value)).font(.display(16 * scale, .semibold)).monospacedDigit()
+                Rectangle().frame(width: 1.5 * scale, height: 17 * scale).padding(.horizontal, 1 * scale)
+            } else {
+                TextField("", text: $text)
+                    .textFieldStyle(.plain)
+                    .font(.display(16 * scale, .semibold))
+                    .monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 44 * scale)
+                    .focused($focused)
+                    .onAppear {
+                        text = String(value)
+                        focused = true
+                    }
+                    .onSubmit { commit(text) }
+                    .onExitCommand { cancel() }
+                    .onChange(of: focused) { _, now in if !now { commit(text) } }
+            }
+            if !unit.isEmpty { Text(unit).font(.display(16 * scale, .semibold)).opacity(0.6) }
+        }
     }
 }
 

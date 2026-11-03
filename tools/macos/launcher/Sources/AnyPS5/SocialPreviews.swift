@@ -79,6 +79,8 @@ enum SocialPreviews {
             TogetherNotification(id: "0002", kind: .warning, actor: nil, data: warning, read: true, createdAt: ago(50)),
         ]
         render("notifications") { model in model.previewNotifications(notes, unread: 3, more: true) }
+        render("notifications-empty") { model in model.previewNotifications([], unread: 0, more: false) }
+        render("notifications-read") { model in model.previewNotifications(notes.filter(\.read), unread: 0, more: false) }
         render("notifications-bell") { model in
             model.social.notifications.load(TogetherNotificationPage(notifications: notes, unread: 3, more: false))
             model.focus = .top(5)
