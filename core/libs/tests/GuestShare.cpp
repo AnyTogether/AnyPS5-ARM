@@ -78,10 +78,12 @@ int main() {
     Require(status[0] == 0x5a);
     Require(sceShareGetCurrentStatus(1, nullptr) == invalidParam);
 #ifndef SHARE_NATIVE_BACKEND
+    Require(sceShareGetCurrentStatus(1, reinterpret_cast<ShareCurrentStatus*>(0x10)) == invalidParam);
     std::uint32_t running[2]{0xffffffffu, 0x5a5a5a5au};
     Require(sceShareGetRunningStatus(running) == 0);
     Require(running[0] == 0 && running[1] == 0x5a5a5a5au);
     Require(sceShareGetRunningStatus(nullptr) == invalidParam);
+    Require(sceShareGetRunningStatus(reinterpret_cast<std::uint32_t*>(0x10)) == invalidParam);
     Require(sceShareSetContentParamForApplicationTitle("title") == 0);
     Require(sceShareSetContentParamForApplicationTitle(nullptr) == invalidParam);
     Require(sceShareSetContentParamForApplicationTitle("") == invalidParam);

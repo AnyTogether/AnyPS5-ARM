@@ -57,6 +57,15 @@ inline VkDeviceSize HostImportOffset(const HostImport& import, std::uint64_t add
     return address - import.base + import.lead;
 }
 
+struct HostImportStart {
+    std::uint64_t guest;
+    VkDeviceAddress device;
+};
+
+inline HostImportStart HostImportBufferStart(const HostImport& import) {
+    return {import.base - import.lead, import.address - import.lead};
+}
+
 enum class ImportWatch : std::uint8_t { Watch, Unwatch };
 
 struct ImportProbe {
@@ -478,7 +487,9 @@ private:
         VkBuffer copySource = VK_NULL_HANDLE;
         std::uint64_t copySourceBase = 0;
         std::vector<GuestCopySpan> copySpans;
+        VkDeviceAddress copySourceAddress = 0;
         bool copiedBack = false;
+        std::shared_ptr<Buffer> shadowCopy;
         // An element the shader updates atomically lies inside (AddWritable's `atomic`).
         bool atomic = false;
         bool swept = false;
