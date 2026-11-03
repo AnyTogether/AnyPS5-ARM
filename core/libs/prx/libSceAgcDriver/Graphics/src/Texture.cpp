@@ -2934,7 +2934,9 @@ void StorageTexture::upload(const std::vector<bool>* layers) {
     };
     if (const auto predicted = PendingFillKeys(descriptor, guestBytes)) {
         uploadedKeys = *predicted;
-        keyProof = {};
+        // The keys come from a fill still pending in the batch: proved by its write note, as upstream's
+        // ProvedClearKeys proves keys a pending store wrote.
+        keyProof = PendingKeyProof(descriptor, guestBytes, *predicted);
     } else {
         uploadedKeys = ProvedClearKeys(descriptor, guestBytes, keyProof);
     }
