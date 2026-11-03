@@ -5580,11 +5580,14 @@ bool deviceLocalHasRoom(const Context& context, std::size_t bytes) {
 }
 
 std::shared_ptr<Buffer> stagingBuffer(const Context& context, std::size_t bytes, VkBufferUsageFlags usage) {
-    if (!deviceLocalHasRoom(context, bytes)) {
-        Copies().stagingRefused.fetch_add(1, std::memory_order_relaxed);
-        return nullptr;
-    }
     try {
+        // Inside the try: a device with no device-local memory type (the mock contexts of the
+        // graphics tests) refuses the staging buffer instead of failing the upload. The fork's span
+        // copies GPU-copy, and so shadow, regions upstream copies on the CPU.
+        if (!deviceLocalHasRoom(context, bytes)) {
+            Copies().stagingRefused.fetch_add(1, std::memory_order_relaxed);
+            return nullptr;
+        }
         if (auto buffer = Buffer::WithinDeviceLocalHeadroom(context, bytes, usage)) return buffer;
         static std::atomic<int> reported{0};
         if (reported.fetch_add(1, std::memory_order_relaxed) < 4) std::fprintf(stderr, "[buffers] staging shadow of %zu bytes refused: its device-local heap is within an eighth of its budget\n", bytes);
