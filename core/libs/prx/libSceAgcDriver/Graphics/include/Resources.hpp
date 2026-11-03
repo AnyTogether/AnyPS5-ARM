@@ -26,7 +26,8 @@ public:
     void Invalidate();
 
 private:
-    Buffer(const Context& context, std::size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, bool headroom);
+    // `headroom` (upstream): allocate new device memory only within the device-local headroom.
+    Buffer(const Context& context, std::size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, bool classSized, bool headroom);
     void initializeAddress(VkBufferUsageFlags usage);
     void release() noexcept;
     Context context;
