@@ -1,0 +1,44 @@
+# Temporary check (not for main): do upstream's own AGC tests pass on lavapipe at this commit?
+name: AnyTogether CI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  agc-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    env:
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++-12 ninja-build pkg-config \
+            libpipewire-0.3-dev libdecor-0-dev libvulkan-dev libx11-dev libxext-dev libxrandr-dev \
+            libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev \
+            libvulkan1 mesa-vulkan-drivers vulkan-tools
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: engine-linux-tests
+          max-size: 3G
+          save: false
+      - run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - run: cmake --build build
+      - run: sudo sysctl -w vm.unprivileged_userfaultfd=1
+      - run: ctest --test-dir build --output-on-failure --timeout 120 -R '^(agc_driver_depth_bits_guest_memory|agc_driver_depth_fast_clear_submit|agc_driver_direct_write_completion|agc_driver_gds_dma_fill|agc_driver_gds_dma_fill_private|agc_driver_gpu_indirect_arguments_misaligned_writer_ahead|agc_driver_indirect_arguments_pending_producer|agc_driver_indirect_thread_dimensions|agc_driver_indirect_thread_dimensions_cpu|agc_driver_overlap_staged_copies|agc_driver_store_over_untracked|agc_driver_write_data_written_ahead|agc_driver_write_data_written_ahead_draw_pipeline|agc_driver_native_depth_buffer_clear|agc_bda_staging|agc_read_written_staging|agc_driver_recorder)$'
+        env:
+          ANYPS5_REQUIRE_VULKAN: 1
+          GALLIUM_OVERRIDE_CPU_CAPS: avx
