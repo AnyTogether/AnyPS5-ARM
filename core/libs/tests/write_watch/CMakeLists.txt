@@ -19,6 +19,9 @@ foreach(mode shared private writable late restore)
     add_test(NAME write_watch_backing_${mode} COMMAND write_watch_backing_tests ${mode})
     set_tests_properties(write_watch_backing_${mode} PROPERTIES TIMEOUT 30)
 endforeach()
+# The late fault test writes the same page eight rounds in a row and counts every fault: our hot
+# pages leave a page that keeps faulting open (no fault, compared at collection), so it runs without them.
+set_tests_properties(write_watch_backing_late PROPERTIES ENVIRONMENT APS5_WRITE_WATCH_NO_HOT=1)
 
 add_executable(write_watch_tests ../WriteWatch.cpp ../../prx/libc/src/GuestWriteWatch.cpp)
 target_include_directories(write_watch_tests PRIVATE ../..)

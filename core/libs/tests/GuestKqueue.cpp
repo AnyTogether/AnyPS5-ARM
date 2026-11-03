@@ -495,7 +495,8 @@ static void SocketPair() {
     Require(Apply(kq, Change(static_cast<std::uintptr_t>(pair[1]), EvfiltWrite, EvAdd | EvOneshot)) == 0);
     Require(Wait(kq, events, 4) == 1 && events[0].filter == EvfiltWrite);
     RequireFailure(Apply(kq, Change(static_cast<std::uintptr_t>(pair[1]), EvfiltWrite, EvDelete)), GuestEnoent);
-#ifndef __linux__
+#if !defined(__linux__) && !defined(__APPLE__)
+    // macOS has edge watches since upstream #12741, so EV_CLEAR is taken there as on Linux.
     Require(Throws([kq, &pair] { Apply(kq, Change(static_cast<std::uintptr_t>(pair[1]), EvfiltRead, EvAdd | EvClear)); }));
 #endif
     const int space = kqueue_nid_postfix();
@@ -1166,7 +1167,7 @@ static void Errors() {
 #ifdef __APPLE__
     Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[1]), EvfiltWrite, EvAdd)); }));
 #endif
-#ifndef __linux__
+#if !defined(__linux__) && !defined(__APPLE__)
     Require(Throws([kq, &pipe] { Apply(kq, Change(static_cast<std::uintptr_t>(pipe[0]), EvfiltRead, EvAdd | EvClear)); }));
 #endif
     Require(close_nid_postfix(pipe[0]) == 0 && close_nid_postfix(pipe[1]) == 0);

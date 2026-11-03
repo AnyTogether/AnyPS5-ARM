@@ -336,6 +336,9 @@ void File::ForgetClosedDescriptor(int descriptor) {
     File::ForgetRandomDevice(descriptor);
     File::ForgetDescriptor(descriptor);
     ForgetJitSharedMemory(descriptor);
+#ifdef __APPLE__
+    File::ForgetNamedSharedMemoryDescriptor(descriptor);
+#endif
 #ifdef _WIN32
     File::ForgetFileLock(descriptor);
 #endif

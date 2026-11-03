@@ -67,3 +67,9 @@ macos   guest_host_standard_error       Upstream test, fails on macOS/Rosetta, t
 macos   guest_kernel_app_archive_archive  Upstream test, fails on macOS/Rosetta, tracked.
 macos   guest_job_manager_worker_spin(_scale_[0-9.]+)?  Upstream test, fails on macOS/Rosetta, tracked (upstream's new JobManager; about 19.7 s of its 20 s timeout on the runner).
 macos   guest_sysmodule(_maps_scan)?    Upstream test, fails on macOS/Rosetta, tracked (aborts now and then, also on retries, since upstream changed it).
+
+# macOS: upstream tests from the November 2 upstream merge that fail the same way on upstream's own tree
+# (1348026318, built for x86-64 on a Mac, without any AnyTogether change).
+macos   guest_dinkumware_float_bits     Upstream test, aborts the same way on upstream's tree on macOS/Rosetta (x87 and SSE flags).
+macos   guest_dinkumware_division       Upstream test, fails the same way on upstream's tree on macOS/Rosetta (case 69: flags 2a, expected 28).
+macos   agc_unit_flags_allocation_failure_populated  Upstream test, fails the same way on upstream's tree on macOS ("failed growth changed the existing unit flags").

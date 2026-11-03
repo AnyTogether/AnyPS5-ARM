@@ -23,6 +23,10 @@ void DuplicateSharedMemoryDescriptor_nid_no_patch(int source, int destination);
 int CloseSharedMemoryDescriptor_nid_no_patch(int descriptor);
 int ReplaceSharedMemoryDescriptor_nid_no_patch(int source, int destination);
 #endif
+#ifdef __APPLE__
+bool IsNamedSharedMemoryDescriptor(int descriptor);
+void ForgetNamedSharedMemoryDescriptor(int descriptor);
+#endif
 #ifndef _WIN32
 std::int64_t WritevSharedMemory_nid_no_patch(int descriptor, const struct iovec* vectors, int count);
 std::int64_t PwritevSharedMemory_nid_no_patch(int descriptor, const struct iovec* vectors, int count, std::int64_t offset);

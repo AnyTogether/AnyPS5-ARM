@@ -518,6 +518,28 @@ bool SourceFaults(const void* pointer, std::uint64_t length) {
     return !GuestReadable(pointer, length);
 }
 #endif
+#ifdef __APPLE__
+// macOS takes only a datagram's address record off the queue when recvfrom cannot copy the data out,
+// and the next receive reads the data without its sender. FreeBSD (and Linux) drop the whole datagram
+// with EFAULT. A buffer that is not writable is found before the receive, which then drops the datagram.
+bool DestinationFaults(const void* pointer, std::uint64_t length) {
+    if (length == 0) return false;
+    auto address = reinterpret_cast<mach_vm_address_t>(pointer);
+    if (length > std::numeric_limits<mach_vm_address_t>::max() - address) return true;
+    const mach_vm_address_t end = address + length;
+    while (address < end) {
+        mach_vm_address_t region = address;
+        mach_vm_size_t size = 0;
+        vm_region_basic_info_data_64_t info{};
+        mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+        mach_port_t object = MACH_PORT_NULL;
+        if (mach_vm_region(mach_task_self(), &region, &size, VM_REGION_BASIC_INFO_64, reinterpret_cast<vm_region_info_t>(&info), &count, &object) != KERN_SUCCESS) return true;
+        if (region > address || (info.protection & VM_PROT_WRITE) == 0) return true;
+        address = region + size;
+    }
+    return false;
+}
+#endif
 bool ReportAddress(void* address, std::uint32_t* addressLength, const void* name, std::uint32_t size) {
     return (address == nullptr || GuestCopyOut_nid_no_patch(address, name, size)) && GuestCopyOut_nid_no_patch(addressLength, &size, sizeof(size));
 }
@@ -1852,6 +1874,20 @@ std::int64_t APS5_VABI recvfrom_nid_postfix(int descriptor, void* buffer, std::u
     socklen_t size = sizeof(native);
     if (const int waited = WaitForTransfer(*socket, false, flags)) return Fail(waited);
     std::uint64_t limit = length;
+#ifdef __APPLE__
+    if (DestinationFaults(buffer, length)) {
+        // Only the bytes the receive would copy have to be writable: peek at them first. Nothing pending
+        // answers as the receive would (EAGAIN on a non-blocking socket).
+        std::vector<char> probe(static_cast<std::size_t>(std::min<std::uint64_t>(length, socket->type == 2 ? 65536u : 1u << 20u)));
+        const auto pending = ::recvfrom(socket->value, probe.data(), probe.size(), NativeReceiveFlags(flags, socket->type) | MSG_PEEK | MSG_DONTWAIT, nullptr, nullptr);
+        if (pending < 0) return Fail(NativeError());
+        if (DestinationFaults(buffer, static_cast<std::uint64_t>(pending))) {
+            // A datagram that cannot be copied out is gone afterwards, as on FreeBSD; stream data stays.
+            if (socket->type == 2 && (flags & GuestPeek) == 0) ::recvfrom(socket->value, probe.data(), probe.size(), NativeReceiveFlags(flags, socket->type) | MSG_DONTWAIT, nullptr, nullptr);
+            return Fail(14);
+        }
+    }
+#endif
 #ifdef _WIN32
     if (length != 0 && (limit = GuestPrefix(buffer, length, WritableProtection)) < length) {
         int error = 0;

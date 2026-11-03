@@ -527,7 +527,7 @@ public:
                     if (page >= first && page < last) return;
                 state &= static_cast<std::uint8_t>(~Written);
                 const bool open = (state & (PROT_READ | PROT_WRITE)) == (PROT_READ | PROT_WRITE) && (state & ReadTrapped) == 0;
-                if (open && ((state & Hot) != 0 || heat >= HotFaults)) {
+                if (open && _hotPages && ((state & Hot) != 0 || heat >= HotFaults)) {
                     if ((state & Hot) == 0) _snapshots[page] = std::make_unique<std::uint8_t[]>(_page);
                     if (snapshot(page)) {
                         state |= Hot;
@@ -794,6 +794,7 @@ private:
     Watch() {
         _lock.profiled = std::getenv("APS5_PROFILE_DRAW") != nullptr;
         if (const char* ahead = std::getenv("APS5_WRITE_WATCH_FAULT_AHEAD")) _faultAhead = static_cast<std::size_t>(std::strtoul(ahead, nullptr, 0));
+        _hotPages = std::getenv("APS5_WRITE_WATCH_NO_HOT") == nullptr;
         if (std::getenv("APS5_NO_WRITE_WATCH") != nullptr) return;
         struct sigaction action {};
         action.sa_sigaction = &Watch::fault;
@@ -1289,6 +1290,8 @@ private:
 
     const std::uintptr_t _page = static_cast<std::uintptr_t>(::getpagesize());
     std::size_t _faultAhead = 32;
+    // APS5_WRITE_WATCH_NO_HOT: every written page is protected again at collection, never left open as hot.
+    bool _hotPages = true;
     bool _available = false;
     Turns _lock;
     std::map<std::uintptr_t, Range> _ranges;

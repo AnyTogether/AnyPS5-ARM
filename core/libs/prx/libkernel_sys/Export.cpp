@@ -639,8 +639,12 @@ std::int64_t APS5_VABI _fpathconf_nid_postfix(int fd, int name) {
     withoutVnode = S_ISFIFO(status.st_mode) || S_ISSOCK(status.st_mode);
 #endif
     if (name == PcAsyncIo) return PosixAsynchronousIo;
-    if (withoutVnode) return name == PcPipeBuf ? 512 : Fail(GuestEinval);
+    // Before the pipe test: macOS reports a kqueue as a FIFO to fstat.
     if (IsKqueueDescriptor_nid_no_patch(fd) || File::IsSharedMemoryDescriptor_nid_no_patch(fd)) return Fail(GuestEopnotsupp);
+#ifdef __APPLE__
+    if (File::IsNamedSharedMemoryDescriptor(fd)) return Fail(GuestEopnotsupp);
+#endif
+    if (withoutVnode) return name == PcPipeBuf ? 512 : Fail(GuestEinval);
     return PathConfigurationValue(name);
 }
 

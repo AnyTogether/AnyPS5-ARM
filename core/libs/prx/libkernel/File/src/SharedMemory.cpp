@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <limits>
 #include <mutex>
+#include <unordered_set>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -50,6 +51,13 @@ extern "C" _invalid_parameter_handler _set_thread_local_invalid_parameter_handle
 #endif
 
 namespace {
+
+#ifdef __APPLE__
+// Descriptors of named objects, for fpathconf: their backing files keep a name, so the path test below
+// cannot tell them, and their reads and writes stay those of the host file.
+std::mutex namedDescriptorMutex;
+std::unordered_set<int> namedDescriptors;
+#endif
 
 #ifdef _WIN32
 std::mutex sharedDescriptorAccessMutex;
@@ -842,6 +850,10 @@ int OpenNamed(const char* path, int flags) {
         errno = error;
         return HostFailure("truncating the named object");
     }
+    {
+        std::lock_guard lock(namedDescriptorMutex);
+        namedDescriptors.insert(descriptor);
+    }
     return descriptor;
 }
 
@@ -862,6 +874,18 @@ int UnlinkNamed(const char* path) {
 }
 
 namespace File {
+
+#ifdef __APPLE__
+bool IsNamedSharedMemoryDescriptor(int descriptor) {
+    std::lock_guard lock(namedDescriptorMutex);
+    return namedDescriptors.contains(descriptor);
+}
+
+void ForgetNamedSharedMemoryDescriptor(int descriptor) {
+    std::lock_guard lock(namedDescriptorMutex);
+    namedDescriptors.erase(descriptor);
+}
+#endif
 
 bool IsSharedMemoryDescriptor_nid_no_patch(int descriptor) {
     return IsHostSharedMemoryDescriptor(descriptor);

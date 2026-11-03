@@ -65,7 +65,9 @@ void shrink(std::atomic<std::size_t>& current, std::size_t bytes) {
 class ArenaHeap {
 public:
     static ArenaHeap& Get() {
-        static ArenaHeap heap;
+        // Never destroyed: atexit handlers and static destructors registered before the first allocation
+        // still allocate and free during exit, and a destroyed std::mutex refuses to lock on macOS (EINVAL).
+        static auto& heap = *new ArenaHeap;
         return heap;
     }
 
