@@ -72,3 +72,4 @@ macos   guest_sysmodule(_maps_scan)?    Upstream test, fails on macOS/Rosetta, t
 macos   guest_dinkumware_float_bits     Upstream test, aborts the same way on upstream's tree on macOS/Rosetta (x87 and SSE flags).
 macos   guest_dinkumware_division       Upstream test, fails the same way on upstream's tree on macOS/Rosetta (case 69: flags 2a, expected 28).
 macos   agc_unit_flags_allocation_failure_populated  Upstream test, fails the same way on upstream's tree on macOS ("failed growth changed the existing unit flags").
+macos   guest_set_env(_pending_[0-9])?  Upstream test, fails the same way on upstream's tree on macOS/Rosetta: unmasked x87 exceptions are not kept ("independent x87/SSE exception masks restored", "restored pending exception did not trap"), as guest_update_env.

@@ -933,7 +933,7 @@ bool RemapFixedIntoRegistered(GuestAllocations::Mutation& mutation, void* addr, 
     return true;
 }
 
-#if defined(__linux__) || defined(__EMSCRIPTEN__)
+#if defined(__linux__) || defined(__EMSCRIPTEN__) || defined(__APPLE__)
 bool ArenaAvailable() { return GuestArena::GuestArenaAvailable_nid_postfix(); }
 
 void* ArenaCommit(void* addr, size_t len, int prot) {
@@ -954,7 +954,10 @@ void ArenaForget(void* addr, size_t len) {
 void Unmap(void* addr, size_t len) {
 #if defined(__APPLE__)
     GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(addr, len);
-    if (munmap(addr, len) != 0) throw std::system_error(errno, std::generic_category(), "munmap failed");
+    if (ArenaAvailable() && GuestArena::GuestArenaContains_nid_postfix(addr, len))
+        GuestArena::GuestArenaReset_nid_postfix(addr, len);
+    else if (munmap(addr, len) != 0) throw std::system_error(errno, std::generic_category(), "munmap failed");
+    ArenaForget(addr, len);
 #elif defined(__linux__) || defined(__EMSCRIPTEN__)
     if (ArenaAvailable() && GuestArena::GuestArenaContains_nid_postfix(addr, len))
         GuestArena::GuestArenaReset_nid_postfix(addr, len);
@@ -1007,15 +1010,21 @@ void* MapPlaced(void* addr, size_t len, int prot, int flags, size_t alignment) {
             }
         }
 #endif
-#if defined(__linux__) || defined(__EMSCRIPTEN__)
+#if defined(__linux__) || defined(__EMSCRIPTEN__) || defined(__APPLE__)
+#ifndef __APPLE__
         if (ArenaAvailable() && !GuestArena::GuestArenaContains_nid_postfix(addr, len))
             throw std::invalid_argument("fixed mapping is outside the guest address space arena");
-        if (ArenaAvailable()) {
+#endif
+        // On macOS too a fixed mapping inside the arena is marked used there, so the arena does not hand
+        // its range out again. One outside the arena is mapped where it asks, as before.
+        if (ArenaAvailable() && GuestArena::GuestArenaContains_nid_postfix(addr, len)) {
             GuestArena::GuestArenaMarkUsed_nid_postfix(addr, len);
             if (void* placed = ArenaCommit(addr, len, prot); placed != MAP_FAILED) return placed;
             GuestArena::GuestArenaRelease_nid_postfix(addr, len);
             throw std::system_error(errno, std::generic_category(), "Arena mapping failed");
         }
+#endif
+#if defined(__linux__) || defined(__EMSCRIPTEN__)
         const int placement = (flags & GuestMapNoOverwrite) != 0 ? MAP_FIXED_NOREPLACE : MAP_FIXED;
         void* result = mmap(addr, len, prot, MAP_PRIVATE | MAP_ANONYMOUS | placement, -1, 0);
 #elif defined(__APPLE__)
@@ -1031,7 +1040,6 @@ void* MapPlaced(void* addr, size_t len, int prot, int flags, size_t alignment) {
     }
     if (addr) {
 #if defined(__linux__) || defined(__APPLE__) || defined(__EMSCRIPTEN__)
-#if defined(__linux__) || defined(__EMSCRIPTEN__)
         if (ArenaAvailable()) {
             void* placed = GuestArena::GuestArenaAllocateFromHint_nid_postfix(
                 reinterpret_cast<std::uintptr_t>(addr), len, alignment);
@@ -1039,7 +1047,6 @@ void* MapPlaced(void* addr, size_t len, int prot, int flags, size_t alignment) {
             ArenaForget(placed, len);
             throw std::system_error(errno, std::generic_category(), "Arena mapping failed");
         }
-#endif
 #ifdef __EMSCRIPTEN__
         throw std::runtime_error("the guest address space arena is unavailable");
 #else
@@ -1052,7 +1059,9 @@ void* MapPlaced(void* addr, size_t len, int prot, int flags, size_t alignment) {
 #ifdef _WIN32
     return mmap_aligned(len, prot, alignment);
 #endif
-#if defined(__linux__) || defined(__EMSCRIPTEN__)
+    // macOS places guest mappings in the arena too, as upstream's macOS port does (#14466): guest code
+    // checks that its direct memory lies in the guest address space.
+#if defined(__linux__) || defined(__EMSCRIPTEN__) || defined(__APPLE__)
     if (ArenaAvailable()) {
         void* placed = GuestArena::GuestArenaAllocate_nid_postfix(len, alignment);
         if (void* committed = ArenaCommit(placed, len, prot); committed != MAP_FAILED) return committed;
