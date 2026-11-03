@@ -22,6 +22,7 @@
 #include <thread>
 #ifdef __APPLE__
 #include <new>
+#include <pthread/qos.h>
 #include <typeinfo>
 #endif
 
@@ -408,6 +409,12 @@ void ExpireAlarm(std::chrono::microseconds interval) {
 }
 
 void RunAlarms() {
+#ifdef __APPLE__
+    // macOS coalesces the timer wakeups of default-class threads, by 10 ms and more on a loaded host
+    // (the runner gave a 2 ms ITIMER_REAL a 12-18 ms median): the alarm thread asks for the
+    // user-interactive class, whose timers keep their deadlines.
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
     auto& alarms = Alarms();
     std::unique_lock lock(alarms.lock);
     for (;;) {
