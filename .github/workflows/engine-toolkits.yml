@@ -45,7 +45,7 @@ env:
     online_bridge_tests online_np_manager_tests online_web_api2_tests online_net_p2p_tests
     online_probe online_observation_tests remote_pad_tests guest_appcontent_tests
     guest_appcontent_addons_tests guest_appcontent_license_tests guest_user_service_tests
-    guest_user_service_user_name_tests
+    guest_user_service_user_name_tests guest_user_service_user_kind_tests guest_appcontent_download_tests
     guest_user_service_lifecycle_tests guest_user_service_presets_tests power_control_tests
   SMOKE_TESTS: online|remote_pad|appcontent|user_service|power_control
 
