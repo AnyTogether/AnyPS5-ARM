@@ -301,9 +301,8 @@ private:
     bool enqueueLabelPacket(std::span<const std::uint32_t> packet, std::uint32_t opcode, std::uint32_t queue);
     // An occlusion counter dump (EVENT_WRITE 0x39) on queue 0 goes into the draw pipeline behind the
     // draws it counts instead of draining it (APS5_PIPELINE_DRAIN_SAMPLE_DUMPS=1 drains as before).
-    bool enqueueSampleDump(std::span<const std::uint32_t> packet, std::uint32_t queue);
-    void commitSampleDump(std::uint32_t queue, std::uint64_t address);
     bool enqueueDmaPacket(std::span<const std::uint32_t> packet, std::uint32_t opcode, std::uint32_t queue, const QueueState& state);
+    bool enqueueSampleDumpPacket(std::span<const std::uint32_t> packet, std::uint32_t opcode, std::uint32_t queue);
     bool enqueueConstantRamDump(std::span<const std::uint32_t> packet, std::uint32_t opcode, std::uint32_t queue, const QueueState& state);
     void commitStore(std::uint32_t queue, std::uint64_t address, std::span<const std::byte> bytes);
     void commitLabel(std::uint32_t queue, std::uint64_t address, std::span<const std::byte> bytes, bool endOfPipeInterrupt);

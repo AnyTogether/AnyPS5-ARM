@@ -25,7 +25,7 @@ public:
     }
     void SetEntryRounding(const RoundingState& state) { setRounding(state); }
     void SetRelaxedFloat(bool relaxed) { relaxedFloat = relaxed; }
-    void SetNativeFloat16(bool enabled) { nativeFloat16 = enabled; }
+    void SetNativeFloat16(bool enabled, bool fma) { nativeFloat16 = enabled; nativeFloat16Fma = enabled && fma; }
     void SetFloat32DenormPreserve(bool enabled) { float32DenormPreserve = enabled; }
     void SetFloat32FlushToZero(bool enabled) { float32FlushToZero = enabled; }
     void SetFloat32FlushDeclared(bool enabled) { float32FlushDeclared = enabled; }
@@ -389,6 +389,7 @@ private:
     RoundingState rounding;
     bool ieeeMode = false;
     bool nativeFloat16 = false;
+    bool nativeFloat16Fma = false;
     IrBuilder ir;
     IrBlock& block;
     IrU1 instructionBranchCondition;
