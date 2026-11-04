@@ -17,6 +17,7 @@
 #include <crt_externs.h>
 #endif
 #include <unistd.h>
+extern char** environ;
 #endif
 
 namespace AgcDriver {

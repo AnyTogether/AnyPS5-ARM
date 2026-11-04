@@ -16,6 +16,7 @@ public:
     ~Buffer();
     Buffer(const Buffer&) = delete;
     Buffer& operator=(const Buffer&) = delete;
+    static std::shared_ptr<Buffer> WithinDeviceLocalHeadroom(const Context& context, std::size_t size, VkBufferUsageFlags usage);
     VkBuffer Handle() const;
     VkDeviceAddress DeviceAddress() const;
     // Host-visible buffers only: a device-local one (properties without HOST_VISIBLE, the staging
@@ -25,6 +26,8 @@ public:
     void Invalidate();
 
 private:
+    // `headroom` (upstream): allocate new device memory only within the device-local headroom.
+    Buffer(const Context& context, std::size_t size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, bool classSized, bool headroom);
     void initializeAddress(VkBufferUsageFlags usage);
     void release() noexcept;
     Context context;

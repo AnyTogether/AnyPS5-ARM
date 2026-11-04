@@ -309,7 +309,7 @@ void Driver::execute(const Submission& submission) {
         if (submission.queue != 0 && Graphics::Recorder::DispatchOverlapEnabled()) noteRingPacket(submission.queue, submission.serial, opcode, header);
         PerformanceTimer timing("Driver.Packet");
         if (!predicated) noteLabelIssue(packet, submission.queue);
-        if (pipelined && !predicated && header != FlipPacketHeader && header != RenderingWaitPacketHeader && !submission.flips.contains(cursor) && (enqueueLabelPacket(packet, opcode, submission.queue) || enqueueSampleDump(packet, submission.queue) || enqueueDmaPacket(packet, opcode, submission.queue, queue))) {
+        if (pipelined && !predicated && header != FlipPacketHeader && header != RenderingWaitPacketHeader && !submission.flips.contains(cursor) && (enqueueLabelPacket(packet, opcode, submission.queue) || enqueueSampleDump(packet, submission.queue) || enqueueDmaPacket(packet, opcode, submission.queue, queue) || enqueueConstantRamDump(packet, opcode, submission.queue, queue))) {
             traceLabel(packet, submission.queue);
             recent.Record(cursor);
             cursor = nextCursor;
@@ -459,6 +459,7 @@ void Driver::execute(const Submission& submission) {
             CheckFailure();
             std::uint64_t batchesAtFlip = 0, unsignaledAtFlip = 0;
             bool flipInterruptDeferred = false;
+            Graphics::StorageTexture::NoteFlip();
             if (!drains) {
 
                 GuestMemory::TagGpuLockSite(GuestMemory::GpuLockSite::Flush);
