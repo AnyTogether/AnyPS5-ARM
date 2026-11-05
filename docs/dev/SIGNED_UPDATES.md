@@ -52,8 +52,8 @@ gh release create <tag> out/* ...                                    # SHA256SUM
 
 `sign.sh` refuses a key that other users can read, a key that is not listed in
 `release-signing.pub` (no launcher would trust it), and two files with the same name. It checks
-its own result with `verify.sh` before it writes anything. `tools/macos/publish_nightly.sh` signs
-nightlies this way. With `ANYPS5_SKIP_SIGN=1` it publishes unsigned, and new launchers then
+its own result with `verify.sh` before it writes anything. `tools/macos/publish_nightly.sh` (the older,
+all-local nightly) signs nightlies this way. With `ANYPS5_SKIP_SIGN=1` it publishes unsigned, and new launchers then
 refuse that nightly.
 
 AnyPS5 Desktop releases are signed the same way, on this Mac, once the Windows and Linux builds
@@ -69,7 +69,7 @@ built is in [WINDOWS_LINUX_ENGINE.md](WINDOWS_LINUX_ENGINE.md).
 ### Nightly Windows and Linux engines from CI
 
 `.github/workflows/engine-nightly.yml` builds the Windows and Linux engine from main once a day
-when `core/` changed. It publishes them as a pre-release named like the Mac's nightlies
+when `core/`, `tools/macos/` or `mobile/` changed. It publishes them as a pre-release named like the Mac's nightlies
 (`v<next>-arm-nightly.<YYYYMMDD>.<n>`). CI has no key, so that pre-release comes out unsigned.
 The launchers refuse it until it is signed.
 
@@ -82,6 +82,46 @@ tools/release/sign_nightly.sh v0.2.31-arm-nightly.20261102.1   # the nightly's t
 The script downloads the pre-release's files and signs them with `sign.sh`. It checks them with
 `verify.sh` and uploads `SHA256SUMS` and `SHA256SUMS.sig` to the release. `-k` is passed on to
 `sign.sh` during a key rotation.
+
+### Nightly macOS builds on the release Mac
+
+`tools/release/nightly_mac.sh` adds the Mac files to CI's nightly and signs it, so the Mac
+launcher's Nightly channel and engine picker offer it (they need `AnyPS5-macOS.zip` and
+`AnyPS5-toolkit-macos-<version>.zip` on the release, and a good signature):
+
+```sh
+tools/release/nightly_mac.sh --dry-run    # what it would do: tag, commit, builds, uploads
+tools/release/nightly_mac.sh [<tag>]      # default: the newest nightly of today or yesterday (UTC)
+tools/release/nightly_mac.sh --install    # the daily launchd agent
+```
+
+It checks out the nightly's commit, detached, in a worktree of its own (`AnyPS5-nightly` beside the
+main checkout; the next nightly reuses it and its `build-mac`, so builds are incremental). There it
+builds the engine (`ninja all libs`), `AnyPS5.app` with `build_launcher_app.sh` (zipped as
+`AnyPS5-macOS.zip`) and the engine toolkit with `package_toolkit.sh`, as releases are built. The
+app is signed as `build_launcher_app.sh` signs it: with `ANYPS5_SIGN_IDENTITY` (and
+`ANYPS5_NOTARY_PROFILE` for notarization) when they are set, ad hoc otherwise. Unlocked games are
+never signed. The phone app (`AnyPS5-Remote.apk`, unsigned `AnyPS5-Remote.ipa`) is built only when
+`mobile/` changed since the last release, and a failed phone build leaves it out. The files are
+uploaded to the pre-release, then `sign_nightly.sh` signs every file of it and
+`verify.sh --signature-only` checks the result. Run again, it only signs again when `SHA256SUMS`
+does not list every file.
+
+It does nothing, and tries again the next day, when less than 6 GB of disk is free or a game is
+running. A game started during the build holds back the upload and the signing for up to 4 hours.
+With no nightly of today or yesterday it exits quietly.
+
+`--install` copies the script to `~/Library/Application Support/AnyPS5/nightly-mac/` and loads the
+launchd agent `net.anytogether.anyps5.nightly-mac`
+(`~/Library/LaunchAgents/net.anytogether.anyps5.nightly-mac.plist`). It runs daily at 04:45 UTC
+under `taskpolicy -b` and logs to `~/Library/Logs/AnyPS5/nightly-mac.log`; each build's full
+output is in `nightly-mac-build.log` beside it. launchd counts local time, so the hour is converted
+when installing; run `--install` again after a summer-time change. The installed copy is replaced
+by each nightly's own `nightly_mac.sh`, so it follows main. Check the agent with
+`launchctl print gui/$(id -u)/net.anytogether.anyps5.nightly-mac`.
+
+CI's scheduled runs have started hours after their 02:23 UTC cron, so the 04:45 run usually
+finds the previous day's nightly; that is why it also takes yesterday's.
 
 ## What the launchers check
 
