@@ -1,5 +1,8 @@
-# A nightly Windows and Linux engine for AnyPS5 Desktop, built from main once a day when core/
-# changed, and published as a GitHub pre-release for the launchers' Nightly update channel.
+# A nightly Windows and Linux engine for AnyPS5 Desktop, built from main once a day when core/,
+# tools/macos/ or mobile/ changed, and published as a GitHub pre-release for the launchers' Nightly
+# update channel. The release Mac adds the macOS app and engine to it later
+# (tools/release/nightly_mac.sh), so a change to the Mac launcher or the phone app alone gets a
+# nightly too.
 #
 # The tag is named as tools/macos/publish_nightly.sh names the Mac's nightlies:
 # v<next>-arm-nightly.<YYYYMMDD>.<n>, <next> being the last release with its last number raised
@@ -24,7 +27,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Build even without core/ changes, or when today already has a CI nightly.
+        description: Build even without core/, tools/macos/ or mobile/ changes, or when today already has a CI nightly.
         type: boolean
         default: false
       dry_run:
@@ -99,7 +102,9 @@ jobs:
             case "$toolkit_nightly" in
               *-arm-nightly."$day".*) skip "today already has $toolkit_nightly" ;;
             esac
-            if git diff --quiet "$base" HEAD -- core/; then skip "core/ has not changed since $base"; fi
+            if git diff --quiet "$base" HEAD -- core/ tools/macos/ mobile/; then
+              skip "core/, tools/macos/ and mobile/ have not changed since $base"
+            fi
           fi
           {
             echo "build=true"
@@ -143,7 +148,9 @@ jobs:
           git fetch -q --tags --force origin
           previous="$(git tag -l 'v*-arm' 'v*-arm-nightly.*' --sort=-creatordate --merged HEAD | head -n 1)"
           {
-            echo "Nightly Windows and Linux engine from main, $(date -u +%Y-%m-%d), $(git rev-parse --short=12 HEAD). It may have new bugs. AnyPS5 Desktop offers it only on the Nightly update channel."
+            echo "Nightly build of main, $(date -u +%Y-%m-%d), $(git rev-parse --short=12 HEAD). It may have new bugs: the launchers offer it only on their Nightly update channel."
+            echo
+            echo "Windows and Linux: the engine for AnyPS5 Desktop. macOS: AnyPS5-macOS.zip and the Mac engine are added by the release Mac (tools/release/nightly_mac.sh), usually within a day; the Mac launcher offers this nightly once they are here."
             echo
             echo "It is unsigned until it is signed on the release Mac (tools/release/sign_nightly.sh). The launchers refuse it until then."
             echo

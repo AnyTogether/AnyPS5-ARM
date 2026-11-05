@@ -34,8 +34,10 @@ the same by hand. Either way the archives are added to the release afterwards, t
 release is signed again on the release Mac.
 
 Nightlies of main get them from the **Engine nightly** workflow
-(`.github/workflows/engine-nightly.yml`). It runs once a day and builds only when `core/` changed
-since the last nightly that has these archives (or since the last release). It calls the Engine
+(`.github/workflows/engine-nightly.yml`). It runs once a day and builds only when `core/`,
+`tools/macos/` or `mobile/` changed since the last nightly that has these archives (or since the
+last release). The release Mac adds the macOS app and engine to that pre-release afterwards
+(`tools/release/nightly_mac.sh`, see [SIGNED_UPDATES.md](SIGNED_UPDATES.md)). It calls the Engine
 toolkits workflow with the nightly's tag, so `relinker --version` names the nightly. Then it
 publishes an unsigned pre-release, `v<next>-arm-nightly.<YYYYMMDD>.<n>`, with
 `AnyPS5-toolkit-windows-<commit>.zip`, `AnyPS5-toolkit-linux-<commit>.zip` and
