@@ -47,12 +47,15 @@ public final class RemoteServer: @unchecked Sendable {
         public var streamWishes: @Sendable () -> Void
         /// The game began or stopped asking for text (`textPrompt`).
         public var textPrompt: @Sendable () -> Void
+        /// A welcomed phone's pad changed, by its device ID, while `padsDriveLauncher` is on (the
+        /// idle pad when it went quiet or left holding something); on the server's queue.
+        public var pad: @Sendable (String, PadState) -> Void
 
         public init(pairing: @escaping @Sendable (PairingRequest) -> Void = { _ in }, connected: @escaping @Sendable (String) -> Void = { _ in },
                     disconnected: @escaping @Sendable () -> Void = {}, latency: @escaping @Sendable (Double) -> Void = { _ in },
                     request: @escaping @Sendable (RemoteMessage) -> Void = { _ in }, connecting: @escaping @Sendable (String?) -> Void = { _ in },
                     players: @escaping @Sendable () -> Void = {}, streamWishes: @escaping @Sendable () -> Void = {},
-                    textPrompt: @escaping @Sendable () -> Void = {}) {
+                    textPrompt: @escaping @Sendable () -> Void = {}, pad: @escaping @Sendable (String, PadState) -> Void = { _, _ in }) {
             self.pairing = pairing
             self.connected = connected
             self.disconnected = disconnected
@@ -62,6 +65,7 @@ public final class RemoteServer: @unchecked Sendable {
             self.players = players
             self.streamWishes = streamWishes
             self.textPrompt = textPrompt
+            self.pad = pad
         }
     }
 
@@ -163,6 +167,8 @@ public final class RemoteServer: @unchecked Sendable {
         let stopping: NWListener? = queue.sync { listener }
         stopping?.stateUpdateHandler = { state in if case .cancelled = state { cancelled.signal() } }
         queue.sync {
+            navigationTimer?.cancel()
+            navigationTimer = nil
             listener?.cancel()
             listener = nil
             for client in clients.values { client.connection.cancel() }
@@ -356,6 +362,7 @@ public final class RemoteServer: @unchecked Sendable {
 
     private func ended(_ client: Client) {
         clients[ObjectIdentifier(client)] = nil
+        if let id = client.deviceID, navigation.left(id), navigates.value { events.pad(id, .idle) }
         if asking === client {
             asking = nil
             events.connecting(nil)
@@ -489,6 +496,7 @@ public final class RemoteServer: @unchecked Sendable {
             guard let session = RemotePacket.inputSession(data), let client = phones.first(where: { $0.session == session }), let slot = client.slot else { continue }
             client.address = source
             if var game = gameAddresses[slot] { RemoteServer.send(assisted(data, client), from: bridgeSockets[slot], to: &game) }
+            navigate(data, from: client)
         }
     }
 
@@ -504,6 +512,50 @@ public final class RemoteServer: @unchecked Sendable {
         guard client.session == session, phones.contains(where: { $0 === client }), let slot = client.slot, gameAddresses.indices.contains(slot) else { return }
         client.padOnChannel = true
         if var game = gameAddresses[slot] { RemoteServer.send(assisted(data, client), from: bridgeSockets[slot], to: &game) }
+        navigate(data, from: client)
+    }
+
+    // MARK: The launcher's screens
+
+    private let navigates = Locked(false)
+    private var navigation = PhonePadNavigation()
+    private var navigationTimer: DispatchSourceTimer?
+
+    /// Whether the phones' pads (the app's and the browser pad's) also go to the launcher's own
+    /// screens, as `Events.pad`: on while no game takes them. Turned off, a pad holding something
+    /// is let go at once.
+    public var padsDriveLauncher: Bool {
+        get { navigates.value }
+        set {
+            guard navigates.value != newValue else { return }
+            navigates.value = newValue
+            queue.async { [weak self] in self?.navigationChanged(newValue) }
+        }
+    }
+
+    private func navigationChanged(_ on: Bool) {
+        navigationTimer?.cancel()
+        navigationTimer = nil
+        guard on else {
+            for id in navigation.releaseAll() { events.pad(id, .idle) }
+            return
+        }
+        // A phone that goes quiet holding a direction lets go of it.
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .milliseconds(200), repeating: .milliseconds(200))
+        timer.setEventHandler { [weak self] in
+            guard let self, self.navigates.value else { return }
+            for id in self.navigation.quiet(at: ProcessInfo.processInfo.systemUptime) { self.events.pad(id, .idle) }
+        }
+        timer.resume()
+        navigationTimer = timer
+    }
+
+    /// A welcomed phone's pad packet, for the launcher's screens when they take the pads.
+    private func navigate(_ data: Data, from client: Client) {
+        guard navigates.value, let id = client.deviceID, let state = RemotePacket.padState(data),
+              let changed = navigation.heard(id, state, at: ProcessInfo.processInfo.systemUptime) else { return }
+        events.pad(id, changed)
     }
 
     /// A hello names the game to send to on that bridge; its answers go back to the slot's phone.

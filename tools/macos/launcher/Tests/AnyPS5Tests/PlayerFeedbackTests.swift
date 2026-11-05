@@ -98,7 +98,7 @@ final class PlayerFeedbackTests: XCTestCase {
         let hue = try XCTUnwrap(rows.first { $0.id == "hue" })
         XCTAssertEqual(hue.cycle, 360)
         guard case .stepper(_, _, let step, _, _) = hue.kind else { return XCTFail("not a stepper") }
-        XCTAssertEqual(step, 15)
+        XCTAssertEqual(step, 20)
     }
 
     // MARK: Friends, Settings, notifications

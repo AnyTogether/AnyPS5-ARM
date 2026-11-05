@@ -475,6 +475,21 @@ enum PreviewRenderer {
         for category in 1..<6 {
             render(preferences, found, root, still, output.appendingPathComponent("settings\(category).png")) { model in model.overlay = .settings; model.panelCategory = category }
         }
+        // Settings' search: the field with the pad's focus, a search and what it found, and nothing found.
+        render(preferences, found, root, still, output.appendingPathComponent("settings-search-field.png")) { model in
+            model.overlay = .settings
+            model.settingsSearchFocused = true
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("settings-search-found.png")) { model in
+            model.overlay = .settings
+            model.settingsQuery = "sound"
+            model.panelInRows = true
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("settings-search-none.png")) { model in
+            model.overlay = .settings
+            model.settingsQuery = "qwxzv"
+            model.settingsSearchFocused = true
+        }
         render(preferences, found, root, still, output.appendingPathComponent("about-update.png")) { model in
             model.previewUpdate(Updates.Release(tag: "v0.2.6-arm", version: "0.2.6", page: URL(string: "https://github.com/AnyTogether/AnyPS5-ARM/releases/tag/v0.2.6-arm")!, download: nil, size: nil), progress: 0.42)
             model.overlay = .settings

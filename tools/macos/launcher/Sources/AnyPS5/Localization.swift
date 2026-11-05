@@ -132,7 +132,7 @@ enum T {
     enum Key: String, CaseIterable {
         case welcome, welcomeSubtitle, chooseLanguage, chooseTheme, chooseThemeSubtitle, chooseFolder, chooseFolderSubtitle
         case pickFolder, changeFolder, gamesFound, noGamesFound, continueAction, back, start, skip
-        case games, library, settings, play, unlock, unlocking, cancel, queued, update, retry, options
+        case games, library, settings, settingsSearch, settingsSearchNone, play, unlock, unlocking, cancel, queued, update, retry, options
         case locked, ready, updateAvailable, failed, starting, startingText, running
         case stepUnwrap, stepRelink, stepCopy, stepBundle, stepFinish
         case titleID, version, size, status, folder

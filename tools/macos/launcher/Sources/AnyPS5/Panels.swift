@@ -177,7 +177,35 @@ extension AppModel {
         ]
     }
 
+    /// Settings' categories, only the settings that match the search while there is one.
     private func settingsCategories() -> [PanelCategory] {
+        AppModel.searchSettings(allSettingsCategories(), for: settingsQuery, language: T.language.rawValue)
+    }
+
+    /// The settings whose words have every word of `query` (in the language the launcher speaks,
+    /// whatever the case and accents), in their categories; a category's name counts for each of
+    /// its settings. Everything when the query is blank.
+    static func searchSettings(_ categories: [PanelCategory], for query: String, language: String) -> [PanelCategory] {
+        let locale = Locale(identifier: language)
+        // Lower case in the language first (Turkish İ is i, I is ı), then without accents.
+        func folded(_ text: String) -> String { text.lowercased(with: locale).folding(options: [.diacriticInsensitive, .widthInsensitive], locale: locale) }
+        let words = folded(query).split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return categories }
+        func matches(_ text: String) -> Bool {
+            let text = folded(text)
+            return words.allSatisfy(text.contains)
+        }
+        return categories.compactMap { category in
+            let rows = category.rows.filter { row in
+                // A blank line or a lone value says nothing to find.
+                guard !row.title.isEmpty else { return false }
+                return matches([category.title, row.title, row.detail ?? ""].joined(separator: " "))
+            }
+            return rows.isEmpty ? nil : PanelCategory(id: category.id, title: category.title, symbol: category.symbol, rows: rows)
+        }
+    }
+
+    private func allSettingsCategories() -> [PanelCategory] {
         let preferences = self.preferences
         // The built-in themes, then the made and installed ones.
         let designs = self.designs
@@ -615,12 +643,14 @@ extension AppModel {
     var overlayHasCategories: Bool { overlay == .settings || overlay == .findPlayers || overlay == .gameHub }
 
     func panelCommand(_ command: Command) -> Bool {
+        if overlay == .settings, let used = settingsSearchCommand(command) { return used }
         let categories = panelCategories()
         guard !categories.isEmpty else { return false }
         // Written only when it changes: a command that changed nothing hit the end (Input's bump).
         if panelCategory > categories.count - 1 { panelCategory = categories.count - 1 }
         let rows = categories[panelCategory].rows
-        let single = categories.count == 1
+        // Settings found in one category by its search still has its categories on the left.
+        let single = categories.count == 1 && overlay != .settings
         if !panelInRows && !single {
             switch command {
             case .up: movePanelCategory(-1, count: categories.count)
@@ -663,6 +693,80 @@ extension AppModel {
         return true
     }
 
+    /// Settings' search field with the pad or the arrows: up from the first category reaches it,
+    /// ✕ (Return) types in it, down goes back to what it found, ○ clears it, then closes.
+    /// nil when the command is the list's.
+    func settingsSearchCommand(_ command: Command) -> Bool? {
+        let found = !panelCategories().isEmpty
+        if settingsSearchFocused {
+            switch command {
+            case .select:
+                settingsTyping = true
+                Sounds.shared.play(.select)
+            case .down, .right:
+                guard found else { break }
+                leaveSettingsSearch(intoRows: false)
+            case .back:
+                settingsTyping = false
+                if settingsQuery.isEmpty { closeOverlay() } else { settingsQuery = ""; Sounds.shared.play(.back) }
+            case .options:
+                closeOverlay()
+            default:
+                break
+            }
+            return true
+        }
+        guard found else {
+            // Nothing matches: only the field is left to go to.
+            switch command {
+            case .up, .select, .left:
+                settingsSearchFocused = true
+                Sounds.shared.play(.move)
+            case .back:
+                settingsQuery = ""
+                settingsSearchFocused = true
+                Sounds.shared.play(.back)
+            case .options:
+                closeOverlay()
+            default:
+                break
+            }
+            return true
+        }
+        guard !panelInRows else { return nil }
+        if command == .up, panelCategory == 0 {
+            settingsSearchFocused = true
+            Sounds.shared.play(.move)
+            return true
+        }
+        if command == .back, !settingsQuery.isEmpty {
+            settingsQuery = ""
+            settingsSearchFocused = true
+            Sounds.shared.play(.back)
+            return true
+        }
+        return nil
+    }
+
+    /// From the search field to what it found: the categories, or (Return) the first setting.
+    func leaveSettingsSearch(intoRows: Bool) {
+        settingsTyping = false
+        settingsSearchFocused = false
+        panelCategory = 0
+        panelInRows = false
+        if intoRows, let rows = panelCategories().first?.rows, let first = rows.firstIndex(where: \.focusable) {
+            focusRow(first, in: rows)
+            panelInRows = true
+        }
+        Sounds.shared.play(.move)
+    }
+
+    /// The field clicked, or ⌘F: typing in it.
+    func startSettingsSearch() {
+        settingsSearchFocused = true
+        settingsTyping = true
+    }
+
     /// L1 and R1 in Settings (and the other panels with categories): the category before or after.
     func panelCategoryStep(_ delta: Int) -> Bool {
         let categories = panelCategories()
@@ -670,6 +774,8 @@ extension AppModel {
         let next = min(categories.count - 1, max(0, panelCategory + delta))
         guard next != panelCategory else { return true }
         if rowEditor.editing != nil { rowEditor.stop() }
+        settingsSearchFocused = false
+        settingsTyping = false
         withAnimation(Motion.focus) { panelCategory = next }
         panelRow = 0
         if panelInRows {
@@ -709,6 +815,19 @@ extension AppModel {
         guard rows.indices.contains(next) else { return }
         focusRow(next, in: rows)
         Sounds.shared.play(.move)
+    }
+
+    /// The open panel's stepper `id` one step on, read as it is now (a held − or + steps from
+    /// the value its last step left); `fallback` when no panel lists it. True when it moved.
+    @discardableResult
+    func stepRow(_ id: String, by delta: Int, else fallback: PanelRow? = nil) -> Bool {
+        guard let row = panelCategories().lazy.flatMap(\.rows).first(where: { $0.id == id }) ?? fallback,
+              case .stepper(let value, _, _, _, let set) = row.kind else { return false }
+        let next = row.stepped(value, by: delta)
+        guard next != value else { return false }
+        set(next)
+        Sounds.shared.play(.move)
+        return true
     }
 
     @discardableResult
@@ -765,6 +884,11 @@ struct SettingsPanel: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
+    @Environment(\.previewRender) private var previewRender
+
+    /// Settings itself has the search field (Find players and a hub use the same screen).
+    private var searchable: Bool { model.overlay == .settings }
+
     var body: some View {
         let categories = model.panelCategories()
         let current = categories.indices.contains(model.panelCategory) ? categories[model.panelCategory] : nil
@@ -775,35 +899,42 @@ struct SettingsPanel: View {
                 if let subtitle {
                     Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)).padding(.bottom, 26 * scale)
                 }
-                ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
-                    let selected = index == model.panelCategory
-                    let focused = selected && !model.panelInRows
-                    HStack(spacing: 14 * scale) {
-                        Image(systemName: category.symbol).font(.system(size: 18 * scale, weight: .medium)).frame(width: 26 * scale)
-                        Text(category.title).font(.display(19 * scale, selected ? .semibold : .regular))
-                        Spacer()
-                    }
-                    .foregroundStyle(focused ? Color.black : .white.opacity(selected ? 1 : 0.7))
-                    .padding(.horizontal, 18 * scale)
-                    .frame(height: 52 * scale)
-                    .background(FocusFill(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(selected ? 0.12 : 0), rim: selected))
-                    .contentShape(Rectangle())
-                    .hoverTick("category-\(index)")
-                    .onTapGesture {
-                        model.panelCategory = index
-                        model.panelRow = 0
-                        model.panelInRows = false
-                        Sounds.shared.play(.move)
+                if searchable {
+                    SettingsSearchField().padding(.top, -12 * scale).padding(.bottom, 8 * scale)
+                }
+                if previewRender {
+                    categoryRows(categories)
+                    Spacer()
+                } else {
+                    // Seventeen categories and the search field are taller than a small window:
+                    // the list scrolls, keeping the selected category in view.
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(alignment: .leading, spacing: 6 * scale) { categoryRows(categories) }
+                                .padding(.vertical, 4 * scale)
+                        }
+                        .onChange(of: model.panelCategory) { _, index in
+                            guard categories.indices.contains(index) else { return }
+                            withAnimation(Motion.focus) { proxy.scrollTo("category-" + categories[index].id) }
+                        }
                     }
                 }
-                Spacer()
             }
             .frame(width: 330 * scale)
             .padding(.trailing, 36 * scale)
             if let current {
                 RowList(rows: current.rows, focusedRow: model.panelInRows ? model.focusedRow(in: current.rows) : nil)
-                    .id(current.id)
+                    .id(current.id + (searchable ? "?" + model.settingsQuery : ""))
                     .transition(.opacity.combined(with: .offset(x: 18 * scale)))
+            } else if searchable, !model.settingsQuery.isEmpty {
+                VStack(spacing: 14 * scale) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 30 * scale, weight: .light)).foregroundStyle(.white.opacity(0.45))
+                    Text(T.format(.settingsSearchNone, model.settingsQuery.trimmingCharacters(in: .whitespaces)))
+                        .font(.display(17 * scale, .medium)).foregroundStyle(.white.opacity(0.6)).multilineTextAlignment(.center)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 120 * scale)
+                .transition(.opacity)
             }
         }
         .padding(.horizontal, 90 * scale)
@@ -812,6 +943,102 @@ struct SettingsPanel: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .screenFrost(0.74)
         .animation(Motion.focus, value: model.panelCategory)
+    }
+
+    @ViewBuilder private func categoryRows(_ categories: [PanelCategory]) -> some View {
+        ForEach(Array(categories.enumerated()), id: \.element.id) { index, category in
+            let selected = index == model.panelCategory
+            let focused = selected && !model.panelInRows && !(searchable && model.settingsSearchFocused)
+            HStack(spacing: 14 * scale) {
+                Image(systemName: category.symbol).font(.system(size: 18 * scale, weight: .medium)).frame(width: 26 * scale)
+                Text(category.title).font(.display(19 * scale, selected ? .semibold : .regular))
+                Spacer()
+            }
+            .foregroundStyle(focused ? Color.black : .white.opacity(selected ? 1 : 0.7))
+            .padding(.horizontal, 18 * scale)
+            .frame(height: 52 * scale)
+            .background(FocusFill(RoundedRectangle(cornerRadius: 12 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(selected ? 0.12 : 0), rim: selected))
+            .contentShape(Rectangle())
+            .id("category-" + category.id)
+            .hoverTick("category-\(index)")
+            .onTapGesture {
+                model.settingsSearchFocused = false
+                model.settingsTyping = false
+                model.panelCategory = index
+                model.panelRow = 0
+                model.panelInRows = false
+                Sounds.shared.play(.move)
+            }
+        }
+    }
+}
+
+/// Settings' search: a field over the categories. The pad reaches it with up from the first
+/// category and ✕ types in it; the pointer clicks it, and ⌘F goes to it from anywhere in Settings.
+/// Return goes to the first setting found, ↓ to the categories found, Esc clears it.
+struct SettingsSearchField: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+    @Environment(\.previewRender) private var previewRender
+    @FocusState private var editing: Bool
+
+    var body: some View {
+        let focused = model.settingsSearchFocused && !model.panelInRows
+        let typing = model.settingsTyping
+        HStack(spacing: 10 * scale) {
+            Image(systemName: "magnifyingglass").font(.system(size: 15 * scale, weight: .semibold))
+                .foregroundStyle(.white.opacity(typing || focused ? 0.9 : 0.55))
+            if previewRender {
+                // A text field does not draw offscreen.
+                Text(model.settingsQuery.isEmpty ? T.text(.settingsSearch) : model.settingsQuery).font(.display(16 * scale))
+                    .foregroundStyle(.white.opacity(model.settingsQuery.isEmpty ? 0.45 : 1))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                TextField("", text: $model.settingsQuery, prompt: Text(T.text(.settingsSearch)).foregroundStyle(.white.opacity(0.45)))
+                    .textFieldStyle(.plain)
+                    .font(.display(16 * scale))
+                    .foregroundStyle(.white)
+                    .focused($editing)
+                    .onSubmit { model.leaveSettingsSearch(intoRows: !model.panelCategories().isEmpty) }
+                    .onExitCommand {
+                        if model.settingsQuery.isEmpty { model.settingsTyping = false } else { model.settingsQuery = "" }
+                    }
+                    .onKeyPress(.downArrow) {
+                        guard !model.panelCategories().isEmpty else { return .ignored }
+                        model.leaveSettingsSearch(intoRows: false)
+                        return .handled
+                    }
+            }
+            if !model.settingsQuery.isEmpty {
+                Image(systemName: "xmark.circle.fill").font(.system(size: 14 * scale)).foregroundStyle(.white.opacity(0.5))
+                    .contentShape(Rectangle())
+                    .onTapGesture { model.settingsQuery = "" }
+                    .transition(.opacity)
+            }
+        }
+        .padding(.horizontal, 16 * scale)
+        .frame(height: 44 * scale)
+        .background(Capsule().fill(Color.white.opacity(typing ? 0.16 : focused ? 0.12 : 0.07)))
+        .overlay(Capsule().strokeBorder(Color.white.opacity(typing ? 0.35 : 0), lineWidth: 1))
+        .focusRing(focused && !typing, radius: 22 * scale, width: 2)
+        .contentShape(Capsule())
+        .onTapGesture { model.startSettingsSearch() }
+        .background {
+            // ⌘F: to the field from anywhere in Settings.
+            Button("") { model.startSettingsSearch() }
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
+        .onChange(of: model.settingsTyping, initial: true) { _, on in editing = on }
+        .onChange(of: editing) { _, on in
+            if on { model.settingsSearchFocused = true }
+            if model.settingsTyping != on { model.settingsTyping = on }
+        }
+        .animation(Motion.focus, value: focused)
+        .animation(Motion.focus, value: model.settingsQuery.isEmpty)
+        .accessibilityLabel(T.text(.settingsSearch))
     }
 }
 
@@ -869,6 +1096,8 @@ struct RowList: View {
                     .hoverTick("row-\(row.id)")
                     .onTapGesture {
                         if model.overlayHasCategories { model.panelInRows = true }
+                        model.settingsSearchFocused = false
+                        model.settingsTyping = false
                         model.focusRow(index, in: rows)
                         if model.rowEditor.editing != nil { model.rowEditor.stop() }
                         model.activate(row)
@@ -976,10 +1205,11 @@ struct RowView: View {
             .modifier(EditRing(editing: editing))
         case .toggle(let value, let set):
             Switch(on: value, accent: model.accent, focused: focused) { set(!value); Sounds.shared.play(.move) }
-        case .stepper(let value, let range, _, let format, let set):
+        case .stepper(let value, let range, _, let format, _):
             let typing = model.typingRow == row.id
             HStack(spacing: 12 * scale) {
-                chevron("minus", enabled: row.cycle != nil || value > range.lowerBound) { model.typingRow = nil; set(row.stepped(value, by: -1)) }
+                // Held, − and + keep stepping as a held arrow does, from the value as it is then.
+                chevron("minus", enabled: row.cycle != nil || value > range.lowerBound, repeats: true) { model.typingRow = nil; return model.stepRow(row.id, by: -1, else: row) }
                 if typing {
                     StepperField(value: value, unit: format(value).replacingOccurrences(of: String(value), with: ""), preview: previewRender,
                                  commit: { model.typeStepper(row, $0) }, cancel: { model.typingRow = nil })
@@ -987,7 +1217,7 @@ struct RowView: View {
                 } else {
                     Text(format(value)).font(.display(16 * scale, .semibold)).monospacedDigit().frame(minWidth: 70 * scale)
                 }
-                chevron("plus", enabled: row.cycle != nil || value < range.upperBound) { model.typingRow = nil; set(row.stepped(value, by: 1)) }
+                chevron("plus", enabled: row.cycle != nil || value < range.upperBound, repeats: true) { model.typingRow = nil; return model.stepRow(row.id, by: 1, else: row) }
             }
             .modifier(EditRing(editing: editing || typing))
         case .action:
@@ -1024,6 +1254,71 @@ struct RowView: View {
         .opacity(shown ? (enabled ? 0.85 : 0.25) : 0)
         .disabled(!enabled || !shown)
         .animation(Motion.focus, value: shown)
+    }
+
+    /// A stepper's − or +: a press steps at once and, held, again after 0.4 s and then faster
+    /// (KeyRepeat), until it is let go or the value reaches its end. `step` says whether it moved.
+    @ViewBuilder private func chevron(_ symbol: String, enabled: Bool, repeats: Bool, step: @escaping () -> Bool) -> some View {
+        let shown = inputMode.mode == .keyboard || editing
+        HoldRepeatButton(enabled: enabled && shown, step: step) {
+            Image(systemName: symbol).font(.system(size: 13 * scale, weight: .bold)).frame(width: 26 * scale, height: 26 * scale).contentShape(Rectangle())
+        }
+        .opacity(shown ? (enabled ? 0.85 : 0.25) : 0)
+        .animation(Motion.focus, value: shown)
+    }
+}
+
+/// A button that acts on the press and keeps acting while it is held, at the pace of a held
+/// arrow key; it stops when let go or when `step` says nothing moved.
+struct HoldRepeatButton<Label: View>: View {
+    let enabled: Bool
+    let step: () -> Bool
+    @ViewBuilder let label: Label
+    @State private var repeater = HoldRepeater()
+
+    var body: some View {
+        label
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in if enabled, !repeater.holding { repeater.begin(step) } }
+                    .onEnded { _ in repeater.end() }
+            )
+            .allowsHitTesting(enabled)
+            .onDisappear { repeater.end() }
+            .onChange(of: enabled) { _, now in if !now { repeater.end() } }
+    }
+}
+
+/// The timer behind a held button: the first step on the press, the next after
+/// KeyRepeat.firstDelay, then KeyRepeat's quicker pace.
+@MainActor
+final class HoldRepeater {
+    private var timer: Timer?
+    private var repeats = 0
+    private(set) var holding = false
+
+    func begin(_ step: @escaping () -> Bool) {
+        end()
+        holding = true
+        guard step() else { return }
+        schedule(step)
+    }
+
+    func end() {
+        timer?.invalidate()
+        timer = nil
+        repeats = 0
+        holding = false
+    }
+
+    private func schedule(_ step: @escaping () -> Bool) {
+        timer = Timer.scheduledTimer(withTimeInterval: KeyRepeat.delay(beforeRepeat: repeats + 1), repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.holding else { return }
+                self.repeats += 1
+                if step() { self.schedule(step) } else { self.timer = nil }
+            }
+        }
     }
 }
 
