@@ -379,6 +379,19 @@ final class AppModel: ObservableObject {
     /// Where the focused item is in `rows` now.
     func focusedRow(in rows: [PanelRow]) -> Int { ListFocus.index(of: panelFocusID, in: rows.map(\.id), fallback: panelRow) }
     @Published var panelInRows = false
+    /// Settings' search: the words in the field at the top (the list shows only the settings
+    /// whose names or descriptions have them), whether the field has the pad's focus, and
+    /// whether it is being typed in.
+    @Published var settingsQuery = "" {
+        didSet {
+            guard settingsQuery != oldValue else { return }
+            panelCategory = 0
+            panelRow = 0
+            panelInRows = false
+        }
+    }
+    @Published var settingsSearchFocused = false
+    @Published var settingsTyping = false
     /// The choice row the pad is changing (✕ starts, ✕ or ○ end).
     @Published var rowEditor = RowEditor()
     /// The focused item of the quick menu, the close question and the home menu.
@@ -411,7 +424,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var queue: [String] = []
     @Published private(set) var failures: [String: String] = [:]
     @Published private(set) var running: (game: Game, app: NSRunningApplication)? {
-        didSet { if (oldValue == nil) != (running == nil) { prepareSoon() } }
+        didSet {
+            guard (oldValue == nil) != (running == nil) else { return }
+            prepareSoon()
+            // A game takes the phones' pads alone; without one they move around the launcher.
+            remote?.padsDriveLauncher = running == nil
+        }
     }
     /// The game from the press of Play until its first window shows.
     @Published private(set) var starting: Game? {
@@ -1052,6 +1070,12 @@ final class AppModel: ObservableObject {
     @Published var messageFocus = 0
     @Published var composing = false
     @Published var messageDraft = ""
+    /// Each phone's pad as the launcher's screens last read it, by device ID.
+    var phonePads: [String: PadState] = [:]
+    /// The conversation a notification opened Messages on, entered once the list has it.
+    var pendingConversation: String?
+    /// The threads being read from the server, so one is asked for once at a time.
+    var threadsLoading: Set<String> = []
     /// Who is typing in which conversation, and what forgets them when they stop.
     @Published var typing = TogetherTyping()
     var typingExpiry: Task<Void, Never>?
@@ -2234,7 +2258,8 @@ final class AppModel: ObservableObject {
             players: { Task { @MainActor in
                 withAnimation(Motion.overlay) { self.phonePlayers = self.remote?.phonePlayers ?? [:] }
             } },
-            streamWishes: { Task { @MainActor in self.updateRemotePlay() } })
+            streamWishes: { Task { @MainActor in self.updateRemotePlay() } },
+            pad: { id, state in Task { @MainActor in self.phonePad(id, state) } })
         // Whatever the launcher shows changes the library the phone shows.
         librarySink = objectWillChange.debounce(for: .milliseconds(150), scheduler: RunLoop.main).sink { [weak self] _ in
             MainActor.assumeIsolated { self?.tellPhone() }
@@ -2246,6 +2271,7 @@ final class AppModel: ObservableObject {
             server.togetherServer = together.base.absoluteString
             if (try? server.start()) != nil {
                 remote = server
+                server.padsDriveLauncher = running == nil
                 applyAssist()
                 updateBrowserPlay()
                 if let port = server.controlPort {
@@ -2258,6 +2284,31 @@ final class AppModel: ObservableObject {
             }
         }
         show(T.text(.phoneServerFailed), symbol: "exclamationmark.triangle.fill")
+    }
+
+    /// A phone's pad (the app's or the browser pad's) on the launcher's own screens while no game
+    /// runs, as a controller's: the D-pad and left stick move, ✕ ○ △ as ever, L1 and R1, and its
+    /// Options button opens Settings (and closes it again). A game running takes it alone.
+    func phonePad(_ id: String, _ state: PadState, active: Bool = NSApp.isActive) {
+        let previous = phonePads[id] ?? .idle
+        phonePads[id] = state == .idle ? nil : state
+        // A pad let go always reaches Input, so nothing it held keeps repeating.
+        guard running == nil || state == .idle else { return }
+        // Options is the phone's own button here, not the controller's Options.
+        var now = state
+        var before = previous
+        let pressed = now.pressed.remove(.start) != nil
+        let held = before.pressed.remove(.start) != nil
+        let options = pressed && !held
+        Input.shared.external("phone-" + id, state: now, previous: before, phone: true)
+        if options, running == nil { phoneOptions(active: active) }
+    }
+
+    /// The phone pad's Options button: Settings, or back out of it.
+    func phoneOptions(active: Bool = NSApp.isActive) {
+        guard active, preferences.onboarded, pairing == nil, ringing == nil, starting == nil, Input.shared.capture == nil, Input.shared.padCapture == nil else { return }
+        InputModeState.shared.usedPad()
+        if overlay == .settings { closeOverlay() } else { open(.settings) }
     }
 
     private func askToPair(_ request: PairingRequest) {
@@ -2860,6 +2911,11 @@ final class AppModel: ObservableObject {
     }
 
     func open(_ next: Overlay) {
+        if next == .settings {
+            settingsQuery = ""
+            settingsSearchFocused = false
+            settingsTyping = false
+        }
         panelCategory = 0
         panelRow = 0
         panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport || next == .noSpace

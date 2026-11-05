@@ -18,6 +18,8 @@
   "games": "Oyunlar",
   "library": "Oyun kütüphanesi",
   "settings": "Ayarlar",
+  "settingsSearch": "Ayarlarda ara",
+  "settingsSearchNone": "“%@” ile eşleşen ayar yok",
   "play": "Oyna",
   "unlock": "Kilidi aç",
   "unlocking": "Kilit açılıyor",

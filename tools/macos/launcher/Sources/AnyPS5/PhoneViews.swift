@@ -90,7 +90,14 @@ struct PhoneIndicator: View {
             }
             Text("mController").font(.display(14 * scale, .semibold))
             if let latency = phone?.latency {
-                Text("\(Int(latency.rounded())) ms").font(.display(14 * scale, .semibold)).monospacedDigit().foregroundStyle(.white.opacity(0.6))
+                // As wide as "999 ms" whatever it reads, so the pill does not change size as
+                // the number changes.
+                ZStack(alignment: .trailing) {
+                    Text(Self.latencyText(999)).hidden()
+                    Text(Self.latencyText(latency)).foregroundStyle(.white.opacity(0.6))
+                }
+                .font(.display(14 * scale, .semibold)).monospacedDigit()
+                .fixedSize()
             }
         }
         .foregroundStyle(.white.opacity(color == nil ? (look.seeThrough ? 0.75 : 0.55) : 0.9))
@@ -102,6 +109,11 @@ struct PhoneIndicator: View {
         .animation(.easeInOut(duration: 0.25), value: color)
         .onAppear { withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { pulse = true } }
         .help(help)
+    }
+
+    /// "23 ms", at most "999 ms".
+    static func latencyText(_ milliseconds: Double) -> String {
+        "\(min(999, max(0, Int(milliseconds.rounded())))) ms"
     }
 
     private var help: String {

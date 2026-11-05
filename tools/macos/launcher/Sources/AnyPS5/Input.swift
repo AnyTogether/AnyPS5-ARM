@@ -477,15 +477,18 @@ final class Input {
         _ = dispatch(controller == nil ? command : ConfirmButton.command(command, circleConfirms: circleConfirms), repeat: false)
     }
 
-    /// A controller the launcher reads itself (the DualShock 3): its new state against the one
-    /// before, as the same commands a GameController pad gives.
-    func external(_ id: String, state: PadState, previous: PadState) {
+    /// A controller the launcher reads itself (the DualShock 3, or a phone's pad: `phone`, which
+    /// has no vibration here): its new state against the one before, as the same commands a
+    /// GameController pad gives.
+    func external(_ id: String, state: PadState, previous: PadState, phone: Bool = false) {
         let key = AnyHashable(id)
         let buttons: [(PadButton, Command)] = [(.south, .select), (.east, .back), (.north, .options), (.start, .options)]
         if state.pressed != previous.pressed {
             if NSApp.isActive, !state.pressed.subtracting(previous.pressed).isEmpty {
-                Feel.shared.haptics.padInUse = true
-                Feel.shared.pad.use(external: id)
+                if !phone {
+                    Feel.shared.haptics.padInUse = true
+                    Feel.shared.pad.use(external: id)
+                }
                 InputModeState.shared.usedPad()
             }
             // PS, Select (the DualShock 3's Create), L1 and R1 are shortcuts like any pad's.

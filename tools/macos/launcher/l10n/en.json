@@ -18,6 +18,8 @@
   "games": "Games",
   "library": "Game Library",
   "settings": "Settings",
+  "settingsSearch": "Search settings",
+  "settingsSearchNone": "No settings match “%@”",
   "play": "Play",
   "unlock": "Unlock",
   "unlocking": "Unlocking",

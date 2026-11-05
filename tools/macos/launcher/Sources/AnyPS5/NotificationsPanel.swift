@@ -95,7 +95,7 @@ extension AppModel {
         case .lfgRequest: openFindPlayers(category: 1)
         case .lfgAccepted: followInvite(note.data.invite)
         case .levelUp: openMyProfile()
-        case .message: openMessages()
+        case .message: openMessages(conversation: note.data.conversationId)
         case .warning, .other: break
         }
     }

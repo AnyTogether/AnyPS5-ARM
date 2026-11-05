@@ -54,28 +54,66 @@ extension AppModel {
             guard let list = try? await together.conversations() else { return }
             var next = TogetherInbox(me: user.id, conversations: list)
             next.threads = inbox?.threads ?? [:]
-            withAnimation(Motion.overlay) { inbox = next }
-            if overlay == .messages, let conversation = selectedConversation, inbox?.threads[conversation.id] == nil { loadThread(conversation.id) }
+            inboxArrived(next)
         }
     }
 
+    /// The list read from the server.
+    func inboxArrived(_ next: TogetherInbox) {
+        // The list read again may be in another order: the same conversation stays selected.
+        let selectedID = inbox == nil ? nil : selectedConversation?.id
+        withAnimation(Motion.overlay) { inbox = next }
+        keepSelection(selectedID)
+        guard overlay == .messages else { return }
+        // A notification's conversation the list did not have yet: open now that it does.
+        if let pending = pendingConversation, showConversation(pending) { return }
+        if let conversation = selectedConversation, inbox?.threads[conversation.id] == nil { loadThread(conversation.id) }
+    }
+
     func loadThread(_ id: String) {
+        guard !threadsLoading.contains(id) else { return }
+        threadsLoading.insert(id)
         Task {
+            defer { threadsLoading.remove(id) }
             guard let page = try? await together.messages(in: id) else { return }
             inbox?.threads[id] = page.messages
             if messagesInThread, selectedConversation?.id == id { markThreadRead() }
         }
     }
 
-    func openMessages() {
+    /// Messages, on the list; with `conversation` (a notification's) on that conversation's
+    /// thread, ready to answer, as soon as the list has it.
+    func openMessages(conversation: String? = nil) {
         messagesIndex = 0
         messagesInThread = false
         composing = false
         resetMessageActions()
         messageFocus = AppModel.quickReplies.count
+        pendingConversation = conversation
         loadInbox()
         if togetherFriends.isEmpty { refreshFriends() }
         open(.messages)
+        if let conversation { showConversation(conversation) }
+    }
+
+    /// Selects the conversation and goes into its thread; false while the list does not have it.
+    @discardableResult
+    func showConversation(_ id: String) -> Bool {
+        guard let index = messageTargets.firstIndex(where: { $0.id == id }) else { return false }
+        pendingConversation = nil
+        openConversation(at: index)
+        return true
+    }
+
+    /// A row on the left clicked (or a notification's conversation): selected and entered.
+    func openConversation(at index: Int) {
+        guard messageTargets.indices.contains(index) else { return }
+        if index != messagesIndex {
+            composing = false
+            resetMessageActions()
+        }
+        messagesIndex = index
+        enterThread()
     }
 
     func messagesCommand(_ command: Command) {
@@ -144,8 +182,11 @@ extension AppModel {
             withAnimation(Motion.focus) { messagesInThread = true }
             groupFocus = 0
             Sounds.shared.play(.select)
-        case .conversation:
+        case .conversation(let conversation):
             resetMessageActions()
+            // A thread not read yet (only the first one is, with the list) is asked for now,
+            // else it would wait on its loading line for good.
+            if inbox?.threads[conversation.id] == nil { loadThread(conversation.id) }
             withAnimation(Motion.focus) { messagesInThread = true }
             messageFocus = AppModel.quickReplies.count
             Sounds.shared.play(.select)
@@ -409,10 +450,7 @@ struct MessagesView: View {
                     }
                     ConversationRow(target: target, focused: index == model.messagesIndex && !model.messagesInThread, selected: index == model.messagesIndex)
                         .id(target.id)
-                        .onTapGesture {
-                            model.messagesIndex = index
-                            model.enterThread()
-                        }
+                        .onTapGesture { model.openConversation(at: index) }
                         .contextMenu {
                             if case .conversation(let conversation) = target {
                                 Button(TChat.text(conversation.pinned ? .unpin : .pin)) { model.setPinned(conversation, !conversation.pinned) }
