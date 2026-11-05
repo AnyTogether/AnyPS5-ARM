@@ -79,6 +79,10 @@ To sign it, run this on the release Mac:
 tools/release/sign_nightly.sh v0.2.31-arm-nightly.20261102.1   # the nightly's tag
 ```
 
+It signs an upstream nightly the same way
+(`tools/release/sign_nightly.sh upstream-nightly.20261106.bf80054e7`; see
+[WINDOWS_LINUX_ENGINE.md](WINDOWS_LINUX_ENGINE.md)).
+
 The script downloads the pre-release's files and signs them with `sign.sh`. It checks them with
 `verify.sh` and uploads `SHA256SUMS` and `SHA256SUMS.sig` to the release. `-k` is passed on to
 `sign.sh` during a key rotation.
@@ -110,6 +114,8 @@ does not list every file.
 It does nothing, and tries again the next day, when less than 6 GB of disk is free or a game is
 running. A game started during the build holds back the upload and the signing for up to 4 hours.
 With no nightly of today or yesterday it exits quietly.
+Before that, it signs the upstream nightlies of today or yesterday that are not signed yet, with
+`sign_nightly.sh` and `verify.sh` as they are on origin/main. Nothing is built for them.
 
 `--install` copies the script to `~/Library/Application Support/AnyPS5/nightly-mac/` and loads the
 launchd agent `net.anytogether.anyps5.nightly-mac`

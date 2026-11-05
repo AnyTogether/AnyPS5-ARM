@@ -19,19 +19,40 @@
 # The tag and the release are made with GITHUB_TOKEN. Events made with GITHUB_TOKEN start no other
 # workflow, so this tag does not start release.yml (`v*`, disabled in this repository anyway) or
 # anything else. engine-toolkits.yml's own tag trigger (`v*-arm`) does not match a nightly tag.
+#
+# Upstream nightly: on its own schedule (or by hand with `upstream`), upstream AnyPS5's main
+# (boykopovar/AnyPS5) is built as it is, for AnyPS5 Desktop users who want upstream's newest engine
+# rather than AnyPS5-ARM's. It is skipped when upstream's main has not moved since the last
+# upstream nightly. engine-toolkits.yml builds it with `repository`: the same toolchains, the smoke
+# tests upstream has of AnyPS5-ARM's set, and upstream's own release packaging, named after
+# upstream's git describe; the pre-release carries what AnyPS5 Desktop downloads of it:
+# relinker-<describe>.exe and prx-windows-<describe>.zip, relinker-<describe> and
+# prx-linux-<describe>.tar.gz (the unpatched libraries and the other archive format would only
+# make the nightly four times as large). It is published as a pre-release tagged upstream-nightly.<YYYYMMDD>.<9-digit
+# upstream commit>: no version the launchers read (they leave it out of updates, and the Mac's
+# engine picker looks only for AnyPS5-toolkit-macos-*), and its tag names a commit of its own with
+# no parents, so that git describe on main (the relinker's version, the launchers') never finds it.
+# It is unsigned too until tools/release/sign_nightly.sh <tag> signs it (nightly_mac.sh does it
+# daily); AnyPS5 Desktop offers it on its Nightly channel once it is.
 name: Engine nightly
 
 on:
   schedule:
     - cron: '23 2 * * *'
+    # The upstream nightly (the upstream-* jobs below).
+    - cron: '47 0 * * *'
   workflow_dispatch:
     inputs:
       force:
-        description: Build even without core/, tools/macos/ or mobile/ changes, or when today already has a CI nightly.
+        description: Build even without core/, tools/macos/ or mobile/ changes, or when today already has a CI nightly (with upstream, even when upstream's main has not moved).
         type: boolean
         default: false
       dry_run:
         description: Plan and build, but make no tag and no release.
+        type: boolean
+        default: false
+      upstream:
+        description: Build upstream's main (boykopovar/AnyPS5, unmodified) instead of AnyPS5-ARM's.
         type: boolean
         default: false
 
@@ -39,12 +60,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: engine-nightly
+  group: engine-nightly${{ (github.event.schedule == '47 0 * * *' || inputs.upstream) && '-upstream' || '' }}
   cancel-in-progress: false
 
 jobs:
   plan:
     name: Decide whether to build
+    if: github.event.schedule != '47 0 * * *' && !inputs.upstream
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
@@ -178,4 +200,117 @@ jobs:
           # The tag is made on GitHub at the built commit.
           gh release create "$TAG" dist/AnyPS5-toolkit-* --repo "$REPO" --target "$SHA" --prerelease --latest=false \
             --title "AnyPS5-ARM $version (nightly)" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "published https://github.com/$REPO/releases/tag/$TAG"
+
+  # ------------------------------------------------------------------ upstream nightly
+
+  upstream-plan:
+    name: Decide whether to build upstream main
+    if: github.event.schedule == '47 0 * * *' || inputs.upstream
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UPSTREAM: boykopovar/AnyPS5
+    outputs:
+      build: ${{ steps.plan.outputs.build }}
+      tag: ${{ steps.plan.outputs.tag }}
+      sha: ${{ steps.plan.outputs.sha }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          set -euo pipefail
+          skip() { echo "::notice::No upstream nightly: $1"; echo "build=false" >> "$GITHUB_OUTPUT"; exit 0; }
+          sha="$(gh api "repos/$UPSTREAM/commits/main" --jq .sha)"
+          [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No commit for $UPSTREAM main: $sha"; exit 1; }
+          short="${sha:0:9}"
+          tag="upstream-nightly.$(date -u +%Y%m%d).$short"
+          last="$(gh api "repos/$REPO/releases?per_page=100" --jq '
+            [.[] | select(.draft | not) | select(.tag_name | test("^upstream-nightly\\.[0-9]{8}\\.[0-9a-f]{9}$"))]
+            | sort_by(.created_at) | last | .tag_name // empty')"
+          echo "$UPSTREAM main is $sha; last upstream nightly: ${last:-none}; next tag $tag"
+          if gh api "repos/$REPO/git/ref/tags/$tag" >/dev/null 2>&1; then
+            skip "$tag exists already"
+          fi
+          if [ "$FORCE" != true ] && [ -n "$last" ] && [ "${last##*.}" = "$short" ]; then
+            skip "$UPSTREAM main has not moved since $last"
+          fi
+          {
+            echo "build=true"
+            echo "tag=$tag"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
+  upstream-build:
+    name: Build upstream main
+    needs: upstream-plan
+    if: needs.upstream-plan.outputs.build == 'true'
+    uses: ./.github/workflows/engine-toolkits.yml
+    with:
+      repository: boykopovar/AnyPS5
+      ref: ${{ needs.upstream-plan.outputs.sha }}
+      tag: ${{ needs.upstream-plan.outputs.tag }}
+
+  upstream-publish:
+    name: Publish the upstream pre-release
+    needs: [upstream-plan, upstream-build]
+    if: needs.upstream-plan.outputs.build == 'true' && !inputs.dry_run
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      UPSTREAM: boykopovar/AnyPS5
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: engine-upstream-*
+          path: dist
+          merge-multiple: true
+      - name: Write the notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.upstream-plan.outputs.sha }}
+        run: |
+          set -euo pipefail
+          ls -l dist
+          relinker="$(cd dist && ls relinker-v*.exe)"
+          describe="${relinker#relinker-}"; describe="${describe%.exe}"
+          date="$(gh api "repos/$UPSTREAM/commits/$SHA" --jq .commit.committer.date)"
+          subject="$(gh api "repos/$UPSTREAM/commits/$SHA" --jq '.commit.message | split("\n") | first')"
+          {
+            echo "**Unmodified upstream main, untested.**"
+            echo
+            echo "Upstream commit: [\`$SHA\`](https://github.com/$UPSTREAM/commit/$SHA) ($date, git describe \`$describe\`): $subject"
+            echo
+            echo "Built by AnyPS5-ARM's CI from $UPSTREAM main as it is, with nothing of AnyPS5-ARM's in it (so no phone controller and no full screen or window size settings): the relinker and the libraries upstream's own release packaging makes, for Windows (WinLibs GCC 15.2, the libraries as .zip) and Linux (Ubuntu 22.04, GCC 12: glibc 2.35 or newer; the libraries as .tar.gz). The unpatched libraries are left out. Only the build and the smoke tests upstream has of AnyPS5-ARM's set ran; no game was tried."
+            echo
+            echo "It is neither an upstream release nor an AnyPS5-ARM one. AnyPS5 Desktop offers it only on its Nightly update channel, and only once it is signed on the release Mac (tools/release/sign_nightly.sh): until then the launchers refuse it. The Mac launcher does not offer it."
+            echo
+            echo "<!-- upstream-commit: $SHA -->"
+          } > "$RUNNER_TEMP/notes.md"
+          cat "$RUNNER_TEMP/notes.md"
+          echo "DESCRIBE=$describe" >> "$GITHUB_ENV"
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.upstream-plan.outputs.tag }}
+          SHA: ${{ needs.upstream-plan.outputs.sha }}
+        run: |
+          set -euo pipefail
+          # The tag names a commit of its own, with no parents: it is in none of main's history, so
+          # git describe on main never takes it for the version.
+          readme="$(printf '%s\n\n%s\n' "# $TAG" "Upstream AnyPS5's main at https://github.com/$UPSTREAM/commit/$SHA ($DESCRIBE), built unmodified by AnyPS5-ARM's CI. The files are on the release: https://github.com/$REPO/releases/tag/$TAG")"
+          tree="$(jq -n --arg text "$readme" '{tree: [{path: "UPSTREAM.md", mode: "100644", type: "blob", content: $text}]}' |
+            gh api "repos/$REPO/git/trees" --input - --jq .sha)"
+          commit="$(jq -n --arg message "Upstream nightly: $UPSTREAM $SHA" --arg tree "$tree" '{message: $message, tree: $tree, parents: []}' |
+            gh api "repos/$REPO/git/commits" --input - --jq .sha)"
+          gh release create "$TAG" dist/* --repo "$REPO" --target "$commit" --prerelease --latest=false \
+            --title "Upstream main ${SHA:0:9} (unmodified, untested)" --notes-file "$RUNNER_TEMP/notes.md"
+          [ "$(gh api "repos/$REPO/git/ref/tags/$TAG" --jq .object.sha)" = "$commit" ] ||
+            { echo "::error::$TAG does not name $commit"; exit 1; }
           echo "published https://github.com/$REPO/releases/tag/$TAG"

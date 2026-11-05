@@ -46,6 +46,21 @@ publishes an unsigned pre-release, `v<next>-arm-nightly.<YYYYMMDD>.<n>`, with
 can force a build (`gh workflow run engine-nightly.yml -f force=true -R AnyTogether/AnyPS5-ARM`) or
 build without publishing (`-f dry_run=true`).
 
+The same workflow also builds an **upstream nightly**: upstream AnyPS5's main
+(`boykopovar/AnyPS5`) as it is, for AnyPS5 Desktop users who want upstream's newest engine. It has
+a schedule of its own and builds only when upstream's main moved since the last upstream nightly
+(by hand: `gh workflow run engine-nightly.yml -f upstream=true -R AnyTogether/AnyPS5-ARM`, with
+`force` and `dry_run` as above). The Engine toolkits workflow builds it with `repository`: the
+same toolchains, the smoke tests upstream has of the set above (the log names the ones it lacks)
+and upstream's own release packaging, named after upstream's `git describe`. The pre-release,
+`upstream-nightly.<YYYYMMDD>.<9-digit upstream commit>`, carries `relinker-<describe>.exe`,
+`prx-windows-<describe>.zip`, `relinker-<describe>` and `prx-linux-<describe>.tar.gz`. Its tag
+names a commit of its own with no parents, so `git describe` on main never finds it, and it is no
+version the launchers read: neither launcher offers it as an update, and the Mac's engine picker
+does not list it. AnyPS5 Desktop offers it in its engine settings on the Nightly update channel,
+once it is signed (`tools/release/sign_nightly.sh <tag>`, or `nightly_mac.sh`, which signs the
+upstream nightlies of the last two days).
+
 A release tag still builds its own archives. They cannot be taken from a nightly of the same
 commit: the relinker carries `git describe` (`relinker --version`), which is the nightly's tag
 there and the release's tag here.
