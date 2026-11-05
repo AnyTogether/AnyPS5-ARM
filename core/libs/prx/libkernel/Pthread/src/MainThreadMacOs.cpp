@@ -127,12 +127,25 @@ void* CopyBlock(void* block) {
     __builtin_unreachable();
 }
 
+// The lowest page of the process start data at the top of the main stack: argc, the argv, environ and
+// apple vectors and their strings. dyld keeps pointers into it for the life of the process (the
+// executable path _NSGetExecutablePath copies, which AppKit's XPC setup asks for when the first window
+// opens), so that part is never released; only the frames below it are. Without argv on this stack,
+// nothing of it is kept.
+std::uintptr_t StartDataLow(const HostStack& stack) {
+    const auto vector = reinterpret_cast<std::uintptr_t>(*_NSGetArgv());
+    const auto page = static_cast<std::uintptr_t>(getpagesize());
+    if (vector < stack.low + sizeof(long) || vector >= stack.high) return stack.high;
+    return (vector - sizeof(long)) & ~(page - 1);
+}
+
 void MoveHostStack() {
     oldStack = FindHostStack();
     if (oldStack.high == oldStack.low || !GuestArena::GuestArenaOverlapsHostRegion_nid_no_patch(oldStack.low, oldStack.high - oldStack.low)) {
         oldStack = {};
         return;
     }
+    oldStack.high = StartDataLow(oldStack);
     void* base = mmap(reinterpret_cast<void*>(MovedStackHint), MovedStackBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON | MAP_NORESERVE, -1, 0);
     if (base == MAP_FAILED) {
         oldStack = {};

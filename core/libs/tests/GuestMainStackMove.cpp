@@ -1,13 +1,16 @@
 #include "prx/libc/include/GuestArena.hpp"
 #include <crt_externs.h>
+#include <mach-o/dyld.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <pthread.h>
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
 
 extern "C" [[noreturn]] void Aps5StartGuest_nid_no_patch(void (*entry)(void*, void*), void* block);
 extern "C" void Aps5RunOnMainThread_nid_no_patch(void (*function)(void*), void* context);
@@ -20,6 +23,8 @@ constexpr std::size_t NeighbourBytes = std::size_t {1} << 20;
 
 std::uintptr_t originalStack = 0;
 std::string originalArgument;
+char** originalVector = nullptr;
+std::string originalPath;
 bool originalInArena = false;
 mach_vm_address_t neighbour = 0;
 
@@ -71,7 +76,9 @@ void CheckMainThread(void*) {
     if (originalInArena) {
         Require(!InArena(address), "the main thread stack is outside the guest arena");
         Require(address != originalStack, "the main thread stack moved");
-        const auto old = reinterpret_cast<const void*>(originalStack & ~(MappingAlignment - 1));
+        // Below the process start data, which stays mapped at the top of the old stack.
+        const auto startData = (reinterpret_cast<std::uintptr_t>(originalVector) - sizeof(long)) & ~static_cast<std::uintptr_t>(getpagesize() - 1);
+        const auto old = reinterpret_cast<const void*>(std::min(originalStack, startData - MappingBytes) & ~(MappingAlignment - 1));
         try {
             GuestArena::GuestArenaMarkUsed_nid_postfix(old, MappingBytes);
         } catch (const std::runtime_error&) {
@@ -85,6 +92,12 @@ void CheckMainThread(void*) {
         Require(RegionOf(neighbour, begin, end, tag) && tag == VM_MEMORY_STACK, "a stack region next to the main stack survived the move");
     }
     Require(originalArgument == (*_NSGetArgv())[0], "argv survived the move");
+    // dyld keeps pointers into the start data at the top of the old stack (the executable path, which
+    // AppKit's XPC setup asks for when the first window opens: Dreaming Sarah died in strlen there).
+    char path[4096];
+    std::uint32_t size = sizeof(path);
+    Require(_NSGetExecutablePath(path, &size) == 0 && originalPath == path, "the executable path survived the move");
+    Require(originalArgument == originalVector[0], "the start data main() was given survived the move");
     Require(std::getenv("PATH") != nullptr, "the environment survived the move");
 }
 
@@ -100,6 +113,11 @@ int main(int, char** argv) {
     originalStack = reinterpret_cast<std::uintptr_t>(&local);
     originalInArena = InArena(originalStack);
     originalArgument = argv[0];
+    originalVector = argv;
+    char path[4096];
+    std::uint32_t size = sizeof(path);
+    Require(_NSGetExecutablePath(path, &size) == 0, "the executable path is known before the move");
+    originalPath = path;
     if (originalInArena) neighbour = MapStackNeighbour(originalStack);
     Aps5StartGuest_nid_no_patch(Guest, nullptr);
 }
