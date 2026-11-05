@@ -165,19 +165,23 @@ body.rumble .lightbar { opacity: 1; filter: brightness(1.35); }
 #ps { color: var(--ink); }
 #ps .label { font-size: calc(var(--s) * 13px); letter-spacing: 0.04em; }
 
+/* The menu: a small round key in the gap between the two sticks' thumb areas, never over them. */
 #chip {
-  position: absolute; display: flex; align-items: center; gap: calc(var(--s) * 8px);
-  padding: 0 calc(var(--s) * 6px) 0 calc(var(--s) * 14px); height: calc(var(--s) * 34px); border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 75%, transparent); border: 1px solid var(--line);
-  font-size: calc(var(--s) * 13px); font-weight: 600; color: var(--ink-soft); white-space: nowrap;
-  -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transform: translateX(-50%);
+  position: absolute; width: calc(var(--s) * 38px); height: calc(var(--s) * 38px); border-radius: 50%;
+  background: color-mix(in srgb, var(--surface) 78%, transparent); border: 1px solid var(--line); box-shadow: var(--shadow);
+  color: var(--ink-soft); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); transform: translate(-50%, -50%);
+  transition: transform 140ms cubic-bezier(.2, .8, .2, 1);
 }
-#chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 8px var(--orange); flex: none; }
-#chip.ok .dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
-#chip .host { color: var(--ink); max-width: 32vw; overflow: hidden; text-overflow: ellipsis; }
-#chip .ms { font-variant-numeric: tabular-nums; }
-#chip button { all: unset; display: grid; place-items: center; width: calc(var(--s) * 26px); height: calc(var(--s) * 26px); border-radius: 50%; background: var(--press); color: var(--ink); }
-#chip button svg { width: 55%; height: 55%; }
+#chip.on { transform: translate(-50%, -50%) scale(0.92); transition-duration: 0ms; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--orange); box-shadow: 0 0 7px var(--orange); flex: none; }
+.dot.ok, #chip.ok .dot { background: var(--green); box-shadow: 0 0 7px var(--green); }
+#chip .dot { position: absolute; top: 1px; right: 1px; border: 1.5px solid var(--shell); box-sizing: content-box; }
+#chip .ms { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: calc(var(--s) * 4px); font-size: max(10px, calc(var(--s) * 11px)); font-weight: 600; color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+#chip button { all: unset; position: absolute; inset: 0; display: grid; place-items: center; border-radius: 50%; color: var(--ink); }
+#chip button svg { width: 52%; height: 52%; }
+.card .link { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0 0 10px; color: var(--ink-soft); font-size: 14px; font-weight: 600; }
+.card .link b { color: var(--ink); font-weight: 600; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .link .ms { font-variant-numeric: tabular-nums; }
 
 /* Cards over the pad: connecting, the pairing code, waiting, refused; the menu. */
 #veil { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--shell) 55%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2); z-index: 10; opacity: 1; transition: opacity 220ms ease-out; }
@@ -231,7 +235,8 @@ body.typing #turn { display: none !important; }
 @keyframes turn { 0%, 20% { transform: rotate(0); } 50%, 80% { transform: rotate(-90deg); } 100% { transform: rotate(0); } }
 #turn h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.02em; }
 #turn p { margin: 0; color: var(--ink-soft); }
-@media (orientation: portrait) { #turn { display: grid; } }
+/* Not over a card: a phone held upright while scanning still sees the pairing code. */
+@media (orientation: portrait) { body:not(.veiled) #turn { display: grid; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
@@ -260,9 +265,11 @@ body.typing #turn { display: none !important; }
       waitTitle: "Waiting for AnyPS5", waitText: "The launcher's phone controller is not answering yet.",
       protocolTitle: "Update AnyPS5", protocolText: "This page and the launcher do not speak the same version.",
       turnTitle: "Turn your phone sideways", turnText: "The pad is laid out for landscape.",
+      leftTitle: "Disconnected", leftText: "Tap Reconnect to come back without scanning. If the computer has closed browser play since, it will ask you to scan the QR code again.",
+      reconnect: "Reconnect",
       tryAgain: "Try again", menuTitle: "Pad", vibration: "Vibration", vibrationText: "Buzz on presses and when the game rumbles",
       vibrationNone: "This browser cannot vibrate", fullscreen: "Full screen", homeScreen: "For full screen, add this page to your Home Screen.",
-      leave: "Leave", done: "Done", player: "Player", touchpad: "Touchpad", ms: "ms",
+      disconnect: "Disconnect", done: "Done", player: "Player", touchpad: "Touchpad", ms: "ms",
       typeKicker: "The game asks", typeTitle: "Type here", send: "Send", cancel: "Cancel",
       enterSend: "Send", enterSearch: "Search", enterGo: "Go",
     },
@@ -276,9 +283,11 @@ body.typing #turn { display: none !important; }
       waitTitle: "AnyPS5 bekleniyor", waitText: "Başlatıcının telefon kumandası henüz yanıt vermiyor.",
       protocolTitle: "AnyPS5'i güncelle", protocolText: "Bu sayfa ile başlatıcı aynı sürümü konuşmuyor.",
       turnTitle: "Telefonu yan çevir", turnText: "Kumanda yatay ekran için dizildi.",
+      leftTitle: "Bağlantı kesildi", leftText: "QR kodu taramadan dönmek için Yeniden bağlan'a dokun. Bilgisayar bu arada tarayıcıdan oynamayı kapattıysa kodu yeniden taraman istenir.",
+      reconnect: "Yeniden bağlan",
       tryAgain: "Yeniden dene", menuTitle: "Kumanda", vibration: "Titreşim", vibrationText: "Basınca ve oyun titreştiğinde titrer",
       vibrationNone: "Bu tarayıcı titreşemiyor", fullscreen: "Tam ekran", homeScreen: "Tam ekran için bu sayfayı Ana Ekran'a ekle.",
-      leave: "Ayrıl", done: "Tamam", player: "Oyuncu", touchpad: "Dokunmatik yüzey", ms: "ms",
+      disconnect: "Bağlantıyı kes", done: "Tamam", player: "Oyuncu", touchpad: "Dokunmatik yüzey", ms: "ms",
       typeKicker: "Oyun soruyor", typeTitle: "Buraya yaz", send: "Gönder", cancel: "Vazgeç",
       enterSend: "Gönder", enterSearch: "Ara", enterGo: "Git",
     },
@@ -348,11 +357,11 @@ body.typing #turn { display: none !important; }
   });
   const leds = el("", "<i></i><i></i><i></i><i></i><i></i>");
   leds.id = "leds";
-  const chip = el("", `<span class="dot"></span><span class="host">AnyPS5</span><span class="ms"></span><button type="button" aria-label="${t("menuTitle")}">${glyph.more}</button>`);
+  const chip = el("", `<button type="button" aria-label="${t("menuTitle")}">${glyph.more}</button><span class="dot"></span><span class="ms"></span>`);
   chip.id = "chip";
-  const chipHost = chip.querySelector(".host"), chipMs = chip.querySelector(".ms");
+  const chipMs = chip.querySelector(".ms");
   // The chip's button opens the menu from pointerdown: the pad keeps touches from becoming clicks.
-  chip.querySelector("button").addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); showMenu(); } });
+  chip.querySelector("button").addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); showMenu(true); } });
   const fingerDots = [el("finger", "", controls.touchpad.el), el("finger", "", controls.touchpad.el)];
   fingerDots.forEach((dot) => { dot.style.display = "none"; });
 
@@ -361,7 +370,7 @@ body.typing #turn { display: none !important; }
   // goes between the two halves. Safe areas (the notch) are kept clear.
   const probe = el("", "");
   probe.style.cssText = "position:absolute;visibility:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)";
-  let W = 0, H = 0, s = 1;
+  let W = 0, H = 0, s = 1, chipAt = { x: 0, y: 0, r: 0 };
   const place = (node, x, y, w, h) => {
     node.style.left = `${x}px`; node.style.top = `${y}px`; node.style.width = `${w}px`; node.style.height = `${h}px`;
   };
@@ -415,8 +424,10 @@ body.typing #turn { display: none !important; }
       // A thumb anywhere in the lower half of its side takes the stick.
       c.zone = side ? { x: W / 2 + 30 * s, y: 112 * s + padH * 0.2, w: W / 2, h: H } : { x: 0, y: 112 * s + padH * 0.2, w: W / 2 - 30 * s, h: H };
     });
-    chip.style.left = `${W / 2}px`;
-    chip.style.top = `${H - inB - 46 * s}px`;
+    // Level with the sticks, inside the 60 px (scaled) gap their thumb areas leave in the middle.
+    chipAt = { x: W / 2, y: stickY, r: 26 * s };
+    chip.style.left = `${chipAt.x}px`;
+    chip.style.top = `${chipAt.y}px`;
   }
   function moveBase(stick, at) {
     stick.at = at;
@@ -435,8 +446,7 @@ body.typing #turn { display: none !important; }
     if (inRect(controls.touchpad, x, y)) return "touchpad";
     if (near(controls.dpad.cx, controls.dpad.cy, controls.dpad.r, x, y)) return "dpad";
     if (near(controls.face.cx, controls.face.cy, controls.face.r, x, y)) return "face";
-    const chipBox = chip.getBoundingClientRect();
-    if (x >= chipBox.left - 6 && x <= chipBox.right + 6 && y >= chipBox.top - 6 && y <= chipBox.bottom + 6) return "menu";
+    if (Math.abs(x - chipAt.x) <= chipAt.r && Math.abs(y - chipAt.y) <= chipAt.r) return "menu";
     for (const name of ["lstick", "rstick"]) if (inRect(controls[name].zone, x, y)) return name;
     return null;
   }
@@ -547,7 +557,7 @@ body.typing #turn { display: none !important; }
   stage.addEventListener("pointerup", up);
   stage.addEventListener("pointercancel", up);
   for (const type of ["touchstart", "touchmove", "touchend", "gesturestart", "gesturechange", "dblclick", "contextmenu"]) {
-    document.addEventListener(type, (event) => { if (event.target.closest && !event.target.closest("#veil")) event.preventDefault(); }, { passive: false });
+    document.addEventListener(type, (event) => { if (event.target.closest && !event.target.closest("#card")) event.preventDefault(); }, { passive: false });
   }
 
   // ---------- The state on the wire ----------
@@ -617,21 +627,24 @@ body.typing #turn { display: none !important; }
   }
   function connect() {
     if (finished) return;
-    socket = new WebSocket(`ws://${location.host}/ws`);
+    const ws = socket = new WebSocket(`ws://${location.host}/ws`);
     let thisOpened = false;
-    socket.onopen = () => { thisOpened = opened = true; failures = 0; };
-    socket.onmessage = (event) => {
+    ws.onopen = () => { if (ws === socket) { thisOpened = opened = true; failures = 0; } };
+    ws.onmessage = (event) => {
+      if (ws !== socket) return;
       let m;
       try { m = JSON.parse(event.data); } catch { return; }
       heard(m);
     };
-    socket.onclose = (event) => {
+    ws.onclose = (event) => {
+      if (ws !== socket) return;
       welcomed = false;
       chip.classList.remove("ok");
       releaseAll();
       if (finished) return;
       if (!thisOpened) {
-        // Refused before it opened: no session (a spent or old link), after a second try.
+        // Refused before it opened: no session (a spent or old link, or the computer closed
+        // browser play), after a second try. Only then is the QR code needed again.
         failures += 1;
         if (failures >= 2 && !opened) return finish("expired");
       }
@@ -646,7 +659,6 @@ body.typing #turn { display: none !important; }
       case "busy": welcomed = false; showCard("busy"); break;
       case "welcome":
         welcomed = true; hostName = m.host || "AnyPS5";
-        chipHost.textContent = hostName;
         chip.classList.add("ok");
         hideCard();
         dirty = true; lastSent = "";
@@ -659,6 +671,8 @@ body.typing #turn { display: none !important; }
       case "pong": {
         const ms = Math.max(1, Math.round(performance.now() - m.at));
         chipMs.textContent = `${ms} ${t("ms")}`;
+        const menuMs = document.getElementById("menuMs");
+        if (menuMs) menuMs.textContent = chipMs.textContent;
         send({ t: "lat", ms });
         break;
       }
@@ -671,6 +685,17 @@ body.typing #turn { display: none !important; }
     welcomed = false;
     showCard(kind);
     try { socket && socket.close(); } catch {}
+  }
+  // The session cookie is still good while the computer keeps browser play on: no new scan.
+  function reconnect() {
+    finished = false; opened = false; failures = 0;
+    showCard("connecting");
+    connect();
+  }
+  function disconnect() {
+    releaseAll();
+    send(current());
+    finish("left");
   }
 
   function releaseAll() {
@@ -748,7 +773,7 @@ body.typing #turn { display: none !important; }
       <div class="field">${field}</div><div class="count" id="count"></div>
       <div class="actions"><button class="btn" type="button" id="cancelType">${t("cancel")}</button><button class="btn primary" type="button" id="sendType">${escape(label)}</button></div>`;
     card.style.animation = "none"; void card.offsetWidth; card.style.animation = "";
-    veil.classList.remove("hidden");
+    openVeil();
     const input = document.getElementById("typed");
     const count = document.getElementById("count");
     input.placeholder = m.placeholder || "";
@@ -790,6 +815,7 @@ body.typing #turn { display: none !important; }
     seat: svg('<circle cx="12" cy="8" r="3.4"/><path d="M5 20c.8-3.6 3.6-5.6 7-5.6s6.2 2 7 5.6"/>'),
     stop: svg('<circle cx="12" cy="12" r="9"/><path d="M8.5 8.5l7 7M15.5 8.5l-7 7"/>'),
     qr: svg('<rect x="3.5" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="14" y="3.5" width="6.5" height="6.5" rx="1"/><rect x="3.5" y="14" width="6.5" height="6.5" rx="1"/><path d="M14 14h2.5v2.5H14zM18 18h2.5v2.5H18zM14 18.5v2M18.5 14h2"/>'),
+    unplug: svg('<path d="M9.5 7.5H7.2a4.5 4.5 0 0 0 0 9h2.3M14.5 7.5h2.3a4.5 4.5 0 0 1 0 9h-2.3M8 12h1.5M14.5 12H16M12 3.2v2.3M12 18.5v2.3M7.6 4.4l1.2 1.6M16.4 19.6l-1.2-1.6"/>'),
     wifi: svg('<path d="M2.5 9a14 14 0 0 1 19 0M5.8 12.4a9.2 9.2 0 0 1 12.4 0M9.1 15.8a4.4 4.4 0 0 1 5.8 0"/><circle cx="12" cy="19" r="1.2" fill="currentColor"/>'),
   };
   const escape = (text) => String(text).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
@@ -806,32 +832,50 @@ body.typing #turn { display: none !important; }
       expired: ["qr", "expiredTitle", "expiredText", false],
       lost: ["wifi", "lostTitle", "lostText", true],
       protocol: ["stop", "protocolTitle", "protocolText", false],
+      left: ["unplug", "leftTitle", "leftText", false],
     }[kind];
     const [mark, title, text, spin] = spec;
     typing = null;
     document.body.classList.remove("typing");
     card.className = "card";
     const digits = code ? `<div class="code" aria-label="${escape(code)}">${[...String(code)].map((d) => `<b>${escape(d)}</b>`).join("")}</div>` : "";
-    const retry = kind === "expired" || kind === "denied" ? `<div class="actions"><button class="btn" type="button" id="again">${t("tryAgain")}</button></div>` : "";
+    const again = kind === "left" ? "reconnect" : kind === "expired" ? "tryAgain" : null;
+    const retry = again ? `<div class="actions"><button class="btn${kind === "left" ? " primary" : ""}" type="button" id="again">${t(again)}</button></div>` : "";
     card.innerHTML = `<div class="mark">${marks[mark]}</div><h1>${t(title)}</h1>${digits}<p>${t(text)}</p>${spin ? '<div class="spinner" role="progressbar"></div>' : ""}${retry}`;
     card.style.animation = "none"; void card.offsetWidth; card.style.animation = "";
-    const again = document.getElementById("again");
-    if (again) again.addEventListener("click", () => location.reload());
-    veil.classList.remove("hidden");
+    const button = document.getElementById("again");
+    if (button) button.addEventListener("click", reconnect);
+    openVeil();
   }
-  function hideCard() { cardKind = null; veil.classList.add("hidden"); }
+  function openVeil() { veil.classList.remove("hidden"); document.body.classList.add("veiled"); }
+  function hideCard() {
+    cardKind = null;
+    veil.classList.add("hidden");
+    document.body.classList.remove("veiled");
+    if (document.activeElement && veil.contains(document.activeElement)) document.activeElement.blur();
+  }
+  // A tap beside the menu closes it, and goes no further: it is not a press on the pad.
+  veil.addEventListener("pointerdown", (event) => {
+    if (cardKind !== "menu" || card.contains(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    hideCard();
+  });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && cardKind === "menu") hideCard(); });
 
-  function showMenu() {
+  function showMenu(fromKeyboard) {
     cardKind = "menu";
     card.className = "card";
     const canFull = !!document.documentElement.requestFullscreen;
-    card.innerHTML = `<h1 style="margin-bottom:12px">${t("menuTitle")}</h1>
+    card.innerHTML = `<h1 style="margin-bottom:8px">${t("menuTitle")}</h1>
+      <p class="link"><span class="dot${welcomed ? " ok" : ""}"></span><b>${escape(hostName)}</b><span class="ms" id="menuMs">${escape(chipMs.textContent)}</span></p>
       <div class="row"><div><span>${t("vibration")}</span><small>${canVibrate ? t("vibrationText") : t("vibrationNone")}</small></div>
         <button class="switch" type="button" role="switch" id="vib" aria-label="${t("vibration")}" aria-checked="${!!prefs.vibration && canVibrate}" ${canVibrate ? "" : "disabled"}></button></div>
       ${canFull ? "" : `<div class="row"><div><span>${t("fullscreen")}</span><small>${t("homeScreen")}</small></div></div>`}
       <div class="actions">${canFull ? `<button class="btn" type="button" id="full">${t("fullscreen")}</button>` : ""}
-        <button class="btn" type="button" id="leave">${t("leave")}</button><button class="btn primary" type="button" id="done">${t("done")}</button></div>`;
-    veil.classList.remove("hidden");
+        <button class="btn" type="button" id="leave">${t("disconnect")}</button><button class="btn primary" type="button" id="done">${t("done")}</button></div>`;
+    card.style.animation = "none"; void card.offsetWidth; card.style.animation = "";
+    openVeil();
     const vib = document.getElementById("vib");
     vib.addEventListener("click", () => {
       prefs.vibration = !prefs.vibration; savePrefs();
@@ -839,7 +883,8 @@ body.typing #turn { display: none !important; }
       if (prefs.vibration) navigator.vibrate(20);
     });
     document.getElementById("done").addEventListener("click", hideCard);
-    document.getElementById("leave").addEventListener("click", () => { releaseAll(); send(current()); finished = true; try { socket.close(); } catch {} showCard("expired"); });
+    document.getElementById("leave").addEventListener("click", disconnect);
+    if (fromKeyboard) document.getElementById("done").focus();
     const full = document.getElementById("full");
     if (full) full.addEventListener("click", () => { goFullscreen(); hideCard(); });
   }
@@ -864,11 +909,11 @@ body.typing #turn { display: none !important; }
   layout();
   setPlayer(0);
   showCard("connecting");
-  // Screenshots and checks can drive the page without a launcher: #demo=pad|pair|busy|expired|type.
+  // Screenshots and checks can drive the page without a launcher: #demo=pad|menu|pair|busy|expired|left|type.
   const demo = new URLSearchParams(location.hash.slice(1)).get("demo");
   if (demo) {
-    finished = demo !== "pad" && demo !== "type";
-    if (demo === "pad") { heard({ t: "welcome", host: "Utku's MacBook Pro" }); setPlayer(2); chipMs.textContent = "9 ms"; }
+    finished = demo !== "pad" && demo !== "type" && demo !== "menu";
+    if (demo === "pad" || demo === "menu") { heard({ t: "welcome", host: "Utku's MacBook Pro" }); setPlayer(2); chipMs.textContent = "9 ms"; if (demo === "menu") showMenu(); }
     else if (demo === "pair") showCard("pair", "4821");
     else if (demo === "type") { heard({ t: "welcome", host: "Utku's MacBook Pro" }); heard({ t: "ime", id: 3, title: "Name your save", placeholder: "Save 1", text: "Kral", max: 16, kb: "text", enter: "default" }); }
     else showCard(demo);
