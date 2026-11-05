@@ -17,6 +17,11 @@
 # Run again, it does only what is missing: with the Mac files there it only signs again, when
 # SHA256SUMS does not list every file.
 #
+# First it signs the upstream nightlies of today or yesterday (UTC) that are not signed yet
+# (upstream-nightly.<YYYYMMDD>.<commit>: upstream's main, built unmodified by engine-nightly.yml),
+# with sign_nightly.sh and verify.sh as they are on origin/main; nothing is built for them, and
+# they get no Mac files. With an upstream nightly's <tag> it signs only that one.
+#
 # It does nothing (and exits 0, so the next day tries again) when less than 6 GB of disk is free
 # or a game is running (an eboot under <games>/.AnyPS5/Games). A game started during the build
 # holds back the upload and the signing, up to 4 hours.
@@ -160,6 +165,64 @@ trap 'rm -rf "$scratch"; [ "$dry" = 1 ] || rm -rf "$lock"' EXIT
 command -v gh >/dev/null || die "gh is needed"
 gh auth status >/dev/null 2>&1 || die "gh is not signed in"
 
+assets() { gh release view "$tag" --repo "$slug" --json assets --jq '.assets[].name' > "$scratch/assets"; }
+
+# Signed when SHA256SUMS(.sig) are there and SHA256SUMS names every other file.
+signed() {
+    grep -qx SHA256SUMS "$scratch/assets" && grep -qx SHA256SUMS.sig "$scratch/assets" || return 1
+    rm -rf "$scratch/sums"; mkdir "$scratch/sums"
+    gh release download "$tag" --repo "$slug" --dir "$scratch/sums" --pattern SHA256SUMS --pattern SHA256SUMS.sig || return 1
+    awk '{ print $2 }' "$scratch/sums/SHA256SUMS" | sort > "$scratch/sums/listed"
+    grep -vxE 'SHA256SUMS(\.sig)?' "$scratch/assets" | sort > "$scratch/sums/wanted"
+    cmp -s "$scratch/sums/listed" "$scratch/sums/wanted"
+}
+
+# Upstream nightlies: signed only. This script's own folder may be the installed copy, with no
+# signing scripts beside it, and the tag is in none of main's history: the scripts come from
+# origin/main, unpacked into the scratch folder.
+upstream_tools="$scratch/main/tools/release"
+sign_upstream() {
+    tag="$1"
+    state="$(gh release view "$tag" --repo "$slug" --json isPrerelease,isDraft --jq '.isPrerelease and (.isDraft | not)')" ||
+        { log "error: $tag has no release"; return 1; }
+    [ "$state" = true ] || { log "error: $tag is not a published pre-release"; return 1; }
+    assets || return 1
+    if signed; then log "upstream nightly $tag is signed over every file"; return 0; fi
+    if [ "$dry" = 1 ]; then
+        echo "upstream nightly $tag: unsigned; would sign it with sign_nightly.sh from origin/main, then verify.sh --signature-only"
+        return 0
+    fi
+    if game_running; then log "skipped signing $tag: a game is running (the next run tries again)"; return 0; fi
+    if [ ! -x "$upstream_tools/sign_nightly.sh" ]; then
+        git -C "$repo" fetch -q origin main || { log "error: cannot fetch origin/main for the signing scripts"; return 1; }
+        mkdir -p "$scratch/main"
+        git -C "$repo" archive origin/main tools/release | tar -x -C "$scratch/main" || return 1
+    fi
+    log "signing upstream nightly $tag (no Mac build for it)"
+    "$upstream_tools/sign_nightly.sh" "$tag" || { log "error: sign_nightly.sh $tag failed"; return 1; }
+    assets || return 1
+    signed || { log "error: SHA256SUMS of $tag does not list every file after signing"; return 1; }
+    "$upstream_tools/verify.sh" --signature-only "$scratch/sums" || { log "error: the signature of $tag does not verify"; return 1; }
+    log "signed upstream nightly: https://github.com/$slug/releases/tag/$tag"
+}
+case "$tag" in
+    upstream-nightly.*)
+        sign_upstream "$tag" || exit 1
+        exit 0 ;;
+    '')
+        today="$(date -u +%Y%m%d)"
+        yesterday="$(date -u -v-1d +%Y%m%d)"
+        upstream_tags="$(gh api "repos/$slug/releases?per_page=40" --jq "
+            [.[] | select(.draft | not) | select(.prerelease)
+                 | select(.tag_name | test(\"^upstream-nightly\\\\.($today|$yesterday)\\\\.[0-9a-f]+\$\"))]
+            | sort_by(.created_at) | .[].tag_name")" || upstream_tags=""
+        [ -n "$upstream_tags" ] || log "no upstream nightly of $today or $yesterday (UTC) to sign"
+        for upstream_tag in $upstream_tags; do
+            sign_upstream "$upstream_tag" || log "upstream nightly $upstream_tag is left unsigned; the next run tries again"
+        done
+        tag="" ;;
+esac
+
 # The nightly.
 if [ -z "$tag" ]; then
     today="$(date -u +%Y%m%d)"
@@ -175,13 +238,12 @@ else
 fi
 case "$tag" in
     v*-arm-nightly.*) ;;
-    *) die "$tag is not a nightly tag (v<next>-arm-nightly.<YYYYMMDD>.<n>)" ;;
+    *) die "$tag is not a nightly tag (v<next>-arm-nightly.<YYYYMMDD>.<n> or upstream-nightly.<YYYYMMDD>.<commit>)" ;;
 esac
 version="${tag#v}"
 state="$(gh release view "$tag" --repo "$slug" --json isPrerelease,isDraft --jq '.isPrerelease and (.isDraft | not)')" ||
     die "$tag has no release"
 [ "$state" = true ] || die "$tag is not a published pre-release"
-assets() { gh release view "$tag" --repo "$slug" --json assets --jq '.assets[].name' > "$scratch/assets"; }
 assets
 
 git -C "$repo" fetch -q --tags origin
@@ -202,16 +264,6 @@ case "${ANYPS5_NIGHTLY_PHONE:-}" in
        else phone=1; phone_why="mobile/ changed since $release"
        fi ;;
 esac
-
-# Signed when SHA256SUMS(.sig) are there and SHA256SUMS names every other file.
-signed() {
-    grep -qx SHA256SUMS "$scratch/assets" && grep -qx SHA256SUMS.sig "$scratch/assets" || return 1
-    rm -rf "$scratch/sums"; mkdir "$scratch/sums"
-    gh release download "$tag" --repo "$slug" --dir "$scratch/sums" --pattern SHA256SUMS --pattern SHA256SUMS.sig || return 1
-    awk '{ print $2 }' "$scratch/sums/SHA256SUMS" | sort > "$scratch/sums/listed"
-    grep -vxE 'SHA256SUMS(\.sig)?' "$scratch/assets" | sort > "$scratch/sums/wanted"
-    cmp -s "$scratch/sums/listed" "$scratch/sums/wanted"
-}
 
 log "nightly $tag, commit $sha (release before it: ${release:-none})"
 log "worktree $wt, build $wt/build-mac"

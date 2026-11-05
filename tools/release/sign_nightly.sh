@@ -4,10 +4,12 @@
 #
 #     tools/release/sign_nightly.sh [-k <private key>]... <tag>
 #
-# It downloads every file of the pre-release <tag> (v<next>-arm-nightly.<YYYYMMDD>.<n>) from
-# AnyTogether/AnyPS5-ARM, signs them with sign.sh (-k is passed on), checks the result with
-# verify.sh and uploads SHA256SUMS and SHA256SUMS.sig to the release, replacing older ones. The
-# launchers offer the nightly's engine once these are there.
+# It downloads every file of the pre-release <tag> from AnyTogether/AnyPS5-ARM, signs them with
+# sign.sh (-k is passed on), checks the result with verify.sh and uploads SHA256SUMS and
+# SHA256SUMS.sig to the release, replacing older ones. The launchers offer the nightly's engine
+# once these are there. <tag> is an AnyPS5-ARM nightly (v<next>-arm-nightly.<YYYYMMDD>.<n>) or an
+# upstream nightly (upstream-nightly.<YYYYMMDD>.<upstream commit>, upstream's main built
+# unmodified by engine-nightly.yml).
 set -eu
 repo="AnyTogether/AnyPS5-ARM"
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -25,7 +27,8 @@ shift $((OPTIND - 1))
 tag="$1"
 case "$tag" in
     v*-arm-nightly.*) ;;
-    *) echo "sign_nightly: $tag is not a nightly tag (v<next>-arm-nightly.<YYYYMMDD>.<n>)" >&2; exit 1 ;;
+    upstream-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].*) ;;
+    *) echo "sign_nightly: $tag is not a nightly tag (v<next>-arm-nightly.<YYYYMMDD>.<n> or upstream-nightly.<YYYYMMDD>.<commit>)" >&2; exit 1 ;;
 esac
 
 command -v gh >/dev/null || { echo "sign_nightly: gh is needed" >&2; exit 1; }

@@ -8,6 +8,14 @@
 # a nightly from main: then `ref` is the commit and `tag` the nightly tag, made in the checkout so
 # that the relinker's --version (git describe) names the nightly, as tools/macos/publish_nightly.sh
 # does for the Mac.
+#
+# With `repository` (engine-nightly.yml's upstream nightly: boykopovar/AnyPS5) it builds that
+# repository's commit as it is, with the same toolchains: nothing of AnyPS5-ARM's goes in. Its own
+# git describe names the relinker (no tag is made), the smoke tests it has of the set below run
+# (the others are AnyPS5-ARM's own and are left out, by name in the log), and it is packed by its
+# own release packaging (tools/package_release.py, named after that describe). The artifacts
+# engine-upstream-linux and engine-upstream-windows keep what AnyPS5 Desktop downloads of it: the
+# relinker, and the libraries as .tar.gz on Linux, as .zip on Windows.
 name: Engine toolkits
 
 on:
@@ -24,6 +32,11 @@ on:
         description: The nightly tag the build is named after (not pushed from here).
         required: true
         type: string
+      repository:
+        description: Another repository to build `ref` of, unmodified (owner/name); empty for this one.
+        required: false
+        type: string
+        default: ''
   # Only when this workflow or the packaging changes, to check that it still builds.
   pull_request:
     paths:
@@ -35,7 +48,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: engine-toolkits-${{ github.event.pull_request.number || github.ref }}
+  group: engine-toolkits-${{ github.event.pull_request.number || github.ref }}${{ inputs.repository && '-upstream' || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -48,6 +61,18 @@ env:
     guest_user_service_user_name_tests guest_user_service_user_kind_tests guest_appcontent_download_tests
     guest_user_service_lifecycle_tests guest_user_service_presets_tests power_control_tests
   SMOKE_TESTS: online|remote_pad|appcontent|user_service|power_control
+  # For another repository's build: of the tests SMOKE_TESTS matches (ctest's JSON on stdin), those
+  # whose program was built, as an exact regular expression in UPSTREAM_SMOKE_TESTS (empty: none).
+  # (A variable set in GITHUB_ENV does not override one set here, hence the other names.)
+  SMOKE_SUBSET: |
+    import json, os, re, sys
+    tests = json.load(sys.stdin).get("tests", [])
+    kept = [test["name"] for test in tests if test.get("command") and os.path.isfile(test["command"][0])]
+    for test in tests:
+        print(("kept: " if test["name"] in kept else "not built: ") + test["name"])
+    pattern = "^(" + "|".join(re.sub(r"([][.^$*+?(){}|\\])", r"\\\1", name) for name in kept) + ")$" if kept else ""
+    with open(os.environ["GITHUB_ENV"], "a") as env:
+        env.write(f"UPSTREAM_SMOKE_TESTS={pattern}\n")
 
 jobs:
   linux:
@@ -59,16 +84,34 @@ jobs:
       CCACHE_COMPILERCHECK: content
     steps:
       - uses: actions/checkout@v7
+        if: ${{ !inputs.repository }}
         with:
           # Empty outside a call: the pushed tag or the pull request, as before.
           ref: ${{ inputs.ref }}
           submodules: recursive
           persist-credentials: false
+      # Another repository's commit, with its history (commits only) and tags for its git describe.
+      - uses: actions/checkout@v7
+        if: ${{ inputs.repository }}
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          filter: tree:0
+          submodules: recursive
+          persist-credentials: false
       - name: Name the build after the nightly tag
-        if: inputs.tag
+        if: inputs.tag && !inputs.repository
         env:
           TAG: ${{ inputs.tag }}
         run: git tag "$TAG" && git describe --tags
+      - name: Name the files after the other repository's git describe
+        if: inputs.repository
+        run: |
+          label="$(git describe --tags --always)"
+          case "$label" in v[0-9A-Za-z]*) ;; *) label="v0-g$label" ;; esac
+          echo "git describe: $label"
+          echo "UPSTREAM_LABEL=$label" >> "$GITHUB_ENV"
       - name: Install GCC 12, Ninja and the audio/display development files
         run: |
           sudo apt-get update
@@ -77,7 +120,7 @@ jobs:
             libwayland-dev libxkbcommon-dev libegl-dev libpulse-dev libasound2-dev
       - uses: hendrikmuhs/ccache-action@v1.2.24
         with:
-          key: engine-toolkit-linux
+          key: engine-toolkit-linux${{ inputs.repository && '-upstream' || '' }}
           max-size: 2G
           evict-old-files: job
       - id: ffmpeg
@@ -91,8 +134,18 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           -DCMAKE_C_COMPILER=gcc-12 -DCMAKE_CXX_COMPILER=g++-12
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Keep the smoke test targets the other repository has
+        if: inputs.repository
+        run: |
+          ninja -C build -t targets all | sed 's/: .*//' > "$RUNNER_TEMP/targets"
+          kept=""
+          for target in $SMOKE_TARGETS; do
+            if grep -qx "$target" "$RUNNER_TEMP/targets"; then kept="$kept $target"; else echo "not in ${{ inputs.repository }}: $target"; fi
+          done
+          echo "smoke test targets: ${kept:-none}"
+          echo "UPSTREAM_SMOKE_TARGETS=$kept" >> "$GITHUB_ENV"
       - name: Build the relinker, the patched libraries and the smoke tests
-        run: cmake --build build --target relinker libs $SMOKE_TARGETS
+        run: cmake --build build --target relinker libs ${{ inputs.repository && '$UPSTREAM_SMOKE_TARGETS' || '$SMOKE_TARGETS' }}
       - name: Check the glibc and libstdc++ floor (2.35, GCC 12)
         run: |
           glibc=$(objdump -T build/core/libs/libs/*.prx build/core/relinker/relinker | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
@@ -102,14 +155,34 @@ jobs:
           printf '%s\n' "$glibcxx" GLIBCXX_3.4.30 | sort -CV || { echo "::error::The engine needs $glibcxx, newer than GCC 12's libstdc++"; exit 1; }
       - name: Allow userfaultfd for the guest write watch
         run: sudo sysctl -w vm.unprivileged_userfaultfd=1
+      - name: Keep the smoke tests that were built
+        if: inputs.repository
+        run: ctest --test-dir build --show-only=json-v1 -R "$SMOKE_TESTS" | python3 -c "$SMOKE_SUBSET"
       - name: Run the smoke tests
-        run: ctest --test-dir build -R "$SMOKE_TESTS" --output-on-failure --timeout 120 --no-tests=error --repeat until-pass:3
+        if: ${{ !inputs.repository || env.UPSTREAM_SMOKE_TESTS != '' }}
+        run: ctest --test-dir build -R "${{ inputs.repository && '$UPSTREAM_SMOKE_TESTS' || '$SMOKE_TESTS' }}" --output-on-failure --timeout 120 --no-tests=error --repeat until-pass:3
       - name: Pack the toolkit
+        if: ${{ !inputs.repository }}
         run: python3 tools/package_arm_toolkit.py --platform linux --build build --output dist --commit "$(git rev-parse --short=9 HEAD)"
       - uses: actions/upload-artifact@v7
+        if: ${{ !inputs.repository }}
         with:
           name: engine-toolkit-linux
           path: dist/AnyPS5-toolkit-linux-*
+          if-no-files-found: error
+          retention-days: 14
+      # The other repository's own release packaging, named after its git describe. Kept: the
+      # relinker and the .tar.gz of the libraries, what AnyPS5 Desktop downloads on Linux.
+      - name: Pack the release files
+        if: inputs.repository
+        run: python3 tools/package_release.py --platform linux --build build --output dist --version "$UPSTREAM_LABEL"
+      - uses: actions/upload-artifact@v7
+        if: inputs.repository
+        with:
+          name: engine-upstream-linux
+          path: |
+            dist/relinker-${{ env.UPSTREAM_LABEL }}
+            dist/prx-linux-${{ env.UPSTREAM_LABEL }}.tar.gz
           if-no-files-found: error
           retention-days: 14
 
@@ -122,16 +195,34 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        if: ${{ !inputs.repository }}
         with:
           # Empty outside a call: the pushed tag or the pull request, as before.
           ref: ${{ inputs.ref }}
           submodules: recursive
           persist-credentials: false
+      # Another repository's commit, with its history (commits only) and tags for its git describe.
+      - uses: actions/checkout@v7
+        if: ${{ inputs.repository }}
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          filter: tree:0
+          submodules: recursive
+          persist-credentials: false
       - name: Name the build after the nightly tag
-        if: inputs.tag
+        if: inputs.tag && !inputs.repository
         env:
           TAG: ${{ inputs.tag }}
         run: git tag "$TAG" && git describe --tags
+      - name: Name the files after the other repository's git describe
+        if: inputs.repository
+        run: |
+          label="$(git describe --tags --always)"
+          case "$label" in v[0-9A-Za-z]*) ;; *) label="v0-g$label" ;; esac
+          echo "git describe: $label"
+          echo "UPSTREAM_LABEL=$label" >> "$GITHUB_ENV"
       - name: Point the WinLibs CMake at the CA bundle of Git for Windows
         run: |
           for prefix in ucrt64 mingw64; do
@@ -151,7 +242,7 @@ jobs:
       - run: echo 'C:\winlibs\mingw64\bin' >> "$GITHUB_PATH"
       - uses: hendrikmuhs/ccache-action@v1.2.24
         with:
-          key: engine-toolkit-windows
+          key: engine-toolkit-windows${{ inputs.repository && '-upstream' || '' }}
           max-size: 3G
           evict-old-files: job
       - id: ffmpeg
@@ -166,23 +257,56 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Keep the smoke test targets the other repository has
+        if: inputs.repository
+        run: |
+          ninja -C build -t targets all | sed 's/: .*//' > "$RUNNER_TEMP/targets"
+          kept=""
+          for target in $SMOKE_TARGETS; do
+            if grep -qx "$target" "$RUNNER_TEMP/targets"; then kept="$kept $target"; else echo "not in ${{ inputs.repository }}: $target"; fi
+          done
+          echo "smoke test targets: ${kept:-none}"
+          echo "UPSTREAM_SMOKE_TARGETS=$kept" >> "$GITHUB_ENV"
       - name: Build the relinker, the patched libraries and the smoke tests
         shell: cmd
-        run: cmake --build build --target relinker libs %SMOKE_TARGETS%
+        run: cmake --build build --target relinker libs ${{ inputs.repository && '%UPSTREAM_SMOKE_TARGETS%' || '%SMOKE_TARGETS%' }}
+      # Only lists them: Git Bash is fine for that.
+      - name: Keep the smoke tests that were built
+        if: inputs.repository
+        run: ctest --test-dir build --show-only=json-v1 -R "$SMOKE_TESTS" | python -c "$SMOKE_SUBSET"
       # From cmd, as in AnyTogether CI: Git Bash puts its own mingw64/bin (another libstdc++-6.dll)
       # ahead of WinLibs on PATH, and the patched libraries then fail to load.
       - name: Run the smoke tests
+        if: ${{ !inputs.repository || env.UPSTREAM_SMOKE_TESTS != '' }}
         shell: cmd
-        run: ctest --test-dir build -R "%SMOKE_TESTS%" --output-on-failure --timeout 120 --no-tests=error --repeat until-pass:3
+        run: ctest --test-dir build -R "${{ inputs.repository && '%UPSTREAM_SMOKE_TESTS%' || '%SMOKE_TESTS%' }}" --output-on-failure --timeout 120 --no-tests=error --repeat until-pass:3
       - id: commit
+        if: ${{ !inputs.repository }}
         run: echo "short=$(git rev-parse --short=9 HEAD)" >> "$GITHUB_OUTPUT"
       # From cmd too, so that the packaging finds WinLibs' g++ and its runtime DLLs first.
       - name: Pack the toolkit
+        if: ${{ !inputs.repository }}
         shell: cmd
         run: python tools\package_arm_toolkit.py --platform windows --build build --output dist --commit ${{ steps.commit.outputs.short }}
       - uses: actions/upload-artifact@v7
+        if: ${{ !inputs.repository }}
         with:
           name: engine-toolkit-windows
           path: dist/AnyPS5-toolkit-windows-*
+          if-no-files-found: error
+          retention-days: 14
+      # The other repository's own release packaging, named after its git describe; from cmd too.
+      # Kept: the relinker and the zip of the libraries, what AnyPS5 Desktop downloads on Windows.
+      - name: Pack the release files
+        if: inputs.repository
+        shell: cmd
+        run: python tools\package_release.py --platform windows --build build --output dist --version %UPSTREAM_LABEL%
+      - uses: actions/upload-artifact@v7
+        if: inputs.repository
+        with:
+          name: engine-upstream-windows
+          path: |
+            dist/relinker-${{ env.UPSTREAM_LABEL }}.exe
+            dist/prx-windows-${{ env.UPSTREAM_LABEL }}.zip
           if-no-files-found: error
           retention-days: 14
