@@ -55,6 +55,30 @@ final class SocialState: ObservableObject {
     var boardTask: Task<Void, Never>?
     var boardReturn: AppModel.ProfileReturn?
 
+    // Challenges
+    /// The strip over the board: the game's challenges, or the user's own over overall points.
+    @Published var challenges: [TogetherChallenge] = []
+    /// The focus is on the strip, not the board.
+    @Published var boardOnChallenges = false
+    @Published var challengeStripIndex = 0
+    var challengesTask: Task<Void, Never>?
+    /// The challenge whose page is open over the board; nil on the board.
+    @Published var challengeId: String?
+    /// The challenge as last answered (from the strip until its page is read).
+    @Published var challengeShown: TogetherChallenge?
+    @Published var challengeDetail: TogetherChallengeDetail?
+    @Published var challengeFailed = false
+    /// No such challenge (any more).
+    @Published var challengeGone = false
+    @Published var challengeIndex = 0
+    /// 0 the standings, 1 the card's buttons.
+    @Published var challengeColumn = 0
+    @Published var challengeButton = 0
+    @Published var challengeBusy = false
+    /// The page was opened from outside the leaderboard (a notification): back leaves both.
+    var challengeAlone = false
+    var challengeTask: Task<Void, Never>?
+
     // Notifications
     @Published var notifications = TogetherNotifications()
     @Published var notificationsFailed = false
@@ -86,6 +110,13 @@ final class SocialState: ObservableObject {
         feedFailed = false
         leaderboard = nil
         boardGame = nil
+        challengesTask?.cancel()
+        challengeTask?.cancel()
+        challenges = []
+        boardOnChallenges = false
+        challengeId = nil
+        challengeShown = nil
+        challengeDetail = nil
         notificationsTask?.cancel()
         compareTask?.cancel()
         compareGameTask?.cancel()

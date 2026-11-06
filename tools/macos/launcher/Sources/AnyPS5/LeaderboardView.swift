@@ -18,11 +18,19 @@ extension AppModel {
         if changed {
             social.boardKind = .points
             social.leaderboard = nil
+            social.challenges = []
+            social.challengeStripIndex = 0
         }
         social.boardIndex = 0
+        social.boardOnChallenges = false
+        social.challengeId = nil
+        social.challengeShown = nil
+        social.challengeDetail = nil
+        social.challengeAlone = false
         withAnimation(Motion.overlay) { overlay = .leaderboard }
         Sounds.shared.play(.select)
         loadLeaderboard()
+        loadChallenges()
     }
 
     func loadLeaderboard() {
@@ -63,6 +71,8 @@ extension AppModel {
 
     func closeLeaderboard() {
         social.boardTask?.cancel()
+        social.challengesTask?.cancel()
+        social.challengeTask?.cancel()
         guard let back = social.boardReturn else { return closeOverlay() }
         social.boardReturn = nil
         withAnimation(Motion.overlay) {
@@ -76,15 +86,24 @@ extension AppModel {
 
     var boardLines: [TogetherLeaderboard.Line] { social.leaderboard?.lines(me: togetherUser?.id ?? "") ?? [] }
 
-    /// Up and down through the people, left and right through a game's boards, △ between friends
-    /// and everyone, select opens someone's profile.
+    /// Up and down through the people (up past the first to the challenges over the board), left
+    /// and right through a game's boards, △ between friends and everyone, select opens someone's
+    /// profile. A challenge's page and the strip take their own commands first.
     func leaderboardCommand(_ command: Command) {
+        if social.challengeId != nil { return challengeCommand(command) }
+        if challengeStripCommand(command) { return }
         let lines = boardLines
         switch command {
         case .up, .down:
             let way = command == .down ? 1 : -1
             // The gap is passed over.
-            guard let next = stride(from: social.boardIndex + way, to: way > 0 ? lines.count : -1, by: way).first(where: { lines[$0] != .gap }) else { return }
+            guard let next = stride(from: social.boardIndex + way, to: way > 0 ? lines.count : -1, by: way).first(where: { lines[$0] != .gap }) else {
+                if way < 0, !social.challenges.isEmpty {
+                    withAnimation(Motion.focus) { social.boardOnChallenges = true }
+                    Sounds.shared.play(.move)
+                }
+                return
+            }
             social.boardIndex = next
             Sounds.shared.play(.move)
         case .left, .right:
@@ -100,7 +119,7 @@ extension AppModel {
             Sounds.shared.play(.move)
             loadLeaderboard()
         case .select:
-            guard lines.indices.contains(social.boardIndex), case .entry(let entry, _) = lines[social.boardIndex] else { return }
+            guard !social.boardOnChallenges, lines.indices.contains(social.boardIndex), case .entry(let entry, _) = lines[social.boardIndex] else { return }
             openProfile(entry.user.handle, card: entry.user)
         case .back:
             closeLeaderboard()
@@ -139,15 +158,23 @@ struct LeaderboardView: View {
 
     var body: some View {
         let social = model.social
-        VStack(alignment: .leading, spacing: 28 * scale) {
-            header
-            HStack(alignment: .top, spacing: 36 * scale) {
-                VStack(alignment: .leading, spacing: 18 * scale) {
-                    tabs
-                    content
+        Group {
+            if social.challengeId != nil {
+                ChallengePage().transition(.opacity.combined(with: .move(edge: .trailing)))
+            } else {
+                VStack(alignment: .leading, spacing: 28 * scale) {
+                    header
+                    if !social.challenges.isEmpty { ChallengeStrip().transition(.opacity.combined(with: .move(edge: .top))) }
+                    HStack(alignment: .top, spacing: 36 * scale) {
+                        VStack(alignment: .leading, spacing: 18 * scale) {
+                            tabs
+                            content
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        if let board = social.leaderboard { rankCard(board).frame(width: 330 * scale) }
+                    }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                if let board = social.leaderboard { rankCard(board).frame(width: 330 * scale) }
+                .transition(.opacity)
             }
         }
         .padding(.horizontal, 80 * scale)
@@ -264,9 +291,12 @@ struct LeaderboardView: View {
             } else {
                 ProfileColumn(title: "", count: nil, focusedIndex: social.boardIndex, ids: lines.indices.map { "line-\($0)" }) {
                     ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                        lineView(line, board: board, focused: index == social.boardIndex)
+                        lineView(line, board: board, focused: !social.boardOnChallenges && index == social.boardIndex)
                             .id("line-\(index)")
-                            .onTapGesture { model.social.boardIndex = index }
+                            .onTapGesture {
+                                model.social.boardOnChallenges = false
+                                model.social.boardIndex = index
+                            }
                     }
                 }
             }

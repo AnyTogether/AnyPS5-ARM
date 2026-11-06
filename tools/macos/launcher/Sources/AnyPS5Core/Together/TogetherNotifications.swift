@@ -15,17 +15,22 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         case lfgAccepted = "lfg_accepted"
         /// The user reached a new trophy level (the actor is the user).
         case levelUp = "level_up"
+        /// A challenge: someone invited the user (the actor), one the user is in started, or one
+        /// ended (no actor; the user's place and the winner in the data).
+        case challengeInvite = "challenge_invite"
+        case challengeStarted = "challenge_started"
+        case challengeEnded = "challenge_ended"
         /// A kind this launcher does not know yet.
         case other
 
-        public static let allKnown: [Kind] = [.friendRequest, .friendAccepted, .message, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted, .levelUp, .warning, .other]
+        public static let allKnown: [Kind] = [.friendRequest, .friendAccepted, .message, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted, .levelUp, .challengeInvite, .challengeStarted, .challengeEnded, .warning, .other]
 
         /// Whether a new one deserves a toast of its own: requests, invites and missed calls are
         /// announced by their own events already.
         public var toastsOnItsOwn: Bool {
             switch self {
             case .friendRequest, .friendAccepted, .partyInvite, .gameInvite, .missedCall, .lfgRequest, .lfgAccepted, .levelUp: return false
-            case .message, .warning, .other: return true
+            case .message, .warning, .challengeInvite, .challengeStarted, .challengeEnded, .other: return true
             }
         }
     }
@@ -66,8 +71,41 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         public var level: Int?
         public var tier: String?
         public var frame: Int?
+        /// Challenges: challenge_invite and challenge_started {challengeId, title, titleId,
+        /// gameNames, metric, endsAt}; challenge_ended the same and {rank, value, entrants, winner}.
+        public var challengeId: String?
+        public var metric: String?
+        public var endsAt: String?
+        public var rank: Int?
+        public var value: Int?
+        public var entrants: Int?
+        public var winner: ChallengeWinner?
+
+        /// Who won a challenge; nil with no one above zero, or someone the user may not see.
+        public struct ChallengeWinner: Decodable, Equatable, Sendable {
+            public var displayName: String?
+            public var handle: String?
+            public var value: Int?
+
+            public init(displayName: String? = nil, handle: String? = nil, value: Int? = nil) {
+                self.displayName = displayName
+                self.handle = handle
+                self.value = value
+            }
+        }
 
         public init() {}
+
+        /// First place with something to show for it: the user won.
+        public var wonChallenge: Bool { rank == 1 && (value ?? 0) > 0 }
+
+        /// When the challenge ends, read from its ISO 8601 text.
+        public var challengeEndsAt: Date? {
+            guard let endsAt else { return nil }
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return fractional.date(from: endsAt) ?? ISO8601DateFormatter().date(from: endsAt)
+        }
 
         /// The level a level_up notification is about.
         public var levelBadge: TogetherLevelBadge? {
@@ -86,6 +124,9 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
     public let updatedAt: Date
 
     public var kind: Kind { Kind(rawValue: kindName) ?? .other }
+
+    /// The challenge a challenge notification is about.
+    public var challengeId: String? { subjectId ?? data.challengeId }
 
     enum CodingKeys: String, CodingKey {
         case id, actor, subjectId, data, read, createdAt, updatedAt
