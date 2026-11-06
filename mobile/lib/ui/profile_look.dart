@@ -251,16 +251,17 @@ class ShowcaseStrip extends StatelessWidget {
             builder: (context, box) {
               const most = ShowcasePicks.max;
               final fits = (box.maxWidth - gap * (most - 1)) / most;
-              final width = fits < 84 ? 96.0 : fits.clamp(84.0, 160.0);
+              final width = fits < 96 ? 104.0 : fits.clamp(96.0, 160.0);
+              final height = 56 + MediaQuery.textScalerOf(context).scale(68);
               final row = Row(
                 children: [
                   for (final (index, tile) in tiles.indexed) ...[
                     if (index > 0) const SizedBox(width: gap),
-                    SizedBox(width: width, height: 124, child: tile),
+                    SizedBox(width: width, height: height, child: tile),
                   ],
                 ],
               );
-              return fits < 84
+              return fits < 96
                   ? SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: row,
@@ -404,15 +405,22 @@ class GamePinTile extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               GameIcon(url: game.game.iconUrl, size: 34),
-              const Spacer(),
+              const SizedBox(width: 6),
               if (progress != null)
-                Text(
-                  '$progress%',
-                  style: TextStyle(
-                    color: bar,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                Expanded(
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.topRight,
+                    child: Text(
+                      '$progress%',
+                      maxLines: 1,
+                      style: TextStyle(
+                        color: bar,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      ),
+                    ),
                   ),
                 ),
             ],

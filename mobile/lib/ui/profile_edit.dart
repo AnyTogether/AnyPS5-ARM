@@ -621,7 +621,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Expanded(child: _left(texts, profile)),
-                        Expanded(child: _right(texts, profile)),
+                        Expanded(child: _right(texts)),
                       ],
                     ),
             ),
@@ -743,11 +743,13 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
           ),
         ),
       ),
+      SectionLabel(texts.profileTheme),
+      _theme(texts, profile),
       ..._privateIdentity(texts, profile),
     ],
   );
 
-  Widget _right(Strings texts, OwnProfile profile) => ListView(
+  Widget _right(Strings texts) => ListView(
     padding: const EdgeInsets.fromLTRB(14, 10, 22, 24),
     children: [
       _Field(
@@ -757,8 +759,6 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         maxLength: ProfileLimits.bioMax,
         lines: 3,
       ),
-      SectionLabel(texts.profileTheme),
-      _theme(texts, profile),
       SectionLabel(texts.privacy),
       Text(
         texts.privacyLead,

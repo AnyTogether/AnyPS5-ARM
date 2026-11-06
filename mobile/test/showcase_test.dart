@@ -547,7 +547,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('PROFILE THEME'), findsOneWidget);
+      await tester.dragUntilVisible(
+        find.text('Default look'),
+        find.byType(ListView).first,
+        const Offset(0, -80),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('PROFILE THEME', skipOffstage: false), findsOneWidget);
       expect(find.text('Default look'), findsOneWidget);
       await tester.tap(find.text('Default look'));
       await tester.pumpAndSettle();
