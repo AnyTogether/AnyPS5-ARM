@@ -238,7 +238,15 @@ class PhonePush extends ChangeNotifier {
   PushToken? _token;
   StreamSubscription<Map<Object?, Object?>>? _taps;
   StreamSubscription<String>? _renewals;
-  final _opens = StreamController<PushOpen>.broadcast();
+  late final _opens = StreamController<PushOpen>.broadcast(
+    onListen: () {
+      // The tap that started the app may come before anyone listens: it waits for them.
+      final waiting = _launch;
+      _launch = null;
+      if (waiting != null) _opens.add(waiting);
+    },
+  );
+  PushOpen? _launch;
   bool _started = false;
 
   /// Taps on pushes, the one that started the app among them.
@@ -308,7 +316,12 @@ class PhonePush extends ChangeNotifier {
         .launchedWith()
         .then((payload) {
           final open = payload == null ? null : pushOpenOf(payload);
-          if (open != null) _opens.add(open);
+          if (open == null) return;
+          if (_opens.hasListener) {
+            _opens.add(open);
+          } else {
+            _launch = open;
+          }
         })
         .catchError((_) {});
   }
