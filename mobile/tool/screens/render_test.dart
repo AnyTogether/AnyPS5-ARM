@@ -14,6 +14,7 @@ import 'dart:ui' as ui;
 
 import 'package:anyps5_remote/connection/session.dart';
 import 'package:anyps5_remote/feedback/haptics.dart';
+import 'package:anyps5_remote/l10n.dart';
 import 'package:anyps5_remote/protocol/messages.dart';
 import 'package:anyps5_remote/ui/activity_card.dart';
 import 'package:anyps5_remote/ui/home_screen.dart';
@@ -265,6 +266,8 @@ void main() {
   late String family;
 
   setUpAll(() async {
+    // The texts, as the app reads them from its assets.
+    L10n.loadFolder(Directory('assets/l10n'));
     family = await _fonts();
     await _art();
     await _games();
@@ -405,6 +408,31 @@ void main() {
       'phone-notifications',
       h,
       together(h, TogetherTab.notifications),
+    );
+  });
+
+  testWidgets('leaderboards', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'phone-leaderboards',
+      h,
+      together(h, TogetherTab.leaderboards),
+    );
+  });
+
+  testWidgets('challenge', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'phone-challenge',
+      h,
+      together(h, TogetherTab.leaderboards),
+      then: () async {
+        await tester.ensureVisible(find.text('Pharloom sprint'));
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Pharloom sprint'));
+      },
     );
   });
 

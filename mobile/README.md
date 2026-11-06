@@ -33,7 +33,7 @@ The phone signs in to [AnyTogether](https://anytogether.net), the launchers' onl
 - **Friends**: from the people button on the home screen: who is online and what they play, requests, adding by handle.
 - **Messages**: your conversations, the same ones as on the Mac and the website, with unread counts; write to a friend from their entry.
 - **Parties and voice**: start a party, invite friends or join theirs, and talk with its members, voice going straight between you; mute or deafen. The leader hands out a join code (copy the code or its link, make a new one, stop it) and sets the party's Discord link, which everyone in it can open. **Join with a code** looks a code or its link up and asks to join.
-- **Calls, profiles, activity**: call a friend 1:1 (an incoming call shows over any screen, the pad too), edit your profile and picture, the activity feed, leaderboards and notifications.
+- **Calls, profiles, activity**: call a friend 1:1 (an incoming call shows over any screen, the pad too), edit your profile and picture, the activity feed, leaderboards with challenges (join, leave and the standings; they are made on the website) and notifications.
 - **Share play**: watch a friend's game and, when they let you, play as player 2–4 with the phone's pad.
 - **Another server**: for a self-hosted AnyTogether; when the Mac uses another server, the phone offers it.
 
@@ -44,8 +44,10 @@ The phone signs in to [AnyTogether](https://anytogether.net), the launchers' onl
 | ![A party talking, one member speaking and one muted](../docs/screenshots/phone-party.jpg) | ![Your profile: totals and games](../docs/screenshots/phone-profile.jpg) |
 | **Activity** | **Notifications** |
 | ![Friends' activity with reactions](../docs/screenshots/phone-feed.jpg) | ![The notification list](../docs/screenshots/phone-notifications.jpg) |
-| **Watching a friend's share play** | |
-| ![A friend's game on the phone](../docs/screenshots/phone-shareplay.jpg) | |
+| **Watching a friend's share play** | **Leaderboards and challenges** |
+| ![A friend's game on the phone](../docs/screenshots/phone-shareplay.jpg) | ![The leaderboard with your challenges over it](../docs/screenshots/phone-leaderboards.jpg) |
+| **A challenge** | |
+| ![A challenge: its window, Join or Leave, and the standings](../docs/screenshots/phone-challenge.jpg) | |
 
 <sub>The pictures use demo people and data, rendered with `tool/screens/render.sh`.</sub>
 

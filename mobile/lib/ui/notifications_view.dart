@@ -342,8 +342,13 @@ class _NoticeRow extends StatelessWidget {
       NoticeKind.lfgAccepted => texts.lfgAcceptedHint(notice),
       NoticeKind.warning when notice.data['reason'] != null =>
         texts.warningReason('${notice.data['reason']}'),
+      NoticeKind.challengeEnded => texts.challengeResult(notice),
       _ => null,
     };
+    final won =
+        notice.kind == NoticeKind.challengeEnded &&
+        notice.data['rank'] == 1 &&
+        (notice.data['value'] is num && (notice.data['value'] as num) > 0);
     final icon = switch (notice.kind) {
       NoticeKind.friendRequest => Icons.person_add_alt_1_rounded,
       NoticeKind.friendAccepted => Icons.how_to_reg_rounded,
@@ -353,7 +358,15 @@ class _NoticeRow extends StatelessWidget {
       NoticeKind.missedCall => Icons.phone_missed_rounded,
       NoticeKind.lfgRequest => Icons.travel_explore_rounded,
       NoticeKind.lfgAccepted => Icons.how_to_reg_rounded,
+      NoticeKind.challengeInvite ||
+      NoticeKind.challengeStarted => Icons.sports_score_rounded,
+      NoticeKind.challengeEnded => Icons.emoji_events_rounded,
       NoticeKind.warning => Icons.gpp_maybe_rounded,
+    };
+    final tint = switch (notice.kind) {
+      NoticeKind.missedCall => togetherError,
+      _ when won => togetherGold,
+      _ => togetherAccent,
     };
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
@@ -372,32 +385,39 @@ class _NoticeRow extends StatelessWidget {
                   children: [
                     if (notice.actor case final actor?)
                       Avatar(person: actor, size: 38)
-                    else
+                    else if (notice.kind == NoticeKind.warning)
                       const SizedBox.square(
                         dimension: 38,
                         child: Icon(
                           Icons.gpp_maybe_rounded,
                           color: togetherAway,
                         ),
-                      ),
-                    Positioned(
-                      right: -4,
-                      bottom: -4,
-                      child: Container(
-                        padding: const EdgeInsets.all(3),
-                        decoration: const BoxDecoration(
-                          color: togetherPanel,
+                      )
+                    else
+                      // No one did it (a challenge's end): its own mark on a tinted disc.
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: tint.withValues(alpha: 0.14),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(
-                          icon,
-                          size: 12,
-                          color: notice.kind == NoticeKind.missedCall
-                              ? togetherError
-                              : togetherAccent,
+                        child: Icon(icon, size: 20, color: tint),
+                      ),
+                    if (notice.actor != null ||
+                        notice.kind == NoticeKind.warning)
+                      Positioned(
+                        right: -4,
+                        bottom: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(
+                            color: togetherPanel,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(icon, size: 12, color: tint),
                         ),
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(width: 12),

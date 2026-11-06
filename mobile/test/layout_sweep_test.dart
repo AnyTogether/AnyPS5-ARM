@@ -9,6 +9,7 @@ import 'package:anyps5_remote/strings.dart';
 import 'package:anyps5_remote/together/profiles.dart';
 import 'package:anyps5_remote/together/together_hub.dart';
 import 'package:anyps5_remote/ui/about_sheet.dart';
+import 'package:anyps5_remote/ui/challenge_view.dart';
 import 'package:anyps5_remote/ui/home_screen.dart';
 import 'package:anyps5_remote/ui/pad_screen.dart';
 import 'package:anyps5_remote/ui/profile_edit.dart';
@@ -134,6 +135,9 @@ final Map<String, Future<Widget> Function(TogetherHub hub)> _screens = {
       onUseMac: null,
       onOpen: (_) {},
     ),
+  ),
+  'challenge': (hub) async => _Opener(
+    (context) => openChallenge(context, hub: hub, id: 'ch-silksong'),
   ),
   'about': (hub) async => _Opener(
     (context) => showAbout(
