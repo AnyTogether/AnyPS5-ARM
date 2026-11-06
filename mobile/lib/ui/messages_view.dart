@@ -130,7 +130,7 @@ class _MessagesPaneState extends State<MessagesPane> {
       context: context,
       backgroundColor: const Color(0xFF151821),
       showDragHandle: false,
-      builder: (context) => _MessageSheet(
+      builder: (context) => MessageSheet(
         message: message,
         me: me,
         canEdit: message.canEdit(me),
@@ -142,14 +142,14 @@ class _MessagesPaneState extends State<MessagesPane> {
     switch (picked) {
       case MessageReaction reaction:
         await _react(message, reaction);
-      case _MessageAction.reply:
+      case MessageAction.reply:
         setState(() => _reply = message);
         _focus.requestFocus();
-      case _MessageAction.edit:
+      case MessageAction.edit:
         await _edit(message);
-      case _MessageAction.unsend:
+      case MessageAction.unsend:
         await _unsend(message);
-      case _MessageAction.report:
+      case MessageAction.report:
         await _report(message);
     }
   }
@@ -190,7 +190,7 @@ class _MessagesPaneState extends State<MessagesPane> {
     final texts = Texts.of(context);
     final text = await showDialog<String>(
       context: context,
-      builder: (_) => _EditDialog(text: message.words ?? ''),
+      builder: (_) => EditMessageDialog(text: message.words ?? ''),
     );
     if (text == null || text.trim().isEmpty || !mounted) return;
     if (text.trim() == message.words?.trim()) return;
@@ -209,34 +209,8 @@ class _MessagesPaneState extends State<MessagesPane> {
 
   Future<void> _unsend(ChatMessage message) async {
     final texts = Texts.of(context);
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF151821),
-        content: Text(
-          texts.confirmUnsend,
-          style: const TextStyle(color: Colors.white70, fontSize: 14.5),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(
-              texts.cancel,
-              style: const TextStyle(color: Colors.white60),
-            ),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: togetherError,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(texts.unsend),
-          ),
-        ],
-      ),
-    );
-    if (sure != true || !mounted) return;
+    final sure = await askUnsend(context);
+    if (!sure || !mounted) return;
     try {
       await _messages.unsend(message);
       if (_reply?.id == message.id) setState(() => _reply = null);
@@ -511,18 +485,19 @@ class _MessagesPaneState extends State<MessagesPane> {
                     final above = index + 1 < thread.length
                         ? thread[index + 1]
                         : null;
-                    return _Bubble(
+                    return MessageBubble(
                       message: message,
                       me: me,
                       mine: message.authorId == me,
                       quote: message.replyTo == null || message.deleted
                           ? null
-                          : _Quote(
+                          : MessageQuote(
                               key: ValueKey('quote-${message.seq}'),
                               target: _messages.thread
                                   .where((m) => m.seq == message.replyTo)
                                   .firstOrNull,
-                              conversation: conversation,
+                              nameOf: (id) =>
+                                  conversation.author(id)?.displayName,
                               me: me,
                             ),
                       receipt: identical(message, newestMine)
@@ -728,6 +703,41 @@ class _MessagesPaneState extends State<MessagesPane> {
   );
 }
 
+/// "Unsend this message for everyone?": true once it is sure.
+Future<bool> askUnsend(BuildContext context) async {
+  final texts = Texts.of(context);
+  return await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF151821),
+            content: Text(
+              texts.confirmUnsend,
+              style: const TextStyle(color: Colors.white70, fontSize: 14.5),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(
+                  texts.cancel,
+                  style: const TextStyle(color: Colors.white60),
+                ),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: togetherError,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(texts.unsend),
+              ),
+            ],
+          );
+        },
+      ) ??
+      false;
+}
+
 class _ConversationRow extends StatelessWidget {
   const _ConversationRow({
     required this.conversation,
@@ -880,8 +890,9 @@ String _when(DateTime time) {
   return '${local.day}.${two(local.month)}';
 }
 
-class _Bubble extends StatelessWidget {
-  const _Bubble({
+class MessageBubble extends StatelessWidget {
+  const MessageBubble({
+    super.key,
     required this.message,
     required this.me,
     required this.mine,
@@ -977,6 +988,8 @@ class _Bubble extends StatelessWidget {
                       message.problem?.extra?['domain'] as String?,
                     ),
                     'forbidden' => texts.cannotMessage,
+                    'rate_limited' => texts.tooManyMessages,
+                    'account_muted' => texts.accountMuted,
                     _ when message.problem != null => texts.mediaProblem(
                       message.problem!,
                     ),
@@ -1177,16 +1190,18 @@ class _Glyph extends StatelessWidget {
 
 /// The message a reply answers, above its words: who wrote it and what, as far as the loaded
 /// thread knows it.
-class _Quote extends StatelessWidget {
-  const _Quote({
+class MessageQuote extends StatelessWidget {
+  const MessageQuote({
     super.key,
     required this.target,
-    required this.conversation,
+    required this.nameOf,
     required this.me,
   });
 
   final ChatMessage? target;
-  final Conversation conversation;
+
+  /// The name of who wrote it, by user id; null when it is not known.
+  final String? Function(String? userId) nameOf;
   final String? me;
 
   @override
@@ -1197,7 +1212,7 @@ class _Quote extends StatelessWidget {
         ? null
         : target.authorId == me
         ? texts.messagesYou
-        : conversation.author(target.authorId)?.displayName;
+        : nameOf(target.authorId);
     final text = target == null
         ? texts.earlierMessage
         : target.deleted
@@ -1259,14 +1274,17 @@ class _Mark extends StatelessWidget {
   );
 }
 
-enum _MessageAction { reply, edit, unsend, report }
+/// What can be done with a message besides reacting.
+enum MessageAction { reply, edit, unsend, report }
 
 enum _ConversationAction { pin, mute }
 
 /// What can be done with a message: the seven reactions on top, then reply, and on one's
-/// own, edit and unsend. Pops a [MessageReaction] or a [_MessageAction].
-class _MessageSheet extends StatelessWidget {
-  const _MessageSheet({
+/// own, edit and unsend; on someone else's, report where [canReport]. Pops a
+/// [MessageReaction] or a [MessageAction].
+class MessageSheet extends StatelessWidget {
+  const MessageSheet({
+    super.key,
     required this.message,
     required this.me,
     required this.canEdit,
@@ -1323,27 +1341,27 @@ class _MessageSheet extends StatelessWidget {
             _SheetRow(
               icon: Icons.reply_rounded,
               label: texts.reply,
-              onTap: () => Navigator.of(context).pop(_MessageAction.reply),
+              onTap: () => Navigator.of(context).pop(MessageAction.reply),
             ),
             if (canEdit)
               _SheetRow(
                 icon: Icons.edit_outlined,
                 label: texts.editMessage,
-                onTap: () => Navigator.of(context).pop(_MessageAction.edit),
+                onTap: () => Navigator.of(context).pop(MessageAction.edit),
               ),
             if (canUnsend)
               _SheetRow(
                 icon: Icons.undo_rounded,
                 label: texts.unsend,
                 color: togetherError,
-                onTap: () => Navigator.of(context).pop(_MessageAction.unsend),
+                onTap: () => Navigator.of(context).pop(MessageAction.unsend),
               ),
             if (canReport)
               _SheetRow(
                 icon: Icons.flag_outlined,
                 label: texts.messageReport,
                 color: togetherError,
-                onTap: () => Navigator.of(context).pop(_MessageAction.report),
+                onTap: () => Navigator.of(context).pop(MessageAction.report),
               ),
           ],
         ),
@@ -1442,16 +1460,16 @@ class _SheetRow extends StatelessWidget {
 }
 
 /// New words for one's own message, in place of the old.
-class _EditDialog extends StatefulWidget {
-  const _EditDialog({required this.text});
+class EditMessageDialog extends StatefulWidget {
+  const EditMessageDialog({super.key, required this.text});
 
   final String text;
 
   @override
-  State<_EditDialog> createState() => _EditDialogState();
+  State<EditMessageDialog> createState() => _EditMessageDialogState();
 }
 
-class _EditDialogState extends State<_EditDialog> {
+class _EditMessageDialogState extends State<EditMessageDialog> {
   late final _text = TextEditingController(text: widget.text);
 
   @override

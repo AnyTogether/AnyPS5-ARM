@@ -48,12 +48,15 @@ extension AppModel {
         return targets.indices.contains(messagesIndex) && targets[messagesIndex] == .newGroup
     }
 
-    func loadInbox() {
+    /// `expecting`: a message came for a conversation the list lacks; read again still without it
+    /// (a party's chat), its messages do not read the list again.
+    func loadInbox(expecting: String? = nil) {
         guard let user = togetherUser else { return }
         Task {
             guard let list = try? await together.conversations() else { return }
             var next = TogetherInbox(me: user.id, conversations: list)
-            next.threads = inbox?.threads ?? [:]
+            if let inbox { next.carry(from: inbox) }
+            next.listed(list, expecting: expecting)
             inboxArrived(next)
         }
     }
@@ -268,7 +271,7 @@ extension AppModel {
 
     /// The user types in the open thread: its other members see so.
     func sayTyping() {
-        guard composing, !messageDraft.isEmpty, let conversation = selectedConversation else { return }
+        guard composing, !chatDraft.isEmpty, let conversation = chatConversation else { return }
         togetherSocket?.typing(in: conversation.id)
     }
 
@@ -300,10 +303,10 @@ extension AppModel {
 
     func sendMessage(_ raw: String) {
         // The field's text while editing says the message again; a quick reply is still a new one.
-        if messageActions.editing != nil, raw == messageDraft { return saveEdit(raw) }
+        if messageActions.editing != nil, raw == chatDraft { return saveEdit(raw) }
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let conversation = selectedConversation, !text.isEmpty else { return }
-        if raw == messageDraft { messageDraft = "" }
+        guard let conversation = chatConversation, !text.isEmpty else { return }
+        if raw == chatDraft { chatDraft = "" }
         let replyTo = messageActions.replyTo
         withAnimation(Motion.focus) { messageActions.replyTo = nil }
         Sounds.shared.play(.select)
@@ -312,26 +315,42 @@ extension AppModel {
         Task {
             do {
                 let sent = try await together.send(text, in: conversation.id, replyTo: replyTo)
-                withAnimation(Motion.focus) { _ = inbox?.apply(sent, open: conversation.id) }
-                keepSelection(conversation.id)
+                withAnimation(Motion.focus) { storeMessage(sent) }
+                if conversation.partyId == nil { keepSelection(conversation.id) }
             } catch let problem as TogetherProblem where problem.code == "e2ee_required" {
                 // Encrypted on the server's side (both people have a device): sealed instead.
                 await e2eeRequired(conversation)
                 sendSealedText(text, raw: raw, in: conversation, replyTo: replyTo)
             } catch {
-                if messageActions.replyTo == nil, selectedConversation?.id == conversation.id { messageActions.replyTo = replyTo }
-                if messageDraft.isEmpty, !AppModel.quickReplies.contains(raw) { messageDraft = raw }
+                if messageActions.replyTo == nil, chatConversation?.id == conversation.id { messageActions.replyTo = replyTo }
+                // The words go back to the field they were typed in.
+                if !AppModel.quickReplies.contains(raw) {
+                    if conversation.partyId != nil { if partyDraft.isEmpty { partyDraft = raw } } else if messageDraft.isEmpty { messageDraft = raw }
+                }
                 if let problem = error as? TogetherProblem, problem.code == "link_blocked" {
                     show(T.text(.togetherLinkBlocked), symbol: "link.badge.plus")
                 } else {
-                    show(T.text(.messagesFailed), symbol: "exclamationmark.bubble.fill")
+                    show(sendRefusal(error), symbol: "exclamationmark.bubble.fill")
                 }
             }
         }
     }
 
+    /// Why a message was not sent: the family's rules, a muted account, too many at once, else
+    /// that it was not sent.
+    func sendRefusal(_ error: Error) -> String {
+        if let family = familyMessage(error) { return family }
+        switch (error as? TogetherProblem)?.code {
+        case "account_muted": return JS.text(.accountMuted)
+        case "rate_limited": return T.text(.togetherTooMany)
+        default: return T.text(.messagesFailed)
+        }
+    }
+
     /// A message event from the socket.
     func messageEvent(_ event: TogetherSocket.Event) {
+        // The party's chat is the party screen's: never in the list, its count or its banners.
+        if partyChatEvent(event) { return }
         switch event.type {
         case "message.created", "message.updated", "message.deleted":
             guard let message = event.decode(TogetherMessage.self) else { return }
@@ -341,7 +360,12 @@ extension AppModel {
             let known = inbox?.apply(message, open: viewing ? message.conversationId : nil) == true
             if message.deletedAt != nil { forgetRemoved(message) }
             if message.sealed != nil { openSealedMessages() }
-            guard known else { return loadInbox() }
+            guard known else {
+                // A new conversation, or one the list never has (another device's party chat):
+                // read again once, not for each of its messages.
+                if inbox?.needsList(for: message.conversationId) ?? true { loadInbox(expecting: message.conversationId) }
+                return
+            }
             // The list moved under the selection: keep the same conversation selected.
             keepSelection(selectedID)
             if viewing, event.type == "message.created" {
@@ -376,6 +400,7 @@ extension AppModel {
             togetherProfile?.readReceipts = on
             loadInbox()
         case "conversation.updated":
+            if let id = event.data["conversationId"], inbox?.unlisted.contains(id) == true { return }
             loadInbox()
         case "typing":
             let data = event.data
@@ -580,6 +605,7 @@ struct MessagesView: View {
 /// The field a message is typed in; Return sends, Escape leaves it.
 struct ComposerField: View {
     let focused: Bool
+    var placeholder = T.text(.messagesWrite)
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
     @FocusState private var editing: Bool
@@ -590,31 +616,38 @@ struct ComposerField: View {
             Image(systemName: "keyboard").font(.system(size: 16 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.55))
             if previewRender {
                 // A text field does not draw offscreen.
-                Text(model.messageDraft.isEmpty ? T.text(.messagesWrite) : model.messageDraft).font(.display(16 * scale))
-                    .foregroundStyle(.white.opacity(model.messageDraft.isEmpty ? 0.4 : 1))
+                Text(model.chatDraft.isEmpty ? placeholder : model.chatDraft).font(.display(16 * scale))
+                    .foregroundStyle(.white.opacity(model.chatDraft.isEmpty ? 0.4 : 1))
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                TextField(T.text(.messagesWrite), text: $model.messageDraft, axis: .vertical)
+                TextField(placeholder, text: $model.chatDraft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.display(16 * scale))
                     .foregroundStyle(.white)
                     .lineLimit(1...4)
                     .focused($editing)
-                    .onSubmit { model.sendMessage(model.messageDraft) }
+                    .onSubmit { model.sendMessage(model.chatDraft) }
                     .onExitCommand { model.composing = false }
-                    .onChange(of: model.messageDraft) { _, _ in model.sayTyping() }
+                    .onChange(of: model.chatDraft) { _, _ in model.sayTyping() }
             }
             Image(systemName: model.messageActions.editing != nil ? "checkmark.circle.fill" : "paperplane.fill").font(.system(size: 16 * scale, weight: .semibold))
-                .foregroundStyle(model.messageDraft.isEmpty ? .white.opacity(0.3) : model.accent)
-                .onTapGesture { model.sendMessage(model.messageDraft) }
+                .foregroundStyle(model.chatDraft.isEmpty ? .white.opacity(0.3) : model.accent)
+                .onTapGesture { model.sendMessage(model.chatDraft) }
         }
         .padding(.horizontal, 18 * scale)
         .padding(.vertical, 14 * scale)
         .background(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(Color.white.opacity(focused || model.composing ? 0.12 : 0.06)))
         .focusRing(focused && !model.composing, radius: 16 * scale, width: 2)
         .onChange(of: model.composing) { _, on in editing = on }
-        .onChange(of: editing) { _, on in if model.composing != on { model.composing = on } }
-        .onTapGesture { model.composing = true }
+        .onChange(of: editing) { _, on in
+            if model.composing != on { model.composing = on }
+            // Typing in the party's chat puts the controller's focus there too.
+            if on, model.partyChatShown, !model.partyChatFocused { model.partyChatFocused = true }
+        }
+        .onTapGesture {
+            if model.partyChatShown { model.partyChatFocused = true }
+            model.composing = true
+        }
     }
 }
 
@@ -872,7 +905,7 @@ struct MessageList: View {
                 if mine { Spacer(minLength: 120 * scale) }
                 VStack(alignment: mine ? .trailing : .leading, spacing: 4 * scale) {
                     if first, !mine, conversation.kind == "group" {
-                        Text(conversation.members.first { $0.userId == message.authorId }?.displayName ?? "")
+                        Text(model.authorName(message.authorId, in: conversation))
                             .font(.display(12 * scale, .semibold)).foregroundStyle(.white.opacity(0.55))
                     }
                     if message.deletedAt == nil, let quote = TogetherQuote(seq: message.replyTo, in: messages) {

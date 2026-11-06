@@ -479,8 +479,52 @@ Map<String, dynamic> get _notifications => {
   'more': false,
 };
 
+/// The party's chat beside its voice.
+final _partyChat = [
+  ('kenji', 'Moss Mother down. finally', 9),
+  ('mira', 'GG! who is on bench duty', 8),
+  ('ines', 'me, grabbing the second pad', 6),
+  ('theo', 'mic is broken, typing here instead', 4),
+  ('sol', 'joining at the next save point', 2),
+];
+
+Map<String, dynamic> get _partyThread => {
+  'messages': [
+    for (final (i, (author, text, minutes)) in _partyChat.indexed)
+      {
+        ..._message('pc-ines', i + 1, author, text, Duration(minutes: minutes)),
+        if (i == 1)
+          'reactions': [
+            {
+              'reaction': 'gg',
+              'count': 2,
+              'userIds': ['ines', 'kenji'],
+            },
+          ],
+        if (i == 2) 'replyTo': 2,
+      },
+  ],
+  'more': false,
+};
+
+Map<String, dynamic> get _partyConversation => {
+  'id': 'pc-ines',
+  'kind': 'group',
+  'title': null,
+  'createdBy': 'ines',
+  'partyId': 'p-ines',
+  'members': [ines.card, mira.card, kenji.card, sol.card, theo.card],
+  'lastSeq': _partyChat.length,
+  'readSeq': _partyChat.length - 1,
+  'unread': 1,
+  'muted': true,
+  'lastMessage': null,
+  'updatedAt': _at(const Duration(minutes: 2)),
+};
+
 Map<String, dynamic> get partyJson => {
   'id': 'p-ines',
+  'conversationId': 'pc-ines',
   'leaderId': 'ines',
   'privacy': 'friends',
   'members': [ines.card, mira.card, kenji.card, sol.card, theo.card],
@@ -560,6 +604,8 @@ Map<String, dynamic> answer(
     ('GET', 'me/conversations') => _conversations,
     ('GET', 'me/conversations/unread') => {'conversations': 2, 'messages': 3},
     ('GET', 'conversations/c-mira/messages') => _thread,
+    ('GET', 'conversations/pc-ines') => _partyConversation,
+    ('GET', 'conversations/pc-ines/messages') => _partyThread,
     ('GET', 'me/feed') => _feed,
     ('GET', 'me/notifications') => _notifications,
     ('GET', 'me/notifications/unread') => {'unread': 3},

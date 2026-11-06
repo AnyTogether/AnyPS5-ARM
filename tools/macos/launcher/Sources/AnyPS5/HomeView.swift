@@ -205,7 +205,7 @@ struct TopBar: View {
             iconButton("bubble.left.and.bubble.right.fill", index: 3, badge: model.unreadMessages) { model.openMessages() }
             // In the party's voice: the microphone, ringed while someone speaks.
             iconButton(model.voiceCall == nil ? (model.party == nil ? "person.3" : "person.3.fill") : (model.micSending ? "mic.fill" : "mic.slash.fill"),
-                       index: 4, badge: model.partyInvites.count, ring: !model.voiceSpeaking.isEmpty) { model.open(.party) }
+                       index: 4, badge: model.partyInvites.count, ring: !model.voiceSpeaking.isEmpty, dot: model.partyChatUnread > 0) { model.open(.party) }
             iconButton(model.social.notifications.unread > 0 ? "bell.badge.fill" : "bell.fill", index: 5, badge: model.social.notifications.unread) { model.openNotifications() }
             // A controller running out of battery says so here (and in Settings → Controllers).
             if let pad = PadTroubleshooter.lowBatteryPad(Controllers.shared.pads) { PadStatusPill(pad: pad) }
@@ -232,7 +232,7 @@ struct TopBar: View {
         .animation(Motion.overlay, value: model.phone != nil || model.phoneConnecting != nil || !model.phoneBadges.isEmpty)
     }
 
-    private func iconButton(_ symbol: String, index: Int, badge: Int = 0, ring: Bool = false, action: @escaping () -> Void) -> some View {
+    private func iconButton(_ symbol: String, index: Int, badge: Int = 0, ring: Bool = false, dot: Bool = false, action: @escaping () -> Void) -> some View {
         let focused = model.focus == .top(index) && model.overlay == nil
         return Button(action: action) {
             Group {
@@ -254,6 +254,12 @@ struct TopBar: View {
                         Text("\(min(badge, 99))").font(.display(11 * scale, .bold)).foregroundStyle(look.glass ? model.accent.onFill : .white)
                             .padding(.horizontal, 5 * scale).frame(minWidth: 18 * scale, minHeight: 18 * scale)
                             .background(Capsule().fill(model.accent)).offset(x: 4 * scale, y: -4 * scale)
+                    } else if dot {
+                        // Something new to read where it is not on screen (the party's chat).
+                        Circle().fill(model.accent).frame(width: 10 * scale, height: 10 * scale)
+                            .overlay(Circle().strokeBorder(Color.black.opacity(0.5), lineWidth: 1.5 * scale))
+                            .offset(x: 1 * scale, y: -1 * scale)
+                            .transition(.scale.combined(with: .opacity))
                     }
                 }
                 .scaleEffect(focused ? 1.1 : 1)
@@ -853,6 +859,11 @@ extension AppModel {
             }
             return panelCommand(command)
         case .friends, .party:
+            // The party's chat while it has the focus, or a message's menu over it.
+            if overlay == .party, partyChatShown, partyChatFocused || messageActions.menu != nil {
+                partyChatCommand(command)
+                return true
+            }
             if command == .back {
                 // A question asked in place (AskFirst.swift) is answered Cancel first.
                 if !cancelAsk() { closeOverlay() }

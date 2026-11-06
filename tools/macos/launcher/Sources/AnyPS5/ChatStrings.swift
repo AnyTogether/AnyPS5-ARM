@@ -2,7 +2,7 @@ import AnyPS5Core
 import Foundation
 
 /// The texts of reactions, replies, editing and unsending, receipts, pinned and muted
-/// conversations, the read receipts setting, end-to-end encryption and reporting, from the language files (l10n) (the same words the website
+/// conversations, the read receipts setting, end-to-end encryption, reporting and the party's chat, from the language files (l10n) (the same words the website
 /// uses). `TChat.text(.key)` reads the launcher's language.
 enum TChat {
     static func text(_ key: Key) -> String { T.string(key.rawValue) }
@@ -24,6 +24,8 @@ enum TChat {
         // Reporting a message (the website's words).
         case report = "messagesReport", reportLead = "messagesReportLead", reported = "messagesReported"
         case reasonSpam = "reportReasonSpam", reasonHarassment = "reportReasonHarassment", reasonHate = "reportReasonHate", reasonSexual = "reportReasonSexual", reasonOther = "reportReasonOther"
+        // The party's chat beside its voice.
+        case partyChat = "partyChatTitle", partyChatPlaceholder, partyChatEmpty, formerMember = "messagesFormerMember"
     }
 
     /// The reasons a message can be reported for, as the server names them.

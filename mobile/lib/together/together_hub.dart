@@ -10,6 +10,7 @@ import 'media_livekit.dart';
 import 'messages.dart';
 import 'notifications.dart';
 import 'parties.dart';
+import 'party_chat.dart';
 import 'push.dart';
 import 'share_play.dart';
 import 'share_play_webrtc.dart';
@@ -47,6 +48,12 @@ class TogetherHub extends ChangeNotifier {
       ..addListener(notifyListeners);
     parties = Parties(account: account, socket: this.socket)
       ..addListener(notifyListeners);
+    partyChat = PartyChat(
+      account: account,
+      socket: this.socket,
+      parties: parties,
+    );
+    messages.aside = partyChat.owns;
     feed = Feed(account: account, socket: this.socket)
       ..addListener(notifyListeners);
     notifications = Notifications(account: account, socket: this.socket)
@@ -105,6 +112,9 @@ class TogetherHub extends ChangeNotifier {
   late final E2ee e2ee;
   late final Messages messages;
   late final Parties parties;
+
+  /// The text chat beside the party's voice; kept out of [messages] and its count.
+  late final PartyChat partyChat;
   late final Feed feed;
 
   /// The bell: what happened while away, and its unread count.
@@ -174,6 +184,7 @@ class TogetherHub extends ChangeNotifier {
     friends.clear();
     messages.clear();
     parties.clear();
+    partyChat.clear();
     feed.clear();
     notifications.clear();
     sharePlays.clear();
@@ -202,6 +213,7 @@ class TogetherHub extends ChangeNotifier {
     voice.dispose();
     sharePlays.dispose();
     discover.dispose();
+    partyChat.dispose();
     parties.dispose();
     feed.dispose();
     notifications.dispose();

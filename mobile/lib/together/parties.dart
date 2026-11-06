@@ -59,6 +59,7 @@ class Party {
     this.deafened = const {},
     this.joinCode,
     this.discord,
+    this.conversationId,
     this.max = maxPartySize,
     this.callMedia = MediaRoute.mesh,
   });
@@ -95,6 +96,7 @@ class Party {
           : const {},
       joinCode: JoinCode.fromJson(json['joinCode']),
       discord: json['discord'] as String?,
+      conversationId: json['conversationId'] as String?,
       max: (json['max'] as num?)?.toInt() ?? maxPartySize,
       callMedia: call is Map<String, dynamic>
           ? mediaRouteFrom(call['media'])
@@ -135,6 +137,10 @@ class Party {
   /// The party's Discord server or channel, set by the leader (members see it).
   final String? discord;
 
+  /// The party's text chat, for its members; null from an older server or for someone who is
+  /// not in it.
+  final String? conversationId;
+
   /// How many the party may hold on this server: eight, or more with a media server.
   final int max;
 
@@ -168,6 +174,7 @@ class Party {
     deafened: deafened,
     joinCode: joinCode,
     discord: discord,
+    conversationId: conversationId,
     max: max,
     callMedia: callMedia ?? this.callMedia,
   );
@@ -343,6 +350,7 @@ class Parties extends ChangeNotifier {
     deafened: p.deafened,
     joinCode: joinCode == null ? p.joinCode : joinCode(),
     discord: p.discord,
+    conversationId: p.conversationId,
     max: p.max,
     callMedia: p.callMedia,
   );

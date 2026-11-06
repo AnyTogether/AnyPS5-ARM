@@ -277,7 +277,7 @@ extension AppModel {
 
     /// Whether the user may edit the message: for a sealed one, only once it opened here.
     func canEditMessage(_ message: TogetherMessage) -> Bool {
-        guard let me = inbox?.me else { return false }
+        guard let me = chatMe else { return false }
         guard message.sealed != nil else { return message.canEdit(by: me) }
         guard let payload = sealedPayload(message), message.authorId == me, message.deletedAt == nil, message.editCount < TogetherMessage.maxEdits,
               Date().timeIntervalSince(message.createdAt) < TogetherMessage.editWindow else { return false }

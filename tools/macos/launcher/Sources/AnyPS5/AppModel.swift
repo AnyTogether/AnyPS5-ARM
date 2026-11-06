@@ -1100,6 +1100,11 @@ final class AppModel: ObservableObject {
     }
     @Published var partyInvites: [TogetherPartyInvite] = []
     @Published var partyStartsOpen = false
+    /// The party's text chat beside its voice (PartyChat.swift): its messages, whether the
+    /// controller's focus is in it rather than in the party's rows, and what is typed there.
+    @Published var partyChat: TogetherPartyChat?
+    @Published var partyChatFocused = false
+    @Published var partyDraft = ""
     /// "Join with a code": what was typed, what it opens, and asking with it.
     @Published var joinEntry = JoinEntry()
     var joinLookup: Task<Void, Never>?
@@ -2380,6 +2385,7 @@ final class AppModel: ObservableObject {
 
     /// Since when the user is in the party, for Discord; a party left forgets who asked with its code.
     func partyChanged() {
+        syncPartyChat()
         // The party's call moved to the media server: the voice follows.
         if let call = party?.call, call.media == .sfu, call.id == voiceCall { moveVoiceToMediaServer(call.id) }
         guard party?.id != partySince?.id else { return updateDiscord() }
@@ -2954,6 +2960,7 @@ final class AppModel: ObservableObject {
         // The screens that show the own name and handle read them again first.
         if next == .friends || next == .profile || next == .settings { refreshOwnProfile() }
         if next == .party {
+            openPartyChat()
             loadParty()
             if togetherFriends.isEmpty { refreshFriends() }
         }

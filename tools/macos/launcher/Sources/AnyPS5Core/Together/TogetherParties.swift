@@ -52,6 +52,8 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
     public let discord: String?
     /// The party's Play Together game while one runs (older servers never say).
     public let together: TogetherPartyTogether?
+    /// The party's text chat, an ordinary group conversation, for its members (older servers never say: then there is none).
+    public let conversationId: String?
     /// How many the party may hold on this server: more than eight with a media server (older
     /// servers never say).
     public let max: Int?
@@ -60,13 +62,13 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
     public var capacity: Int { max ?? TogetherParty.maxSize }
 
     enum CodingKeys: String, CodingKey {
-        case id, leaderId, privacy, members, invited, call, requests, joinCode, discord, together, max
+        case id, leaderId, privacy, members, invited, call, requests, joinCode, discord, together, max, conversationId
         case listing = "public"
     }
 
     public init(id: String, leaderId: String, privacy: String, members: [TogetherPerson], invited: [TogetherPerson], call: Call?,
                 listing: TogetherPartyListing? = nil, requests: [TogetherPerson]? = nil, joinCode: TogetherJoinCode? = nil, discord: String? = nil,
-                together: TogetherPartyTogether? = nil, max: Int? = nil) {
+                together: TogetherPartyTogether? = nil, max: Int? = nil, conversationId: String? = nil) {
         self.max = max
         self.id = id
         self.leaderId = leaderId
@@ -79,18 +81,19 @@ public struct TogetherParty: Decodable, Equatable, Sendable, Identifiable {
         self.joinCode = joinCode
         self.discord = discord
         self.together = together
+        self.conversationId = conversationId
     }
 
     /// The same party with these members and call (someone taken out here before the server says).
     public func with(members: [TogetherPerson], call: Call?) -> TogetherParty {
         TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests,
-                      joinCode: joinCode, discord: discord, together: together, max: max)
+                      joinCode: joinCode, discord: discord, together: together, max: max, conversationId: conversationId)
     }
 
     /// The same party with a new code, or none (made or stopped here before the server says).
     public func with(joinCode: TogetherJoinCode?) -> TogetherParty {
         TogetherParty(id: id, leaderId: leaderId, privacy: privacy, members: members, invited: invited, call: call, listing: listing, requests: requests,
-                      joinCode: joinCode, discord: discord, together: together, max: max)
+                      joinCode: joinCode, discord: discord, together: together, max: max, conversationId: conversationId)
     }
 
     public var open: Bool { privacy == "friends" }

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../chat_strings.dart';
 import '../discover_strings.dart';
 import '../join_strings.dart';
 import '../safety_strings.dart';
 import '../strings.dart';
 import '../together/join_codes.dart';
 import '../together/parties.dart';
+import '../together/party_chat.dart';
 import '../together/people.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
@@ -13,6 +15,7 @@ import '../together/voice.dart';
 import 'ask_first.dart';
 import 'find_players_view.dart';
 import 'join_code_view.dart';
+import 'party_chat_view.dart';
 import 'together_widgets.dart';
 
 /// The party: without one, a way to start one and the invites and friends' open parties to
@@ -30,6 +33,9 @@ class PartyPane extends StatefulWidget {
 class _PartyPaneState extends State<PartyPane> {
   String? _error;
   bool _busy = false;
+
+  /// On a small phone, the party's chat shown in place of the party.
+  bool _chatShown = false;
   late final _codes = JoinCodes(widget.hub.account);
 
   @override
@@ -40,6 +46,8 @@ class _PartyPaneState extends State<PartyPane> {
       widget.hub.friends.refresh().catchError((_) {});
     }
   }
+
+  void _showChat(bool shown) => setState(() => _chatShown = shown);
 
   Future<void> _try(Future<void> Function() step) async {
     final texts = Texts.of(context);
@@ -65,6 +73,7 @@ class _PartyPaneState extends State<PartyPane> {
         widget.hub.parties,
         widget.hub.friends,
         widget.hub.voice,
+        widget.hub.partyChat,
       ]),
       builder: (context, _) {
         final party = widget.hub.parties.party;
@@ -222,18 +231,22 @@ class _PartyPaneState extends State<PartyPane> {
               !party.invited.any((p) => p.id == f.person.id),
         )
         .toList();
+    final chat =
+        party.conversationId != null &&
+            widget.hub.partyChat.id == party.conversationId
+        ? widget.hub.partyChat
+        : null;
+    final title = Row(
+      children: [
+        Text(texts.party, style: _title),
+        const SizedBox(width: 10),
+        Text(
+          '${party.members.length}/${party.max}',
+          style: const TextStyle(color: Colors.white38, fontSize: 14),
+        ),
+      ],
+    );
     final main = <Widget>[
-      Row(
-        children: [
-          Text(texts.party, style: _title),
-          const SizedBox(width: 10),
-          Text(
-            '${party.members.length}/${party.max}',
-            style: const TextStyle(color: Colors.white38, fontSize: 14),
-          ),
-        ],
-      ),
-      const SizedBox(height: 14),
       Wrap(
         spacing: 14,
         runSpacing: 14,
@@ -330,9 +343,7 @@ class _PartyPaneState extends State<PartyPane> {
       ],
       if (_error != null) _errorText,
     ];
-    final side = <Widget>[
-      SectionLabel(texts.voice),
-      _voiceCard(texts, party, voice),
+    final manage = <Widget>[
       SectionLabel(texts.partyInviteFriends),
       if (invitable.isEmpty)
         Text(
@@ -389,6 +400,12 @@ class _PartyPaneState extends State<PartyPane> {
         label: Text(texts.partyLeave),
       ),
     ];
+    final side = <Widget>[
+      SectionLabel(texts.voice),
+      _voiceCard(texts, party, voice),
+      ...manage,
+    ];
+    if (chat != null) return _withChat(texts, party, chat, title, main, manage);
     return LayoutBuilder(
       builder: (context, box) {
         // A small phone has no room for the party beside the voice and invite column: one
@@ -396,7 +413,13 @@ class _PartyPaneState extends State<PartyPane> {
         if (box.maxWidth < 600) {
           return ListView(
             padding: const EdgeInsets.fromLTRB(22, 16, 18, 18),
-            children: [...main, const SizedBox(height: 6), ...side],
+            children: [
+              title,
+              const SizedBox(height: 14),
+              ...main,
+              const SizedBox(height: 6),
+              ...side,
+            ],
           );
         }
         return Row(
@@ -405,7 +428,7 @@ class _PartyPaneState extends State<PartyPane> {
             Expanded(
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(22, 16, 14, 18),
-                children: main,
+                children: [title, const SizedBox(height: 14), ...main],
               ),
             ),
             const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
@@ -424,6 +447,107 @@ class _PartyPaneState extends State<PartyPane> {
 }
 
 extension on _PartyPaneState {
+  /// The party with its chat. Wide: the party and what to do with it on the left, its voice and
+  /// the chat under it on the right. A small phone: the party or the chat, picked at the top,
+  /// the voice above the chat while there is room for both.
+  Widget _withChat(
+    Strings texts,
+    Party party,
+    PartyChat chat,
+    Widget title,
+    List<Widget> main,
+    List<Widget> manage,
+  ) {
+    final voice = widget.hub.voice;
+    Widget voiceAndChat({required bool label}) => LayoutBuilder(
+      builder: (context, box) {
+        // The keyboard up, or a short screen: the chat keeps the room.
+        final room = box.maxHeight >= (label ? 330 : 250);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (room) ...[
+              if (label) SectionLabel(texts.voice),
+              _voiceCard(texts, party, voice),
+            ],
+            if (label)
+              SectionLabel(texts.partyChat)
+            else if (room)
+              const SizedBox(height: 10),
+            Expanded(
+              child: PartyChatPanel(
+                chat: chat,
+                typing: widget.hub.typing,
+                me: widget.hub.me,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    return LayoutBuilder(
+      builder: (context, box) {
+        if (box.maxWidth < 600) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 18, 4),
+                child: _PartyTabs(
+                  count: '${party.members.length}/${party.max}',
+                  chatShown: _chatShown,
+                  unread: chat.unread > 0,
+                  onPick: _showChat,
+                ),
+              ),
+              Expanded(
+                child: _chatShown
+                    ? Padding(
+                        padding: const EdgeInsets.fromLTRB(22, 4, 18, 12),
+                        child: voiceAndChat(label: false),
+                      )
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(22, 8, 18, 18),
+                        children: [
+                          ...main,
+                          SectionLabel(texts.voice),
+                          _voiceCard(texts, party, voice),
+                          ...manage,
+                        ],
+                      ),
+              ),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(22, 16, 14, 18),
+                children: [
+                  title,
+                  const SizedBox(height: 14),
+                  ...main,
+                  const SizedBox(height: 6),
+                  ...manage,
+                ],
+              ),
+            ),
+            const VerticalDivider(width: 1, color: Color(0x14FFFFFF)),
+            SizedBox(
+              width: (box.maxWidth * 0.44).clamp(270, 400),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 14, 12),
+                child: voiceAndChat(label: true),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   /// Leader only: the party in the public list or not, how people get in, and its language.
   Widget _publicListing(Strings texts, Party party) {
     final listing = party.listing;
@@ -786,6 +910,109 @@ class _Row extends StatelessWidget {
         ),
         trailing,
       ],
+    ),
+  );
+}
+
+/// The top of the party on a small phone: the party with how many are in it, or its chat,
+/// set as two titles; a dot on the chat while something in it is unread.
+class _PartyTabs extends StatelessWidget {
+  const _PartyTabs({
+    required this.count,
+    required this.chatShown,
+    required this.unread,
+    required this.onPick,
+  });
+
+  final String count;
+  final bool chatShown;
+  final bool unread;
+  final ValueChanged<bool> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    // Large text on the smallest phone: the two titles shrink rather than run off.
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.centerLeft,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _PartyTab(
+            label: texts.party,
+            extra: Text(
+              count,
+              style: const TextStyle(color: Colors.white38, fontSize: 14),
+            ),
+            selected: !chatShown,
+            onTap: () => onPick(false),
+          ),
+          const SizedBox(width: 4),
+          _PartyTab(
+            label: texts.partyChat,
+            extra: AnimatedScale(
+              scale: unread && !chatShown ? 1 : 0,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOutBack,
+              child: Container(
+                key: const ValueKey('party-chat-unread'),
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: togetherAccent,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            selected: chatShown,
+            onTap: () => onPick(true),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PartyTab extends StatelessWidget {
+  const _PartyTab({
+    required this.label,
+    required this.extra,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final Widget extra;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    child: InkWell(
+      onTap: selected ? null : onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(6, 6, 8, 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 160),
+              style: DefaultTextStyle.of(context).style.copyWith(
+                color: selected ? Colors.white : Colors.white38,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+              ),
+              child: Text(label),
+            ),
+            const SizedBox(width: 8),
+            extra,
+          ],
+        ),
+      ),
     ),
   );
 }

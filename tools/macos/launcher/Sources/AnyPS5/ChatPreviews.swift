@@ -70,12 +70,75 @@ enum ChatPreviews {
             model.messagesIndex = 1
             model.messageActions.menu = .init(target: .conversation("c3"), row: 1)
         }
+        partyChat(preferences, found, root, still, output)
         render("chat-settings") { model in
             model.togetherProfile = TogetherOwnProfile(handle: "robin", displayName: "Robin", bio: nil, avatar: nil, country: "TR", handleChangeAt: nil, privacy: .standard, readReceipts: false)
             model.overlay = .settings
             model.panelCategory = model.panelCategories().firstIndex { $0.id == "together" } ?? 0
             model.panelInRows = true
             model.panelRow = model.panelCategories()[model.panelCategory].rows.firstIndex { $0.id == "privacy-read-receipts" } ?? 0
+        }
+    }
+
+    /// The party screen with its chat beside the voice: a lively one (Kenji left, Ana was never
+    /// seen in the party here), an empty one, the chat focused with a reply and someone typing,
+    /// a message's menu and the reasons to report it; the party's button with something unread.
+    static func partyChat(_ preferences: Preferences, _ found: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
+        let ago = { (minutes: Double) in Date().addingTimeInterval(-minutes * 60) }
+        let robin = TogetherPerson(userId: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+        let mira = TogetherPerson(userId: "f1", handle: "mira", displayName: "Mira", avatar: nil)
+        let sol = TogetherPerson(userId: "f2", handle: "sol", displayName: "Sol", avatar: nil)
+        let kenji = TogetherPerson(userId: "f3", handle: "kenji", displayName: "Kenji", avatar: nil)
+        let lines: [(String, String, Int?)] = [("f9", "Anyone up for the raid later?", nil), ("f3", "I'm out for tonight, have fun", nil),
+                                               ("f1", "Boss is at 20%, keep the adds off me", nil), ("f2", "On it. Rezzing in 3", nil),
+                                               ("u1", "Swap to fire, it's weak to it", 3), ("f1", "GG!! First clear 🔥", nil)]
+        var thread = lines.enumerated().map { index, line in
+            TogetherMessage(id: "p\(index)", conversationId: "pc1", seq: index + 1, authorId: line.0, text: line.1, replyTo: line.2, createdAt: ago(Double(lines.count - index) * 3))
+        }
+        thread[4].reactions = [TogetherReactionCount(reaction: .fire, count: 2, userIds: ["f1", "f2"])]
+        thread[5].reactions = [TogetherReactionCount(reaction: .gg, count: 3, userIds: ["u1", "f2", "f1"])]
+        let party = TogetherParty(id: "p1", leaderId: "u1", privacy: "friends", members: [robin, mira, sol], invited: [],
+                                  call: .init(id: "call1", in: ["u1", "f1", "f2"]), conversationId: "pc1")
+        let friends = [TogetherFriend(userId: "f5", handle: "theo", displayName: "Theo", avatar: nil, presence: .init(state: "online", titleId: nil, since: nil))]
+        let render = { (name: String, messages: [TogetherMessage], configure: (AppModel) -> Void) in
+            PreviewRenderer.render(preferences, found, root, still, output.appendingPathComponent("\(name).png")) { model in
+                model.togetherUser = SocialPreviews.me
+                model.togetherFriends = friends
+                model.previewParty(party)
+                model.previewPartyChat(messages, seen: [kenji])
+                model.previewVoice(call: "call1", speaking: ["f1"])
+                model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+                configure(model)
+            }
+        }
+        render("party-chat", thread) { _ in }
+        render("party-chat-empty", []) { model in model.previewVoice(call: "call1", speaking: []) }
+        render("party-chat-focused", thread) { model in
+            model.partyChatFocused = true
+            model.messageActions.replyTo = 6
+            model.partyDraft = "Next one at 9?"
+            model.typing.typing("f2", in: "pc1")
+        }
+        render("party-chat-picked", thread) { model in
+            model.partyChatFocused = true
+            model.messageActions.picked = 4
+        }
+        render("party-chat-menu", thread) { model in
+            model.partyChatFocused = true
+            model.messageActions.picked = 4
+            model.messageActions.menu = .init(target: .message(conversation: "pc1", seq: 4), row: 2)
+        }
+        render("party-chat-report", thread) { model in
+            model.partyChatFocused = true
+            model.messageActions.picked = 4
+            model.messageActions.menu = .init(target: .report(conversation: "pc1", seq: 4), row: 1)
+        }
+        PreviewRenderer.render(preferences, found, root, still, output.appendingPathComponent("home-party-unread.png")) { model in
+            model.togetherUser = SocialPreviews.me
+            model.previewParty(party)
+            model.previewPartyChat(Array(thread.prefix(4)))
+            model.partyChat?.apply(thread[5], me: "u1", open: false)
+            model.focus = .top(4)
         }
     }
 }
