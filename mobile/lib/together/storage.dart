@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'e2ee.dart';
+
 /// What a message holds: text, or one piece of media with an optional caption.
 enum MediaKind {
   text,
@@ -83,6 +85,9 @@ class Attachment {
     this.removed = false,
     this.blocked = false,
     this.local,
+    this.sealed = false,
+    this.file,
+    this.posterFile,
   });
 
   factory Attachment.fromJson(Map<String, dynamic> json) => Attachment(
@@ -97,6 +102,7 @@ class Attachment {
     contentType: json['contentType'] as String?,
     removed: json['removed'] == true,
     blocked: json['blocked'] == true,
+    sealed: json['sealed'] == true,
   );
 
   final String id;
@@ -114,8 +120,35 @@ class Attachment {
   /// The picture itself while it is still on its way from this phone.
   final Uint8List? local;
 
-  /// There is something to show.
-  bool get shown => !removed && !blocked && (url != null || local != null);
+  /// Encrypted on the sender's device: [url] and [poster] serve ciphertext, opened with [file]
+  /// and [posterFile] from the sealed message.
+  final bool sealed;
+  final SealedFileKey? file;
+  final SealedFileKey? posterFile;
+
+  /// There is something to show; for sealed media, also the key to open it.
+  bool get shown =>
+      !removed &&
+      !blocked &&
+      (local != null || (url != null && (!sealed || file != null)));
+
+  /// The same media with the keys, size and type the sealed message gives for it.
+  Attachment opened(SealedAttachment keys) => Attachment(
+    id: id,
+    kind: MediaKind.parse(keys.kind, fallback: kind),
+    url: url,
+    poster: poster,
+    width: keys.width ?? width,
+    height: keys.height ?? height,
+    durationMs: keys.durationMs ?? durationMs,
+    contentType: keys.type,
+    removed: removed,
+    blocked: blocked,
+    local: local,
+    sealed: true,
+    file: SealedFileKey(key: keys.key, nonce: keys.nonce, type: keys.type),
+    posterFile: keys.poster,
+  );
 
   Duration? get duration =>
       durationMs == null ? null : Duration(milliseconds: durationMs!);

@@ -386,6 +386,8 @@ class _NoticeRow extends StatelessWidget {
             TextSpan(text: line.substring(at + '{name}'.length)),
           ];
     final extra = switch (notice.kind) {
+      // A sealed message's notification carries no text; the line above says it all.
+      NoticeKind.message when notice.data['sealed'] == true => null,
       NoticeKind.message => notice.data['text'] as String?,
       NoticeKind.gameInvite => texts.gameInviteHint,
       NoticeKind.lfgAccepted => texts.lfgAcceptedHint(notice),
