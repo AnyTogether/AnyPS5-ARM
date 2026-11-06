@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5MediaServer
 import AnyPS5Online
 import AppKit
 import Combine
@@ -1139,9 +1140,14 @@ final class AppModel: ObservableObject {
     }
     var shareSession: ShareSession?
     var shareWatch: ShareWatchSession?
+    /// What AnyTogether holds: a media server for big share plays and parties or not (nil until
+    /// it said; the mesh's limits then).
+    @Published var mediaLimits: TogetherMediaLimits?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
     var partyVoice: PartyVoice?
+    /// The party's voice through the media server, once the call moved there (the mesh is closed then).
+    var sfuVoice: SfuVoice?
     /// The microphone's switch and deafening.
     @Published var mic = TogetherVoiceMic()
     var micOn: Bool { mic.on }
@@ -2364,6 +2370,8 @@ final class AppModel: ObservableObject {
 
     /// Since when the user is in the party, for Discord; a party left forgets who asked with its code.
     func partyChanged() {
+        // The party's call moved to the media server: the voice follows.
+        if let call = party?.call, call.media == .sfu, call.id == voiceCall { moveVoiceToMediaServer(call.id) }
         guard party?.id != partySince?.id else { return updateDiscord() }
         partySince = party.map { ($0.id, Date()) }
         codeAskers = []
@@ -2407,7 +2415,7 @@ final class AppModel: ObservableObject {
             }
         }
         let activity = DiscordActivity(game: game?.name, since: game != nil ? discordSince ?? sessionStart : partySince?.at,
-                                       party: party.map { DiscordActivity.Party(id: $0.id, size: $0.members.count, max: TogetherParty.maxSize) },
+                                       party: party.map { DiscordActivity.Party(id: $0.id, size: $0.members.count, max: $0.capacity) },
                                        button: button, partyText: JS.text(.inParty))
         guard activity != discordShown else { return }
         discordShown = activity

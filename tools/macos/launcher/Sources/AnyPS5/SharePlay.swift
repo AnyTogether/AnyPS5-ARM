@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5MediaServer
 import AnyPS5SharePlay
 import AppKit
 import SwiftUI
@@ -16,6 +17,10 @@ struct ShareState {
     var watching: TogetherSharePlay?
     var watchConnected = false
     var watchStats: WatchStats?
+    /// Watching from the media server rather than straight from the host.
+    var watchViaServer = false
+    /// The hosted share play's picture is out on the media server.
+    var hostingViaServer = false
 
     struct WatchStats: Equatable {
         var roundTrip: Double?
@@ -34,6 +39,17 @@ final class ShareSession {
     let capture = SharePlayCapture()
     let awake = Awake("Share play")
     var viewers: [TogetherSharePlay.Viewer] = []
+    /// The share play as the server said last.
+    var sharePlay: TogetherSharePlay?
+    /// The viewers with a direct (mesh) connection here: everyone on the mesh; through the media
+    /// server, pad holders and the older viewer apps in `asked`.
+    var mesh: [TogetherSharePlay.Viewer] = []
+    /// Viewers without a pad who asked for a mesh connection while the share play went through the
+    /// media server (viewer apps from before it), and were served.
+    var asked: Set<String> = []
+    /// The picture and sound published once to the media server, while the share play goes through it.
+    var mediaServer: SfuShareHost?
+    var mediaServerTried = false
     var renewal: Task<Void, Never>?
 
     init(id: String, host: SharePlayHost, router: SharePadRouter) {
@@ -66,10 +82,20 @@ extension AppModel {
         set { UserDefaults.standard.set(newValue, forKey: AppModel.openKey) }
     }
 
-    /// How many may watch at once (the Mac uploads a stream each).
+    /// How many may watch at once: up to four on the mesh (the Mac uploads a stream each), more
+    /// with AnyTogether's media server, up to what it takes.
     var shareMaxViewers: Int {
-        get { min(SharePlayRoster.maxViewers, max(1, UserDefaults.standard.object(forKey: AppModel.viewersKey) as? Int ?? 2)) }
+        get { SharePlayMedia.clampViewers(UserDefaults.standard.object(forKey: AppModel.viewersKey) as? Int ?? 2, mediaLimits) }
         set { UserDefaults.standard.set(newValue, forKey: AppModel.viewersKey) }
+    }
+
+    /// What the server holds (a media server or not); the mesh's limits until it answers.
+    func loadMediaLimits() {
+        let client = together
+        Task {
+            guard let limits = try? await client.mediaServer() else { return }
+            if limits != mediaLimits { mediaLimits = limits }
+        }
     }
 
     // MARK: Hosting
@@ -82,6 +108,7 @@ extension AppModel {
         Task {
             defer { share.starting = false }
             do {
+                if mediaLimits == nil, let limits = try? await together.mediaServer() { mediaLimits = limits }
                 let joined = try await together.startSharePlay(titleId: game.titleID, title: game.name, open: shareOpensToFriends, maxViewers: shareMaxViewers)
                 guard self.running?.app.processIdentifier == pid else {
                     try? await together.endSharePlay(joined.sharePlay.id)
@@ -89,7 +116,7 @@ extension AppModel {
                 }
                 let session = makeShareSession(joined)
                 shareSession = session
-                applyShare(joined.sharePlay)
+                applyShare(joined.sharePlay, access: joined.sfu)
                 renewShareRelays(session, expiresAt: joined.expiresAt)
                 do {
                     try await session.capture.start(pid: pid, host: session.host)
@@ -99,6 +126,8 @@ extension AppModel {
                     RemoteServer.log.error("share play capture: \(String(describing: error), privacy: .public)")
                 }
                 show(SP.format(.started, game.name), symbol: "shareplay")
+            } catch let problem as TogetherProblem where problem.code == "media_server_off" {
+                show(togetherMessage(problem), symbol: "person.3.sequence")
             } catch {
                 show(SP.text(.couldNotStart) + ": \(error)", symbol: "exclamationmark.triangle.fill")
             }
@@ -122,19 +151,65 @@ extension AppModel {
             guard let userId = router.viewer(onBridge: bridge) else { return }
             Task { @MainActor in host?.sendPadOutput(data, to: userId) }
         }
-        return ShareSession(id: id, host: host, router: router)
+        let session = ShareSession(id: id, host: host, router: router)
+        // Through the media server, a viewer's ask for a connection here is answered only for a
+        // pad holder, or an older viewer app while there is room; on the mesh, always.
+        host.admits = { [weak session, weak host] userId in
+            guard let session, let host, let sharePlay = session.sharePlay else { return true }
+            guard SharePlayMedia.servesAsk(sharePlay, from: userId, meshPeers: host.links.count) else { return false }
+            if sharePlay.media == .sfu, sharePlay.viewers.first(where: { $0.user.userId == userId })?.slot == nil {
+                session.asked.insert(userId)
+                session.mesh = SharePlayMedia.meshViewers(sharePlay, asked: session.asked)
+            }
+            return true
+        }
+        return session
     }
 
     /// The share play as the server has it now: newcomers are called, leavers hung up on, and the
-    /// pads follow who holds them.
-    func applyShare(_ sharePlay: TogetherSharePlay) {
+    /// pads follow who holds them. Through the media server only the viewers holding a pad (and
+    /// older viewer apps that asked) are called here; the rest watch from the media server, where
+    /// the picture and sound go once the share play turned "sfu".
+    func applyShare(_ sharePlay: TogetherSharePlay, access: TogetherSfuAccess? = nil) {
         guard let session = shareSession, session.id == sharePlay.id else { return }
-        let plan = SharePlayRoster.plan(from: session.viewers, to: sharePlay.viewers)
+        session.asked = session.asked.filter { id in sharePlay.viewers.contains { $0.user.userId == id } }
+        let mesh = SharePlayMedia.meshViewers(sharePlay, asked: session.asked)
+        let plan = SharePlayRoster.plan(from: session.mesh, to: mesh)
         for userId in plan.hangUp { session.host.hangUp(userId, sayBye: false) }
         for viewer in plan.call { session.host.call(viewer.user.userId, device: viewer.device) }
         session.router.update(pads: SharePlayRoster.pads(sharePlay.viewers))
         session.viewers = sharePlay.viewers
+        session.mesh = mesh
+        session.sharePlay = sharePlay
         withAnimation(Motion.overlay) { share.hosting = sharePlay }
+        if sharePlay.media == .sfu { publishToMediaServer(session, access: access) }
+    }
+
+    /// The picture and sound published once to the media server (when the share play turned
+    /// "sfu"), with the access starting gave or a fresh one; tried once per share play.
+    private func publishToMediaServer(_ session: ShareSession, access: TogetherSfuAccess?) {
+        guard session.mediaServer == nil, !session.mediaServerTried else { return }
+        session.mediaServerTried = true
+        let publisher = SfuShareHost { [weak self, weak session] in
+            guard let self, let session, self.shareSession === session else { return }
+            self.share.hostingViaServer = session.mediaServer?.state == .connected
+        }
+        session.mediaServer = publisher
+        session.capture.mediaServer.value = publisher
+        Task {
+            do {
+                let given: TogetherSfuAccess
+                if let access { given = access } else { given = try await together.sharePlaySfu(session.id) }
+                guard shareSession === session else { return await publisher.close() }
+                try await publisher.start(given)
+            } catch {
+                RemoteServer.log.error("share play: media server: \(String(describing: error), privacy: .public)")
+                guard shareSession === session else { return }
+                session.capture.mediaServer.value = nil
+                session.mediaServer = nil
+                show(SP.text(.mediaServerFailed), symbol: "exclamationmark.triangle.fill")
+            }
+        }
     }
 
     /// New relay credentials ten minutes before the old ones end, for a long evening.
@@ -162,6 +237,9 @@ extension AppModel {
         guard let session = shareSession else { return }
         session.renewal?.cancel()
         session.capture.stop()
+        session.capture.mediaServer.value = nil
+        if let publisher = session.mediaServer { Task { await publisher.close() } }
+        session.mediaServer = nil
         session.host.close()
         session.awake.release()
         session.router.releaseAll()
@@ -170,6 +248,7 @@ extension AppModel {
         withAnimation(Motion.overlay) {
             share.hosting = nil
             share.links = [:]
+            share.hostingViaServer = false
         }
     }
 
@@ -222,7 +301,13 @@ extension AppModel {
     func setShareMaxViewers(_ count: Int) {
         shareMaxViewers = count
         guard let session = shareSession, count >= session.viewers.count else { return objectWillChange.send() }
-        Task { if let updated = try? await together.updateSharePlay(session.id, maxViewers: count) { applyShare(updated) } }
+        Task {
+            do {
+                applyShare(try await together.updateSharePlay(session.id, maxViewers: count))
+            } catch let problem as TogetherProblem where problem.code == "media_server_off" {
+                show(togetherMessage(problem), symbol: "person.3.sequence")
+            } catch {}
+        }
     }
 
     // MARK: Invites and events
@@ -230,6 +315,7 @@ extension AppModel {
     /// Invites waiting, and a share play a launcher that quit left behind.
     func loadShareInvites() {
         guard togetherUser != nil else { return }
+        loadMediaLimits()
         Task {
             guard let mine = try? await together.mySharePlay() else { return }
             withAnimation(Motion.overlay) { share.invites = mine.invites }
@@ -310,6 +396,8 @@ extension AppModel {
             let name = viewer.user.displayName
             let person = PanelPerson(name: name, avatar: viewer.user.avatar, status: viewer.slot == nil ? .online : .playing)
             let link = share.links[viewer.user.userId]
+            // Watching from the media server: no connection here to show.
+            let viaServer = hosting.media == .sfu && link == nil && viewer.slot == nil
             if let pad = viewer.slot {
                 let bridge = shareSession?.router.bridge(of: viewer.user.userId)
                 let player = bridge.flatMap { remote?.padPlayer(bridge: $0) }
@@ -318,7 +406,7 @@ extension AppModel {
                 if let assist = shareAssistRow(viewer.user.userId, name: name) { rows.append(assist) }
             } else {
                 rows.append(PanelRow(id: "share-play-\(viewer.user.userId)", title: SP.format(.letPlay, name, SharePlayRoster.freePad(hosting.viewers) ?? 0),
-                                     detail: SP.linkText(link, pad: nil, seated: false), symbol: "gamecontroller",
+                                     detail: SP.linkText(link, pad: nil, seated: false, viaServer: viaServer), symbol: "gamecontroller",
                                      kind: .action(destructive: false) { [weak self] in self?.letPlay(viewer) }, person: person))
             }
             rows += askingFirst(PanelRow(id: "share-remove-\(viewer.user.userId)", title: SP.format(.remove, name), symbol: "person.crop.circle.badge.xmark",
@@ -327,8 +415,10 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "share-open", title: SP.text(.openToFriends), detail: SP.text(.openToFriendsDetail), symbol: "person.2",
                              kind: .toggle(hosting.open) { [weak self] on in self?.setShareOpen(on) }))
-        rows.append(PanelRow(id: "share-max", title: SP.text(.maxViewers), detail: SP.text(.maxViewersDetail), symbol: "person.3.sequence",
-                             kind: .stepper(value: hosting.maxViewers, range: max(1, hosting.viewers.count) ... SharePlayRoster.maxViewers, step: 1, format: { "\($0)" }) { [weak self] count in
+        let choices = SharePlayMedia.viewerChoices(mediaLimits, watching: hosting.viewers.count, current: hosting.maxViewers)
+        rows.append(PanelRow(id: "share-max", title: SP.text(.maxViewers), detail: SP.text(choices.upperBound > SharePlayRoster.maxViewers ? .maxViewersServerDetail : .maxViewersDetail),
+                             symbol: "person.3.sequence",
+                             kind: .stepper(value: hosting.maxViewers, range: choices, step: 1, format: { "\($0)" }) { [weak self] count in
                                  self?.setShareMaxViewers(count)
                              }))
         rows += shareListingRows(hosting)
@@ -416,14 +506,16 @@ enum SP {
         case openToFriends = "sharePlayOpenToFriends", openToFriendsDetail = "sharePlayOpenToFriendsDetail", maxViewers = "sharePlayMaxViewers", maxViewersDetail = "sharePlayMaxViewersDetail", stop = "sharePlayStop", stopped = "sharePlayStopped", noPadFree = "sharePlayNoPadFree", nowPlays = "sharePlayNowPlays", invitedYou = "sharePlayInvitedYou", watchFriend = "sharePlayWatchFriend", watchDetail = "sharePlayWatchDetail", decline = "sharePlayDecline"
         case player = "sharePlayPlayer", onlyWatches = "sharePlayOnlyWatches", connecting = "sharePlayConnecting", direct = "sharePlayDirect", relayed = "sharePlayRelayed", roundTrip = "sharePlayRoundTrip"
         case full = "sharePlayFull", couldNotWatch = "sharePlayCouldNotWatch", youPlay = "sharePlayYouPlay", youWatch = "sharePlayYouWatch", tookYouOut = "sharePlayTookYouOut", hostStopped = "sharePlayHostStopped", leave = "sharePlayLeave"
+        case viaServer = "sharePlayViaServer", maxViewersServerDetail = "sharePlayMaxViewersServerDetail", mediaServerOff = "sharePlayMediaServerOff", mediaServerFailed = "sharePlayMediaServerFailed"
     }
 
     static func text(_ key: Key) -> String { T.string(key.rawValue) }
     static func format(_ key: Key, _ arguments: CVarArg...) -> String { String(format: text(key), arguments: arguments) }
 
     /// A viewer's line: player or watching, the path and its round trip.
-    static func linkText(_ link: SharePlayHost.Link?, pad: Int?, seated: Bool) -> String {
+    static func linkText(_ link: SharePlayHost.Link?, pad: Int?, seated: Bool, viaServer: Bool = false) -> String {
         var parts = [pad.map { format(.player, $0) } ?? text(.onlyWatches)]
+        if viaServer { return (parts + [text(.viaServer)]).joined(separator: " · ") }
         guard let link, link.state == .connected else { return (parts + [text(.connecting)]).joined(separator: " · ") }
         if let relayed = link.relayed { parts.append(text(relayed ? .relayed : .direct)) }
         if let roundTrip = link.roundTrip { parts.append(format(.roundTrip, Int(roundTrip.rounded()))) }
