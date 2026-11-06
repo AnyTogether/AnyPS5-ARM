@@ -125,6 +125,8 @@
   "shareConnecting": "Connecting to %@…",
   "shareEnded": "%@ stopped sharing",
   "shareRemoved": "%@ took you out",
+  "shareViaServer": "via server",
+  "mediaServerOff": "This server has no media server, so it takes four viewers at most",
   "partyLeave": "Leave party",
   "partyInvite": "Invite",
   "partyInvited": "Invited",

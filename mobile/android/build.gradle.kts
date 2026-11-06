@@ -2,6 +2,12 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+        // livekit_client's audio routing (audioswitch, pinned to one commit) comes from JitPack
+        // only; the app resolves it, so the app needs the repository too.
+        maven {
+            url = uri("https://jitpack.io")
+            content { includeGroup("com.github.davidliu") }
+        }
     }
 }
 

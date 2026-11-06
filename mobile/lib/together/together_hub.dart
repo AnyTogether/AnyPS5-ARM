@@ -4,6 +4,7 @@ import 'calls.dart';
 import 'discover.dart';
 import 'feed.dart';
 import 'friends.dart';
+import 'media_livekit.dart';
 import 'messages.dart';
 import 'notifications.dart';
 import 'parties.dart';
@@ -25,6 +26,8 @@ class TogetherHub extends ChangeNotifier {
     VoiceEngine Function()? voiceEngine,
     ShareEngine Function()? shareEngine,
     ShareSound Function()? shareSound,
+    ShareRoom Function()? shareRoom,
+    VoiceRoom Function()? voiceRoom,
   }) : socket = socket ?? TogetherSocket(account: account) {
     friends = Friends(account: account, socket: this.socket)
       ..addListener(notifyListeners);
@@ -41,6 +44,7 @@ class TogetherHub extends ChangeNotifier {
       socket: this.socket,
       parties: parties,
       engine: voiceEngine,
+      room: voiceRoom ?? LiveKitVoiceRoom.new,
     );
     calls = Calls(
       account: account,
@@ -54,6 +58,7 @@ class TogetherHub extends ChangeNotifier {
       socket: this.socket,
       engine: shareEngine ?? WebRtcShareEngine.new,
       sound: shareSound ?? PlatformShareSound.new,
+      room: shareRoom ?? LiveKitShareRoom.new,
     )..addListener(notifyListeners);
     discover = Discover(
       account: account,

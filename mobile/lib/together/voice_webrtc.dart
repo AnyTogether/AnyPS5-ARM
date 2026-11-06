@@ -1,7 +1,6 @@
-import 'dart:io';
-
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
+import 'phone_audio.dart';
 import 'voice_mesh.dart';
 
 /// Voice with flutter_webrtc: the microphone with the platform's echo cancellation, noise
@@ -31,53 +30,13 @@ class WebRtcVoice implements VoiceEngine {
       await stop();
       throw const VoiceDenied();
     }
-    try {
-      if (Platform.isIOS) {
-        await Helper.setSpeakerphoneOnButPreferBluetooth();
-      } else {
-        await Helper.setSpeakerphoneOn(true);
-      }
-    } on Object {
-      // The earpiece, then; voice still works.
-    }
+    await PhoneAudio.speaker();
   }
 
-  /// A voice chat while in voice; back to plain playback (Remote Play's sound) after.
-  static Future<void> _session({required bool voice}) async {
-    try {
-      if (Platform.isIOS) {
-        await Helper.setAppleAudioConfiguration(
-          voice
-              ? AppleAudioConfiguration(
-                  appleAudioCategory: AppleAudioCategory.playAndRecord,
-                  appleAudioCategoryOptions: {
-                    AppleAudioCategoryOption.mixWithOthers,
-                    AppleAudioCategoryOption.allowBluetooth,
-                    AppleAudioCategoryOption.allowBluetoothA2DP,
-                    AppleAudioCategoryOption.defaultToSpeaker,
-                  },
-                  appleAudioMode: AppleAudioMode.voiceChat,
-                )
-              : AppleAudioConfiguration(
-                  appleAudioCategory: AppleAudioCategory.playback,
-                  appleAudioCategoryOptions: {
-                    AppleAudioCategoryOption.mixWithOthers,
-                  },
-                  appleAudioMode: AppleAudioMode.default_,
-                ),
-        );
-      } else if (Platform.isAndroid) {
-        await Helper.setAndroidAudioConfiguration(
-          voice
-              ? AndroidAudioConfiguration.communication
-              : AndroidAudioConfiguration.media,
-        );
-        if (!voice) await Helper.clearAndroidCommunicationDevice();
-      }
-    } on Object {
-      // The platform's defaults, then.
-    }
-  }
+  /// A voice chat while in voice; back to plain playback (Remote Play's sound) after. Set
+  /// through LiveKit's audio manager, which owns the session (PhoneAudio).
+  static Future<void> _session({required bool voice}) =>
+      PhoneAudio.voice(voice);
 
   @override
   Future<VoiceLink> link(List<Map<String, dynamic>> iceServers) async {
