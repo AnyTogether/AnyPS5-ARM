@@ -5,6 +5,11 @@ import UniformTypeIdentifiers
 
 /// A settings row the panels draw and the input moves through.
 struct PanelRow: Identifiable {
+    struct Option {
+        let label: String
+        let run: () -> Void
+    }
+
     enum Kind {
         case choice(options: [String], selected: Int, set: (Int) -> Void)
         case toggle(Bool, set: (Bool) -> Void)
@@ -25,6 +30,8 @@ struct PanelRow: Identifiable {
     var person: PanelPerson?
     /// The detail is advice to read whole (the controller troubleshooter): no line limit.
     var wraps = false
+    /// What △ does on this row, with the hint saying so (a Hub theme: Wear on my profile).
+    var option: Option?
     /// A stepper's value that goes round, as degrees do: past one end it comes back at the other.
     var cycle: Int?
     /// A stepper whose number can be typed: at the keyboard, Return or a click opens a field.
@@ -112,6 +119,8 @@ extension AppModel {
         case .controls: return selectedGame.map { [PanelCategory(id: "controls", title: $0.name, symbol: "keyboard", rows: controlRows($0))] } ?? []
         case .advanced: return selectedGame.map { [PanelCategory(id: "advanced", title: $0.name, symbol: "slider.horizontal.below.rectangle", rows: advancedRows($0))] } ?? []
         case .themes: return [PanelCategory(id: "themes", title: T.text(.themes), symbol: "paintpalette", rows: themeRows())]
+        case .showcaseEdit: return [PanelCategory(id: "showcase", title: TL.text(.showcaseEdit), symbol: "pin", rows: showcaseRows())]
+        case .profileTheme: return [PanelCategory(id: "profile-theme", title: TL.text(.profileTheme), symbol: "paintpalette", rows: profileThemeRows())]
         case .studio: return [PanelCategory(id: "studio", title: T.text(.themeStudio), symbol: "wand.and.stars", rows: studioRows())]
         case .friends: return [PanelCategory(id: "friends", title: T.text(.friendsTitle), symbol: "person.2", rows: friendRows())]
         case .party: return [PanelCategory(id: "party", title: T.text(.partyTitle), symbol: "person.3", rows: partyRows())]
@@ -642,6 +651,21 @@ extension AppModel {
     /// Panels with categories on the left (Settings, Find players, a game's hub).
     var overlayHasCategories: Bool { overlay == .settings || overlay == .findPlayers || overlay == .gameHub }
 
+    /// The focused row's △ action, when it has one.
+    var focusedRowOption: PanelRow.Option? {
+        guard panelInRows, let rows = panelCategories().first?.rows, !rows.isEmpty else { return nil }
+        let index = focusedRow(in: rows)
+        return rows.indices.contains(index) ? rows[index].option : nil
+    }
+
+    /// △ on a row that has an action of its own runs it.
+    func runRowOption() -> Bool {
+        guard let option = focusedRowOption else { return false }
+        Sounds.shared.play(.select)
+        option.run()
+        return true
+    }
+
     func panelCommand(_ command: Command) -> Bool {
         if overlay == .settings, let used = settingsSearchCommand(command) { return used }
         let categories = panelCategories()
@@ -1063,6 +1087,14 @@ struct SidePanel: View {
                 // The focus in the column beside them leaves the rows unfocused.
                 RowList(rows: rows, focusedRow: beside != nil && model.partyChatFocused ? nil : model.focusedRow(in: rows))
                     .padding(.top, 18 * scale)
+                if let option = model.focusedRowOption {
+                    HStack(spacing: 18 * scale) {
+                        Hint(keys: "O / △", label: option.label)
+                        Hint(keys: "esc / ○", label: T.text(.hintBack))
+                    }
+                    .padding(.top, 14 * scale)
+                    .transition(.opacity)
+                }
             }
             .padding(36 * scale)
             .frame(width: 560 * scale, alignment: .topLeading)

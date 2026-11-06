@@ -71,10 +71,12 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
     /// The name and picture only accepted friends see; nil when not set (or an older server).
     public var privateName: String?
     public var privateAvatar: String?
+    /// The cover, accent and Theme Hub theme the profile shows; plain from an older server.
+    public var look: TogetherProfileLook
 
     public init(handle: String, displayName: String, bio: String?, avatar: String?, country: String?, handleChangeAt: Date?, privacy: TogetherPrivacy,
                 trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, presence: TogetherPresenceStatus? = nil, readReceipts: Bool = true,
-                privateName: String? = nil, privateAvatar: String? = nil) {
+                privateName: String? = nil, privateAvatar: String? = nil, look: TogetherProfileLook = .plain) {
         self.handle = handle
         self.displayName = displayName
         self.bio = bio
@@ -87,6 +89,7 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         self.readReceipts = readReceipts
         self.privateName = privateName
         self.privateAvatar = privateAvatar
+        self.look = look
     }
 
     enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, status, readReceipts, privateName, privateAvatar }
@@ -106,6 +109,7 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         readReceipts = container.lenient(Bool.self, .readReceipts) ?? true
         privateName = container.lenient(String.self, .privateName)
         privateAvatar = container.lenient(String.self, .privateAvatar)
+        look = (try? TogetherProfileLook(from: decoder)) ?? .plain
     }
 }
 

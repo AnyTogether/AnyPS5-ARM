@@ -180,7 +180,7 @@ extension Overlay {
     /// Panels drawn over the whole screen rather than sliding in at its side.
     var coversScreen: Bool {
         switch self {
-        case .settings, .library, .log, .messages, .profile, .compare, .feed, .captures, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
+        case .settings, .library, .log, .messages, .profile, .compare, .showcaseEdit, .profileTheme, .feed, .captures, .leaderboard, .crashReport, .cropPicture, .trophies, .gallery, .findPlayers, .gameHub, .controllerTest,
              .profilePicker, .addProfile, .signIn:
             return true
         default:
@@ -241,6 +241,9 @@ enum Overlay: Equatable {
     case cloudStorage
     /// Trophies compared with someone: the games, then one game's trophies side by side.
     case compare
+    /// The own profile's Edit showcase and Profile theme, at its side (ProfileLook.swift).
+    case showcaseEdit
+    case profileTheme
     /// Settings → Controllers → Test Buttons and Sticks.
     case controllerTest
     /// Settings → Advanced → Play from a browser: the QR code a phone scans (BrowserPlay.swift).

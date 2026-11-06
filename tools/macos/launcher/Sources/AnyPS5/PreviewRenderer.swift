@@ -592,6 +592,7 @@ enum PreviewRenderer {
         HomeMenuPreviews.run(preferences, found, root, still, output)
         DisplayPreviews.run(preferences, found, root, still, output)
         ProfilePreviews.run(preferences, found, root, still, output)
+        ProfileLookPreviews.run(preferences, found, root, still, output)
         PowerPreviews.run(preferences, found, root, still, output)
         GameFilesPreviews.run(preferences, found, root, still, output)
         print("rendered into \(output.path)")

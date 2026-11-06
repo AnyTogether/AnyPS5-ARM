@@ -853,6 +853,7 @@ extension AppModel {
             }
             return panelCommand(command)
         case .themes, .studio:
+            if command == .options, runRowOption() { return true }
             if command == .back || command == .options {
                 backFromThemes()
                 return true
@@ -876,6 +877,18 @@ extension AppModel {
         case .compare:
             compareCommand(command)
             return true
+        case .showcaseEdit:
+            if command == .back || command == .options {
+                closeShowcaseEditor()
+                return true
+            }
+            return panelCommand(command)
+        case .profileTheme:
+            if command == .back || command == .options {
+                closeProfileTheme()
+                return true
+            }
+            return panelCommand(command)
         case .cropPicture:
             cropCommand(command)
             return true

@@ -44,6 +44,13 @@ public struct TogetherHubTheme: Decodable, Equatable, Sendable, Identifiable {
         public let middle: String
         public let bright: String
         public let accent: String
+
+        public init(deep: String, middle: String, bright: String, accent: String) {
+            self.deep = deep
+            self.middle = middle
+            self.bright = bright
+            self.accent = accent
+        }
     }
 
     public let id: String

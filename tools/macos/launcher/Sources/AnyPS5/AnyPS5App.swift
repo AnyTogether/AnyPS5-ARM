@@ -247,7 +247,8 @@ struct RootView: View {
                 .transition(.move(edge: .trailing).combined(with: .opacity))
         case .messages:
             MessagesView().transition(.opacity.combined(with: .scale(scale: 1.03)))
-        case .profile:
+        case .profile, .showcaseEdit, .profileTheme:
+            // Edit showcase and Profile theme slide in at the profile's side (ProfileView).
             ProfileView().transition(.opacity.combined(with: .scale(scale: 1.03)))
         case .compare:
             CompareView().transition(.opacity.combined(with: .scale(scale: 1.03)))

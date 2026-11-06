@@ -14,11 +14,15 @@ public enum ThemeHub {
         public let design: ThemeDesign
         public let package: URL
         public let preview: URL?
+        /// The Hub it was listed by: on AnyTogether's (`base(onServer:)`) its ID is the one a
+        /// profile wears it by.
+        public var source: URL?
 
-        public init(design: ThemeDesign, package: URL, preview: URL?) {
+        public init(design: ThemeDesign, package: URL, preview: URL?, source: URL? = nil) {
             self.design = design
             self.package = package
             self.preview = preview
+            self.source = source
         }
     }
 
@@ -45,7 +49,7 @@ public enum ThemeHub {
             guard let package = URL(string: entry.package, relativeTo: base)?.absoluteURL else { return nil }
             let design = ThemeDesign(id: entry.id, name: entry.name, author: entry.author, version: entry.version ?? 1, style: entry.style ?? 0,
                                      deep: entry.deep, middle: entry.middle, bright: entry.bright, accent: entry.accent)
-            return Theme(design: design, package: package, preview: entry.preview.flatMap { URL(string: $0, relativeTo: base)?.absoluteURL })
+            return Theme(design: design, package: package, preview: entry.preview.flatMap { URL(string: $0, relativeTo: base)?.absoluteURL }, source: base)
         }
     }
 

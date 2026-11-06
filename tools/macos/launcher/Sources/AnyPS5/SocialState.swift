@@ -27,6 +27,18 @@ final class SocialState: ObservableObject {
     @Published var profileShowcase: TogetherShowcase?
     var profileShowcaseTask: Task<Void, Never>?
 
+    // Editing the own profile (ProfileLook.swift)
+    enum EditLoad: Equatable { case loading, shown, failed }
+    /// The pins while Edit showcase is open, and as it opened.
+    @Published var showcasePins = TogetherShowcasePins()
+    var showcasePinsBefore = TogetherShowcasePins()
+    /// The Hub's themes to wear, most popular first.
+    @Published var profileThemes: [TogetherProfileTheme] = []
+    @Published var profileThemesLoad = EditLoad.loading
+    var profileThemesTask: Task<Void, Never>?
+    /// The theme being put on ("" taking it off) while the server answers.
+    @Published var profileThemeSaving: String?
+
     // Comparing trophies
     enum CompareLoad: Equatable { case loading, shown, hidden, failed, unknown }
     /// Whom the trophies are compared with.
