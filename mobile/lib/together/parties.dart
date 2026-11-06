@@ -3,11 +3,13 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'join_codes.dart';
+import 'media.dart';
 import 'people.dart';
 import 'together_account.dart';
 import 'together_socket.dart';
 
-/// At most eight in a party: its voice is a mesh, each phone talking to every other.
+/// At most eight in a party on the mesh, each phone talking to every other; a server with a
+/// media server holds more ([Party.max] says how many).
 const maxPartySize = 8;
 
 /// How a public party or share play lets people in: they ask first, or anyone walks in.
@@ -58,6 +60,8 @@ class Party {
     this.joinCode,
     this.discord,
     this.conversationId,
+    this.max = maxPartySize,
+    this.callMedia = MediaRoute.mesh,
   });
 
   factory Party.fromJson(Map<String, dynamic> json) {
@@ -93,6 +97,10 @@ class Party {
       joinCode: JoinCode.fromJson(json['joinCode']),
       discord: json['discord'] as String?,
       conversationId: json['conversationId'] as String?,
+      max: (json['max'] as num?)?.toInt() ?? maxPartySize,
+      callMedia: call is Map<String, dynamic>
+          ? mediaRouteFrom(call['media'])
+          : MediaRoute.mesh,
       listing: PartyListing.fromJson(json['public']),
       requests: [
         for (final person in (json['requests'] as List? ?? const []))
@@ -133,7 +141,13 @@ class Party {
   /// not in it.
   final String? conversationId;
 
-  bool get full => members.length >= maxPartySize;
+  /// How many the party may hold on this server: eight, or more with a media server.
+  final int max;
+
+  /// How its voice call goes: the mesh, or the media server once it outgrew the mesh.
+  final MediaRoute callMedia;
+
+  bool get full => members.length >= max;
 
   bool has(String userId) => members.any((person) => person.id == userId);
 
@@ -145,6 +159,7 @@ class Party {
     String? Function()? callId,
     Set<String>? inCall,
     List<Person>? requests,
+    MediaRoute? callMedia,
   }) => Party(
     id: id,
     leaderId: leaderId ?? this.leaderId,
@@ -160,6 +175,8 @@ class Party {
     joinCode: joinCode,
     discord: discord,
     conversationId: conversationId,
+    max: max,
+    callMedia: callMedia ?? this.callMedia,
   );
 }
 
@@ -334,6 +351,8 @@ class Parties extends ChangeNotifier {
     joinCode: joinCode == null ? p.joinCode : joinCode(),
     discord: p.discord,
     conversationId: p.conversationId,
+    max: p.max,
+    callMedia: p.callMedia,
   );
 
   /// Leader only: lets someone who asked in (an invite they join with), or says no.
@@ -459,8 +478,18 @@ class Parties extends ChangeNotifier {
           inCall: {...current.inCall}..remove(data['userId']),
         );
         notifyListeners();
+      case 'call.media' when data['partyId'] == current.id:
+        party = current.copyWith(
+          callId: () => data['callId'] as String? ?? current.callId,
+          callMedia: mediaRouteFrom(data['media']),
+        );
+        notifyListeners();
       case 'call.ended':
-        party = current.copyWith(callId: () => null, inCall: const {});
+        party = current.copyWith(
+          callId: () => null,
+          inCall: const {},
+          callMedia: MediaRoute.mesh,
+        );
         notifyListeners();
     }
   }

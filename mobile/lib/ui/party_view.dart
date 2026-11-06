@@ -241,7 +241,7 @@ class _PartyPaneState extends State<PartyPane> {
         Text(texts.party, style: _title),
         const SizedBox(width: 10),
         Text(
-          '${party.members.length}/$maxPartySize',
+          '${party.members.length}/${party.max}',
           style: const TextStyle(color: Colors.white38, fontSize: 14),
         ),
       ],
@@ -494,7 +494,7 @@ extension on _PartyPaneState {
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 10, 18, 4),
                 child: _PartyTabs(
-                  count: '${party.members.length}/$maxPartySize',
+                  count: '${party.members.length}/${party.max}',
                   chatShown: _chatShown,
                   unread: chat.unread > 0,
                   onPick: _showChat,
