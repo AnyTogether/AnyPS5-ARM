@@ -14,6 +14,7 @@ import 'dart:ui' as ui;
 
 import 'package:anyps5_remote/connection/session.dart';
 import 'package:anyps5_remote/feedback/haptics.dart';
+import 'package:anyps5_remote/l10n.dart';
 import 'package:anyps5_remote/protocol/messages.dart';
 import 'package:anyps5_remote/ui/activity_card.dart';
 import 'package:anyps5_remote/ui/home_screen.dart';
@@ -265,6 +266,7 @@ void main() {
   late String family;
 
   setUpAll(() async {
+    L10n.loadFolder(Directory('assets/l10n'));
     family = await _fonts();
     await _art();
     await _games();
@@ -385,6 +387,37 @@ void main() {
       h,
       together(h, TogetherTab.party),
       then: () => h.voice.join(),
+    );
+  });
+
+  testWidgets('party chat on a phone', (tester) async {
+    final h = await hub(tester, voice: [0.4, 0, 0]);
+    await shoot(
+      tester,
+      'phone-party-chat',
+      h,
+      together(h, TogetherTab.party),
+      size: _phone,
+      then: () async {
+        await h.voice.join();
+        await tester.tap(find.text('Chat'));
+        (h.socket as DemoSocket).push('typing', {
+          'conversationId': 'pc-ines',
+          'userId': 'mira',
+        });
+      },
+    );
+  });
+
+  testWidgets('party chat on a large phone', (tester) async {
+    final h = await hub(tester, voice: [0.4, 0, 0]);
+    await shoot(
+      tester,
+      'phone-party-chat-wide',
+      h,
+      together(h, TogetherTab.party),
+      size: const Size(2796, 1290),
+      then: h.voice.join,
     );
   });
 
