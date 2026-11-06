@@ -326,7 +326,9 @@ if [ "$have_mac" = 0 ]; then
         mkdir -p "$out"
         # The main checkout's submodule URLs can be its own .git/modules folders (a local clone);
         # git refuses the file transport for submodules unless it is allowed for this command.
-        step "submodules" git -c protocol.file.allow=always -C "$wt" submodule update --init --recursive --jobs 4
+        # --force puts back tracked files that went missing inside a submodule (an interrupted
+        # clone, a cleanup tool); without it the -dirty check below stops the run.
+        step "submodules" git -c protocol.file.allow=always -C "$wt" submodule update --init --recursive --force --jobs 4
         actual="$(git -C "$wt" describe --tags --dirty)"
         [ "$actual" = "$tag" ] || die "git describe in $wt gives $actual, not $tag (another tag on $sha?)"
         [ -f "$build/CMakeCache.txt" ] ||
