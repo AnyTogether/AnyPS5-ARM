@@ -15,9 +15,11 @@ public struct TogetherProfile: Decodable, Equatable, Sendable {
     /// The friends-only name and picture, for a friend (or the user) signed in.
     public var privateName: String?
     public var privateAvatar: String?
+    /// The cover, accent and Theme Hub theme the profile shows; plain from an older server.
+    public var look: TogetherProfileLook
 
     public init(userId: String, handle: String, displayName: String, avatar: String?, bio: String?, country: String?, friendship: String, trophyLevel: TogetherTrophyLevel? = nil,
-                privateName: String? = nil, privateAvatar: String? = nil) {
+                privateName: String? = nil, privateAvatar: String? = nil, look: TogetherProfileLook = .plain) {
         self.userId = userId
         self.handle = handle
         self.displayName = displayName
@@ -28,6 +30,7 @@ public struct TogetherProfile: Decodable, Equatable, Sendable {
         self.trophyLevel = trophyLevel
         self.privateName = privateName
         self.privateAvatar = privateAvatar
+        self.look = look
     }
 
     enum CodingKeys: String, CodingKey { case userId, handle, displayName, avatar, bio, country, friendship, trophyLevel, privateName, privateAvatar }
@@ -38,7 +41,8 @@ public struct TogetherProfile: Decodable, Equatable, Sendable {
                   displayName: try container.decode(String.self, forKey: .displayName), avatar: try container.decodeIfPresent(String.self, forKey: .avatar),
                   bio: try container.decodeIfPresent(String.self, forKey: .bio), country: try container.decodeIfPresent(String.self, forKey: .country),
                   friendship: try container.decode(String.self, forKey: .friendship), trophyLevel: container.lenient(TogetherTrophyLevel.self, .trophyLevel),
-                  privateName: container.lenient(String.self, .privateName), privateAvatar: container.lenient(String.self, .privateAvatar))
+                  privateName: container.lenient(String.self, .privateName), privateAvatar: container.lenient(String.self, .privateAvatar),
+                  look: (try? TogetherProfileLook(from: decoder)) ?? .plain)
     }
 
     public var isMe: Bool { friendship == "me" }
@@ -153,7 +157,8 @@ public struct TogetherProfilePage: Equatable, Sendable {
         }
     }
 
-    public let profile: TogetherProfile
+    /// A var so the look the user just chose shows at once.
+    public var profile: TogetherProfile
     /// The profile's details (bio, country) are private: the card the launcher knew stands in.
     public let detailsPrivate: Bool
     public let library: TogetherSection<[TogetherPlayedGame]>

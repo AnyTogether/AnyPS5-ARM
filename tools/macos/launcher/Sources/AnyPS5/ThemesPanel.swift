@@ -71,11 +71,14 @@ extension AppModel {
             for theme in shared {
                 let installed = designs.first { $0.id == theme.id }
                 let current = installed.map { $0.version >= theme.design.version } ?? false
-                rows.append(PanelRow(id: "hub-\(theme.id)", title: theme.name, detail: T.format(.themeBy, theme.design.author), symbol: current ? "checkmark.circle" : "arrow.down.circle",
+                // △ wears a theme of AnyTogether's Hub on the user's profile (ProfileLook.swift).
+                let worn = wornThemeID == theme.id && hubWearOption(theme) != nil
+                rows.append(PanelRow(id: "hub-\(theme.id)", title: theme.name, detail: [T.format(.themeBy, theme.design.author), worn ? TL.text(.profileThemeWorn) : nil].compactMap { $0 }.joined(separator: " · "),
+                                     symbol: current ? "checkmark.circle" : "arrow.down.circle",
                                      kind: .action(destructive: false) { [weak self] in
                                          guard let self else { return }
                                          if current, let installed { self.activate(installed) } else { self.installFromHub(theme) }
-                                     }))
+                                     }, option: hubWearOption(theme)))
             }
         }
         rows.append(PanelRow(id: "share", title: T.text(.shareTheme), detail: T.text(.shareThemeHint), symbol: "square.and.arrow.up", kind: .action(destructive: false) { [weak self] in

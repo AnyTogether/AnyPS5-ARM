@@ -95,7 +95,45 @@ extension AppModel {
             return
         }
         let counts = [profileGames.count, profileTrophies.count, social.profileActivity?.count ?? 0]
+        // The own profile's buttons over the columns: Edit showcase, Profile theme.
+        let buttons = profileButtons
+        if profileColumn < 0 {
+            guard !buttons.isEmpty else {
+                profileColumn = 0
+                profileIndex = 0
+                return profileCommand(command)
+            }
+            switch command {
+            case .left, .right:
+                let next = min(buttons.count - 1, max(0, profileIndex + (command == .right ? 1 : -1)))
+                guard next != profileIndex else { return }
+                withAnimation(Motion.focus) { profileIndex = next }
+                Sounds.shared.play(.move)
+            case .down:
+                withAnimation(Motion.focus) {
+                    profileColumn = counts.firstIndex { $0 > 0 } ?? 0
+                    profileIndex = 0
+                }
+                Sounds.shared.play(.move)
+            case .select:
+                profileButton(buttons[min(profileIndex, buttons.count - 1)])
+            case .options:
+                if buttons.contains(.showcase) { openShowcaseEditor() } else { closeProfile() }
+            case .back:
+                closeProfile()
+            case .up, .previousGame, .nextGame, .home, .capture:
+                break
+            }
+            return
+        }
         switch command {
+        case .up where !buttons.isEmpty && profileIndex == 0:
+            // Up from the top of a column: the buttons.
+            withAnimation(Motion.focus) {
+                profileColumn = -1
+                profileIndex = 0
+            }
+            Sounds.shared.play(.move)
         case .up, .down:
             let count = counts[profileColumn]
             let next = min(count - 1, max(0, profileIndex + (command == .down ? 1 : -1)))
@@ -112,8 +150,14 @@ extension AppModel {
             }
             Sounds.shared.play(.move)
         case .options:
-            // A friend's profile: their trophies beside the user's.
-            if let profile = profilePage?.profile, !profile.isMe { openCompare() } else { closeProfile() }
+            // A friend's profile: their trophies beside the user's; the own one: Edit showcase.
+            if let profile = profilePage?.profile, !profile.isMe {
+                openCompare()
+            } else if buttons.contains(.showcase) {
+                openShowcaseEditor()
+            } else {
+                closeProfile()
+            }
         case .select:
             // A game of someone else's: that game's trophies side by side.
             guard let profile = profilePage?.profile, !profile.isMe, profileColumn == 0, profileGames.indices.contains(profileIndex) else { return }
@@ -153,8 +197,10 @@ struct ProfileView: View {
         let page = model.profilePage
         VStack(alignment: .leading, spacing: 30 * scale) {
             header(page)
-            if let page, let showcase = model.social.profileShowcase, !showcase.isEmpty || (showcase.isPrivate && !page.profile.isMe && (page.library != .private || page.trophies != .private)) {
-                ProfileShowcaseStrip(showcase: showcase, owner: page.profile.displayName).transition(.opacity)
+            // At the top, under the header: the own one even when empty (it says how to pin).
+            if let page, let showcase = model.social.profileShowcase,
+               !showcase.isEmpty || page.profile.isMe || (showcase.isPrivate && (page.library != .private || page.trophies != .private)) {
+                ProfileShowcaseStrip(showcase: showcase, owner: page.profile.displayName, mine: page.profile.isMe).transition(.opacity)
             }
             if page != nil, let gallery = model.cloud.profileGallery {
                 ProfileGalleryStrip(gallery: gallery, mine: page?.profile.isMe == true).transition(.opacity)
@@ -174,7 +220,7 @@ struct ProfileView: View {
                     if model.profileFailed {
                         ProfileNotice(symbol: "wifi.exclamationmark", text: T.text(.profileFailed))
                     } else {
-                        IndeterminateLine(color: model.accent).frame(width: 260 * scale)
+                        IndeterminateLine(color: model.profileAccent).frame(width: 260 * scale)
                         Text(T.text(.profileLoading)).font(.display(15 * scale, .medium)).foregroundStyle(.white.opacity(0.6))
                     }
                 }
@@ -187,6 +233,14 @@ struct ProfileView: View {
         .screenFrost(0.74)
         .overlay {
             if let media = model.cloud.viewing { MediaViewer(media: media).transition(.opacity) }
+        }
+        .overlay {
+            // Edit showcase and Profile theme, at the side.
+            if model.overlay == .showcaseEdit || model.overlay == .profileTheme {
+                SidePanel(title: TL.text(model.overlay == .showcaseEdit ? .showcaseEdit : .profileTheme),
+                          subtitle: TL.text(model.overlay == .showcaseEdit ? .showcaseEditHint : .profileThemeHint))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         }
         // Capitals in the launcher's language: "PROFİLİM", not "PROFILIM".
         .environment(\.locale, T.locale)
@@ -201,8 +255,11 @@ struct ProfileView: View {
         let identity = (profile.map { model.shown($0) } ?? card.map { model.shown($0) })
         let name = identity?.name ?? ""
         let handle = profile?.handle ?? card?.handle ?? ""
+        let look = model.profileLook
+        let accent = model.profileAccent
+        let buttons = model.profileButtons
         return HStack(alignment: .center, spacing: 30 * scale) {
-            ProfileAvatar(url: identity?.avatar, name: name, size: 128 * scale)
+            ProfileAvatar(url: identity?.avatar, name: name, size: 128 * scale, accent: accent)
                 .overlay(alignment: .bottomTrailing) {
                     if profile?.isMe == true { OwnPresenceDot(status: model.presenceStatus, size: 34 * scale).offset(x: -4 * scale, y: -4 * scale) }
                 }
@@ -231,10 +288,11 @@ struct ProfileView: View {
                             .foregroundStyle(.white)
                             .padding(.horizontal, 10 * scale)
                             .padding(.vertical, 4 * scale)
-                            .background(Capsule().fill(model.accent.opacity(0.35)))
-                            .overlay(Capsule().strokeBorder(model.accent.opacity(0.6), lineWidth: 1))
+                            .background(Capsule().fill(accent.opacity(0.35)))
+                            .overlay(Capsule().strokeBorder(accent.opacity(0.6), lineWidth: 1))
                     }
                     if profile?.isMe == true, model.appearingOffline { AppearingOfflineTag() }
+                    if let theme = look.theme { ProfileThemeChip(theme: theme) }
                 }
                 if let level = model.profileLevel {
                     LevelCard(level: level).padding(.vertical, 2 * scale)
@@ -256,23 +314,42 @@ struct ProfileView: View {
                 HStack(spacing: 22 * scale) {
                     Hint(keys: "← → ↑ ↓", label: T.text(.hintMove))
                     if let profile, !profile.isMe { Hint(keys: "O / △", label: TL.text(.compareTrophies)) }
+                    if buttons.contains(.showcase) { Hint(keys: "O / △", label: TL.text(.showcaseEdit)) }
                     Hint(keys: "esc / ○", label: T.text(.hintBack))
                 }
-                if let page { totals(page.totals) }
+                if !buttons.isEmpty {
+                    HStack(spacing: 12 * scale) {
+                        ForEach(Array(buttons.enumerated()), id: \.offset) { index, button in
+                            ConsoleButton(title: TL.text(button == .showcase ? .showcaseEdit : .profileTheme), symbol: button == .showcase ? "pin.fill" : "paintpalette.fill",
+                                          focused: model.profileColumn < 0 && model.profileIndex == index) {
+                                model.profileColumn = -1
+                                model.profileIndex = index
+                                model.profileButton(button)
+                            }
+                        }
+                    }
+                }
+                if let page { totals(page.totals, accent: accent) }
             }
         }
+        // The cover or the worn theme's still behind it, as every AnyTogether client draws it.
+        .padding(look.picture == nil && look.theme == nil ? 0 : 30 * scale)
+        .background {
+            if look.picture != nil || look.theme != nil { ProfileBackdrop(look: look).transition(.opacity) }
+        }
+        .animation(Motion.overlay, value: look)
     }
 
-    private func totals(_ totals: TogetherProfilePage.Totals?) -> some View {
+    private func totals(_ totals: TogetherProfilePage.Totals?, accent: Color) -> some View {
         HStack(spacing: 12 * scale) {
-            stat(totals.map { "\($0.games)" }, T.text(.profileGames), symbol: "gamecontroller.fill")
-            stat(totals.map { Self.hours($0.seconds) }, T.text(.profileHours), symbol: "clock.fill")
-            stat(totals.map { "\($0.trophies)" }, T.text(.profileTrophies), symbol: "trophy.fill")
-            stat(totals.map { "\($0.points)" }, T.text(.profilePoints), symbol: "star.fill")
+            stat(totals.map { "\($0.games)" }, T.text(.profileGames), symbol: "gamecontroller.fill", accent: accent)
+            stat(totals.map { Self.hours($0.seconds) }, T.text(.profileHours), symbol: "clock.fill", accent: accent)
+            stat(totals.map { "\($0.trophies)" }, T.text(.profileTrophies), symbol: "trophy.fill", accent: accent)
+            stat(totals.map { "\($0.points)" }, T.text(.profilePoints), symbol: "star.fill", accent: accent)
         }
     }
 
-    private func stat(_ value: String?, _ label: String, symbol: String) -> some View {
+    private func stat(_ value: String?, _ label: String, symbol: String, accent: Color) -> some View {
         VStack(alignment: .leading, spacing: 6 * scale) {
             Text(value ?? "—")
                 .font(.display(28 * scale, .semibold))
@@ -280,7 +357,7 @@ struct ProfileView: View {
                 .foregroundStyle(.white)
             Label(label, systemImage: symbol)
                 .font(.display(12 * scale, .semibold))
-                .foregroundStyle(model.accent)
+                .foregroundStyle(accent)
                 .labelStyle(ProfileStatLabel())
         }
         .padding(.horizontal, 18 * scale)
@@ -466,7 +543,7 @@ struct ProfileGameRow: View {
                 .font(.display(14 * scale, .semibold))
                 .foregroundStyle(.white.opacity(0.85))
                 if let progress = game.progress {
-                    ProgressLine(fraction: Double(progress) / 100, color: model.accent, height: 4 * scale)
+                    ProgressLine(fraction: Double(progress) / 100, color: model.profileAccent, height: 4 * scale)
                         .frame(width: 150 * scale)
                 }
             }
@@ -591,14 +668,17 @@ struct ProfileAvatar: View {
     var glow = true
     /// A picture on this Mac, before the avatar's address and the initial.
     var picture: NSImage? = nil
+    /// A profile's own accent in place of the launcher's.
+    var accent: Color? = nil
     @EnvironmentObject private var model: AppModel
     @Environment(\.look) private var look
 
     var body: some View {
+        let accent = accent ?? model.accent
         ZStack {
             // The Glass theme's light Ice accent takes dark ink, on a fill that stays light enough for it.
-            Circle().fill(LinearGradient(colors: [model.accent, model.accent.opacity(look.glass ? 0.8 : 0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Text(String(name.prefix(1)).uppercased()).font(.display(size * 0.42, .semibold)).foregroundStyle(look.glass ? model.accent.onFill : .white)
+            Circle().fill(LinearGradient(colors: [accent, accent.opacity(look.glass ? 0.8 : 0.5)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            Text(String(name.prefix(1)).uppercased()).font(.display(size * 0.42, .semibold)).foregroundStyle(look.glass ? accent.onFill : .white)
             if let picture {
                 Image(nsImage: picture).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
             } else if let remote = url.flatMap(URL.init(string:)) {
@@ -608,7 +688,7 @@ struct ProfileAvatar: View {
         .frame(width: size, height: size)
         .clipShape(Circle())
         .overlay(Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: glow ? 2 : 1))
-        .shadow(color: model.accent.opacity(glow ? 0.35 : 0), radius: size * 0.18)
+        .shadow(color: accent.opacity(glow ? 0.35 : 0), radius: size * 0.18)
     }
 }
 

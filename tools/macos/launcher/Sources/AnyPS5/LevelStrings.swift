@@ -15,6 +15,9 @@ enum TL {
         case levelUp = "levelUpKicker", levelUpTitle = "levelUp", levelUpDetail, friendLevelUp, notifLevelUp
         // Showcase
         case showcase = "showcaseTitle", showcaseTrophies, showcaseGames, showcaseEmpty, showcasePrivate
+        case showcaseEdit, showcasePinnedCount, showcaseEditHint, showcaseFull, showcaseSaved
+        // Profile look
+        case profileTheme = "profileThemeTitle", profileThemeName, themeWear = "themeWearOnProfile", themeTakeOff, profileThemeWorn, profileThemeOn, profileThemeOff, profileThemeHint, profileThemeUnavailable
         // Compare
         case compareTrophies, compareTitle, compareLead, compareGameLead, compareNoGames, compareBoth, compareNotYet, compareNotPlayed
         case comparePrivate, compareFailed, compareLoading, compareYou, compareGames, compareBothPlay, hintCompare, hintTrophies, compareUnknownGame

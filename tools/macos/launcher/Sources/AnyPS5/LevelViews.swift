@@ -286,33 +286,49 @@ struct LevelUpToast: View {
     }
 }
 
-/// A profile's showcase under its card: the favourite games' icons with their progress, then the
-/// pinned trophies; a lock when the owner keeps it private.
+/// A profile's showcase under its card: up to six pins, the trophies first, then the games'
+/// icons with their progress; a lock when the owner keeps it private. The owner's own, empty,
+/// says how to pin.
 struct ProfileShowcaseStrip: View {
     let showcase: TogetherShowcase
     let owner: String
+    var mine = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
     var body: some View {
+        let shown = showcase.shown
         HStack(alignment: .top, spacing: 30 * scale) {
-            if showcase.isPrivate {
+            if showcase.isPrivate && !mine {
                 Label(TL.format(.showcasePrivate, owner), systemImage: "lock.fill")
                     .font(.display(14 * scale, .medium))
                     .foregroundStyle(.white.opacity(0.5))
                     .padding(.vertical, 6 * scale)
             }
-            if let games = showcase.games, !games.isEmpty {
-                section(TL.text(.showcaseGames)) {
-                    HStack(spacing: 12 * scale) {
-                        ForEach(games.prefix(4)) { game in gameTile(game) }
+            if mine && showcase.isEmpty {
+                HStack(spacing: 14 * scale) {
+                    Image(systemName: "pin").font(.system(size: 15 * scale, weight: .semibold))
+                    Text(TL.text(.showcaseEmpty)).font(.display(15 * scale, .medium))
+                    Text(TL.text(.showcaseEditHint)).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.45))
+                }
+                .foregroundStyle(.white.opacity(0.6))
+                .padding(.horizontal, 18 * scale)
+                .padding(.vertical, 14 * scale)
+                .background(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous).fill(Color.white.opacity(0.04)))
+                .overlay(RoundedRectangle(cornerRadius: 14 * scale, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.1), style: StrokeStyle(lineWidth: 1, dash: [5 * scale, 4 * scale])))
+            }
+            if let trophies = shown.trophies, !trophies.isEmpty {
+                section(TL.text(.showcaseTrophies)) {
+                    HStack(spacing: 10 * scale) {
+                        ForEach(trophies) { trophy in trophyChip(trophy) }
                     }
                 }
             }
-            if let trophies = showcase.trophies, !trophies.isEmpty {
-                section(TL.text(.showcaseTrophies)) {
-                    HStack(spacing: 10 * scale) {
-                        ForEach(trophies.prefix(6)) { trophy in trophyChip(trophy) }
+            if let games = shown.games, !games.isEmpty {
+                section(TL.text(.showcaseGames)) {
+                    HStack(spacing: 12 * scale) {
+                        ForEach(games) { game in gameTile(game) }
                     }
                 }
             }
@@ -350,7 +366,7 @@ struct ProfileShowcaseStrip: View {
             .frame(width: size, height: size)
             .clipShape(RoundedRectangle(cornerRadius: size * 0.2, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: size * 0.2, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
-            ProgressLine(fraction: Double(game.progress ?? 0) / 100, color: model.accent, height: 3 * scale)
+            ProgressLine(fraction: Double(game.progress ?? 0) / 100, color: model.profileAccent, height: 3 * scale)
                 .frame(width: size)
                 .opacity(game.progress == nil ? 0 : 1)
         }

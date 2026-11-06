@@ -154,7 +154,8 @@ public struct TogetherShowcaseGame: Decodable, Equatable, Sendable, Identifiable
     public func name(in language: String) -> String { TogetherNames.pick(names, language) ?? titleId }
 }
 
-/// What someone pinned: up to six earned trophies and four games. A part the reader may not see is nil.
+/// What someone pinned: six pins in all, earned trophies and games together (`shown`). A part the
+/// reader may not see is nil.
 public struct TogetherShowcase: Decodable, Equatable, Sendable {
     public let trophies: [TogetherEarnedTrophy]?
     public let games: [TogetherShowcaseGame]?
