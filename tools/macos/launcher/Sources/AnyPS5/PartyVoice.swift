@@ -173,8 +173,10 @@ final class PartyVoice: NSObject {
         }
     }
 
-    func close() {
-        for userId in Array(peers.keys) { drop(userId) }
+    /// Out of the voice: a bye to everyone, unless it moved to another of the user's devices,
+    /// which talks to them now.
+    func close(sayBye: Bool = true) {
+        for userId in Array(peers.keys) { drop(userId, sayBye: sayBye) }
         timer?.invalidate()
         timer = nil
         track.isEnabled = false

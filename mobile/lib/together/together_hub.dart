@@ -7,6 +7,7 @@ import 'friends.dart';
 import 'messages.dart';
 import 'notifications.dart';
 import 'parties.dart';
+import 'push.dart';
 import 'share_play.dart';
 import 'share_play_webrtc.dart';
 import 'together_account.dart';
@@ -25,6 +26,7 @@ class TogetherHub extends ChangeNotifier {
     VoiceEngine Function()? voiceEngine,
     ShareEngine Function()? shareEngine,
     ShareSound Function()? shareSound,
+    PushChannel? pushChannel,
   }) : socket = socket ?? TogetherSocket(account: account) {
     friends = Friends(account: account, socket: this.socket)
       ..addListener(notifyListeners);
@@ -61,8 +63,22 @@ class TogetherHub extends ChangeNotifier {
       parties: parties,
       sharePlays: sharePlays,
     )..addListener(notifyListeners);
+    push = PhonePush(
+      account: account,
+      notifications: notifications,
+      channel: pushChannel,
+      language: () => account.preferences.getString('language') ?? 'en',
+    );
+    // Reaching out to someone is when push is offered: they may answer while the app is closed.
+    messages.onReachOut = push.reachedOut;
+    friends.onReachOut = push.reachedOut;
+    parties.addListener(_partyMaybeJoined);
+    calls.addListener(_callMaybeStarted);
     account.addListener(_accountChanged);
-    _lifecycle = AppLifecycleListener(onResume: this.socket.wake);
+    _lifecycle = AppLifecycleListener(
+      onResume: this.socket.wake,
+      onHide: _away,
+    );
     _accountChanged();
   }
 
@@ -88,6 +104,30 @@ class TogetherHub extends ChangeNotifier {
   late final Discover discover;
   late final AppLifecycleListener _lifecycle;
   String? _user;
+
+  /// Messages, invites and calls while the app is closed.
+  late final PhonePush push;
+  bool _wasInParty = false;
+  bool _wasInCall = false;
+
+  /// The app went to the background: its socket closes so pushes come at once, unless voice or a
+  /// call needs it.
+  void _away() {
+    if (voice.active || calls.inCall || calls.incoming.isNotEmpty) return;
+    socket.rest();
+  }
+
+  void _partyMaybeJoined() {
+    final now = parties.party != null;
+    if (now && !_wasInParty) push.reachedOut();
+    _wasInParty = now;
+  }
+
+  void _callMaybeStarted() {
+    final now = calls.active != null;
+    if (now && !_wasInCall) push.reachedOut();
+    _wasInCall = now;
+  }
 
   /// Who is signed in, by id.
   String? get me => account.user?.id;
@@ -119,13 +159,20 @@ class TogetherHub extends ChangeNotifier {
     notifications.clear();
     sharePlays.clear();
     discover.clear();
-    if (user != null) socket.start();
+    push.clear();
+    if (user != null) {
+      socket.start();
+      push.start().catchError((_) {});
+    }
     notifyListeners();
   }
 
   @override
   void dispose() {
     account.removeListener(_accountChanged);
+    parties.removeListener(_partyMaybeJoined);
+    calls.removeListener(_callMaybeStarted);
+    push.dispose();
     _lifecycle.dispose();
     friends.dispose();
     messages.dispose();
