@@ -41,7 +41,8 @@ final class PartyChatTests: XCTestCase {
         XCTAssertNil(model.partyChat)
         model.overlay = .party
         XCTAssertFalse(model.partyChatShown)
-        XCTAssertNil(model.chatConversation)
+        XCTAssertNil(model.partyChatConversation)
+        XCTAssertNil(model.chatConversation?.partyId, "the thread's actions stay Messages'")
     }
 
     /// A message of the party's chat goes to the chat alone: the inbox's count, its list and its
