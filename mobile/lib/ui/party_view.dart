@@ -228,7 +228,7 @@ class _PartyPaneState extends State<PartyPane> {
           Text(texts.party, style: _title),
           const SizedBox(width: 10),
           Text(
-            '${party.members.length}/$maxPartySize',
+            '${party.members.length}/${party.max}',
             style: const TextStyle(color: Colors.white38, fontSize: 14),
           ),
         ],

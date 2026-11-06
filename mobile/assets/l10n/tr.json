@@ -125,6 +125,8 @@
   "shareConnecting": "%@ ile bağlanılıyor…",
   "shareEnded": "%@ paylaşımı durdurdu",
   "shareRemoved": "%@ seni çıkardı",
+  "shareViaServer": "sunucu üzerinden",
+  "mediaServerOff": "Bu sunucuda medya sunucusu yok, en çok dört izleyici alabilir",
   "partyLeave": "Partiden ayrıl",
   "partyInvite": "Davet et",
   "partyInvited": "Davet edildi",

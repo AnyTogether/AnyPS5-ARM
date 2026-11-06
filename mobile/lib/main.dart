@@ -16,6 +16,7 @@ import 'layout/layout_tweaks.dart';
 import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
+import 'together/phone_audio.dart';
 import 'together/push.dart';
 import 'together/together_hub.dart';
 import 'stream/platform_player.dart';
@@ -45,6 +46,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
     await L10n.load();
+    await PhoneAudio.takeOver();
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,

@@ -6,6 +6,7 @@ import 'e2ee_devices.dart';
 import 'e2ee_keys.dart';
 import 'feed.dart';
 import 'friends.dart';
+import 'media_livekit.dart';
 import 'messages.dart';
 import 'notifications.dart';
 import 'parties.dart';
@@ -28,6 +29,8 @@ class TogetherHub extends ChangeNotifier {
     VoiceEngine Function()? voiceEngine,
     ShareEngine Function()? shareEngine,
     ShareSound Function()? shareSound,
+    ShareRoom Function()? shareRoom,
+    VoiceRoom Function()? voiceRoom,
     PushChannel? pushChannel,
     DeviceKeyStore? e2eeKeys,
     String deviceName = 'AnyPS5 Remote',
@@ -53,6 +56,7 @@ class TogetherHub extends ChangeNotifier {
       socket: this.socket,
       parties: parties,
       engine: voiceEngine,
+      room: voiceRoom ?? LiveKitVoiceRoom.new,
     );
     calls = Calls(
       account: account,
@@ -66,6 +70,7 @@ class TogetherHub extends ChangeNotifier {
       socket: this.socket,
       engine: shareEngine ?? WebRtcShareEngine.new,
       sound: shareSound ?? PlatformShareSound.new,
+      room: shareRoom ?? LiveKitShareRoom.new,
     )..addListener(notifyListeners);
     discover = Discover(
       account: account,
