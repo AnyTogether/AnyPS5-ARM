@@ -238,7 +238,7 @@ class PhonePush extends ChangeNotifier {
   PushToken? _token;
   StreamSubscription<Map<Object?, Object?>>? _taps;
   StreamSubscription<String>? _renewals;
-  late final _opens = StreamController<PushOpen>.broadcast(
+  late final StreamController<PushOpen> _opens = StreamController.broadcast(
     onListen: () {
       // The tap that started the app may come before anyone listens: it waits for them.
       final waiting = _launch;
