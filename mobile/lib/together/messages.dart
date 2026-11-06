@@ -642,8 +642,9 @@ class Messages extends ChangeNotifier {
       await e2ee?.prepare(chat).catchError((_) {});
     }
     if (id != null && openId == id) {
-      final opened = await _revealAll(thread);
-      if (openId == id) thread = opened;
+      final before = thread;
+      final opened = await _revealAll(before);
+      if (openId == id && identical(thread, before)) thread = opened;
     }
     conversations = await _revealLast(conversations);
     notifyListeners();
@@ -687,7 +688,8 @@ class Messages extends ChangeNotifier {
         if (c.lastMessage?.seal == SealState.opening) c,
     ];
     final e = e2ee;
-    if (waiting.isEmpty || e == null) return list;
+    // The list as it is now: it may have changed while this waited.
+    if (waiting.isEmpty || e == null) return conversations;
     if (e.on) {
       final unknown = {
         for (final c in waiting)
@@ -781,7 +783,10 @@ class Messages extends ChangeNotifier {
       if (conversation != null) await _prepare(conversation);
       final opened = await _revealAll(messages);
       if (openId != id) return;
-      thread = opened;
+      // Anything that came live while this was opening stays.
+      final known = {for (final m in opened) m.id};
+      thread = [...opened, ...thread.where((m) => !known.contains(m.id))]
+        ..sort(_order);
       more = page['more'] == true;
     } finally {
       if (openId == id) {

@@ -458,9 +458,9 @@ void main() {
   test(
     'encrypted, but the other person has no device now: nothing goes out',
     () async {
-      await start();
       eceDevices = [];
       encrypted = true;
+      await start();
       await openThread();
       expect(messages().lockOf(messages().open).state, ChatLock.noDevice);
       await messages().send('hi');
