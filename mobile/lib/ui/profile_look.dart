@@ -227,13 +227,15 @@ class ShowcaseStrip extends StatelessWidget {
                     foregroundColor: accent,
                     visualDensity: VisualDensity.compact,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    textStyle: const TextStyle(
+                  ),
+                  icon: const Icon(Icons.push_pin_outlined, size: 15),
+                  label: Text(
+                    texts.showcaseEdit,
+                    style: const TextStyle(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  icon: const Icon(Icons.push_pin_outlined, size: 15),
-                  label: Text(texts.showcaseEdit),
                 ),
         ),
         if (tiles.isEmpty)
@@ -248,18 +250,22 @@ class ShowcaseStrip extends StatelessWidget {
           LayoutBuilder(
             builder: (context, box) {
               const most = ShowcasePicks.max;
-              final width = ((box.maxWidth - gap * (most - 1)) / most).clamp(
-                92.0,
-                160.0,
-              );
-              return Wrap(
-                spacing: gap,
-                runSpacing: gap,
+              final fits = (box.maxWidth - gap * (most - 1)) / most;
+              final width = fits < 84 ? 96.0 : fits.clamp(84.0, 160.0);
+              final row = Row(
                 children: [
-                  for (final tile in tiles)
+                  for (final (index, tile) in tiles.indexed) ...[
+                    if (index > 0) const SizedBox(width: gap),
                     SizedBox(width: width, height: 124, child: tile),
+                  ],
                 ],
               );
+              return fits < 84
+                  ? SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: row,
+                    )
+                  : row;
             },
           ),
       ],
