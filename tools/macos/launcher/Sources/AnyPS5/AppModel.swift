@@ -1141,6 +1141,8 @@ final class AppModel: ObservableObject {
     var shareWatch: ShareWatchSession?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
+    /// The party's voice moved to another of the user's devices (the phone); joining here takes it back.
+    @Published var voiceElsewhere: TogetherVoiceMoved?
     var partyVoice: PartyVoice?
     /// The microphone's switch and deafening.
     @Published var mic = TogetherVoiceMic()

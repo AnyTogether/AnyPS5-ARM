@@ -258,6 +258,39 @@ class Calls extends ChangeNotifier {
     }
   }
 
+  /// A call that rang this phone through a push: it rings here again if it still does on the
+  /// server, and the notification's own Answer or Decline is carried out.
+  Future<void> fromPush(
+    String callId,
+    Person from, {
+    bool answer = false,
+    bool decline = false,
+  }) async {
+    if (active?.id == callId) return;
+    if (!incoming.any((ring) => ring.callId == callId)) {
+      try {
+        final json = await account.call('GET', 'calls/$callId');
+        if (json['answeredAt'] != null || json['endedAt'] != null) return;
+      } on Object {
+        // Over, or not reachable: nothing rings.
+        return;
+      }
+      if (incoming.any((ring) => ring.callId == callId)) return;
+      incoming = [...incoming, IncomingCall(callId, from)];
+      notifyListeners();
+    }
+    final ring = incoming.firstWhere((ring) => ring.callId == callId);
+    // Answering offers to the caller through the gateway: the socket of an app that just
+    // started is let come up first.
+    if (answer) {
+      for (var i = 0; i < 100 && socket.status != SocketStatus.ready; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      await accept(ring);
+    }
+    if (decline) await this.decline(ring);
+  }
+
   /// Ends the call (or stops calling).
   void hangUp() {
     if (active != null && active!.phase != CallPhase.ended) {

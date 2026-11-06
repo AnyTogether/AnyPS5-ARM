@@ -45,6 +45,10 @@ class Voice extends ChangeNotifier {
   bool deafened = false;
   VoiceProblem? problem;
 
+  /// The voice went to another of the person's devices (the computer took it back): the client
+  /// there, such as "launcher-macos". Cleared when this phone joins again.
+  String? movedTo;
+
   bool get active => _mesh != null;
 
   /// This phone's microphone is heard right now.
@@ -62,6 +66,7 @@ class Voice extends ChangeNotifier {
     if (party == null || me == null || joining || active) return;
     joining = true;
     problem = null;
+    movedTo = null;
     notifyListeners();
     final engine = _engine();
     try {
@@ -183,7 +188,7 @@ class Voice extends ChangeNotifier {
       })
       .catchError((_) => <String, dynamic>{});
 
-  Future<void> _stop() async {
+  Future<void> _stop({bool sayBye = true}) async {
     final mesh = _mesh;
     _mesh = null;
     callId = null;
@@ -191,7 +196,7 @@ class Voice extends ChangeNotifier {
     _levels?.cancel();
     _renew?.cancel();
     notifyListeners();
-    await mesh?.close();
+    await mesh?.close(sayBye: sayBye);
   }
 
   /// Out of the party, out of its voice: the server took this phone out of the call already.
@@ -219,6 +224,11 @@ class Voice extends ChangeNotifier {
         mesh.drop(data['userId'] as String, sayBye: false).catchError((_) {});
       case 'call.ended' when data['callId'] == callId:
         _stop();
+      // Joined on another device: this phone goes quiet and stays in the party. The other
+      // device talks to everyone now, so no one is told goodbye.
+      case 'call.moved' when data['callId'] == callId:
+        movedTo = data['client'] as String? ?? '';
+        _stop(sayBye: false);
     }
   }
 
