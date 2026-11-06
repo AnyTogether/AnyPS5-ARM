@@ -285,6 +285,15 @@ enum PreviewRenderer {
                                              call: .init(id: "call1", in: ["u1", "f1"])))
             model.overlay = .party; model.panelInRows = true; model.panelRow = 4
         }
+        // A party on a server with a media server: up to 24, its call through the server.
+        render(preferences, found, root, still, output.appendingPathComponent("party-voice-server.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.previewParty(TogetherParty(id: "p1", leaderId: "u1", privacy: "friends", members: [robin, people[0], people[1]], invited: [],
+                                             call: .init(id: "call1", in: ["u1", "f1", "f2"], media: .sfu), max: 24))
+            model.previewVoice(call: "call1", speaking: ["f2"])
+            model.overlay = .party; model.panelInRows = true; model.panelRow = 0
+        }
         render(preferences, found, root, still, output.appendingPathComponent("party-voice.png")) { model in
             model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
             model.togetherFriends = partyFriends
@@ -390,6 +399,27 @@ enum PreviewRenderer {
                                                      viewers: [TogetherSharePlay.Viewer(user: robin, device: "mac", slot: nil, joinedAt: nil)])
             model.share.watchConnected = true
             model.share.watchStats = .init(roundTrip: 42, fps: 60, height: 720)
+        }
+        // A big share play through the media server: Mira plays on the direct link, the others
+        // watch from the server; the host may let up to the server's 16 watch.
+        render(preferences, found, root, still, output.appendingPathComponent("friends-share-server.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.togetherFriends = partyFriends
+            model.mediaLimits = TogetherMediaLimits(sfu: true, maxShareViewers: 16, maxPartySize: 24)
+            let viewers = [TogetherSharePlay.Viewer(user: people[0], device: "web1", slot: 2, joinedAt: nil), TogetherSharePlay.Viewer(user: people[1], device: "phone1", slot: nil, joinedAt: nil),
+                           TogetherSharePlay.Viewer(user: TogetherPerson(userId: "f3", handle: "kenji", displayName: "Kenji", avatar: nil), device: "web3", slot: nil, joinedAt: nil)]
+            model.previewShare(TogetherSharePlay(id: "sp1", host: robin, hostDevice: "mac", titleId: found.first?.titleID ?? "PPSA01234", title: found.first?.name, open: true, maxViewers: 12,
+                                                 viewers: viewers, invited: [], media: .sfu),
+                               links: ["f1": .init(state: .connected, roundTrip: 38, sendRate: 9_000_000, relayed: false, framesPerSecond: 60, frameHeight: 720)])
+            model.overlay = .friends; model.panelInRows = true; model.panelRow = 8
+        }
+        render(preferences, found, root, still, output.appendingPathComponent("share-watch-server.png")) { model in
+            model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+            model.share.watching = TogetherSharePlay(id: "sp9", host: people[0], hostDevice: "mac9", titleId: "PPSA01234", title: "Cat Quest III", open: true, maxViewers: 12,
+                                                     viewers: [TogetherSharePlay.Viewer(user: robin, device: "mac", slot: nil, joinedAt: nil)], media: .sfu)
+            model.share.watchConnected = true
+            model.share.watchViaServer = true
+            model.share.watchStats = .init(roundTrip: 58, fps: 60, height: 720)
         }
         render(preferences, found, root, still, output.appendingPathComponent("controls-capture.png")) { model in model.overlay = .controls; model.panelInRows = true; model.panelRow = 3; model.capturing = .square }
         render(preferences, found, root, still, output.appendingPathComponent("pairing.png")) { model in model.previewPairing(PairingRequest(id: UUID(), deviceName: "Pixel 8", code: "4821")) }
@@ -555,6 +585,7 @@ enum PreviewRenderer {
         CapturesPreviews.run(preferences, found, root, still, output)
         LevelPreviews.run(preferences, found, root, still, output)
         ChatPreviews.run(preferences, found, root, still, output)
+        E2EEPreviews.run(preferences, found, root, still, output)
         UpdatePreviews.run(preferences, found, root, still, output)
         ControllerPreviews.run(preferences, found, root, still, output)
         BrowserPlayPreviews.run(preferences, found, root, still, output)

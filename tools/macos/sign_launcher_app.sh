@@ -34,6 +34,10 @@ sign() {
 sign_toolkit "$toolkit" "$identity"
 # WebRTC for party voice, signed as ours so library validation lets the app load it.
 [ ! -d "$app/Contents/Frameworks/WebRTC.framework" ] || sign "$app/Contents/Frameworks/WebRTC.framework"
+# LiveKit's WebRTC and its Rust helper (the optional media server), the same way.
+for framework in LiveKitWebRTC RustLiveKitUniFFI; do
+    [ ! -d "$app/Contents/Frameworks/$framework.framework" ] || sign "$app/Contents/Frameworks/$framework.framework"
+done
 # The microphone (party voice) under the hardened runtime.
 sign --options runtime --entitlements "$(dirname "$0")/launcher/AnyPS5.entitlements" "$app"
 codesign --verify --deep --strict "$app"

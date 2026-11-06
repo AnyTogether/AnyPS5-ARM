@@ -572,6 +572,9 @@ class Messages extends ChangeNotifier {
   final E2ee? e2ee;
   late final StreamSubscription<TogetherEvent> _events;
 
+  /// Told when this phone writes to someone (a moment to offer push).
+  VoidCallback? onReachOut;
+
   List<Conversation> conversations = const [];
 
   /// Messages not read yet, over every conversation.
@@ -863,6 +866,7 @@ class Messages extends ChangeNotifier {
     );
     thread = [...thread, message];
     notifyListeners();
+    onReachOut?.call();
     await _deliver(message);
   }
 

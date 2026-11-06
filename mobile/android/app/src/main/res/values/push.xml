@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Push: what Android shows of it outside the app (the channels in its settings, a call's buttons). -->
+<resources>
+    <color name="push_accent">#FF8AB4FF</color>
+    <string name="push_channel_together">Friends and messages</string>
+    <string name="push_channel_together_detail">Messages, invites and what friends do.</string>
+    <string name="push_channel_calls">Calls</string>
+    <string name="push_channel_calls_detail">A friend calling. It rings over the lock screen.</string>
+    <string name="push_answer">Answer</string>
+    <string name="push_decline">Decline</string>
+</resources>

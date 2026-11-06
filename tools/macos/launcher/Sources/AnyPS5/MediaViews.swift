@@ -33,6 +33,8 @@ extension AppModel {
     /// The words a message shows in a list or a notice: its text, or what its media is.
     func messageWords(_ message: TogetherMessage) -> String? {
         guard message.deletedAt == nil else { return nil }
+        // Sealed: what it opened to here, never its stand-in text.
+        if message.sealed != nil { return sealedWords(message) }
         guard let attachment = message.attachment else { return message.text }
         let kind = TCloud.kind(attachment.kind)
         return message.words.map { "\(kind) · \($0)" } ?? kind
@@ -97,11 +99,20 @@ extension AppModel {
         Task {
             defer { cloud.working = false }
             do {
-                let media = try await uploadShot(file)
-                let sent = try await together.send(media: media.id, in: conversation.id)
+                let sent: TogetherMessage
+                if sendsSealed(conversation) {
+                    // Sealed on this Mac: the server keeps only ciphertext of it.
+                    let attachment = try await uploadSealedShot(file)
+                    sent = try await sealAndSend(TogetherE2EE.Payload(attachment: attachment), in: conversation, mediaId: attachment.mediaId)
+                } else {
+                    let media = try await uploadShot(file)
+                    sent = try await together.send(media: media.id, in: conversation.id)
+                }
                 _ = inbox?.apply(sent, open: nil)
                 Sounds.shared.play(.select)
                 show(TCloud.format(.sentTo, name), symbol: "checkmark.circle.fill")
+            } catch let refusal as E2EERefusal {
+                showSealedFailure(refusal, in: conversation)
             } catch {
                 show(cloudMessage(error), symbol: "exclamationmark.bubble.fill")
             }

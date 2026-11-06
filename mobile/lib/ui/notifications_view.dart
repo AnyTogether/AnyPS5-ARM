@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../social_strings.dart';
 import '../strings.dart';
 import '../together/notifications.dart';
+import '../together/push.dart';
 import '../together/together_hub.dart';
 import 'together_widgets.dart';
 
@@ -262,13 +263,61 @@ class _NotificationsPaneState extends State<NotificationsPane> {
         value: settings.digest,
         onChanged: settings.canMail ? (on) => _set('digest', on) : null,
       ),
-      Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: Text(
-          texts.noPushYet,
-          style: const TextStyle(color: Colors.white38, fontSize: 12),
+      ..._pushList(texts, settings),
+    ];
+  }
+
+  /// Push on this phone, and what it carries: only where the server and this build can push.
+  List<Widget> _pushList(Strings texts, NoticeSettings settings) {
+    final push = widget.hub.push;
+    if (!push.available) {
+      return [
+        Padding(
+          padding: const EdgeInsets.only(top: 10),
+          child: Text(
+            texts.noPushYet,
+            style: const TextStyle(color: Colors.white38, fontSize: 12),
+          ),
         ),
+      ];
+    }
+    final denied = push.permission == PushPermission.denied;
+    return [
+      const Padding(
+        padding: EdgeInsets.symmetric(vertical: 6),
+        child: Divider(color: Colors.white10, height: 1),
       ),
+      _Toggle(
+        label: texts.pushHere,
+        detail: denied && !push.registered
+            ? texts.pushDenied
+            : texts.pushHereHint,
+        value: push.registered,
+        onChanged: denied && !push.registered
+            ? null
+            : (on) async {
+                try {
+                  await (on ? push.turnOn() : push.turnOff());
+                } on Object catch (error) {
+                  _failed(error);
+                }
+                if (mounted) setState(() {});
+              },
+      ),
+      if (push.registered) ...[
+        _Toggle(
+          label: texts.pushPreview,
+          detail: texts.pushPreviewHint,
+          value: settings.pushPreview,
+          onChanged: (on) => _set('pushPreview', on),
+        ),
+        _Toggle(
+          label: texts.pushCalls,
+          detail: texts.pushCallsHint,
+          value: settings.pushCalls,
+          onChanged: (on) => _set('pushCalls', on),
+        ),
+      ],
     ];
   }
 }
