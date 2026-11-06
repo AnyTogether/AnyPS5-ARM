@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5MediaServer
 import AnyPS5SharePlay
 import AVFoundation
 import CoreMedia
@@ -6,9 +7,13 @@ import ScreenCaptureKit
 
 /// The game's window and sound for share play, as Remote Play captures them: ScreenCaptureKit at
 /// up to 1280 x 720 and 60 frames a second, each frame handed to WebRTC as it comes (its encoder
-/// works on the Mac's media engine), the sound as 5 ms packets of 16-bit stereo.
+/// works on the Mac's media engine), the sound as 5 ms packets of 16-bit stereo; both also to the
+/// media server while the share play goes through it.
 @MainActor
 final class SharePlayCapture {
+    /// The share play's publisher on the media server, while there is one: it gets every frame
+    /// and every sound packet the mesh host gets.
+    let mediaServer = Locked<SfuShareHost?>(nil)
     private var stream: SCStream?
     private var output: Output?
     private var watch: Task<Void, Never>?
@@ -33,7 +38,7 @@ final class SharePlayCapture {
             ClipRecorder.configuration(window: window, display: display, scale: scale, maxWidth: 1280, maxHeight: 720, queueDepth: 3)
         }
         let configuration = configure(window, display, CGFloat(filter.pointPixelScale))
-        let output = Output(host: host)
+        let output = Output(host: host, mediaServer: mediaServer)
         let stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
         try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: output.queue)
         try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: output.audioQueue)
@@ -57,9 +62,13 @@ final class SharePlayCapture {
         let queue = DispatchQueue(label: "org.anyps5.shareplay.video", qos: .userInteractive)
         let audioQueue = DispatchQueue(label: "org.anyps5.shareplay.audio", qos: .userInteractive)
         private let host: SharePlayHost
+        private let mediaServer: Locked<SfuShareHost?>
         private var chunker = SoundChunker()
 
-        init(host: SharePlayHost) { self.host = host }
+        init(host: SharePlayHost, mediaServer: Locked<SfuShareHost?>) {
+            self.host = host
+            self.mediaServer = mediaServer
+        }
 
         func stream(_ stream: SCStream, didOutputSampleBuffer sample: CMSampleBuffer, of type: SCStreamOutputType) {
             guard sample.isValid else { return }
@@ -70,6 +79,7 @@ final class SharePlayCapture {
                       let pixels = CMSampleBufferGetImageBuffer(sample) else { return }
                 let time = CMSampleBufferGetPresentationTimeStamp(sample)
                 host.push(pixels, timeNs: Int64(time.seconds * 1_000_000_000))
+                mediaServer.value?.push(pixels, timeNs: Int64(time.seconds * 1_000_000_000))
             case .audio:
                 sound(sample)
             default:
@@ -90,7 +100,11 @@ final class SharePlayCapture {
             let planar = description.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
             let second = planar && buffers.count > 1 ? buffers[1].mData?.assumingMemoryBound(to: Float.self) : nil
             let samples = SoundChunker.stereo16(first: first, second: second, planar: planar, channels: Int(description.mChannelsPerFrame), frames: frames)
-            for packet in chunker.add(samples, at: CMSampleBufferGetPresentationTimeStamp(sample).seconds) { host.push(sound: packet) }
+            let publisher = mediaServer.value
+            for packet in chunker.add(samples, at: CMSampleBufferGetPresentationTimeStamp(sample).seconds) {
+                host.push(sound: packet)
+                publisher?.push(sound: packet)
+            }
         }
     }
 }

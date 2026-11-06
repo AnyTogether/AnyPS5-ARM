@@ -295,6 +295,7 @@ class _Chip extends StatelessWidget {
       if (quality.framesPerSecond != null)
         '${quality.framesPerSecond!.round()} fps',
       if (quality.height != null) '${quality.height}p',
+      if (plays.viaServer) texts.shareViaServer,
     ].where((part) => part.isNotEmpty);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

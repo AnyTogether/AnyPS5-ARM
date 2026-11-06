@@ -32,10 +32,11 @@ The phone signs in to [AnyTogether](https://anytogether.net), the launchers' onl
 - **Sign-in:** with a code sent to your email, or with one tap using the account the Mac is signed in with; a signed-in phone also signs the Mac in. No password, no sign-up form.
 - **Friends**: from the people button on the home screen: who is online and what they play, requests, adding by handle.
 - **Messages**: your conversations, the same ones as on the Mac and the website, with unread counts; write to a friend from their entry.
-- **Parties and voice**: start a party, invite friends or join theirs, and talk with its members, voice going straight between you; mute or deafen. The leader hands out a join code (copy the code or its link, make a new one, stop it) and sets the party's Discord link, which everyone in it can open. **Join with a code** looks a code or its link up and asks to join.
+- **Parties and voice**: start a party, invite friends or join theirs, and talk with its members, voice going straight between you; mute or deafen. While the phone is the controller, the headset beside the connection status brings the party's voice to the phone (its microphone and speaker, or earphones), and the computer goes quiet for you; joining the voice on the computer takes it back. The leader hands out a join code (copy the code or its link, make a new one, stop it) and sets the party's Discord link, which everyone in it can open. **Join with a code** looks a code or its link up and asks to join.
 - **Calls, profiles, activity**: call a friend 1:1 (an incoming call shows over any screen, the pad too), edit your profile and picture, the activity feed, leaderboards with challenges (join, leave and the standings; they are made on the website) and notifications.
 - **Share play**: watch a friend's game and, when they let you, play as player 2–4 with the phone's pad.
 - **Another server**: for a self-hosted AnyTogether; when the Mac uses another server, the phone offers it.
+- **Push**: messages, invites and calls with the app closed or the phone locked, once you reach out to someone and say yes. A call rings over the lock screen with Answer and Decline. It needs a server and a build set up for it (see [Push](#push)); the notification settings say when this one is not.
 
 | Friends | Messages |
 |---|---|
@@ -63,6 +64,36 @@ flutter build apk --release
 ```
 
 The APK is `build/app/outputs/flutter-apk/app-release.apk`. For the iPhone, `flutter build ios --release --no-codesign` makes an unsigned app; zipped as `Payload/Runner.app` it is the .ipa that AltStore or Sideloadly sign while installing.
+
+## Push
+
+Push is off until three things are in place: the server's keys, the Firebase project's file in the Android build, and an iPhone build signed with a paid Apple Developer team. Nothing secret is in this repository, and nothing here should be committed.
+
+**What to create**
+
+| What | Where to make it | Where it goes |
+|---|---|---|
+| An App ID with Push Notifications ticked, for `org.anyps5.anyps5Remote` (or your own bundle ID) | Apple Developer → Certificates, Identifiers & Profiles → Identifiers | the iPhone build's bundle ID, and `APNS_BUNDLE_IDS` on the server |
+| An APNs key (`.p8`) and its Key ID | Apple Developer → Keys → new key with Apple Push Notifications service | `APNS_PRIVATE_KEY` and `APNS_KEY_ID` on the server |
+| The Team ID | Apple Developer → Membership | `APNS_TEAM_ID` on the server, and `DEVELOPMENT_TEAM` in `ios/Flutter/Push.xcconfig` |
+| A Firebase project with an Android app for `org.anyps5.anyps5_remote` | console.firebase.google.com | — |
+| The Android app's `google-services.json` | Firebase → Project settings → Your apps | `android/app/google-services.json`, or a path in `ANYPS5_GOOGLE_SERVICES_JSON`, when building |
+| A service account key (JSON) | Firebase → Project settings → Service accounts → Generate new private key | `FCM_SERVICE_ACCOUNT` on the server (one line, or base64) |
+
+The server side is in AnyTogether's `docs/self-hosting.md` ("Push to the phone app").
+
+**Android.** With `google-services.json` in place, `flutter build apk --release` builds an app that gets a token and registers it. Without it the app builds as before and its notification settings say push is not set up. The file is listed in `android/.gitignore`.
+
+**iPhone.** A build sideloaded with a free Apple ID (AltStore, SideStore, Sideloadly) cannot get pushes: Apple gives free accounts no push entitlement. Push needs a build signed with a paid team (TestFlight, the App Store, or an ad hoc build). Create `ios/Flutter/Push.xcconfig` (listed in `ios/.gitignore`):
+
+```
+CODE_SIGN_ENTITLEMENTS = Runner/RunnerPush.entitlements
+DEVELOPMENT_TEAM = <your Team ID>
+```
+
+and build signed (`flutter build ipa`). The app reports whether its profile uses Apple's development or production service and the server follows it. If AltStore or another re-signer changes the bundle ID, the server does not push to that build.
+
+**On the phone.** The app asks once the person writes to someone, sends a friend request, joins a party or makes a call, never at the first start. "Not now" waits a week, and after three the app stops asking. Notifications settings have the switch for this phone, whether a push shows what was written, and whether calls ring.
 
 ## Testing
 

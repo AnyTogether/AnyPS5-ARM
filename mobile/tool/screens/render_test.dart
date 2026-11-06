@@ -18,7 +18,11 @@ import 'package:anyps5_remote/l10n.dart';
 import 'package:anyps5_remote/protocol/messages.dart';
 import 'package:anyps5_remote/ui/activity_card.dart';
 import 'package:anyps5_remote/ui/home_screen.dart';
+import 'package:anyps5_remote/together/profiles.dart';
 import 'package:anyps5_remote/ui/pad_screen.dart';
+import 'package:anyps5_remote/ui/profile_edit.dart';
+import 'package:anyps5_remote/ui/profile_look.dart';
+import 'package:anyps5_remote/ui/showcase_edit.dart';
 import 'package:anyps5_remote/ui/setup_screen.dart' show StatusDot;
 import 'package:anyps5_remote/together/together_hub.dart';
 import 'package:anyps5_remote/ui/share_watch_screen.dart';
@@ -31,6 +35,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'demo.dart';
+import 'demo_e2ee.dart';
 
 const _size = Size(2400, 1648);
 const _phone = Size(2340, 1080);
@@ -159,6 +164,77 @@ Future<ui.Image> _avatar(String seed) {
   return recorder.endRecording().toImage(side.toInt(), side.toInt());
 }
 
+Future<ui.Image> _themeStill(DemoTheme theme, Size size) {
+  final [deep, middle, bright, accent] = [
+    for (final c in theme.colors) Color(c),
+  ];
+  final random = Random(
+    theme.slug.codeUnits.fold<int>(3, (a, c) => a * 31 + c),
+  );
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final area = Offset.zero & size;
+  canvas.drawRect(
+    area,
+    Paint()
+      ..shader = ui.Gradient.linear(
+        Offset.zero,
+        size.bottomRight(Offset.zero),
+        [deep, middle],
+      ),
+  );
+  for (var i = 0; i < 3; i++) {
+    final center = Offset(
+      size.width * (0.2 + random.nextDouble() * 0.7),
+      size.height * random.nextDouble(),
+    );
+    final radius = size.width * (0.25 + random.nextDouble() * 0.3);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..shader = ui.Gradient.radial(center, radius, [
+          (i.isEven ? bright : accent).withValues(alpha: 0.42),
+          (i.isEven ? bright : accent).withValues(alpha: 0),
+        ]),
+    );
+  }
+  for (var band = 0; band < 5; band++) {
+    final path = Path();
+    final base = size.height * (0.45 + band * 0.08);
+    final phase = random.nextDouble() * pi * 2;
+    path.moveTo(0, base);
+    for (var x = 0.0; x <= size.width; x += size.width / 64) {
+      path.lineTo(
+        x,
+        base + sin(x / size.width * pi * 2.2 + phase) * size.height * 0.09,
+      );
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.height * 0.006
+        ..color = bright.withValues(alpha: 0.18 + band * 0.05),
+    );
+  }
+  for (var i = 0; i < 70; i++) {
+    canvas.drawCircle(
+      Offset(
+        random.nextDouble() * size.width,
+        random.nextDouble() * size.height,
+      ),
+      random.nextDouble() * size.height * 0.004 + 0.6,
+      Paint()
+        ..color = Colors.white.withValues(alpha: random.nextDouble() * 0.6),
+    );
+  }
+  return recorder.endRecording().toImage(
+    size.width.round(),
+    size.height.round(),
+  );
+}
+
 Future<void> _art() async {
   final library = await _decode('../docs/screenshots/launcher-library.jpg');
   const icon = Size(256, 256);
@@ -176,6 +252,10 @@ Future<void> _art() async {
   }
   for (final person in pictured) {
     _images['$avatarBase/${person.id}.png'] = await _avatar(person.id);
+  }
+  for (final theme in demoThemes) {
+    _images[theme.preview] = await _themeStill(theme, const Size(1280, 720));
+    _images[theme.thumb] = await _themeStill(theme, const Size(640, 360));
   }
   final banner = await _decode(
     '../docs/screenshots/launcher-trophy-banner.jpg',
@@ -266,7 +346,6 @@ void main() {
   late String family;
 
   setUpAll(() async {
-    // The texts, as the app reads them from its assets.
     L10n.loadFolder(Directory('assets/l10n'));
     family = await _fonts();
     await _art();
@@ -277,14 +356,23 @@ void main() {
     WidgetTester tester, {
     List<double> voice = const [],
     int unseen = 4,
+    DemoE2ee? e2ee,
   }) async {
     final preferences = await tester.runAsync(() async {
-      SharedPreferences.setMockInitialValues(signedIn());
+      SharedPreferences.setMockInitialValues(
+        e2ee?.preferences(signedIn()) ?? signedIn(),
+      );
       return SharedPreferences.getInstance();
     });
     final account = DemoAccount(preferences!);
+    if (e2ee != null) {
+      account
+        ..own = e2ee.answer
+        ..wrap = e2ee.wrap;
+    }
     final hub = TogetherHub(
       account: account,
+      e2eeKeys: e2ee?.keys(account.base),
       socket: DemoSocket(account: account),
       voiceEngine: () => DemoVoice(voice),
       shareEngine: () => DemoShare(
@@ -294,8 +382,9 @@ void main() {
       ),
       shareSound: QuietSound.new,
     );
+    if (e2ee != null) await tester.runAsync(hub.e2ee.start);
     await hub.friends.refresh();
-    await hub.messages.refresh();
+    await tester.runAsync(hub.messages.refresh);
     await hub.parties.refresh();
     await hub.notifications.refresh();
     hub.feed.unseen = unseen;
@@ -380,6 +469,91 @@ void main() {
     );
   });
 
+  // End-to-end encrypted messages: the lock and the devices-changed notice, the sheet with the
+  // safety number, a conversation that is not encrypted, the states of messages that do not
+  // open, and the report sheet's note; wide, and on a narrow phone.
+  Future<DemoE2ee> keys(WidgetTester tester) async =>
+      (await tester.runAsync(DemoE2ee.make))!;
+
+  Future<void> showThread(WidgetTester tester, TogetherHub h, String id) =>
+      tester.runAsync(() => h.messages.show(id));
+
+  for (final (suffix, size) in [('', _size), ('-narrow', _phone)]) {
+    testWidgets('e2ee thread$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-thread$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () => showThread(tester, h, 'c-mira'),
+        size: size,
+      );
+    });
+
+    testWidgets('e2ee sheet$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-sheet$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () async {
+          await showThread(tester, h, 'c-mira');
+          await settle(tester);
+          await tester.tap(find.text('End-to-end encrypted').first);
+          await settle(tester);
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 300)),
+          );
+        },
+        size: size,
+      );
+    });
+
+    testWidgets('e2ee plain$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-plain$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () => showThread(tester, h, 'c-theo'),
+        size: size,
+      );
+    });
+
+    testWidgets('e2ee states$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-states$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () => showThread(tester, h, 'c-sol'),
+        size: size,
+      );
+    });
+  }
+
+  testWidgets('e2ee report', (tester) async {
+    final h = await hub(tester, e2ee: await keys(tester));
+    await shoot(
+      tester,
+      'phone-e2ee-report',
+      h,
+      together(h, TogetherTab.messages),
+      then: () async {
+        await showThread(tester, h, 'c-mira');
+        await settle(tester);
+        await tester.tap(find.byTooltip('Message actions').first);
+        await settle(tester);
+        await tester.tap(find.text('Report'));
+        await settle(tester);
+      },
+    );
+  });
+
   testWidgets('party', (tester) async {
     final h = await hub(tester, voice: [0.4, 0, 0]);
     await shoot(
@@ -391,9 +565,87 @@ void main() {
     );
   });
 
+  testWidgets('party chat on a phone', (tester) async {
+    final h = await hub(tester, voice: [0.4, 0, 0]);
+    await shoot(
+      tester,
+      'phone-party-chat',
+      h,
+      together(h, TogetherTab.party),
+      size: _phone,
+      then: () async {
+        await h.voice.join();
+        await tester.tap(find.text('Chat'));
+        (h.socket as DemoSocket).push('typing', {
+          'conversationId': 'pc-ines',
+          'userId': 'mira',
+        });
+      },
+    );
+  });
+
+  testWidgets('party chat on a large phone', (tester) async {
+    final h = await hub(tester, voice: [0.4, 0, 0]);
+    await shoot(
+      tester,
+      'phone-party-chat-wide',
+      h,
+      together(h, TogetherTab.party),
+      size: const Size(2796, 1290),
+      then: h.voice.join,
+    );
+  });
+
   testWidgets('profile', (tester) async {
     final h = await hub(tester);
     await shoot(tester, 'phone-profile', h, together(h, TogetherTab.profile));
+  });
+
+  testWidgets('showcase editor', (tester) async {
+    final h = await hub(tester);
+    final profiles = Profiles(h.account);
+    final page = (await tester.runAsync(() => profiles.load('ines')))!;
+    await shoot(
+      tester,
+      'showcase/phone-showcase-edit',
+      h,
+      ShowcaseEditScreen(
+        profiles: profiles,
+        current: page.showcase!,
+        trophies: page.trophies!,
+        games: page.games!,
+        accent: lookAccent(page.profile.look),
+      ),
+    );
+  });
+
+  testWidgets('profile theme picker', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'showcase/phone-theme-picker',
+      h,
+      ProfileEditScreen(
+        profiles: Profiles(h.account),
+        pickPhoto: () async => null,
+      ),
+      then: () async {
+        await tester.tap(find.text(demoThemes.first.name));
+      },
+    );
+  });
+
+  testWidgets('profile edit with a theme', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'showcase/phone-profile-edit',
+      h,
+      ProfileEditScreen(
+        profiles: Profiles(h.account),
+        pickPhoto: () async => null,
+      ),
+    );
   });
 
   testWidgets('feed', (tester) async {

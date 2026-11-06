@@ -685,8 +685,9 @@ extension AppModel {
             // On a value with the pad, left in a panel without categories goes nowhere rather
             // than closing it.
             if command == .left && single && row.valueKind != .other && InputModeState.shared.mode == .pad { break }
-            // A question asked in place (AskFirst.swift) is answered Cancel first.
-            if !cancelAsk() { leaveRows(single) }
+            // A question asked in place (AskFirst.swift) is answered Cancel first; on the party
+            // screen ← goes into the chat beside the rows.
+            if !cancelAsk(), !(command == .left && overlay == .party && enterPartyChat()) { leaveRows(single) }
         case .close: closeOverlay()
         case .none: break
         }
@@ -1046,6 +1047,8 @@ struct SettingsSearchField: View {
 struct SidePanel: View {
     let title: String
     var subtitle: String?
+    /// A column drawn beside the rows, on their left (the party's chat).
+    var beside: AnyView?
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
@@ -1053,10 +1056,12 @@ struct SidePanel: View {
         let rows = model.panelCategories().first?.rows ?? []
         HStack(spacing: 0) {
             Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture { model.closeOverlay() }
+            if let beside { beside }
             VStack(alignment: .leading, spacing: 8 * scale) {
                 Text(title).font(.display(30 * scale, .light)).foregroundStyle(.white).lineLimit(2)
                 if let subtitle { Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)) }
-                RowList(rows: rows, focusedRow: model.focusedRow(in: rows))
+                // The focus in the column beside them leaves the rows unfocused.
+                RowList(rows: rows, focusedRow: beside != nil && model.partyChatFocused ? nil : model.focusedRow(in: rows))
                     .padding(.top, 18 * scale)
             }
             .padding(36 * scale)

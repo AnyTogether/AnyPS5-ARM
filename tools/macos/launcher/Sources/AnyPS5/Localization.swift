@@ -125,6 +125,7 @@ enum T {
             TC.Key.allCases.map(\.rawValue),
             SP.Key.allCases.map(\.rawValue),
             TS.Key.allCases.map(\.rawValue),
+            TChal.Key.allCases.map(\.rawValue),
             TSteam.Key.allCases.map(\.rawValue),
         ].flatMap { $0 }
     }
@@ -160,6 +161,7 @@ enum T {
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
         case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
         case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn = "voicePushToTalkOnMac", voicePushToTalkOff = "voicePushToTalkOffMac", voiceLeave, voiceNoMic, voiceJoined
+        case voiceMovedPhone, voiceMovedAway, voiceTakeBack, voiceOnPhone, voiceOnOtherDevice
         case togetherLinkBlocked
         case togetherOnlinePlay, togetherOnlinePlayDetail
         case messagesTyping, messagesTypingMany

@@ -40,12 +40,13 @@ Future<void> openTogether(
   required TogetherHub hub,
   TogetherTab tab = TogetherTab.friends,
   String? Function(String titleId)? gameName,
+  Notice? notice,
 }) => Navigator.of(context).push(
   PageRouteBuilder<void>(
     transitionDuration: const Duration(milliseconds: 260),
     reverseTransitionDuration: const Duration(milliseconds: 200),
     pageBuilder: (_, _, _) =>
-        TogetherScreen(hub: hub, tab: tab, gameName: gameName),
+        TogetherScreen(hub: hub, tab: tab, gameName: gameName, notice: notice),
     transitionsBuilder: (_, animation, _, child) {
       final eased = CurvedAnimation(
         parent: animation,
@@ -72,10 +73,14 @@ class TogetherScreen extends StatefulWidget {
     required this.hub,
     this.tab = TogetherTab.friends,
     this.gameName,
+    this.notice,
   });
 
   final TogetherHub hub;
   final TogetherTab tab;
+
+  /// A notification to go to as the screen opens (a push that was tapped).
+  final Notice? notice;
 
   /// A game's name from the Mac's library, for a friend playing it.
   final String? Function(String titleId)? gameName;
@@ -94,6 +99,13 @@ class _TogetherScreenState extends State<TogetherScreen> {
   void initState() {
     super.initState();
     widget.hub.friends.refresh().catchError((_) {});
+    final notice = widget.notice;
+    if (notice != null) {
+      widget.hub.notifications.read(notice).catchError((_) {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _openNotice(notice);
+      });
+    }
   }
 
   void _show(TogetherTab tab) => setState(() => _tab = tab);

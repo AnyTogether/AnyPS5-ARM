@@ -173,6 +173,8 @@ class Strings {
   String get shareWatching => lookup('shareWatching');
   String get shareFull => lookup('shareFull');
   String get shareFailed => lookup('shareFailed');
+  String get shareViaServer => lookup('shareViaServer');
+  String get mediaServerOff => lookup('mediaServerOff');
   String get shareTaken => lookup('shareTaken');
   String shareInvited(String name, String game) =>
       fill('shareInvited', [name, game]);

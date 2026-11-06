@@ -12,3 +12,6 @@ GeneratedPluginRegistrant.java
 key.properties
 **/*.keystore
 **/*.jks
+
+# The Firebase project's file for push (mobile/README.md, Push): kept out of the repository.
+/app/google-services.json

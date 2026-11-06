@@ -6,6 +6,7 @@ import 'package:flutter/widgets.dart';
 
 import '../protocol/packets.dart';
 import '../stream/stream_packets.dart';
+import 'media.dart';
 import 'people.dart';
 import 'together_account.dart';
 import 'together_socket.dart';
@@ -75,6 +76,23 @@ abstract class ShareEngine {
   Future<ShareLink> link(List<Map<String, dynamic>> iceServers);
 }
 
+/// The media server's room as a viewer needs it: the host's "game" picture and "game-audio"
+/// sound, nothing sent. [LiveKitShareRoom] makes real ones, tests make fakes.
+abstract class ShareRoom {
+  /// Joins the room and takes [host]'s game picture and sound (their user ID is their identity).
+  Future<void> join(SfuAccess access, {required String host});
+
+  /// connecting, connected (the host's picture is in), failed (lost: join again), closed (taken
+  /// out, or the room closed: the server says why on its own).
+  String get state;
+  set onState(void Function() handler);
+
+  /// The picture, drawn as large as fits.
+  Widget video();
+  Future<ShareQuality> quality();
+  Future<void> leave();
+}
+
 /// Where the game's sound goes: the speaker Remote Play uses.
 abstract class ShareSound {
   void sound(AudioPacket packet);
@@ -107,6 +125,7 @@ class SharePlayView {
     this.open = true,
     this.maxViewers = 2,
     this.viewers = const [],
+    this.media = MediaRoute.mesh,
   });
 
   factory SharePlayView.fromJson(Map<String, dynamic> json) => SharePlayView(
@@ -119,6 +138,7 @@ class SharePlayView {
     title: json['title'] as String?,
     open: json['open'] != false,
     maxViewers: (json['maxViewers'] as num?)?.toInt() ?? 2,
+    media: mediaRouteFrom(json['media']),
     viewers: [
       for (final viewer in (json['viewers'] as List? ?? const []))
         ShareViewer.fromJson(viewer as Map<String, dynamic>),
@@ -133,6 +153,10 @@ class SharePlayView {
   final bool open;
   final int maxViewers;
   final List<ShareViewer> viewers;
+
+  /// The mesh (the host streams to each viewer), or the media server (viewers without a pad
+  /// watch from there; pad holders stay straight on the host).
+  final MediaRoute media;
 
   String get name => title ?? titleId;
 
@@ -171,15 +195,22 @@ enum WatchEnd { stopped, removed, full, failed, left }
 /// picture on a receive-only connection, the game's sound on the "audio" channel to Remote
 /// Play's speaker, and, while the host lets this phone play, the pad on the "pad" channel: at
 /// once on a change and 120 times a second besides.
+///
+/// A share play that goes through the media server (more viewers than the mesh holds) is
+/// watched from there while this phone only watches: the host's picture and sound from the
+/// room, no signals to the host at all. A pad handed over moves it straight to the host as
+/// above; taken back, it goes back to the room.
 class SharePlays extends ChangeNotifier {
   SharePlays({
     required this.account,
     required this.socket,
     required this.engine,
     required this.sound,
+    this.room,
     this.padEvery = const Duration(microseconds: 8333),
     this.askAgainAfter = const Duration(seconds: 5),
     this.measureEvery = const Duration(seconds: 1),
+    this.joinAgainAfter = const Duration(seconds: 1),
     Random? random,
   }) : _random = random ?? Random.secure() {
     _events = socket.events.listen(_event);
@@ -189,9 +220,15 @@ class SharePlays extends ChangeNotifier {
   final TogetherSocket socket;
   final ShareEngine Function() engine;
   final ShareSound Function() sound;
+
+  /// Rooms on the media server; without, every share play is watched over the mesh.
+  final ShareRoom Function()? room;
   final Duration padEvery;
   final Duration askAgainAfter;
   final Duration measureEvery;
+
+  /// How long before a lost media server room is joined again.
+  final Duration joinAgainAfter;
   final Random _random;
   late final StreamSubscription<TogetherEvent> _events;
 
@@ -228,13 +265,24 @@ class SharePlays extends ChangeNotifier {
   String? _hostDevice;
   int _generation = 0;
 
+  /// Where the picture comes from now: the host (the mesh) or the media server; null while not
+  /// watching.
+  _Path? _path;
+  ShareRoom? _room;
+  SfuAccess? _sfu;
+  int _roomTries = 0;
+  Timer? _roomTimer;
+
   String? get me => account.user?.id;
 
   /// The pad the host gave this phone (2-4), or null while it only watches.
   int? get slot => watching?.slotOf(me);
 
   /// The host's picture, once the connection is made.
-  Widget? video() => _link?.video();
+  Widget? video() => _room?.video() ?? _link?.video();
+
+  /// Watching from the media server rather than straight from the host.
+  bool get viaServer => _path == _Path.server;
 
   /// Invites and, for a socket that reconnected, the share play still being watched.
   Future<void> refresh() async {
@@ -277,6 +325,8 @@ class SharePlays extends ChangeNotifier {
       joined['sharePlay'] as Map<String, dynamic>,
     );
     _hostDevice = watching!.hostDevice;
+    _sfu = SfuAccess.fromJson(joined['sfu']);
+    _roomTries = 0;
     _ice = _servers(joined['iceServers']);
     _renewBefore(joined['expiresAt']);
     _session =
@@ -289,7 +339,7 @@ class SharePlays extends ChangeNotifier {
     _measureTimer = Timer.periodic(measureEvery, (_) => _measure());
     _slotChanged();
     notifyListeners();
-    _askForOffer();
+    _route();
   }
 
   /// Stops watching; the host hears it from the server.
@@ -320,6 +370,7 @@ class SharePlays extends ChangeNotifier {
     _askTimer?.cancel();
     final view = watching;
     if (view == null || status == WatchStatus.ended) return;
+    if (_path != _Path.host) return;
     _signal('renegotiate', null);
     if (tries >= 5) return;
     _askTimer = Timer(askAgainAfter, () {
@@ -353,6 +404,8 @@ class SharePlays extends ChangeNotifier {
   Future<void> _onSignal(Map<String, dynamic> data) => _serial(() async {
     final view = watching;
     if (view == null || status == WatchStatus.ended) return;
+    // Watching from the media server: the host is not answered.
+    if (_path != _Path.host) return;
     if (data['sharePlayId'] != view.id || data['from'] != view.host?.id) return;
     final kind = data['kind'];
     final payload = data['data'];
@@ -483,13 +536,118 @@ class SharePlays extends ChangeNotifier {
     final before = slot;
     watching = view;
     if (slot != before) _slotChanged();
+    _route();
+  }
+
+  /// The media server while this phone only watches a share play that goes through it; the
+  /// host otherwise. Leaving one for the other says bye to the host or leaves the room first.
+  void _route() {
+    final view = watching;
+    if (view == null || status == WatchStatus.ended) return;
+    final want = view.media == MediaRoute.sfu && slot == null && room != null
+        ? _Path.server
+        : _Path.host;
+    if (want == _path) return;
+    final first = _path == null;
+    _path = want;
+    final generation = _generation;
+    if (!first) status = WatchStatus.connecting;
+    if (want == _Path.server) {
+      _askTimer?.cancel();
+      if (_link != null) _signal('bye', null);
+      _roomTries = 0;
+      _serial(() async {
+        await _dropLink();
+        if (generation == _generation && _path == _Path.server) {
+          await _joinRoom();
+        }
+      });
+    } else {
+      _roomTimer?.cancel();
+      _serial(_leaveRoom);
+      _askForOffer();
+    }
+    notifyListeners();
+  }
+
+  /// Into the media server's room, with the token from joining while it works and a fresh one
+  /// after.
+  Future<void> _joinRoom() async {
+    final view = watching;
+    final rooms = room;
+    if (view == null || rooms == null || _room != null) return;
+    final generation = _generation;
+    var access = _sfu;
+    if (access == null || !access.usable) {
+      try {
+        access = SfuAccess.fromJson(
+          await account.call('GET', 'share-plays/${view.id}/sfu'),
+        );
+      } on Object {
+        access = null;
+      }
+      if (generation != _generation || _path != _Path.server) return;
+      _sfu = access;
+    }
+    if (access == null) {
+      _roomAgain();
+      return;
+    }
+    final joining = rooms();
+    _room = joining;
+    joining.onState = () {
+      if (_room != joining) return;
+      switch (joining.state) {
+        case 'connected':
+          _roomTries = 0;
+          if (status == WatchStatus.connecting) status = WatchStatus.watching;
+        case 'failed':
+          // Joined again with a fresh token, in case this one was the trouble.
+          _sfu = null;
+          status = WatchStatus.connecting;
+          _serial(() => _leaveRoom(joining)).then((_) => _roomAgain());
+        case 'connecting':
+          if (status == WatchStatus.watching) status = WatchStatus.connecting;
+      }
+      notifyListeners();
+    };
+    notifyListeners();
+    try {
+      await joining.join(access, host: view.host?.id ?? '');
+    } on Object {
+      if (_room != joining) return;
+      _sfu = null;
+      await _leaveRoom(joining);
+      _roomAgain();
+    }
+  }
+
+  /// The room again after a moment, a few times; then the screen keeps saying it connects.
+  void _roomAgain() {
+    _roomTimer?.cancel();
+    if (_path != _Path.server || _roomTries >= 5) return;
+    _roomTries++;
+    final generation = _generation;
+    _roomTimer = Timer(joinAgainAfter, () {
+      if (generation == _generation && _path == _Path.server) {
+        _serial(_joinRoom);
+      }
+    });
+  }
+
+  Future<void> _leaveRoom([ShareRoom? only]) async {
+    final current = _room;
+    if (current == null || (only != null && current != only)) return;
+    _room = null;
+    await current.leave();
   }
 
   Future<void> _measure() async {
+    final room = _room;
     final link = _link;
-    if (link == null) return;
+    if (room == null && link == null) return;
     try {
-      quality = await link.quality();
+      quality = room != null ? await room.quality() : await link!.quality();
       notifyListeners();
     } on Object {
       // Next second.
@@ -524,6 +682,9 @@ class SharePlays extends ChangeNotifier {
     if (view != null && _link != null) _signal('bye', null);
     _generation++;
     watching = null;
+    _path = null;
+    _sfu = null;
+    _roomTimer?.cancel();
     _padTimer?.cancel();
     _padTimer = null;
     _askTimer?.cancel();
@@ -540,6 +701,7 @@ class SharePlays extends ChangeNotifier {
       notifyListeners();
     }
     await _serial(_dropLink);
+    await _serial(_leaveRoom);
     if (tell && view != null) {
       try {
         await account.call('POST', 'share-plays/${view.id}/leave');
@@ -555,7 +717,9 @@ class SharePlays extends ChangeNotifier {
       case 'live.ready':
         refresh().catchError((_) {});
         // Signals sent while the socket was gone are lost: the host is asked again.
-        if (watching != null && _link?.connectionState != 'connected') {
+        if (watching != null &&
+            _path == _Path.host &&
+            _link?.connectionState != 'connected') {
           _askForOffer();
         }
       case 'share_play.invite':
@@ -601,3 +765,5 @@ class SharePlays extends ChangeNotifier {
     super.dispose();
   }
 }
+
+enum _Path { host, server }

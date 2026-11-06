@@ -72,8 +72,7 @@ class _Link implements ShareLink {
   void Function(ShareChannel)? _onChannel;
   String _signaling = 'stable';
   bool _hasRemote = false;
-  int? _bytes;
-  DateTime? _bytesAt;
+  final _stats = ShareStats();
 
   @override
   set onCandidate(void Function(Map<String, dynamic>) handler) =>
@@ -149,13 +148,32 @@ class _Link implements ShareLink {
   );
 
   @override
-  Future<ShareQuality> quality() async {
+  Future<ShareQuality> quality() async => _stats.read(await pc.getStats());
+
+  @override
+  Future<void> close() async {
+    _onState = null;
+    _onChannel = null;
+    renderer.srcObject = null;
+    await pc.close();
+    await renderer.dispose();
+  }
+}
+
+/// The quality line from WebRTC's stats: the round trip on the chosen path, and the picture's
+/// frames per second, height, losses and bit rate (from the bytes since the last reading). The
+/// host's connection and the media server's both read it this way.
+class ShareStats {
+  int? _bytes;
+  DateTime? _bytesAt;
+
+  ShareQuality read(List<StatsReport> reports) {
     double? rtt;
     double? fps;
     double? kbps;
     double? lost;
     int? height;
-    for (final report in await pc.getStats()) {
+    for (final report in reports) {
       final values = report.values;
       if (report.type == 'candidate-pair' &&
           (values['nominated'] == true || values['state'] == 'succeeded')) {
@@ -187,15 +205,6 @@ class _Link implements ShareLink {
       lostPercent: lost,
       height: height,
     );
-  }
-
-  @override
-  Future<void> close() async {
-    _onState = null;
-    _onChannel = null;
-    renderer.srcObject = null;
-    await pc.close();
-    await renderer.dispose();
   }
 }
 

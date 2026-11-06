@@ -10,6 +10,78 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 const avatarBase = 'https://demo.anytogether.invalid/avatars';
 const iconBase = 'https://demo.anytogether.invalid/icons';
+const themeBase = 'https://demo.anytogether.invalid/themes';
+
+class DemoTheme {
+  const DemoTheme(this.slug, this.name, this.colors, this.maker);
+
+  final String slug;
+  final String name;
+
+  /// Deep, middle, bright and accent.
+  final List<int> colors;
+  final DemoPerson? maker;
+
+  String get id => 'theme-$slug';
+  String get preview => '$themeBase/$slug-preview.png';
+  String get thumb => '$themeBase/$slug-thumb.png';
+
+  static String _hex(int color) =>
+      '#${(color & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+  Map<String, dynamic> get json => {
+    'id': id,
+    'name': name,
+    'colors': {
+      for (final (i, key) in ['deep', 'middle', 'bright', 'accent'].indexed)
+        key: _hex(colors[i]),
+    },
+    'preview': preview,
+    'thumb': thumb,
+    'maker': maker == null
+        ? null
+        : {'handle': maker!.handle, 'displayName': maker!.name},
+  };
+}
+
+const demoThemes = [
+  DemoTheme('nebula-drift', 'Nebula Drift', [
+    0xFF060418,
+    0xFF2B1466,
+    0xFFC3A8FF,
+    0xFFA885FF,
+  ], mira),
+  DemoTheme('tidepool', 'Tidepool', [
+    0xFF02080B,
+    0xFF054D4D,
+    0xFF8FFFC7,
+    0xFF5CEBBD,
+  ], kenji),
+  DemoTheme('ember-grid', 'Ember Grid', [
+    0xFF0F030A,
+    0xFF851C38,
+    0xFFFFA354,
+    0xFFFF8066,
+  ], theo),
+  DemoTheme('blue-hour', 'Blue Hour', [
+    0xFF030617,
+    0xFF0A266B,
+    0xFF6BA3FF,
+    0xFF4F94FF,
+  ], null),
+  DemoTheme('gilded', 'Gilded', [
+    0xFF0C0904,
+    0xFF4A3510,
+    0xFFFFE2A0,
+    0xFFFFCC5C,
+  ], pablo),
+  DemoTheme('paper-moon', 'Paper Moon', [
+    0xFF0A0B0E,
+    0xFF2E3340,
+    0xFFE6E9F0,
+    0xFFF0F0F0,
+  ], mira),
+];
 
 class DemoGame {
   const DemoGame(this.titleId, this.name, this.icon);
@@ -427,8 +499,52 @@ Map<String, dynamic> get _notifications => {
   'more': false,
 };
 
+/// The party's chat beside its voice.
+final _partyChat = [
+  ('kenji', 'Moss Mother down. finally', 9),
+  ('mira', 'GG! who is on bench duty', 8),
+  ('ines', 'me, grabbing the second pad', 6),
+  ('theo', 'mic is broken, typing here instead', 4),
+  ('sol', 'joining at the next save point', 2),
+];
+
+Map<String, dynamic> get _partyThread => {
+  'messages': [
+    for (final (i, (author, text, minutes)) in _partyChat.indexed)
+      {
+        ..._message('pc-ines', i + 1, author, text, Duration(minutes: minutes)),
+        if (i == 1)
+          'reactions': [
+            {
+              'reaction': 'gg',
+              'count': 2,
+              'userIds': ['ines', 'kenji'],
+            },
+          ],
+        if (i == 2) 'replyTo': 2,
+      },
+  ],
+  'more': false,
+};
+
+Map<String, dynamic> get _partyConversation => {
+  'id': 'pc-ines',
+  'kind': 'group',
+  'title': null,
+  'createdBy': 'ines',
+  'partyId': 'p-ines',
+  'members': [ines.card, mira.card, kenji.card, sol.card, theo.card],
+  'lastSeq': _partyChat.length,
+  'readSeq': _partyChat.length - 1,
+  'unread': 1,
+  'muted': true,
+  'lastMessage': null,
+  'updatedAt': _at(const Duration(minutes: 2)),
+};
+
 Map<String, dynamic> get partyJson => {
   'id': 'p-ines',
+  'conversationId': 'pc-ines',
   'leaderId': 'ines',
   'privacy': 'friends',
   'members': [ines.card, mira.card, kenji.card, sol.card, theo.card],
@@ -634,6 +750,8 @@ Map<String, dynamic> answer(
     ('GET', 'me/conversations') => _conversations,
     ('GET', 'me/conversations/unread') => {'conversations': 2, 'messages': 3},
     ('GET', 'conversations/c-mira/messages') => _thread,
+    ('GET', 'conversations/pc-ines') => _partyConversation,
+    ('GET', 'conversations/pc-ines/messages') => _partyThread,
     ('GET', 'me/feed') => _feed,
     ('GET', 'me/notifications') => _notifications,
     ('GET', 'me/notifications/unread') => {'unread': 3},
@@ -685,6 +803,81 @@ Map<String, dynamic> answer(
         'search': true,
       },
       'presence': {'state': 'online'},
+      'cover': null,
+      'accent': null,
+      'theme': demoThemes.first.json,
+    },
+    ('GET', 'users/ines/showcase') => {
+      'trophies': [
+        _earned(
+          catQuest,
+          _trophy(
+            1,
+            'platinum',
+            'Purrate King',
+            rarity: 0.08,
+            label: 'very_rare',
+          ),
+          const Duration(days: 4),
+        ),
+        _earned(
+          silksong,
+          _trophy(22, 'gold', 'Needle Sharp', rarity: 0.11, label: 'rare'),
+          const Duration(hours: 3),
+        ),
+        _earned(
+          sarah,
+          _trophy(
+            5,
+            'silver',
+            'Lucid Dreamer',
+            rarity: 0.034,
+            label: 'ultra_rare',
+          ),
+          const Duration(days: 9),
+        ),
+      ],
+      'games': [
+        {
+          ...silksong.ref,
+          'secondsPlayed': 41 * 3600 + 12 * 60,
+          'trophiesEarned': 38,
+          'trophiesTotal': 52,
+          'progress': 73,
+        },
+        {
+          ...catQuest.ref,
+          'secondsPlayed': 14 * 3600 + 47 * 60,
+          'trophiesEarned': 25,
+          'trophiesTotal': 25,
+          'progress': 100,
+        },
+        {
+          ...doom.ref,
+          'secondsPlayed': 2 * 3600 + 38 * 60,
+          'trophiesEarned': 4,
+          'trophiesTotal': 31,
+          'progress': 13,
+        },
+      ],
+    },
+    ('GET', 'me') => {
+      'profile': {
+        'handle': ines.handle,
+        'displayName': ines.name,
+        'bio':
+            'Metroidvanias, cosy co-op and one more run. Usually on after 8.',
+        'avatar': '$avatarBase/ines.png',
+        'country': 'PT',
+        'privacy': {'library': 'everyone', 'trophies': 'friends'},
+        'cover': null,
+        'accent': null,
+        'theme': demoThemes.first.json,
+      },
+    },
+    ('GET', 'themes') => {
+      'themes': [for (final theme in demoThemes) theme.json],
+      'next': null,
     },
     ('GET', 'users/ines/library') => {
       'games': [
@@ -774,6 +967,16 @@ class DemoAccount extends TogetherAccount {
 
   final asked = <String>[];
 
+  /// Answers that take work first (end-to-end encryption): one of its own, or [answer]'s
+  /// changed; null leaves [answer]'s as it is.
+  Future<Map<String, dynamic>?> Function(String method, String path)? own;
+  Future<Map<String, dynamic>> Function(
+    String method,
+    String path,
+    Map<String, dynamic> base,
+  )?
+  wrap;
+
   @override
   Future<Map<String, dynamic>> call(
     String method,
@@ -781,8 +984,13 @@ class DemoAccount extends TogetherAccount {
     Map<String, dynamic>? body,
   ]) async {
     asked.add('$method $path');
-    return jsonDecode(jsonEncode(answer(method, path, body)))
-        as Map<String, dynamic>;
+    final special = await own?.call(method, path);
+    var json =
+        special ??
+        jsonDecode(jsonEncode(answer(method, path, body)))
+            as Map<String, dynamic>;
+    if (special == null && wrap != null) json = await wrap!(method, path, json);
+    return json;
   }
 }
 

@@ -147,6 +147,26 @@ void main() {
   });
 
   test(
+    'in the background the socket rests, so pushes come at once; back, it picks up',
+    () async {
+      final live = await socket();
+      live.start();
+      await until(() => live.status == SocketStatus.ready);
+      server.push('notification', {'unread': 1}, id: '0190b000-0000-7000-8000-000000000001');
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      live.rest();
+      expect(live.status, SocketStatus.offline);
+      await until(() => server.sockets.first.closeCode != null);
+      // No retry while resting.
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      expect(server.sent('hello'), hasLength(1));
+      live.wake();
+      await until(() => live.status == SocketStatus.ready);
+      expect(server.sent('hello').last['resume'], '0190b000-0000-7000-8000-000000000001');
+    },
+  );
+
+  test(
     'the hub keeps the socket open while signed in, and closes it on sign-out',
     () async {
       server.answer = (method, path, body) => (204, null);

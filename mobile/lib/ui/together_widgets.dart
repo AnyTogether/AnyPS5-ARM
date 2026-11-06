@@ -196,6 +196,7 @@ class CountBadge extends StatelessWidget {
 /// The words for what went wrong with a call to AnyTogether.
 String togetherFailure(Strings texts, Object error) => switch (error) {
   TogetherProblem(code: 'not_found') => texts.togetherNotFound,
+  TogetherProblem(code: 'media_server_off') => texts.mediaServerOff,
   TogetherProblem(:final title) when title.isNotEmpty => title,
   _ => texts.togetherUnreachable,
 };

@@ -1,9 +1,14 @@
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
 import '../media_strings.dart';
 import '../strings.dart';
+import '../together/e2ee.dart';
 import '../together/messages.dart';
+import '../together/sealed_media.dart';
 import '../together/storage.dart';
 import 'together_widgets.dart';
 
@@ -14,7 +19,8 @@ String clockOf(Duration duration) {
 }
 
 /// The media a message holds, as its bubble shows it: a photo, a clip's poster, a voice note
-/// to play, or why it is not there. The links are signed and need no token.
+/// to play, or why it is not there. The links are signed and need no token. Sealed media is
+/// downloaded and opened on the phone, and shown from memory.
 class MessageMedia extends StatelessWidget {
   const MessageMedia({super.key, required this.message, required this.mine});
 
@@ -104,6 +110,18 @@ class _PhotoTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final local = attachment.local;
+    if (local == null && attachment.sealed) {
+      return _SealedPicture(
+        media: attachment,
+        part: FilePart.file,
+        onOpen: (bytes) => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            fullscreenDialog: true,
+            builder: (_) => PhotoScreen(bytes: bytes),
+          ),
+        ),
+      );
+    }
     return GestureDetector(
       onTap: local != null || attachment.url == null
           ? null
@@ -135,7 +153,9 @@ class _ClipTile extends StatelessWidget {
       onTap: () => Navigator.of(context).push(
         MaterialPageRoute<void>(
           fullscreenDialog: true,
-          builder: (_) => ClipScreen(url: attachment.url!),
+          builder: (_) => attachment.sealed
+              ? ClipScreen(sealed: attachment)
+              : ClipScreen(url: attachment.url!),
         ),
       ),
       child: _Frame(
@@ -143,7 +163,12 @@ class _ClipTile extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            _picture(attachment.poster ?? attachment.thumb),
+            if (attachment.sealed)
+              attachment.posterFile == null
+                  ? const SizedBox.expand()
+                  : _SealedBytes(media: attachment, part: FilePart.poster)
+            else
+              _picture(attachment.poster ?? attachment.thumb),
             Center(
               child: Container(
                 padding: const EdgeInsets.all(8),
@@ -205,10 +230,12 @@ class _VoiceNoteState extends State<_VoiceNote> {
   VideoPlayerController? _player;
   bool _failed = false;
   bool _starting = false;
+  File? _opened;
 
   @override
   void dispose() {
     _player?.dispose();
+    _forget(_opened);
     super.dispose();
   }
 
@@ -218,11 +245,19 @@ class _VoiceNoteState extends State<_VoiceNote> {
     var player = _player;
     if (player == null) {
       setState(() => _starting = true);
-      player = VideoPlayerController.networkUrl(Uri.parse(url));
       try {
+        if (widget.attachment.sealed) {
+          final file = await SealedMedia.shared.temporaryFile(
+            widget.attachment,
+          );
+          _opened = file;
+          player = VideoPlayerController.file(file);
+        } else {
+          player = VideoPlayerController.networkUrl(Uri.parse(url));
+        }
         await player.initialize();
       } on Object {
-        await player.dispose();
+        await player?.dispose();
         if (mounted) {
           setState(() {
             _failed = true;
@@ -325,11 +360,13 @@ class _VoiceNoteState extends State<_VoiceNote> {
   }
 }
 
-/// A photo over the whole screen, to pinch and pan.
+/// A photo over the whole screen, to pinch and pan: from its link, or a sealed one's opened
+/// [bytes].
 class PhotoScreen extends StatelessWidget {
-  const PhotoScreen({super.key, required this.url});
+  const PhotoScreen({super.key, this.url, this.bytes});
 
-  final String url;
+  final String? url;
+  final Uint8List? bytes;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -339,7 +376,11 @@ class PhotoScreen extends StatelessWidget {
         Positioned.fill(
           child: InteractiveViewer(
             maxScale: 5,
-            child: Center(child: _picture(url, fit: BoxFit.contain)),
+            child: Center(
+              child: bytes != null
+                  ? Image.memory(bytes!, fit: BoxFit.contain)
+                  : _picture(url, fit: BoxFit.contain),
+            ),
           ),
         ),
         const _Close(),
@@ -348,36 +389,54 @@ class PhotoScreen extends StatelessWidget {
   );
 }
 
-/// A clip playing over the whole screen: tap to pause, the bar to seek.
+/// A clip playing over the whole screen: tap to pause, the bar to seek. A [sealed] one is opened
+/// into a temporary file first (the player plays only files and links), deleted after.
 class ClipScreen extends StatefulWidget {
-  const ClipScreen({super.key, required this.url});
+  const ClipScreen({super.key, this.url, this.sealed})
+    : assert(url != null || sealed != null);
 
-  final String url;
+  final String? url;
+  final Attachment? sealed;
 
   @override
   State<ClipScreen> createState() => _ClipScreenState();
 }
 
 class _ClipScreenState extends State<ClipScreen> {
-  late final VideoPlayerController _player = VideoPlayerController.networkUrl(
-    Uri.parse(widget.url),
-  );
+  VideoPlayerController? _player;
+  File? _opened;
   bool _failed = false;
 
   @override
   void initState() {
     super.initState();
-    _player
-        .initialize()
-        .then((_) {
-          if (!mounted) return;
-          setState(() {});
-          _player.play();
-        })
-        .catchError((Object _) {
-          if (mounted) setState(() => _failed = true);
-        });
-    _player.addListener(_changed);
+    _start();
+  }
+
+  Future<void> _start() async {
+    try {
+      final sealed = widget.sealed;
+      final VideoPlayerController player;
+      if (sealed != null) {
+        final file = await SealedMedia.shared.temporaryFile(sealed);
+        if (!mounted) {
+          _forget(file);
+          return;
+        }
+        _opened = file;
+        player = VideoPlayerController.file(file);
+      } else {
+        player = VideoPlayerController.networkUrl(Uri.parse(widget.url!));
+      }
+      setState(() => _player = player);
+      player.addListener(_changed);
+      await player.initialize();
+      if (!mounted) return;
+      setState(() {});
+      await player.play();
+    } on Object {
+      if (mounted) setState(() => _failed = true);
+    }
   }
 
   void _changed() {
@@ -386,14 +445,16 @@ class _ClipScreenState extends State<ClipScreen> {
 
   @override
   void dispose() {
-    _player.dispose();
+    _player?.dispose();
+    _forget(_opened);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
-    final value = _player.value;
+    final player = _player;
+    final value = player?.value ?? const VideoPlayerValue.uninitialized();
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
@@ -404,17 +465,17 @@ class _ClipScreenState extends State<ClipScreen> {
                     texts.mediaUnplayable,
                     style: const TextStyle(color: Colors.white60),
                   )
-                : !value.isInitialized
+                : player == null || !value.isInitialized
                 ? const CircularProgressIndicator(strokeWidth: 2)
                 : GestureDetector(
                     onTap: () =>
-                        value.isPlaying ? _player.pause() : _player.play(),
+                        value.isPlaying ? player.pause() : player.play(),
                     child: AspectRatio(
                       aspectRatio: value.aspectRatio,
                       child: Stack(
                         alignment: Alignment.bottomCenter,
                         children: [
-                          VideoPlayer(_player),
+                          VideoPlayer(player),
                           if (!value.isPlaying)
                             const Center(
                               child: Icon(
@@ -424,7 +485,7 @@ class _ClipScreenState extends State<ClipScreen> {
                               ),
                             ),
                           VideoProgressIndicator(
-                            _player,
+                            player,
                             allowScrubbing: true,
                             colors: const VideoProgressColors(
                               playedColor: togetherAccent,
@@ -458,5 +519,96 @@ class _Close extends StatelessWidget {
         ),
       ),
     ),
+  );
+}
+
+/// An opened clip or voice note's temporary file, gone once it is not played any more.
+void _forget(File? file) {
+  if (file == null) return;
+  file.parent.delete(recursive: true).catchError((Object _) => file.parent);
+}
+
+/// A sealed picture (a photo, or a clip's poster) downloaded and opened, filling its place.
+class _SealedBytes extends StatefulWidget {
+  const _SealedBytes({required this.media, required this.part, this.onOpen});
+
+  final Attachment media;
+  final FilePart part;
+  final ValueChanged<Uint8List>? onOpen;
+
+  @override
+  State<_SealedBytes> createState() => _SealedBytesState();
+}
+
+class _SealedBytesState extends State<_SealedBytes> {
+  late Future<Uint8List> _bytes = _load();
+
+  Future<Uint8List> _load() =>
+      SealedMedia.shared.open(widget.media, part: widget.part);
+
+  @override
+  void didUpdateWidget(_SealedBytes old) {
+    super.didUpdateWidget(old);
+    if (old.media.id != widget.media.id ||
+        old.media.file?.key != widget.media.file?.key) {
+      _bytes = _load();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List>(
+    future: _bytes,
+    builder: (context, snapshot) {
+      final bytes = snapshot.data;
+      if (snapshot.hasError) {
+        return Center(
+          child: IconButton(
+            tooltip: MaterialLocalizations.of(context)
+                .refreshIndicatorSemanticLabel,
+            onPressed: () => setState(() => _bytes = _load()),
+            icon: const Icon(
+              Icons.broken_image_outlined,
+              color: Colors.white24,
+            ),
+          ),
+        );
+      }
+      if (bytes == null) {
+        return const Center(
+          child: SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        );
+      }
+      final image = Image.memory(
+        bytes,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+      );
+      final open = widget.onOpen;
+      return open == null
+          ? image
+          : GestureDetector(onTap: () => open(bytes), child: image);
+    },
+  );
+}
+
+/// A sealed photo in its frame.
+class _SealedPicture extends StatelessWidget {
+  const _SealedPicture({
+    required this.media,
+    required this.part,
+    required this.onOpen,
+  });
+
+  final Attachment media;
+  final FilePart part;
+  final ValueChanged<Uint8List> onOpen;
+
+  @override
+  Widget build(BuildContext context) => _Frame(
+    aspect: media.aspect,
+    child: _SealedBytes(media: media, part: part, onOpen: onOpen),
   );
 }

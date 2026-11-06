@@ -87,9 +87,13 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
     public let editCount: Int
     /// Who reacted with what, in TogetherMessageReaction's order; empty once unsent (and from an older server).
     public var reactions: [TogetherReactionCount]
+    /// End-to-end encrypted (docs/e2ee.md): its words and its attachment's key are in here, and
+    /// `text` is only "[encrypted message]" for older clients. Opened with TogetherE2EE.
+    public var sealed: TogetherE2EE.Sealed?
 
     public init(id: String, conversationId: String, seq: Int, authorId: String?, text: String?, replyTo: Int? = nil, editedAt: Date? = nil, deletedAt: Date? = nil, createdAt: Date,
-                kind: String? = nil, caption: String? = nil, attachments: [TogetherAttachment]? = nil, editCount: Int = 0, reactions: [TogetherReactionCount] = []) {
+                kind: String? = nil, caption: String? = nil, attachments: [TogetherAttachment]? = nil, editCount: Int = 0, reactions: [TogetherReactionCount] = [],
+                sealed: TogetherE2EE.Sealed? = nil) {
         self.id = id
         self.conversationId = conversationId
         self.seq = seq
@@ -104,9 +108,10 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
         self.attachments = attachments
         self.editCount = editCount
         self.reactions = reactions
+        self.sealed = sealed
     }
 
-    enum CodingKeys: String, CodingKey { case id, conversationId, seq, authorId, text, replyTo, editedAt, deletedAt, createdAt, kind, caption, attachments, editCount, reactions }
+    enum CodingKeys: String, CodingKey { case id, conversationId, seq, authorId, text, replyTo, editedAt, deletedAt, createdAt, kind, caption, attachments, editCount, reactions, sealed }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -124,6 +129,13 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
         attachments = try container.decodeIfPresent([TogetherAttachment].self, forKey: .attachments)
         editCount = container.lenient(Int.self, .editCount) ?? 0
         reactions = container.lenient(KnownReactions.self, .reactions)?.reactions ?? []
+        // A seal this launcher cannot read (another version) still marks it as sealed: it is
+        // never shown as its stand-in text.
+        if deletedAt == nil, container.contains(.sealed), (try? container.decodeNil(forKey: .sealed)) != true {
+            sealed = container.lenient(TogetherE2EE.Sealed.self, .sealed) ?? .unreadable
+        } else {
+            sealed = nil
+        }
     }
 
     /// The media it carries, when it is a media message (and not deleted).
@@ -211,13 +223,18 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
     public var updatedAt: Date
     /// Kept at the top of the list; false from an older server.
     public var pinned: Bool
+    /// A direct conversation with an end-to-end encrypted message in it: plain messages are
+    /// refused from then on. False from an older server.
+    public var encrypted: Bool
     /// No notifications for it; false from an older server.
     public var muted: Bool
     /// One for each other member; nil from an older server (and then none are shown).
     public var receipts: [TogetherReceipt]?
+    /// The party whose chat it is, shown on the party screen and never in the list; nil for every other one.
+    public let partyId: String?
 
     public init(id: String, kind: String, title: String?, members: [TogetherPerson], lastSeq: Int, readSeq: Int, unread: Int, lastMessage: TogetherMessage?, updatedAt: Date,
-                pinned: Bool = false, muted: Bool = false, receipts: [TogetherReceipt]? = nil) {
+                pinned: Bool = false, muted: Bool = false, receipts: [TogetherReceipt]? = nil, encrypted: Bool = false, partyId: String? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -230,9 +247,11 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
         self.pinned = pinned
         self.muted = muted
         self.receipts = receipts
+        self.encrypted = encrypted
+        self.partyId = partyId
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, title, members, lastSeq, readSeq, unread, lastMessage, updatedAt, pinned, muted, receipts }
+    enum CodingKeys: String, CodingKey { case id, kind, title, members, lastSeq, readSeq, unread, lastMessage, updatedAt, pinned, muted, receipts, encrypted, partyId }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -248,6 +267,8 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
         pinned = container.lenient(Bool.self, .pinned) ?? false
         muted = container.lenient(Bool.self, .muted) ?? false
         receipts = container.lenient([TogetherReceipt].self, .receipts)
+        encrypted = container.lenient(Bool.self, .encrypted) ?? false
+        partyId = container.lenient(String.self, .partyId)
     }
 
     public func others(than me: String) -> [TogetherPerson] { members.filter { $0.userId != me } }
@@ -275,7 +296,8 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
 extension TogetherClient {
     public func conversations() async throws -> [TogetherConversation] {
         struct List: Decodable { let conversations: [TogetherConversation] }
-        return try JSONDecoder.together.decode(List.self, from: try await authorized("GET", "me/conversations", nil)).conversations
+        // A party's chat is the party screen's; the server leaves it out, and so does the list here.
+        return try JSONDecoder.together.decode(List.self, from: try await authorized("GET", "me/conversations", nil)).conversations.filter { $0.partyId == nil }
     }
 
     /// Unread messages over every conversation, for the top bar.
@@ -296,10 +318,11 @@ extension TogetherClient {
         return try JSONDecoder.together.decode(TogetherConversation.self, from: try await authorized("POST", "conversations", body))
     }
 
-    /// The newest page, or the one before `before` (a message seq); oldest first.
-    public func messages(in conversationId: String, before: Int? = nil, limit: Int = 50) async throws -> (messages: [TogetherMessage], more: Bool) {
+    /// The newest page, the one before `before`, or the one after `after` (message seqs, to catch
+    /// up after a reconnect); oldest first.
+    public func messages(in conversationId: String, before: Int? = nil, after: Int? = nil, limit: Int = 50) async throws -> (messages: [TogetherMessage], more: Bool) {
         struct Page: Decodable { let messages: [TogetherMessage]; let more: Bool }
-        let query = "limit=\(limit)" + (before.map { "&before=\($0)" } ?? "")
+        let query = "limit=\(limit)" + (before.map { "&before=\($0)" } ?? "") + (after.map { "&after=\($0)" } ?? "")
         let page = try JSONDecoder.together.decode(Page.self, from: try await authorized("GET", "conversations/\(conversationId)/messages?\(query)", nil))
         return (page.messages, page.more)
     }
@@ -406,6 +429,9 @@ public struct TogetherInbox: Equatable, Sendable {
     public var conversations: [TogetherConversation]
     /// Messages by conversation, oldest first, for the threads opened.
     public var threads: [String: [TogetherMessage]] = [:]
+    /// Conversations a message came for that the list read again still lacked (a party's chat):
+    /// their messages do not make it be read again.
+    public private(set) var unlisted: Set<String> = []
 
     public init(me: String, conversations: [TogetherConversation] = []) {
         self.me = me
@@ -413,6 +439,24 @@ public struct TogetherInbox: Equatable, Sendable {
     }
 
     public var unread: Int { conversations.reduce(0) { $0 + $1.unread } }
+
+    /// Whether a message for this conversation should have the list read again: one it lacks
+    /// and has not been read again without.
+    public func needsList(for conversationId: String) -> Bool {
+        !unlisted.contains(conversationId) && !conversations.contains { $0.id == conversationId }
+    }
+
+    /// The list read again because of a message for `expecting`: still without it, it is not asked for again.
+    public mutating func listed(_ list: [TogetherConversation], expecting conversationId: String?) {
+        guard let conversationId else { return }
+        if list.contains(where: { $0.id == conversationId }) { unlisted.remove(conversationId) } else { unlisted.insert(conversationId) }
+    }
+
+    /// What a list read again keeps from the one before it: the threads read and the conversations it lacks.
+    public mutating func carry(from before: TogetherInbox) {
+        threads = before.threads
+        unlisted = before.unlisted.filter { id in !conversations.contains { $0.id == id } }
+    }
 
     /// A message made, edited or unsent. A new one moves its conversation up (under the pinned
     /// ones) and counts as unread unless it is the user's own or its thread is `open`. False when
