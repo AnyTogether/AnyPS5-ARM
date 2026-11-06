@@ -152,9 +152,12 @@ public struct TogetherMedia: Decodable, Equatable, Sendable, Identifiable {
     /// Its place in the owner's gallery, when pinned.
     public let gallery: Int?
     public let createdAt: Date?
+    /// Encrypted on the sender's device for an end-to-end encrypted message: `url` and `poster`
+    /// serve ciphertext, opened with the key in the message's seal. No thumbnail.
+    public let sealed: Bool
 
     public init(id: String, kind: String, contentType: String? = nil, size: Int = 0, width: Int? = nil, height: Int? = nil, durationMs: Int? = nil,
-                url: String?, thumb: String? = nil, poster: String? = nil, hidden: Bool? = nil, gallery: Int? = nil, createdAt: Date? = nil) {
+                url: String?, thumb: String? = nil, poster: String? = nil, hidden: Bool? = nil, gallery: Int? = nil, createdAt: Date? = nil, sealed: Bool = false) {
         self.id = id
         self.kind = kind
         self.contentType = contentType
@@ -168,6 +171,7 @@ public struct TogetherMedia: Decodable, Equatable, Sendable, Identifiable {
         self.hidden = hidden
         self.gallery = gallery
         self.createdAt = createdAt
+        self.sealed = sealed
     }
 
     public init(from decoder: Decoder) throws {
@@ -185,9 +189,10 @@ public struct TogetherMedia: Decodable, Equatable, Sendable, Identifiable {
         hidden = try c.decodeIfPresent(Bool.self, forKey: .hidden)
         gallery = try c.flexibleInt(.gallery)
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
+        sealed = c.lenient(Bool.self, .sealed) ?? false
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, contentType, size, width, height, durationMs, url, thumb, poster, hidden, gallery, createdAt }
+    enum CodingKeys: String, CodingKey { case id, kind, contentType, size, width, height, durationMs, url, thumb, poster, hidden, gallery, createdAt, sealed }
 
     /// The still to show: a photo's thumbnail, a clip's poster.
     public var still: String? { kind == "clip" ? poster : (thumb ?? url) }
