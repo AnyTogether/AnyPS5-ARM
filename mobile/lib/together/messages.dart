@@ -1497,6 +1497,12 @@ class Messages extends ChangeNotifier {
 
   static List<ChatMessage> _page(Map<String, dynamic> page) => messagesOf(page);
 
+  /// By place in the conversation; the ones still on their way last.
+  static int _order(ChatMessage a, ChatMessage b) {
+    if (a.seq == 0 || b.seq == 0) return a.seq == 0 ? (b.seq == 0 ? 0 : 1) : -1;
+    return a.seq.compareTo(b.seq);
+  }
+
   bool _disposed = false;
 
   /// Answers and openings still on their way after the hub went are dropped.

@@ -57,8 +57,7 @@ extension ChatTexts on Strings {
   String get report => lookup('report');
   String get reportMessage => lookup('reportMessage');
   String get reportMessageLead => lookup('reportMessageLead');
-  String reportReason(ReportReason reason) => lookup('reason_${reason.name}');
+  String reasonLabel(ReportReason reason) => lookup('reason_${reason.name}');
   String get reportNote => lookup('reportNote');
   String get sendReport => lookup('sendReport');
-  String get reportSent => lookup('reportSent');
 }

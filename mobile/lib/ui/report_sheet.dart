@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../chat_strings.dart';
+import '../e2ee_strings.dart';
 import '../strings.dart';
 import '../together/reports.dart';
 import 'find_players_view.dart' show ChoicePill, ChoiceRow;
@@ -113,7 +114,7 @@ class _ReportSheetState extends State<_ReportSheet> {
               children: [
                 for (final reason in ReportReason.values)
                   ChoicePill(
-                    label: texts.reportReason(reason),
+                    label: texts.reasonLabel(reason),
                     selected: _reason == reason,
                     onTap: _busy
                         ? null
