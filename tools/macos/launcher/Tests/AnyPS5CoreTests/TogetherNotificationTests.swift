@@ -138,8 +138,8 @@ final class TogetherNotificationTests: TogetherSignedInCase {
     }
 
     /// The launcher announces requests, invites and missed calls from their own events; a
-    /// notification stands alone for the rest.
+    /// notification stands alone for the rest (challenges have no event of their own).
     func testWhichKindsToastOnTheirOwn() throws {
-        XCTAssertEqual(TogetherNotification.Kind.allKnown.filter(\.toastsOnItsOwn), [.message, .warning, .other])
+        XCTAssertEqual(TogetherNotification.Kind.allKnown.filter(\.toastsOnItsOwn), [.message, .challengeInvite, .challengeStarted, .challengeEnded, .warning, .other])
     }
 }

@@ -362,7 +362,10 @@ struct ChallengeStrip: View {
             }
             .font(.display(13 * scale, .semibold))
             if previewRender {
-                cards.frame(maxWidth: .infinity, alignment: .leading).clipped()
+                // Room for the focus ring, as the scroll view below leaves it.
+                cards.padding(.vertical, 8 * scale).padding(.horizontal, 6 * scale)
+                    .frame(maxWidth: .infinity, alignment: .leading).clipped()
+                    .padding(.vertical, -8 * scale).padding(.horizontal, -6 * scale)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) { cards.padding(.vertical, 8 * scale).padding(.horizontal, 6 * scale) }
@@ -676,8 +679,7 @@ struct ChallengePage: View {
                     switch action {
                     case .join, .leave:
                         ConsoleButton(title: TChal.text(action == .join ? .join : .leave), symbol: action == .join ? "flag.fill" : "flag.slash", focused: focused,
-                                      prominent: action == .join, destructive: action == .leave) { model.challengeAction(action) }
-                            .frame(maxWidth: .infinity)
+                                      prominent: action == .join, destructive: action == .leave, minWidth: 282) { model.challengeAction(action) }
                             .opacity(social.challengeBusy ? 0.6 : 1)
                         if action == .join {
                             Text(TChal.text(.joinNote))
@@ -686,14 +688,17 @@ struct ChallengePage: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     case .website:
+                        let shape = RoundedRectangle(cornerRadius: 14 * scale, style: .continuous)
                         Label(TChal.text(.makeOnWeb), systemImage: "safari")
                             .font(.display(13 * scale, .semibold))
                             .foregroundStyle(.white.opacity(focused ? 1 : 0.7))
+                            .fixedSize(horizontal: false, vertical: true)
                             .padding(.horizontal, 14 * scale)
-                            .frame(height: 36 * scale)
-                            .background(Capsule().fill(Color.white.opacity(focused ? 0.16 : 0.06)))
-                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
-                            .focusRing(focused, radius: 18 * scale, width: 2)
+                            .padding(.vertical, 10 * scale)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(shape.fill(Color.white.opacity(focused ? 0.16 : 0.06)))
+                            .overlay(shape.strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+                            .focusRing(focused, radius: 14 * scale, width: 2)
                             .onTapGesture { model.openChallengeWebsite() }
                             .animation(Motion.focus, value: focused)
                     }

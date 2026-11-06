@@ -3,10 +3,10 @@ import AnyPS5Core
 import XCTest
 
 /// How a challenge's time and values read, in English and Turkish.
+@MainActor
 final class ChallengeTextTests: XCTestCase {
-    override func setUp() { T.texts = T.load([T.sourceFolder]) }
-
     func testTimeLeftAndValuesInBothLanguages() {
+        T.texts = T.load([T.sourceFolder])
         let saved = T.language
         defer { T.language = saved }
         T.language = .english
@@ -19,8 +19,10 @@ final class ChallengeTextTests: XCTestCase {
         XCTAssertEqual(AppModel.challengeValue(1830, metric: .points), "1,830 pts")
         XCTAssertEqual(AppModel.challengeValue(2 * 3600 + 5 * 60, metric: .time), "2 h 5 min")
         T.language = .turkish
-        XCTAssertEqual(AppModel.challengeClock(.endsIn(2 * 86400 + 600)), "2 gün içinde bitiyor")
-        XCTAssertEqual(AppModel.challengeClock(.startsIn(3 * 3600)), "3 saat sonra başlıyor")
+        // The system's unit names may be joined to the number by a no-break space.
+        let plain = { (text: String) in text.replacingOccurrences(of: "\u{00A0}", with: " ").replacingOccurrences(of: "\u{202F}", with: " ") }
+        XCTAssertEqual(plain(AppModel.challengeClock(.endsIn(2 * 86400 + 600))), "2 gün içinde bitiyor")
+        XCTAssertEqual(plain(AppModel.challengeClock(.startsIn(3 * 3600))), "3 saat sonra başlıyor")
         XCTAssertEqual(AppModel.challengeValue(12, metric: .trophies), "12 kupa")
         XCTAssertEqual(TChal.text(.title), "Meydan okumalar")
         XCTAssertEqual(TChal.format(.entrants, 4), "4 kişi katıldı")
@@ -28,6 +30,7 @@ final class ChallengeTextTests: XCTestCase {
 
     /// Joining or leaving refused: the server's reason in words.
     func testRefusalsReadAsTheirReason() throws {
+        T.texts = T.load([T.sourceFolder])
         let saved = T.language
         defer { T.language = saved }
         T.language = .english
