@@ -2,6 +2,7 @@ import AVFoundation
 import CoreHaptics
 import Flutter
 import UIKit
+import UserNotifications
 import VideoToolbox
 
 @main
@@ -15,8 +16,33 @@ import VideoToolbox
   ) -> Bool {
     // The game's rumble keeps going while the party's voice records.
     try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+    // Push: taps on notifications come here, and a call's Answer and Decline buttons.
+    UNUserNotificationCenter.current().delegate = Push.shared
+    Push.shared.registerCategories()
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
+
+  override func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    Push.shared.registered(deviceToken)
+    super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
+  }
+
+  override func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+    // A build without the push entitlement (sideloaded with a free Apple ID) ends here.
+    Push.shared.failed()
+    super.application(application, didFailToRegisterForRemoteNotificationsWithError: error)
+  }
+
+  /// A quiet push: a call that rang is over (answered elsewhere, or declined), so it goes away.
+  override func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+                            fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {
+    if let callId = userInfo["callId"] as? String, userInfo["kind"] as? String == "call_over" {
+      Push.shared.removeCall(callId) { completionHandler(.newData) }
+    } else {
+      completionHandler(.noData)
+    }
+  }
+
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
@@ -56,6 +82,10 @@ import VideoToolbox
         }
       }
     }
+    // Push: the token, the permission and the taps.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "Push") {
+      Push.shared.listen(registrar.messenger())
+    }
     // The game's rumble.
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "Haptics") {
       FlutterMethodChannel(name: "org.anyps5.remote/haptics", binaryMessenger: registrar.messenger())
@@ -64,6 +94,155 @@ import VideoToolbox
           self?.haptics.set(strength: arguments["strength"] as? Int ?? 0, sharpness: arguments["sharpness"] as? Double ?? 0.5)
           result(nil)
         }
+    }
+  }
+}
+
+/// Push on the iPhone, through Apple's push service: the device token for the server (with the
+/// app's bundle ID and whether the build uses the development service), asking the person, and
+/// the taps on notifications for the app to open where they lead. A tap before the app's Dart side
+/// listens waits for it.
+final class Push: NSObject, UNUserNotificationCenterDelegate {
+  static let shared = Push()
+  static let call = "CALL"
+  static let answer = "ANSWER"
+  static let decline = "DECLINE"
+
+  private var channel: FlutterMethodChannel?
+  private var token: String?
+  private var waiting: [FlutterResult] = []
+  private var heard = false
+  private var unheard: [String: Any]?
+
+  /// A call rings with Answer and Decline, in the phone's language (English or Turkish).
+  func registerCategories() {
+    let turkish = Locale.preferredLanguages.first?.hasPrefix("tr") == true
+    let answer = UNNotificationAction(identifier: Push.answer, title: turkish ? "Cevapla" : "Answer", options: [.foreground])
+    let decline = UNNotificationAction(identifier: Push.decline, title: turkish ? "Reddet" : "Decline", options: [.foreground, .destructive])
+    let category = UNNotificationCategory(identifier: Push.call, actions: [answer, decline], intentIdentifiers: [], options: [])
+    UNUserNotificationCenter.current().setNotificationCategories([category])
+  }
+
+  func listen(_ messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "org.anyps5.remote/push", binaryMessenger: messenger)
+    self.channel = channel
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return result(nil) }
+      self.heard = true
+      switch call.method {
+      case "token": self.askToken(result)
+      case "permission":
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+          let answer = switch settings.authorizationStatus {
+          case .authorized, .provisional, .ephemeral: "granted"
+          case .denied: "denied"
+          default: "undetermined"
+          }
+          DispatchQueue.main.async { result(answer) }
+        }
+      case "ask":
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+          DispatchQueue.main.async { result(granted) }
+        }
+      case "launchedWith":
+        result(self.unheard)
+        self.unheard = nil
+      case "clearCall":
+        let callId = (call.arguments as? [String: Any])?["callId"] as? String ?? ""
+        self.removeCall(callId) { result(nil) }
+      case "badge":
+        let count = (call.arguments as? [String: Any])?["count"] as? Int ?? 0
+        if #available(iOS 16.0, *) {
+          UNUserNotificationCenter.current().setBadgeCount(count)
+        } else {
+          UIApplication.shared.applicationIconBadgeNumber = count
+        }
+        result(nil)
+      default: result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  /// Registering asks nothing of the person: it only gets the token (none without the push
+  /// entitlement, which a free Apple ID's signing leaves out).
+  private func askToken(_ result: @escaping FlutterResult) {
+    if let token { return result(info(token)) }
+    waiting.append(result)
+    guard waiting.count == 1 else { return }
+    UIApplication.shared.registerForRemoteNotifications()
+    DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.answer(nil) }
+  }
+
+  func registered(_ deviceToken: Data) {
+    let made = deviceToken.map { String(format: "%02x", $0) }.joined()
+    let renewed = token != nil && token != made
+    token = made
+    answer(made)
+    if renewed { channel?.invokeMethod("token", arguments: made) }
+  }
+
+  func failed() { answer(nil) }
+
+  private func answer(_ token: String?) {
+    let all = waiting
+    waiting = []
+    for result in all { result(token.map(info)) }
+  }
+
+  private func info(_ token: String) -> [String: Any] {
+    ["token": token, "app": Bundle.main.bundleIdentifier ?? "", "sandbox": Push.sandbox]
+  }
+
+  /// Whether the build's provisioning profile is for Apple's development push service; an App
+  /// Store or TestFlight build has no profile in it and uses production.
+  static let sandbox: Bool = {
+    guard let path = Bundle.main.path(forResource: "embedded", ofType: "mobileprovision"),
+          let data = FileManager.default.contents(atPath: path),
+          let text = String(data: data, encoding: .isoLatin1),
+          let key = text.range(of: "<key>aps-environment</key>") else { return false }
+    let rest = text[key.upperBound...].prefix(80)
+    return rest.contains("<string>development</string>")
+  }()
+
+  func opened(_ userInfo: [AnyHashable: Any], action: String?) {
+    var payload: [String: Any] = [:]
+    for (key, value) in userInfo {
+      if let key = key as? String, key != "aps" { payload[key] = value }
+    }
+    if let action { payload["action"] = action }
+    if heard, let channel {
+      channel.invokeMethod("opened", arguments: payload)
+    } else {
+      unheard = payload
+    }
+  }
+
+  /// With the app open it shows things itself (the bell, the ringing): no banner on top.
+  func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+                              withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    completionHandler([])
+  }
+
+  func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                              withCompletionHandler completionHandler: @escaping () -> Void) {
+    let action: String? = switch response.actionIdentifier {
+    case Push.answer: "answer"
+    case Push.decline: "decline"
+    default: nil
+    }
+    opened(response.notification.request.content.userInfo, action: action)
+    completionHandler()
+  }
+
+  /// Takes a call's ringing off the lock screen and out of the notification list.
+  func removeCall(_ callId: String, done: @escaping () -> Void) {
+    let center = UNUserNotificationCenter.current()
+    center.getDeliveredNotifications { delivered in
+      let ids = delivered
+        .filter { $0.request.content.userInfo["callId"] as? String == callId && $0.request.content.userInfo["kind"] as? String == "call" }
+        .map(\.request.identifier)
+      center.removeDeliveredNotifications(withIdentifiers: ids)
+      DispatchQueue.main.async(execute: done)
     }
   }
 }

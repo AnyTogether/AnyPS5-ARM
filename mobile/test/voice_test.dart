@@ -494,6 +494,40 @@ void main() {
       await until(() => !voice().active);
     });
 
+    test(
+      'taken back on another device: quiet here, no goodbye, no leaving',
+      () async {
+        await voice().join();
+        await until(() => engine.links.length == 1);
+        final before = server.sent('signal').length;
+        server.push('call.moved', {
+          'callId': 'call1',
+          'partyId': 'p1',
+          'userId': 'me',
+          'device': 'mac-session',
+          'client': 'launcher-macos',
+        });
+        await until(() => !voice().active);
+        expect(voice().movedTo, 'launcher-macos');
+        expect(engine.stopped, isTrue);
+        expect(engine.links.single.closed, isTrue);
+        // The computer talks to everyone now: no bye, and the server is not told to leave.
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        expect(
+          server.sent('signal').skip(before).where((s) => s['kind'] == 'bye'),
+          isEmpty,
+        );
+        expect(
+          server.requests.any((r) => r.$2 == '/api/v1/calls/call1/leave'),
+          isFalse,
+        );
+        // Joining here again brings it back.
+        await voice().join();
+        expect(voice().active, isTrue);
+        expect(voice().movedTo, isNull);
+      },
+    );
+
     test('no microphone, no voice, and a reason', () async {
       deny = true;
       await voice().join();

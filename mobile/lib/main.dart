@@ -17,13 +17,16 @@ import 'connection/session.dart';
 import 'protocol/messages.dart';
 import 'strings.dart';
 import 'together/phone_audio.dart';
+import 'together/push.dart';
 import 'together/together_hub.dart';
 import 'stream/platform_player.dart';
 import 'ui/activity_card.dart';
 import 'ui/call_layer.dart';
 import 'ui/home_screen.dart';
 import 'ui/pad_screen.dart';
+import 'ui/push_offer_card.dart';
 import 'ui/setup_screen.dart';
+import 'ui/together_screen.dart';
 import 'ui/handoff_card.dart';
 import 'ui/update_required_card.dart';
 import 'ui/trophy_card.dart';
@@ -117,6 +120,8 @@ class _RemoteAppState extends State<RemoteApp> {
 
   /// AnyTogether's live side: friends, messages, the party and its voice, on every screen.
   late final TogetherHub _together = TogetherHub(account: _session.together);
+  final _navigator = GlobalKey<NavigatorState>();
+  StreamSubscription<PushOpen>? _pushTaps;
   StreamSubscription<(InternetAddress, int, String)>? _discovery;
   Timer? _manualTimer;
   Timer? _readyTimer;
@@ -153,6 +158,7 @@ class _RemoteAppState extends State<RemoteApp> {
   void initState() {
     super.initState();
     _session.addListener(_changed);
+    _pushTaps = _together.push.opens.listen(_pushOpened);
     if (_welcomed) _search();
     // Without the cable port the phone still works over Wi-Fi.
     _cableLink.start().catchError((_) {});
@@ -248,6 +254,32 @@ class _RemoteAppState extends State<RemoteApp> {
     setState(() => _show(pad: true));
   }
 
+  /// A push was tapped: the call rings here (answered or declined if its button said so), or
+  /// AnyTogether opens where the notification leads.
+  void _pushOpened(PushOpen open) {
+    switch (open) {
+      case CallOpened(:final callId, :final from, :final action):
+        _together.push.clearCall(callId);
+        _together.calls
+            .fromPush(
+              callId,
+              from,
+              answer: action == CallAction.answer,
+              decline: action == CallAction.decline,
+            )
+            .catchError((_) {});
+      case NoticeOpened(:final notice):
+        final navigator = _navigator.currentState;
+        if (navigator == null) return;
+        openTogether(
+          navigator.context,
+          hub: _together,
+          tab: TogetherTab.notifications,
+          notice: notice,
+        );
+    }
+  }
+
   void _start() {
     widget.preferences.setBool('welcomed', true);
     setState(() => _welcomed = true);
@@ -256,6 +288,7 @@ class _RemoteAppState extends State<RemoteApp> {
 
   @override
   void dispose() {
+    _pushTaps?.cancel();
     _discovery?.cancel();
     _manualTimer?.cancel();
     _readyTimer?.cancel();
@@ -317,6 +350,7 @@ class _RemoteAppState extends State<RemoteApp> {
       ),
       child: MaterialApp(
         title: 'AnyPS5 Remote',
+        navigatorKey: _navigator,
         debugShowCheckedModeBanner: false,
         theme: ThemeData.dark(useMaterial3: true),
         builder: (context, child) => Stack(
@@ -344,6 +378,7 @@ class _RemoteAppState extends State<RemoteApp> {
                     ),
                     TrophyCard(trophy: _session.trophy),
                     CallLayer(calls: _together.calls),
+                    PushOfferCard(push: _together.push),
                     UpdateRequiredCard(tooOld: _session.together.tooOld),
                     HandoffCard(
                       asked: _session.handoffAsked,

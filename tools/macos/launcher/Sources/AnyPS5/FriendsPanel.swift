@@ -168,6 +168,8 @@ extension AppModel {
             if let mode = TogetherPresenceMode(event) { withAnimation(Motion.overlay) { togetherProfile?.presence = mode.status } }
         case let type where type.hasPrefix("message.") || type.hasPrefix("conversation.") || type == "typing" || type == "messages.settings":
             messageEvent(event)
+        case "e2ee.devices":
+            e2eeDevicesChanged(event.data["userId"])
         case let type where type.hasPrefix("lfg.") || type == "discover.changed":
             discoverEvent(event)
         case let type where type.hasPrefix("party."):
