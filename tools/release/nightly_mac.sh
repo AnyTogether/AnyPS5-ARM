@@ -324,7 +324,9 @@ if [ "$have_mac" = 0 ]; then
         # Only the newest nightly's files are kept.
         rm -rf "$wt/build-nightly"
         mkdir -p "$out"
-        step "submodules" git -C "$wt" submodule update --init --recursive --jobs 4
+        # The main checkout's submodule URLs can be its own .git/modules folders (a local clone);
+        # git refuses the file transport for submodules unless it is allowed for this command.
+        step "submodules" git -c protocol.file.allow=always -C "$wt" submodule update --init --recursive --jobs 4
         actual="$(git -C "$wt" describe --tags --dirty)"
         [ "$actual" = "$tag" ] || die "git describe in $wt gives $actual, not $tag (another tag on $sha?)"
         [ -f "$build/CMakeCache.txt" ] ||
