@@ -125,6 +125,11 @@ public final class SharePlayHost: NSObject {
     /// Whether viewers who ask get the Opus track; off, everyone gets PCM as from hosts before it.
     private let opus: Bool
 
+    /// Whether a viewer without a connection here who asks for one ("renegotiate") gets it; nil
+    /// answers everyone, as on the mesh. Through the media server only pad holders (and, while
+    /// there is room, older viewer apps) are called here.
+    public var admits: ((_ userId: String) -> Bool)?
+
     public init(iceServers: [TogetherIceServer], send: @escaping (_ to: String, _ device: String, _ signal: ShareSignal) -> Void,
                 onPad: @escaping @Sendable (_ userId: String, _ packet: Data) -> Void, changed: @escaping () -> Void = {}, opus: Bool = true) {
         self.opus = opus
@@ -223,6 +228,9 @@ public final class SharePlayHost: NSObject {
             if let peer = peers[userId], peer.device == device, peer.connection.signalingState == .haveLocalOffer,
                let pending = peer.connection.localDescription {
                 send(userId, device, .offer(sdp: pending.sdp))
+            } else if peers[userId] == nil, let admits, !admits(userId) {
+                // Watching through the media server: no connection here.
+                return
             } else {
                 if peers[userId] != nil { hangUp(userId, sayBye: false) }
                 call(userId, device: device)

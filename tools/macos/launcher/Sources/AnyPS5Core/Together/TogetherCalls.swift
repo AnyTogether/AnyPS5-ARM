@@ -37,6 +37,32 @@ public struct TogetherCall: Decodable, Equatable, Sendable {
     /// Who was called, in a direct call.
     public let calleeId: String?
     public let `in`: [TogetherCallPeer]
+    /// "sfu" once a party call moved to the media server (it stays there); the mesh otherwise and
+    /// from older servers. Direct calls are always the mesh.
+    public let media: TogetherMediaRoute
+
+    public init(id: String, kind: String?, partyId: String?, startedBy: String?, calleeId: String?, in peers: [TogetherCallPeer], media: TogetherMediaRoute = .mesh) {
+        self.id = id
+        self.kind = kind
+        self.partyId = partyId
+        self.startedBy = startedBy
+        self.calleeId = calleeId
+        self.in = peers
+        self.media = media
+    }
+
+    enum CodingKeys: String, CodingKey { case id, kind, partyId, startedBy, calleeId, `in`, media }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind)
+        partyId = try container.decodeIfPresent(String.self, forKey: .partyId)
+        startedBy = try container.decodeIfPresent(String.self, forKey: .startedBy)
+        calleeId = try container.decodeIfPresent(String.self, forKey: .calleeId)
+        self.in = try container.decode([TogetherCallPeer].self, forKey: .in)
+        media = try container.decodeIfPresent(TogetherMediaRoute.self, forKey: .media) ?? .mesh
+    }
 }
 
 /// A friend calling: rings on every device of the user until one answers or declines.
@@ -179,6 +205,8 @@ public struct TogetherCallJoin: Decodable, Equatable, Sendable {
     public let call: TogetherCall
     public let iceServers: [TogetherIceServer]
     public let expiresAt: Date?
+    /// The media server's room while the call goes through it; nil on the mesh and from older servers.
+    public let sfu: TogetherSfuAccess?
 
     /// Whoever joins later makes the offers: to everyone already in the call.
     public func peersToCall(me: String) -> [TogetherCallPeer] { call.in.filter { $0.userId != me } }

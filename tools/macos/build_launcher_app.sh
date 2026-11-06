@@ -32,6 +32,12 @@ binary="$products/AnyPS5"
 # Contents/Frameworks.
 webrtc="$(find "$products" -maxdepth 2 -name WebRTC.framework -type d | head -n 1)"
 [ -n "$webrtc" ] || { echo "WebRTC.framework not found in $products" >&2; exit 1; }
+# LiveKit's client (the optional media server) brings its own renamed WebRTC and a Rust helper,
+# both frameworks beside the executable too.
+for name in LiveKitWebRTC RustLiveKitUniFFI; do
+    [ -n "$(find "$products" -maxdepth 2 -name "$name.framework" -type d | head -n 1)" ] ||
+        { echo "$name.framework not found in $products" >&2; exit 1; }
+done
 
 rm -rf "$app"
 toolkit="$app/Contents/Resources/toolkit"
@@ -39,6 +45,9 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/licenses"
 cp "$binary" "$app/Contents/MacOS/AnyPS5"
 mkdir -p "$app/Contents/Frameworks"
 ditto "$webrtc" "$app/Contents/Frameworks/WebRTC.framework"
+for name in LiveKitWebRTC RustLiveKitUniFFI; do
+    ditto "$(find "$products" -maxdepth 2 -name "$name.framework" -type d | head -n 1)" "$app/Contents/Frameworks/$name.framework"
+done
 otool -l "$app/Contents/MacOS/AnyPS5" | grep -q "@executable_path/../Frameworks" ||
     install_name_tool -add_rpath "@executable_path/../Frameworks" "$app/Contents/MacOS/AnyPS5"
 webrtc_license="$(find "$source/.build/artifacts" -path '*WebRTC.xcframework/LICENSE' | head -n 1)"
@@ -46,6 +55,8 @@ make_toolkit "$root" "$build" "$vulkan" "$toolkit" "$version"
 cp "$root/LICENSE" "$app/Contents/Resources/licenses/AnyPS5-LICENSE.txt"
 cp "$vulkan/../Licenses/LICENSE.txt" "$app/Contents/Resources/licenses/VulkanSDK-LICENSE.txt"
 [ -z "$webrtc_license" ] || cp "$webrtc_license" "$app/Contents/Resources/licenses/WebRTC-LICENSE.txt"
+livekit_license="$source/.build/checkouts/client-sdk-swift/LICENSE"
+[ ! -f "$livekit_license" ] || cp "$livekit_license" "$app/Contents/Resources/licenses/LiveKit-LICENSE.txt"
 # The Noto fonts games get when they ask for the console's system fonts (SystemFonts.swift);
 # Japanese, Chinese and Korean are downloaded the first time a game needs them.
 mkdir -p "$app/Contents/Resources/fonts"

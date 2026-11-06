@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5MediaServer
 import AppKit
 import Carbon.HIToolbox
 import SwiftUI
@@ -19,7 +20,7 @@ extension AppModel {
         var rows: [PanelRow] = []
         for invite in partyInvites where invite.partyId != party?.id {
             let name = invite.from?.displayName ?? "?"
-            rows.append(PanelRow(id: "party-accept-\(invite.partyId)", title: T.format(.partyJoinOf, name), detail: T.format(.partySize, invite.size, TogetherParty.maxSize),
+            rows.append(PanelRow(id: "party-accept-\(invite.partyId)", title: T.format(.partyJoinOf, name), detail: T.format(.partySize, invite.size, max(invite.size, mediaLimits?.sfu == true ? mediaLimits?.maxPartySize ?? TogetherParty.maxSize : TogetherParty.maxSize)),
                                  symbol: "person.3.fill", kind: .action(destructive: false) { [weak self] in self?.joinParty(invite.partyId) },
                                  person: invite.from.map { PanelPerson(name: $0.displayName, avatar: $0.avatar) }))
             rows.append(PanelRow(id: "party-decline-\(invite.partyId)", title: T.format(.partyDecline, name), symbol: "xmark.circle",
@@ -52,7 +53,7 @@ extension AppModel {
         rows += togetherRows(party, me: me.id)
         if leader { rows += partyRequestRows(party) }
         rows += partyCodeRows(party, leader: leader)
-        rows.append(PanelRow(id: "party-members", title: T.format(.partyMembers, party.members.count, TogetherParty.maxSize), symbol: "person.3.fill", kind: .info("")))
+        rows.append(PanelRow(id: "party-members", title: T.format(.partyMembers, party.members.count, party.capacity), symbol: "person.3.fill", kind: .info("")))
         for member in party.members {
             let identity = shown(member)
             var details: [String] = [handleLine(member)]
@@ -82,7 +83,7 @@ extension AppModel {
         let inside = Set(party.members.map(\.userId))
         let invited = Set(party.invited.map(\.userId))
         let invitable = togetherFriends.filter { !inside.contains($0.userId) }
-        if !invitable.isEmpty, party.members.count < TogetherParty.maxSize {
+        if !invitable.isEmpty, party.members.count < party.capacity {
             rows.append(PanelRow(id: "party-invite-title", title: T.text(.partyInviteFriends), symbol: "person.badge.plus", kind: .info("")))
             for friend in invitable {
                 let status = PanelPerson.Status(friend.presence)
@@ -174,7 +175,7 @@ extension AppModel {
 
     var partySubtitle: String? {
         guard togetherUser != nil else { return nil }
-        if let party { return T.format(.partySize, party.members.count, TogetherParty.maxSize) }
+        if let party { return T.format(.partySize, party.members.count, party.capacity) }
         return partyInvites.isEmpty ? T.text(.partyStartDetail) : T.format(.partyInvites, partyInvites.count)
     }
 
@@ -405,7 +406,12 @@ extension AppModel {
             voiceDeafened = Set(joined.call.in.filter(\.deafened).map(\.userId))
         }
         mic = TogetherVoiceMic()
-        for peer in joined.peersToCall(me: me.id) { voice.connect(to: peer) }
+        if joined.call.media == .sfu, joined.call.partyId != nil {
+            // Through the media server from the start: no mesh connections.
+            moveVoiceToMediaServer(call, access: joined.sfu)
+        } else {
+            for peer in joined.peersToCall(me: me.id) { voice.connect(to: peer) }
+        }
         Input.shared.registerHotKey(id: Input.talkKey, keyCode: kVK_ANSI_V, modifiers: optionKey) { [weak self] pressed in self?.talkKey(pressed) }
         voiceChanged()
         renewIceServers(at: TogetherVoice.renewal(expiresAt: joined.expiresAt), call: call)
@@ -436,6 +442,10 @@ extension AppModel {
         guard let call = voiceCall else { return }
         partyVoice?.close(sayBye: sayBye)
         partyVoice = nil
+        if let sfu = sfuVoice {
+            sfuVoice = nil
+            Task { await sfu.close() }
+        }
         iceRenewal?.cancel()
         iceRenewal = nil
         Input.shared.unregisterHotKey(id: Input.talkKey)
@@ -487,6 +497,8 @@ extension AppModel {
     func voiceChanged() {
         partyVoice?.talking = micSending
         partyVoice?.deafened = deafened
+        sfuVoice?.talking = micSending
+        sfuVoice?.deafened = deafened
         // The others see the user muted when deafened or the open microphone is off (push-to-talk
         // is not muted), and deafened as it is; both go each time, as the server takes them.
         let state = mic.state(pushToTalk: preferences.pushToTalk ?? false)
@@ -495,8 +507,35 @@ extension AppModel {
             let client = together
             Task { try? await client.setMuted(state.muted, deafened: state.deafened, in: call) }
         }
-        let speaking = partyVoice?.speaking ?? []
+        let speaking = sfuVoice?.speaking ?? partyVoice?.speaking ?? []
         if speaking != voiceSpeaking { voiceSpeaking = speaking }
+    }
+
+    /// The party's call moved to the media server (more voices than the mesh holds): every mesh
+    /// connection of it goes, no more mesh signals are answered, and the voice joins the call's
+    /// room with the access the join gave or a fresh one. Mute and deafen go on as before.
+    func moveVoiceToMediaServer(_ call: String, access: TogetherSfuAccess? = nil) {
+        guard voiceCall == call, callFriend == nil, sfuVoice == nil, let me = togetherUser?.id else { return }
+        partyVoice?.close()
+        partyVoice = nil
+        iceRenewal?.cancel()
+        iceRenewal = nil
+        let voice = SfuVoice(me: me, call: call) { [weak self] in self?.voiceChanged() }
+        sfuVoice = voice
+        voiceChanged()
+        Task {
+            do {
+                let given: TogetherSfuAccess
+                if let access { given = access } else { given = try await together.callSfu(call) }
+                guard sfuVoice === voice else { return }
+                try await voice.start(given)
+                voiceChanged()
+            } catch {
+                RemoteServer.log.error("party voice: media server: \(String(describing: error), privacy: .public)")
+                guard sfuVoice === voice else { return }
+                show(SP.text(.mediaServerFailed), symbol: "exclamationmark.triangle.fill")
+            }
+        }
     }
 
     /// Signals and call changes from the socket.
@@ -513,6 +552,10 @@ extension AppModel {
             loadParty()
         case "call.joined":
             loadParty()
+        case "call.media":
+            // The party's call moved to the media server.
+            guard let moved = event.decode(TogetherCallMedia.self), moved.callId == voiceCall, moved.media == .sfu else { return }
+            moveVoiceToMediaServer(moved.callId)
         case "call.moved":
             // Joined on the phone (it is the controller, and the headset now): quiet here, still
             // in the party, and no echo of the same voice from two devices.

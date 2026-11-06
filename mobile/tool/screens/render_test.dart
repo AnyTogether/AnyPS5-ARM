@@ -14,10 +14,15 @@ import 'dart:ui' as ui;
 
 import 'package:anyps5_remote/connection/session.dart';
 import 'package:anyps5_remote/feedback/haptics.dart';
+import 'package:anyps5_remote/l10n.dart';
 import 'package:anyps5_remote/protocol/messages.dart';
 import 'package:anyps5_remote/ui/activity_card.dart';
 import 'package:anyps5_remote/ui/home_screen.dart';
+import 'package:anyps5_remote/together/profiles.dart';
 import 'package:anyps5_remote/ui/pad_screen.dart';
+import 'package:anyps5_remote/ui/profile_edit.dart';
+import 'package:anyps5_remote/ui/profile_look.dart';
+import 'package:anyps5_remote/ui/showcase_edit.dart';
 import 'package:anyps5_remote/ui/setup_screen.dart' show StatusDot;
 import 'package:anyps5_remote/together/together_hub.dart';
 import 'package:anyps5_remote/ui/share_watch_screen.dart';
@@ -158,6 +163,77 @@ Future<ui.Image> _avatar(String seed) {
   return recorder.endRecording().toImage(side.toInt(), side.toInt());
 }
 
+Future<ui.Image> _themeStill(DemoTheme theme, Size size) {
+  final [deep, middle, bright, accent] = [
+    for (final c in theme.colors) Color(c),
+  ];
+  final random = Random(
+    theme.slug.codeUnits.fold<int>(3, (a, c) => a * 31 + c),
+  );
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  final area = Offset.zero & size;
+  canvas.drawRect(
+    area,
+    Paint()
+      ..shader = ui.Gradient.linear(
+        Offset.zero,
+        size.bottomRight(Offset.zero),
+        [deep, middle],
+      ),
+  );
+  for (var i = 0; i < 3; i++) {
+    final center = Offset(
+      size.width * (0.2 + random.nextDouble() * 0.7),
+      size.height * random.nextDouble(),
+    );
+    final radius = size.width * (0.25 + random.nextDouble() * 0.3);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..shader = ui.Gradient.radial(center, radius, [
+          (i.isEven ? bright : accent).withValues(alpha: 0.42),
+          (i.isEven ? bright : accent).withValues(alpha: 0),
+        ]),
+    );
+  }
+  for (var band = 0; band < 5; band++) {
+    final path = Path();
+    final base = size.height * (0.45 + band * 0.08);
+    final phase = random.nextDouble() * pi * 2;
+    path.moveTo(0, base);
+    for (var x = 0.0; x <= size.width; x += size.width / 64) {
+      path.lineTo(
+        x,
+        base + sin(x / size.width * pi * 2.2 + phase) * size.height * 0.09,
+      );
+    }
+    canvas.drawPath(
+      path,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.height * 0.006
+        ..color = bright.withValues(alpha: 0.18 + band * 0.05),
+    );
+  }
+  for (var i = 0; i < 70; i++) {
+    canvas.drawCircle(
+      Offset(
+        random.nextDouble() * size.width,
+        random.nextDouble() * size.height,
+      ),
+      random.nextDouble() * size.height * 0.004 + 0.6,
+      Paint()
+        ..color = Colors.white.withValues(alpha: random.nextDouble() * 0.6),
+    );
+  }
+  return recorder.endRecording().toImage(
+    size.width.round(),
+    size.height.round(),
+  );
+}
+
 Future<void> _art() async {
   final library = await _decode('../docs/screenshots/launcher-library.jpg');
   const icon = Size(256, 256);
@@ -175,6 +251,10 @@ Future<void> _art() async {
   }
   for (final person in pictured) {
     _images['$avatarBase/${person.id}.png'] = await _avatar(person.id);
+  }
+  for (final theme in demoThemes) {
+    _images[theme.preview] = await _themeStill(theme, const Size(1280, 720));
+    _images[theme.thumb] = await _themeStill(theme, const Size(640, 360));
   }
   final banner = await _decode(
     '../docs/screenshots/launcher-trophy-banner.jpg',
@@ -265,6 +345,7 @@ void main() {
   late String family;
 
   setUpAll(() async {
+    L10n.loadFolder(Directory('assets/l10n'));
     family = await _fonts();
     await _art();
     await _games();
@@ -391,6 +472,53 @@ void main() {
   testWidgets('profile', (tester) async {
     final h = await hub(tester);
     await shoot(tester, 'phone-profile', h, together(h, TogetherTab.profile));
+  });
+
+  testWidgets('showcase editor', (tester) async {
+    final h = await hub(tester);
+    final profiles = Profiles(h.account);
+    final page = (await tester.runAsync(() => profiles.load('ines')))!;
+    await shoot(
+      tester,
+      'showcase/phone-showcase-edit',
+      h,
+      ShowcaseEditScreen(
+        profiles: profiles,
+        current: page.showcase!,
+        trophies: page.trophies!,
+        games: page.games!,
+        accent: lookAccent(page.profile.look),
+      ),
+    );
+  });
+
+  testWidgets('profile theme picker', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'showcase/phone-theme-picker',
+      h,
+      ProfileEditScreen(
+        profiles: Profiles(h.account),
+        pickPhoto: () async => null,
+      ),
+      then: () async {
+        await tester.tap(find.text(demoThemes.first.name));
+      },
+    );
+  });
+
+  testWidgets('profile edit with a theme', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'showcase/phone-profile-edit',
+      h,
+      ProfileEditScreen(
+        profiles: Profiles(h.account),
+        pickPhoto: () async => null,
+      ),
+    );
   });
 
   testWidgets('feed', (tester) async {

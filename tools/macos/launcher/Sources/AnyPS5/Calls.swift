@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5MediaServer
 import AppKit
 import Carbon.HIToolbox
 import SwiftUI
@@ -160,7 +161,12 @@ extension AppModel {
         let client = together
         partyVoice?.close()
         partyVoice = nil
-        return Task { _ = await client.leaveCall(call, within: .seconds(2)) }
+        let sfu = sfuVoice
+        sfuVoice = nil
+        return Task {
+            await sfu?.close()
+            _ = await client.leaveCall(call, within: .seconds(2))
+        }
     }
 
     func previewRinging(_ call: TogetherRinging?) { ringing = call }
