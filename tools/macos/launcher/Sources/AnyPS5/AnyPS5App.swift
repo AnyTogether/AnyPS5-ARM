@@ -240,7 +240,7 @@ struct RootView: View {
             SidePanel(title: T.text(.friendsTitle), subtitle: model.togetherUser.map { "@\($0.handle) · \(T.format(.friendsOnlineCount, model.friendsOnline))" })
                 .transition(.move(edge: .trailing).combined(with: .opacity))
         case .party:
-            SidePanel(title: T.text(.partyTitle), subtitle: model.partySubtitle)
+            PartyScreen()
                 .transition(.move(edge: .trailing).combined(with: .opacity))
         case .themes, .studio:
             SidePanel(title: T.text(model.overlay == .studio ? .themeStudio : .themes), subtitle: T.text(model.overlay == .studio ? .themeStudioSubtitle : .themesDetail))

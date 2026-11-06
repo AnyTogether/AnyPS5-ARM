@@ -17,6 +17,8 @@ struct MessageActions: Equatable {
         enum Target: Equatable {
             case message(conversation: String, seq: Int)
             case unsend(conversation: String, seq: Int)
+            /// Why someone else's message is reported.
+            case report(conversation: String, seq: Int)
             case conversation(String)
         }
 
@@ -27,16 +29,18 @@ struct MessageActions: Equatable {
     }
 
     enum Row: Equatable {
-        case reactions, reply, edit, unsend, confirmUnsend, cancel
+        case reactions, reply, edit, unsend, confirmUnsend, cancel, report
+        case reason(TogetherReportReason)
         /// What choosing it makes the conversation: pinned or not, muted or not.
         case pin(Bool), mute(Bool)
     }
 }
 
 extension AppModel {
-    /// The open thread's messages, oldest first.
+    /// The open thread's messages, oldest first: the party's chat on the party screen, else the
+    /// conversation selected in Messages.
     var openThread: [TogetherMessage] {
-        selectedConversation.flatMap { inbox?.threads[$0.id] } ?? []
+        chatConversation.flatMap { thread(of: $0.id) } ?? []
     }
 
     func resetMessageActions() {
@@ -87,13 +91,13 @@ extension AppModel {
     // MARK: The menu
 
     func message(in conversationId: String, seq: Int) -> TogetherMessage? {
-        inbox?.threads[conversationId]?.first { $0.seq == seq }
+        thread(of: conversationId)?.first { $0.seq == seq }
     }
 
     /// The message a message menu (or its question) is about, while it is still there to act on.
     func menuMessage(_ menu: MessageActions.Menu) -> TogetherMessage? {
         switch menu.target {
-        case .message(let conversation, let seq), .unsend(let conversation, let seq):
+        case .message(let conversation, let seq), .unsend(let conversation, let seq), .report(let conversation, let seq):
             return message(in: conversation, seq: seq).flatMap { $0.deletedAt == nil ? $0 : nil }
         case .conversation:
             return nil
@@ -103,22 +107,25 @@ extension AppModel {
     func menuConversation(_ menu: MessageActions.Menu) -> TogetherConversation? {
         let id: String
         switch menu.target {
-        case .message(let conversation, _), .unsend(let conversation, _): id = conversation
+        case .message(let conversation, _), .unsend(let conversation, _), .report(let conversation, _): id = conversation
         case .conversation(let conversation): id = conversation
         }
-        return inbox?.conversations.first { $0.id == id }
+        return conversation(withId: id)
     }
 
     func menuRows(_ menu: MessageActions.Menu) -> [MessageActions.Row] {
         switch menu.target {
         case .message:
-            guard let message = menuMessage(menu), let me = inbox?.me else { return [] }
+            guard let message = menuMessage(menu), let me = chatMe else { return [] }
             var rows: [MessageActions.Row] = [.reactions, .reply]
             if message.canEdit(by: me) { rows.append(.edit) }
             if message.authorId == me { rows.append(.unsend) }
+            if message.authorId != nil, message.authorId != me { rows.append(.report) }
             return rows
         case .unsend:
             return menuMessage(menu) == nil ? [] : [.confirmUnsend, .cancel]
+        case .report:
+            return menuMessage(menu) == nil ? [] : TogetherReportReason.allCases.map(MessageActions.Row.reason) + [.cancel]
         case .conversation:
             guard let conversation = menuConversation(menu) else { return [] }
             return [.pin(!conversation.pinned), .mute(!conversation.muted)]
@@ -126,7 +133,7 @@ extension AppModel {
     }
 
     func openMessageMenu(_ seq: Int) {
-        guard let conversation = selectedConversation, let message = message(in: conversation.id, seq: seq), message.deletedAt == nil else { return }
+        guard let conversation = chatConversation, let message = message(in: conversation.id, seq: seq), message.deletedAt == nil else { return }
         withAnimation(Motion.overlay) { messageActions.menu = .init(target: .message(conversation: conversation.id, seq: seq)) }
         Sounds.shared.play(.select)
     }
@@ -147,6 +154,27 @@ extension AppModel {
         guard let menu = messageActions.menu, case .message(let conversation, let seq) = menu.target else { return }
         withAnimation(Motion.focus) { messageActions.menu = .init(target: .unsend(conversation: conversation, seq: seq), row: 1) }
         Sounds.shared.play(.select)
+    }
+
+    /// Reporting asks why first, from the message's menu.
+    func askReport() {
+        guard let menu = messageActions.menu, case .message(let conversation, let seq) = menu.target else { return }
+        withAnimation(Motion.focus) { messageActions.menu = .init(target: .report(conversation: conversation, seq: seq)) }
+        Sounds.shared.play(.select)
+    }
+
+    /// The message reported for a reason: the author is not told who sent it.
+    func report(_ message: TogetherMessage, _ reason: TogetherReportReason) {
+        let client = together
+        Sounds.shared.play(.select)
+        Task {
+            do {
+                try await client.report(message: message.id, reason: reason)
+                show(TChat.text(.reportSent), symbol: "flag.fill")
+            } catch {
+                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
     }
 
     /// The question straight away, from a message's context menu.
@@ -177,7 +205,11 @@ extension AppModel {
         case .select:
             perform(rows[menu.row], in: menu)
         case .back:
-            if case .unsend(let conversation, let seq) = menu.target {
+            if case .report(let conversation, let seq) = menu.target {
+                let back = MessageActions.Menu(target: .message(conversation: conversation, seq: seq))
+                withAnimation(Motion.focus) { messageActions.menu = MessageActions.Menu(target: back.target, row: max(0, menuRows(back).count - 1)) }
+                Sounds.shared.play(.back)
+            } else if case .unsend(let conversation, let seq) = menu.target {
                 let back = MessageActions.Menu(target: .message(conversation: conversation, seq: seq))
                 withAnimation(Motion.focus) { messageActions.menu = MessageActions.Menu(target: back.target, row: max(0, menuRows(back).count - 1)) }
                 Sounds.shared.play(.back)
@@ -216,6 +248,12 @@ extension AppModel {
             unsend(message)
         case .cancel:
             menuCommand(.back)
+        case .report:
+            askReport()
+        case .reason(let reason):
+            guard let message else { return }
+            closeMessageMenu(sound: false)
+            report(message, reason)
         case .pin(let on):
             guard let conversation else { return }
             closeMessageMenu(sound: false)
@@ -231,13 +269,13 @@ extension AppModel {
 
     /// Adds the reaction, or takes it back when the user already gave it.
     func toggleReaction(_ reaction: TogetherMessageReaction, on message: TogetherMessage) {
-        guard let me = inbox?.me, message.deletedAt == nil, familyPermits(.messages) else { return }
+        guard let me = chatMe, message.deletedAt == nil, familyPermits(.messages) else { return }
         let on = !message.hasReacted(reaction, by: me)
         Sounds.shared.play(.select)
         Task {
             do {
                 let reactions = try await together.react(reaction, to: message.seq, in: message.conversationId, on: on)
-                withAnimation(Motion.focus) { inbox?.react(message.conversationId, seq: message.seq, reactions: reactions) }
+                withAnimation(Motion.focus) { storeReactions(message.conversationId, seq: message.seq, reactions) }
             } catch {
                 show(togetherMessage(error), symbol: "exclamationmark.bubble.fill")
             }
@@ -251,28 +289,28 @@ extension AppModel {
             messageActions.editing = nil
             messageActions.replyTo = message.seq
             messageActions.picked = nil
-            messagesInThread = true
+            if partyChatShown { partyChatFocused = true } else { messagesInThread = true }
         }
         messageFocus = AppModel.quickReplies.count
         composing = true
     }
 
     func startEditing(_ message: TogetherMessage) {
-        guard let me = inbox?.me, message.canEdit(by: me) else { return show(TChat.text(.editLimit), symbol: "pencil.slash") }
+        guard let me = chatMe, message.canEdit(by: me) else { return show(TChat.text(.editLimit), symbol: "pencil.slash") }
         withAnimation(Motion.focus) {
             messageActions.replyTo = nil
             messageActions.editing = message.seq
             messageActions.picked = nil
-            messagesInThread = true
+            if partyChatShown { partyChatFocused = true } else { messagesInThread = true }
         }
-        messageDraft = message.words ?? ""
+        chatDraft = message.words ?? ""
         messageFocus = AppModel.quickReplies.count
         composing = true
     }
 
     /// Leaves the reply or the edit; an edit's text goes with it.
     func cancelReplyOrEdit() {
-        if messageActions.editing != nil { messageDraft = "" }
+        if messageActions.editing != nil { chatDraft = "" }
         withAnimation(Motion.focus) {
             messageActions.replyTo = nil
             messageActions.editing = nil
@@ -283,9 +321,9 @@ extension AppModel {
     /// The message being edited, said again.
     func saveEdit(_ raw: String) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let seq = messageActions.editing, let conversation = selectedConversation, !text.isEmpty else { return }
+        guard let seq = messageActions.editing, let conversation = chatConversation, !text.isEmpty else { return }
         if message(in: conversation.id, seq: seq)?.words == text {
-            messageDraft = ""
+            chatDraft = ""
             withAnimation(Motion.focus) { messageActions.editing = nil }
             return
         }
@@ -294,10 +332,10 @@ extension AppModel {
             do {
                 let edited = try await together.edit(seq, in: conversation.id, to: text)
                 withAnimation(Motion.focus) {
-                    _ = inbox?.apply(edited, open: conversation.id)
+                    storeMessage(edited)
                     messageActions.editing = nil
                 }
-                if messageDraft == raw { messageDraft = "" }
+                if chatDraft == raw { chatDraft = "" }
             } catch let problem as TogetherProblem where problem.code == "edit_limit" || (problem.status == 403 && problem.code == "forbidden") {
                 withAnimation(Motion.focus) { messageActions.editing = nil }
                 show(TChat.text(.editLimit), symbol: "pencil.slash")
@@ -314,7 +352,7 @@ extension AppModel {
         Task {
             do {
                 try await together.unsend(message.seq, in: message.conversationId)
-                withAnimation(Motion.focus) { _ = inbox?.apply(message.removed(), open: message.conversationId) }
+                withAnimation(Motion.focus) { storeMessage(message.removed()) }
                 forgetRemoved(message)
             } catch {
                 show(togetherMessage(error), symbol: "exclamationmark.bubble.fill")
@@ -324,17 +362,17 @@ extension AppModel {
 
     /// A message unsent (here, on another device or by its author): nothing acts on it any more.
     func forgetRemoved(_ message: TogetherMessage) {
-        let here = selectedConversation?.id == message.conversationId
+        let here = chatConversation?.id == message.conversationId
         withAnimation(Motion.focus) {
             if here, messageActions.picked == message.seq { messageActions.picked = nil }
             if here, messageActions.replyTo == message.seq { messageActions.replyTo = nil }
             if here, messageActions.editing == message.seq {
                 messageActions.editing = nil
-                messageDraft = ""
+                chatDraft = ""
             }
             if let menu = messageActions.menu {
                 switch menu.target {
-                case .message(let conversation, let seq), .unsend(let conversation, let seq):
+                case .message(let conversation, let seq), .unsend(let conversation, let seq), .report(let conversation, let seq):
                     if conversation == message.conversationId, seq == message.seq { messageActions.menu = nil }
                 case .conversation:
                     break
@@ -445,13 +483,18 @@ struct MessageMenuSheet: View {
     }
 
     @ViewBuilder private var header: some View {
-        let me = model.inbox?.me ?? ""
+        let me = model.chatMe ?? ""
         switch menu.target {
-        case .message, .unsend:
+        case .message, .unsend, .report:
             if let message = model.menuMessage(menu), let conversation = model.menuConversation(menu) {
                 let mine = message.authorId == me
                 VStack(alignment: .leading, spacing: 8 * scale) {
-                    Text(mine ? TL.text(.compareYou) : conversation.members.first { $0.userId == message.authorId }?.displayName ?? "")
+                    if case .report = menu.target {
+                        Text(TChat.text(.reportTitle)).font(.display(22 * scale, .semibold)).foregroundStyle(.white)
+                        Text(TChat.text(.reportLead)).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.65))
+                            .fixedSize(horizontal: false, vertical: true).padding(.bottom, 6 * scale)
+                    }
+                    Text(mine ? TL.text(.compareYou) : model.authorName(message.authorId, in: conversation))
                         .font(.display(13 * scale, .semibold)).textCase(.uppercase).tracking(0.8).foregroundStyle(.white.opacity(0.55))
                     Text(model.messageWords(message) ?? "")
                         .font(.display(16 * scale)).foregroundStyle(.white).lineLimit(4)
@@ -479,7 +522,7 @@ struct MessageMenuSheet: View {
     }
 
     private func reactions(focused: Bool) -> some View {
-        let me = model.inbox?.me ?? ""
+        let me = model.chatMe ?? ""
         let message = model.menuMessage(menu)
         let all = TogetherMessageReaction.allCases
         let column = min(menu.column, all.count - 1)
@@ -533,6 +576,8 @@ struct MessageMenuSheet: View {
         case .unsend: return (TChat.text(.unsend), "arrow.uturn.backward", true)
         case .confirmUnsend: return (TChat.text(.unsend), "arrow.uturn.backward", true)
         case .cancel: return (T.text(.cancel), "xmark", false)
+        case .report: return (TChat.text(.report), "flag", true)
+        case .reason(let reason): return (TChat.name(reason), TChat.symbol(reason), false)
         case .pin(let on): return (TChat.text(on ? .pin : .unpin), on ? "pin" : "pin.slash", false)
         case .mute(let on): return (TChat.text(on ? .mute : .unmute), on ? "bell.slash" : "bell", false)
         }
@@ -576,7 +621,7 @@ struct ReplyBar: View {
 
     var body: some View {
         let actions = model.messageActions
-        if let conversation = model.selectedConversation, let seq = actions.editing ?? actions.replyTo {
+        if let conversation = model.chatConversation, let seq = actions.editing ?? actions.replyTo {
             let target = model.message(in: conversation.id, seq: seq)
             let editing = actions.editing != nil
             HStack(spacing: 12 * scale) {
@@ -604,9 +649,9 @@ struct ReplyBar: View {
     }
 
     private func author(_ message: TogetherMessage?, in conversation: TogetherConversation) -> String {
-        guard let message else { return conversation.name(for: model.inbox?.me ?? "") }
-        if message.authorId == model.inbox?.me { return TL.text(.compareYou) }
-        return conversation.members.first { $0.userId == message.authorId }?.displayName ?? ""
+        guard let message else { return conversation.partyId == nil ? conversation.name(for: model.chatMe ?? "") : TChat.text(.partyChat) }
+        if message.authorId == model.chatMe { return TL.text(.compareYou) }
+        return model.authorName(message.authorId, in: conversation)
     }
 }
 
@@ -623,7 +668,7 @@ struct ReplyQuote: View {
             Capsule().fill(Color.white.opacity(0.35)).frame(width: 2.5 * scale)
             VStack(alignment: .leading, spacing: 1 * scale) {
                 if case .message(let message) = quote {
-                    Text(message.authorId == model.inbox?.me ? TL.text(.compareYou) : conversation.members.first { $0.userId == message.authorId }?.displayName ?? "")
+                    Text(message.authorId == model.chatMe ? TL.text(.compareYou) : model.authorName(message.authorId, in: conversation))
                         .font(.display(11 * scale, .semibold)).foregroundStyle(.white.opacity(0.6))
                 }
                 Text(words).font(.display(13 * scale)).italic(quote != quoteMessage).foregroundStyle(.white.opacity(0.55)).lineLimit(2)
@@ -657,7 +702,7 @@ struct ReactionChips: View {
     @Environment(\.scale) private var scale
 
     var body: some View {
-        let me = model.inbox?.me ?? ""
+        let me = model.chatMe ?? ""
         HStack(spacing: 6 * scale) {
             ForEach(message.reactions, id: \.reaction) { reaction in
                 let mine = reaction.userIds.contains(me)
@@ -679,7 +724,7 @@ struct ReactionChips: View {
     }
 
     private func names(_ ids: [String], me: String) -> String {
-        ids.map { id in id == me ? TL.text(.compareYou) : conversation.members.first { $0.userId == id }?.displayName ?? "?" }.joined(separator: ", ")
+        ids.map { id in id == me ? TL.text(.compareYou) : model.authorName(id, in: conversation, unknown: "?") }.joined(separator: ", ")
     }
 }
 
