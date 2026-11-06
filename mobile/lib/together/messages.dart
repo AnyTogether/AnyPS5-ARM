@@ -649,7 +649,7 @@ class Messages extends ChangeNotifier {
       final opened = await _revealAll(before);
       if (openId == id && identical(thread, before)) thread = opened;
     }
-    conversations = await _revealLast(conversations);
+    await _openLast();
     notifyListeners();
   }
 
@@ -684,6 +684,14 @@ class Messages extends ChangeNotifier {
     return [for (final m in messages) await _reveal(m)];
   }
 
+  /// The last messages opened where they wait; the list as it is now when none did (it may
+  /// have changed meanwhile).
+  Future<void> _openLast() async {
+    final before = conversations;
+    final opened = await _revealLast(before);
+    if (!identical(opened, before)) conversations = opened;
+  }
+
   /// The conversations with their last messages opened, the authors' devices fetched at once.
   Future<List<Conversation>> _revealLast(List<Conversation> list) async {
     final waiting = [
@@ -691,8 +699,7 @@ class Messages extends ChangeNotifier {
         if (c.lastMessage?.seal == SealState.opening) c,
     ];
     final e = e2ee;
-    // The list as it is now: it may have changed while this waited.
-    if (waiting.isEmpty || e == null) return conversations;
+    if (waiting.isEmpty || e == null) return list;
     if (e.on) {
       final unknown = {
         for (final c in waiting)
@@ -752,7 +759,7 @@ class Messages extends ChangeNotifier {
         Conversation.fromJson(json as Map<String, dynamic>),
     ];
     loaded = true;
-    conversations = await _revealLast(conversations);
+    await _openLast();
     await _countUnread();
     final shown = open;
     if (shown != null && shown.unread > 0) await _read(shown);
@@ -1229,7 +1236,7 @@ class Messages extends ChangeNotifier {
     ]);
     notifyListeners();
     if (next.lastMessage?.seal == SealState.opening) {
-      conversations = await _revealLast(conversations);
+      await _openLast();
       notifyListeners();
     }
   }
