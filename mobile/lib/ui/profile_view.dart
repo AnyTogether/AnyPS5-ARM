@@ -8,6 +8,8 @@ import '../together/profiles.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
 import 'activity_tile.dart';
+import 'profile_look.dart';
+import 'showcase_edit.dart';
 import 'together_widgets.dart';
 
 /// Someone's profile on its own screen, over AnyTogether's: a back button and the profile.
@@ -241,24 +243,34 @@ class _ProfileViewState extends State<ProfileView> {
               ),
       );
     }
+    final look = page.profile.look;
+    final accent = lookAccent(look);
+    final own =
+        page.profile.friendship == Friendship.me && widget.onEdit != null;
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(22, 18, 18, 18),
         children: [
-          _card(texts, page.profile),
+          LookHeader(look: look, child: _card(texts, page.profile, accent)),
+          if (page.showcase case final showcase? when !showcase.isEmpty || own)
+            ShowcaseStrip(
+              showcase: showcase,
+              accent: accent,
+              onEdit: own ? () => _editShowcase(page, showcase, accent) : null,
+            ),
           if (page.totals case final totals?) ...[
             const SizedBox(height: 14),
             _Totals(totals: totals),
           ],
           const SizedBox(height: 16),
-          _tabs(texts),
+          _tabs(texts, accent),
           const SizedBox(height: 6),
           AnimatedSwitcher(
-            duration: const Duration(milliseconds: 160),
+            duration: motion(context, 160),
             child: KeyedSubtree(
               key: ValueKey(_part),
-              child: _partBody(texts, page),
+              child: _partBody(texts, page, accent),
             ),
           ),
         ],
@@ -266,7 +278,23 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  Widget _card(Strings texts, UserProfile profile) {
+  Future<void> _editShowcase(
+    ProfilePage page,
+    Showcase showcase,
+    Color accent,
+  ) async {
+    final saved = await openShowcaseEdit(
+      context,
+      profiles: _profiles,
+      current: showcase,
+      trophies: page.trophies ?? const [],
+      games: page.games ?? const [],
+      accent: accent,
+    );
+    if (saved && mounted) await _load();
+  }
+
+  Widget _card(Strings texts, UserProfile profile, Color accent) {
     final person = profile.person;
     final presence = profile.presence;
     final where = [
@@ -342,7 +370,7 @@ class _ProfileViewState extends State<ProfileView> {
             ),
             if (!narrow) ...[
               const SizedBox(width: 10),
-              _actions(texts, profile),
+              _actions(texts, profile, accent),
             ],
           ],
         );
@@ -354,7 +382,7 @@ class _ProfileViewState extends State<ProfileView> {
             const SizedBox(height: 10),
             Padding(
               padding: const EdgeInsets.only(left: 84),
-              child: _actions(texts, profile),
+              child: _actions(texts, profile, accent),
             ),
           ],
         );
@@ -362,13 +390,13 @@ class _ProfileViewState extends State<ProfileView> {
     );
   }
 
-  Widget _actions(Strings texts, UserProfile profile) {
+  Widget _actions(Strings texts, UserProfile profile, Color accent) {
     final person = profile.person;
     final friends = widget.hub.friends;
     return switch (profile.friendship) {
       Friendship.me =>
         widget.onEdit == null
-            ? _Tag(texts.thisIsYou)
+            ? _Tag(texts.thisIsYou, accent: accent)
             : OutlinedButton.icon(
                 onPressed: () async {
                   await widget.onEdit!();
@@ -393,10 +421,10 @@ class _ProfileViewState extends State<ProfileView> {
               icon: const Icon(Icons.call_rounded, size: 19),
             ),
           const SizedBox(width: 4),
-          _Tag(texts.areFriends),
+          _Tag(texts.areFriends, accent: accent),
         ],
       ),
-      Friendship.pendingOut => _Tag(texts.requestPending),
+      Friendship.pendingOut => _Tag(texts.requestPending, accent: accent),
       Friendship.pendingIn => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -431,7 +459,7 @@ class _ProfileViewState extends State<ProfileView> {
     };
   }
 
-  Widget _tabs(Strings texts) => Wrap(
+  Widget _tabs(Strings texts, Color accent) => Wrap(
     spacing: 6,
     runSpacing: 6,
     children: [
@@ -444,12 +472,13 @@ class _ProfileViewState extends State<ProfileView> {
             _Part.friends => texts.friendsList,
           },
           selected: _part == part,
+          accent: accent,
           onTap: () => setState(() => _part = part),
         ),
     ],
   );
 
-  Widget _partBody(Strings texts, ProfilePage page) {
+  Widget _partBody(Strings texts, ProfilePage page, Color accent) {
     final name = page.profile.person.shownName;
     Widget empty(String text) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 18),
@@ -464,7 +493,9 @@ class _ProfileViewState extends State<ProfileView> {
         if (games == null) return _Private(texts.privateSection(name));
         if (games.isEmpty) return empty(texts.noGamesYet);
         return Column(
-          children: [for (final game in games) _GameRow(game: game)],
+          children: [
+            for (final game in games) _GameRow(game: game, accent: accent),
+          ],
         );
       case _Part.trophies:
         final trophies = page.trophies;
@@ -589,9 +620,10 @@ class _Totals extends StatelessWidget {
 }
 
 class _GameRow extends StatelessWidget {
-  const _GameRow({required this.game});
+  const _GameRow({required this.game, required this.accent});
 
   final LibraryGame game;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) {
@@ -648,7 +680,7 @@ class _GameRow extends StatelessWidget {
                       backgroundColor: const Color(0x14FFFFFF),
                       color: progress == 100
                           ? gradeColor(Grade.platinum)
-                          : togetherAccent,
+                          : accent,
                     ),
                   ),
                 ),
@@ -766,21 +798,22 @@ class _Private extends StatelessWidget {
 }
 
 class _Tag extends StatelessWidget {
-  const _Tag(this.text);
+  const _Tag(this.text, {this.accent = togetherAccent});
 
   final String text;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
     decoration: BoxDecoration(
-      color: const Color(0x148AB4FF),
+      color: accent.withValues(alpha: 0.08),
       borderRadius: BorderRadius.circular(999),
     ),
     child: Text(
       text,
-      style: const TextStyle(
-        color: togetherAccent,
+      style: TextStyle(
+        color: accent,
         fontSize: 12.5,
         fontWeight: FontWeight.w600,
       ),
@@ -793,11 +826,13 @@ class _Pill extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.accent = togetherAccent,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+  final Color accent;
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -807,11 +842,13 @@ class _Pill extends StatelessWidget {
       behavior: HitTestBehavior.opaque,
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
+        duration: motion(context, 160),
         curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? const Color(0x268AB4FF) : const Color(0x0AFFFFFF),
+          color: selected
+              ? accent.withValues(alpha: 0.15)
+              : const Color(0x0AFFFFFF),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(
