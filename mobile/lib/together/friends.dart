@@ -22,6 +22,9 @@ class Friends extends ChangeNotifier {
   List<Person> outgoing = const [];
   bool loaded = false;
 
+  /// Told when this phone asks someone to be friends (a moment to offer push).
+  VoidCallback? onReachOut;
+
   Future<void> refresh() async {
     final list = await account.call('GET', 'me/friends');
     final requests = await account.call('GET', 'me/friends/requests');
@@ -45,6 +48,7 @@ class Friends extends ChangeNotifier {
     final answer = await account.call('POST', 'me/friends/requests', {
       'handle': handle.trim().replaceFirst(RegExp('^@'), ''),
     });
+    onReachOut?.call();
     await refresh();
     return answer['state'] == 'accepted';
   }

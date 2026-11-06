@@ -95,6 +95,20 @@ class TogetherSocket extends ChangeNotifier {
     _set(SocketStatus.offline);
   }
 
+  /// Into the background: the socket closes now, so the server knows this phone is away and
+  /// pushes to it (a socket left open would count as here until its heartbeats are missed, a
+  /// minute later). [wake] opens it again and picks up what was missed.
+  void rest() {
+    if (!_running || status == SocketStatus.offline) return;
+    _generation++;
+    _retry?.cancel();
+    _beat?.cancel();
+    _socket?.close(1000, 'away');
+    _socket = null;
+    session = null;
+    _set(SocketStatus.offline);
+  }
+
   /// Back in the foreground: a socket the phone lost while asleep comes back at once, not after
   /// its back-off.
   void wake() {

@@ -80,6 +80,27 @@ public struct TogetherRinging: Decodable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// The user joined the party's voice on another device (the phone, while it is the controller):
+/// this one stops its own voice, says goodbye to no one (the other device talks to them now) and
+/// stays in the party. Sent only to the device that had the voice.
+public struct TogetherVoiceMoved: Decodable, Equatable, Sendable {
+    public let callId: String
+    public let partyId: String?
+    /// The device that has the voice now, and what it is ("phone", "web", a launcher).
+    public let device: String
+    public let client: String?
+
+    public init(callId: String, partyId: String?, device: String, client: String?) {
+        self.callId = callId
+        self.partyId = partyId
+        self.device = device
+        self.client = client
+    }
+
+    /// The voice is on the user's phone now.
+    public var toPhone: Bool { client == "phone" }
+}
+
 /// Someone in a call muted or unmuted, deafened or undeafened themselves.
 public struct TogetherMuteChange: Decodable, Equatable, Sendable {
     public let callId: String

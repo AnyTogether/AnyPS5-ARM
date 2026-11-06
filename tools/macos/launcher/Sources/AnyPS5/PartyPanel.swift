@@ -307,6 +307,7 @@ extension AppModel {
             }
             loadParty()
         case "party.ended":
+            voiceElsewhere = nil
             guard event.data["partyId"] == party?.id else { return loadParty() }
             leaveVoice(tellServer: false)
                 withAnimation(Motion.overlay) { party = nil }
@@ -336,6 +337,12 @@ extension AppModel {
     func voiceRows(_ party: TogetherParty) -> [PanelRow] {
         guard familyAllows(.voiceChat) else { return [] }
         guard voiceCall != nil, callFriend == nil else {
+            // The voice went to the phone (or another device): joining here takes it back.
+            if let elsewhere = voiceElsewhere, party.call?.in.contains(togetherUser?.id ?? "") == true {
+                return [PanelRow(id: "voice-join", title: T.text(.voiceTakeBack), detail: T.text(elsewhere.toPhone ? .voiceOnPhone : .voiceOnOtherDevice),
+                                 symbol: elsewhere.toPhone ? "iphone" : "laptopcomputer",
+                                 kind: .action(destructive: false) { [weak self] in self?.joinVoice() })]
+            }
             let others = party.call?.in.filter { $0 != togetherUser?.id }.count ?? 0
             return [PanelRow(id: "voice-join", title: T.text(.voiceJoin), detail: others > 0 ? T.format(.voiceInCall, others) : T.text(.voiceJoinDetail), symbol: "waveform",
                              kind: .action(destructive: false) { [weak self] in self?.joinVoice() })]
@@ -373,6 +380,7 @@ extension AppModel {
             }
             do {
                 startVoice(try await together.joinCall(party: party.id))
+                voiceElsewhere = nil
                 Sounds.shared.play(.select)
                 show(T.text(.voiceJoined), symbol: "waveform")
             } catch {
@@ -428,10 +436,11 @@ extension AppModel {
         }
     }
 
-    /// Out of the call here; `tellServer` false when the server ended it already.
-    func leaveVoice(tellServer: Bool = true) {
+    /// Out of the call here; `tellServer` false when the server ended it already, `sayBye` false
+    /// when the voice moved to another of the user's devices.
+    func leaveVoice(tellServer: Bool = true, sayBye: Bool = true) {
         guard let call = voiceCall else { return }
-        partyVoice?.close()
+        partyVoice?.close(sayBye: sayBye)
         partyVoice = nil
         if let sfu = sfuVoice {
             sfuVoice = nil
@@ -547,6 +556,14 @@ extension AppModel {
             // The party's call moved to the media server.
             guard let moved = event.decode(TogetherCallMedia.self), moved.callId == voiceCall, moved.media == .sfu else { return }
             moveVoiceToMediaServer(moved.callId)
+        case "call.moved":
+            // Joined on the phone (it is the controller, and the headset now): quiet here, still
+            // in the party, and no echo of the same voice from two devices.
+            guard let moved = event.decode(TogetherVoiceMoved.self), moved.callId == voiceCall else { return }
+            leaveVoice(tellServer: false, sayBye: false)
+            voiceElsewhere = moved
+            show(T.text(moved.toPhone ? .voiceMovedPhone : .voiceMovedAway), symbol: moved.toPhone ? "iphone" : "laptopcomputer")
+            loadParty()
         case "call.updated":
             // Someone muted or unmuted themselves (the party's view follows with party.updated).
             guard let change = event.decode(TogetherMuteChange.self), change.callId == voiceCall else { return }

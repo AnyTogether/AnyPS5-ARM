@@ -247,6 +247,22 @@ extension SocialTexts on Strings {
   String get digestNoEmail => lookup('digestNoEmail');
   String get gameInviteHint => lookup('n_game_invite_hint');
   String get noPushYet => lookup('noPushYet');
+  String get pushHere => lookup('pushHere');
+  String get pushHereHint => lookup('pushHereHint');
+  String get pushDenied => lookup('pushDenied');
+  String get pushPreview => lookup('pushPreview');
+  String get pushPreviewHint => lookup('pushPreviewHint');
+  String get pushCalls => lookup('pushCalls');
+  String get pushCallsHint => lookup('pushCallsHint');
+  String get pushOffer => lookup('pushOffer');
+  String get pushOfferDetail => lookup('pushOfferDetail');
+  String get turnOn => lookup('turnOn');
+  String get voiceHere => lookup('voiceHere');
+  String get voiceHereShort => lookup('voiceHereShort');
+  String get voiceMovedPhone => lookup('voiceMovedPhone');
+  String get voiceMovedAway => lookup('voiceMovedAway');
+  String get voiceTakeBack => lookup('voiceTakeBack');
+  String get voiceLeaveHere => lookup('voiceLeaveHere');
 
   /// What a notification says, with {name} left for the caller to set in bold.
   String notice(Notice n, {String? Function(String titleId)? gameName}) {

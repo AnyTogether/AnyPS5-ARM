@@ -585,6 +585,7 @@ enum PreviewRenderer {
         CapturesPreviews.run(preferences, found, root, still, output)
         LevelPreviews.run(preferences, found, root, still, output)
         ChatPreviews.run(preferences, found, root, still, output)
+        E2EEPreviews.run(preferences, found, root, still, output)
         UpdatePreviews.run(preferences, found, root, still, output)
         ControllerPreviews.run(preferences, found, root, still, output)
         BrowserPlayPreviews.run(preferences, found, root, still, output)

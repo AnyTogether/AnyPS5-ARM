@@ -64,6 +64,7 @@ extension AppModel {
         let selectedID = inbox == nil ? nil : selectedConversation?.id
         withAnimation(Motion.overlay) { inbox = next }
         keepSelection(selectedID)
+        e2eeInboxArrived()
         guard overlay == .messages else { return }
         // A notification's conversation the list did not have yet: open now that it does.
         if let pending = pendingConversation, showConversation(pending) { return }
@@ -77,6 +78,7 @@ extension AppModel {
             defer { threadsLoading.remove(id) }
             guard let page = try? await together.messages(in: id) else { return }
             inbox?.threads[id] = page.messages
+            openSealedMessages()
             if messagesInThread, selectedConversation?.id == id { markThreadRead() }
         }
     }
@@ -191,6 +193,7 @@ extension AppModel {
             messageFocus = AppModel.quickReplies.count
             Sounds.shared.play(.select)
             markThreadRead()
+            e2eeConversationOpened(conversation)
         case .friend(let friend):
             Task {
                 do {
@@ -202,6 +205,7 @@ extension AppModel {
                     messageFocus = AppModel.quickReplies.count
                     composing = true
                     loadThread(conversation.id)
+                    e2eeConversationOpened(conversation)
                 } catch {
                     show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
                 }
@@ -303,11 +307,17 @@ extension AppModel {
         let replyTo = messageActions.replyTo
         withAnimation(Motion.focus) { messageActions.replyTo = nil }
         Sounds.shared.play(.select)
+        // End-to-end encrypted, or to be: sealed on this Mac, never plain.
+        if sendsSealed(conversation) { return sendSealedText(text, raw: raw, in: conversation, replyTo: replyTo) }
         Task {
             do {
                 let sent = try await together.send(text, in: conversation.id, replyTo: replyTo)
                 withAnimation(Motion.focus) { _ = inbox?.apply(sent, open: conversation.id) }
                 keepSelection(conversation.id)
+            } catch let problem as TogetherProblem where problem.code == "e2ee_required" {
+                // Encrypted on the server's side (both people have a device): sealed instead.
+                await e2eeRequired(conversation)
+                sendSealedText(text, raw: raw, in: conversation, replyTo: replyTo)
             } catch {
                 if messageActions.replyTo == nil, selectedConversation?.id == conversation.id { messageActions.replyTo = replyTo }
                 if messageDraft.isEmpty, !AppModel.quickReplies.contains(raw) { messageDraft = raw }
@@ -330,6 +340,7 @@ extension AppModel {
             if event.type == "message.created", let author = message.authorId { typing.wrote(author, in: message.conversationId) }
             let known = inbox?.apply(message, open: viewing ? message.conversationId : nil) == true
             if message.deletedAt != nil { forgetRemoved(message) }
+            if message.sealed != nil { openSealedMessages() }
             guard known else { return loadInbox() }
             // The list moved under the selection: keep the same conversation selected.
             keepSelection(selectedID)
@@ -413,7 +424,7 @@ struct MessagesView: View {
             if let menu = model.messageActions.menu {
                 HStack(spacing: 0) {
                     Color.black.opacity(0.35).contentShape(Rectangle()).onTapGesture { model.closeMessageMenu() }
-                    MessageMenuSheet(menu: menu)
+                    if case .encryption = menu.target { EncryptionSheet(menu: menu) } else { MessageMenuSheet(menu: menu) }
                 }
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
@@ -475,7 +486,10 @@ struct MessagesView: View {
                         Text(conversation.name(for: me)).font(.display(22 * scale, .semibold)).foregroundStyle(.white).lineLimit(1)
                         if let other, conversation.kind == "direct" {
                             let presence = model.togetherFriends.first { $0.userId == other.userId }?.presence
-                            Text("@\(other.handle) · \(model.presenceText(presence))").font(.display(14 * scale)).foregroundStyle(.white.opacity(0.55))
+                            HStack(spacing: 10 * scale) {
+                                Text("@\(other.handle) · \(model.presenceText(presence))").font(.display(14 * scale)).foregroundStyle(.white.opacity(0.55)).lineLimit(1)
+                                if let lock = model.e2eeLock(conversation) { E2EELockPill(conversation: conversation, lock: lock) }
+                            }
                         }
                     }
                     Spacer()
@@ -490,6 +504,9 @@ struct MessagesView: View {
                         }
                         Hint(keys: "esc / ○", label: T.text(.hintBack))
                     }
+                }
+                if let notice = model.e2ee?.notice(conversation.id), model.e2eeLock(conversation) != nil {
+                    E2EENoticeBar(conversation: conversation, notice: notice).transition(.opacity.combined(with: .move(edge: .top)))
                 }
                 messages(conversation, me: me)
                     .frame(maxHeight: .infinity)
@@ -532,6 +549,7 @@ struct MessagesView: View {
     private var composer: some View {
         let inThread = model.messagesInThread
         let replies = AppModel.quickReplies
+        let blocked = model.selectedConversation.flatMap(model.e2eeLock) == .noDevice
         return VStack(alignment: .leading, spacing: 12 * scale) {
             HStack(spacing: 10 * scale) {
                 ForEach(Array(replies.enumerated()), id: \.offset) { index, reply in
@@ -547,8 +565,14 @@ struct MessagesView: View {
                     .animation(Motion.focus, value: focused)
                 }
             }
+            .opacity(blocked ? 0.35 : 1)
+            .allowsHitTesting(!blocked)
             ReplyBar()
-            ComposerField(focused: inThread && model.messageActions.picked == nil && model.messageFocus == replies.count)
+            if blocked, let conversation = model.selectedConversation {
+                E2EEComposerNotice(conversation: conversation).transition(.opacity)
+            } else {
+                ComposerField(focused: inThread && model.messageActions.picked == nil && model.messageFocus == replies.count)
+            }
         }
     }
 }
@@ -793,7 +817,7 @@ struct ConversationRow: View {
 
     private func preview(_ conversation: TogetherConversation, me: String) -> String {
         guard let last = conversation.lastMessage else { return T.text(.messagesSayHello) }
-        let text = model.messageWords(last) ?? T.text(.messagesDeleted)
+        let text = last.sealed != nil && last.deletedAt == nil ? model.sealedWords(last, preview: true) : model.messageWords(last) ?? T.text(.messagesDeleted)
         return last.authorId == me ? T.format(.messagesYou, text) : text
     }
 }
@@ -855,7 +879,9 @@ struct MessageList: View {
                         ReplyQuote(quote: quote, conversation: conversation, mine: mine)
                     }
                     VStack(alignment: mine ? .trailing : .leading, spacing: 4 * scale) {
-                        if let attachment = message.attachment {
+                        if message.sealed != nil, message.deletedAt == nil {
+                            SealedMessageContent(message: message, mine: mine)
+                        } else if let attachment = message.attachment {
                             AttachmentBubble(attachment: attachment, mine: mine)
                             if let caption = message.words { bubble(caption, mine: mine) }
                         } else {
@@ -897,8 +923,9 @@ struct MessageList: View {
                 }
             }
             Button(TChat.text(.reply)) { model.startReply(message) }
-            if message.canEdit(by: me) { Button(TChat.text(.edit)) { model.startEditing(message) } }
+            if model.canEditMessage(message) { Button(TChat.text(.edit)) { model.startEditing(message) } }
             if message.authorId == me { Button(TChat.text(.unsend), role: .destructive) { model.askUnsend(message) } }
+            if message.authorId != me, message.authorId != nil { Button(TChat.text(.report), role: .destructive) { model.askReport(message) } }
         }
     }
 

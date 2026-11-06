@@ -1086,6 +1086,14 @@ final class AppModel: ObservableObject {
     @Published var groupFocus = 0
     /// The open thread's actions: the message picked, the menu over it, a reply or an edit on its way.
     @Published var messageActions = MessageActions()
+    /// End-to-end encrypted direct messages (MessagesE2EE.swift): this Mac's keys, everyone's
+    /// checked devices, what sealed messages opened to, and what is remembered per conversation.
+    @Published var e2ee: TogetherE2EEBook?
+    /// Sealed attachments opened on this Mac, by media ID, shown from files only this user reads.
+    @Published var e2eeMedia: [String: TogetherMedia] = [:]
+    var e2eeMediaLoading: Set<String> = []
+    var e2eePreparing: Task<Void, Never>?
+    var e2eeFetching: Set<String> = []
     /// The party the user is in, the invites waiting, and whether a new party is open to friends.
     @Published var party: TogetherParty? {
         didSet { partyChanged() }
@@ -1145,6 +1153,8 @@ final class AppModel: ObservableObject {
     @Published var mediaLimits: TogetherMediaLimits?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
+    /// The party's voice moved to another of the user's devices (the phone); joining here takes it back.
+    @Published var voiceElsewhere: TogetherVoiceMoved?
     var partyVoice: PartyVoice?
     /// The party's voice through the media server, once the call moved there (the mesh is closed then).
     var sfuVoice: SfuVoice?
