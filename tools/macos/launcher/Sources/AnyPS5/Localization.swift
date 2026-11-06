@@ -125,6 +125,7 @@ enum T {
             TC.Key.allCases.map(\.rawValue),
             SP.Key.allCases.map(\.rawValue),
             TS.Key.allCases.map(\.rawValue),
+            TChal.Key.allCases.map(\.rawValue),
             TSteam.Key.allCases.map(\.rawValue),
         ].flatMap { $0 }
     }

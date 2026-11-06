@@ -63,6 +63,7 @@ enum SocialPreviews {
                                      game: nil, index: 0)
         }
         render("leaderboard-missing") { model in model.previewLeaderboard(nil, game: found.first, missing: true) }
+        challenges(found, render: render, top: top, around: around)
         var details = TogetherNotification.Details()
         details.count = 3
         details.text = "on tonight? raid at nine"
@@ -110,5 +111,79 @@ enum SocialPreviews {
             model.previewProfile(TogetherProfilePage(profile: miraProfile, library: .shown(library), trophies: .shown([])), column: 2, index: 0)
             model.social.profileActivity = items.filter { $0.actor.userId == "f1" } + items.suffix(2)
         }
+    }
+
+    /// Challenges: the strip over a game's board and over overall points, a running one's page
+    /// (joined, with a hidden player), one still to come (Join focused), one decided, and the
+    /// three notifications.
+    static func challenges(_ found: [Game], render: (String, (AppModel) -> Void) -> Void, top: [TogetherLeaderboard.Entry], around: [TogetherLeaderboard.Entry]) {
+        let game = found.first.map { TogetherChallenge.Game(titleId: $0.titleID, names: ["en": $0.name]) } ?? .init(titleId: "PPSA01234", names: ["en": "Stray"])
+        let other = found.dropFirst().first.map { TogetherChallenge.Game(titleId: $0.titleID, names: ["en": $0.name]) } ?? game
+        let robin = TogetherPerson(userId: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+        let now = Date()
+        let hours = { (count: Double) in now.addingTimeInterval(count * 3600) }
+        let running = TogetherChallenge(id: "c1", title: "Weekend sprint", description: "Most trophy points by Sunday night. No platinum hunting guides!", game: game,
+                                        metric: .points, audience: .friends, creator: mira, startsAt: hours(-30), endsAt: hours(52), state: .active, entrants: 6, joined: true,
+                                        leader: .init(rank: 1, user: mira, value: 420), myStanding: .init(rank: 3, value: 195))
+        let coming = TogetherChallenge(id: "c2", title: "Night owls", game: game, metric: .time, audience: .community, community: .init(id: "k1", name: "Souls fans"),
+                                       creator: kenji, startsAt: hours(20), endsAt: hours(20 + 7 * 24), state: .upcoming, entrants: 14)
+        let trophies = TogetherChallenge(id: "c3", title: "Trophy rush", game: other, metric: .trophies, audience: .public, creator: sol, startsAt: hours(-4), endsAt: hours(5),
+                                         state: .active, entrants: 212, leader: .init(rank: 1, user: nil, value: 9))
+        let decided = TogetherChallenge(id: "c4", title: "Halloween marathon", game: game, metric: .time, audience: .friends, creator: robin, startsAt: hours(-24 * 9), endsAt: hours(-24 * 2),
+                                        state: .ended, final: true, entrants: 4, joined: true, mine: true, leader: .init(rank: 1, user: kenji, value: 151_200), myStanding: .init(rank: 2, value: 98_400))
+        let board = TogetherLeaderboard(board: "points", scope: .global, game: nil, entries: Array(top.prefix(4)), me: .init(rank: 41, value: 1_830, listed: true), around: around, total: 312)
+        render("leaderboard-challenges") { model in
+            model.previewLeaderboard(board, game: found.first, index: 6)
+            model.previewChallenges([running, coming], onStrip: true, index: 0)
+        }
+        render("leaderboard-challenges-overall") { model in
+            model.previewLeaderboard(TogetherLeaderboard(board: "points", scope: .friends, game: nil, entries: Array(top.prefix(5)), me: .init(rank: 3, value: 7_660, listed: true), total: 9),
+                                     game: nil, index: 2)
+            model.previewChallenges([running, trophies, decided], onStrip: false)
+        }
+        let person = { (id: String, name: String) in TogetherPerson(userId: id, handle: name.lowercased(), displayName: name, avatar: nil) }
+        let standings: [TogetherChallenge.Standing] = [
+            .init(rank: 1, user: mira, value: 420), .init(rank: 2, user: nil, value: 300), .init(rank: 3, user: robin, value: 195, me: true),
+            .init(rank: 3, user: person("p4", "Ines"), value: 195), .init(rank: 5, user: sol, value: 60), .init(rank: 6, user: kenji, value: 0),
+        ]
+        render("challenge-running") { model in
+            model.previewChallenge(running, detail: TogetherChallengeDetail(challenge: running, standings: standings), index: 2)
+        }
+        render("challenge-coming") { model in
+            model.previewChallenge(coming, detail: TogetherChallengeDetail(challenge: coming, standings: []), card: true, button: 0)
+        }
+        render("challenge-decided") { model in
+            let final: [TogetherChallenge.Standing] = [.init(rank: 1, user: kenji, value: 151_200), .init(rank: 2, user: robin, value: 98_400, me: true),
+                                                       .init(rank: 3, user: mira, value: 26_100), .init(rank: 4, user: sol, value: 2_700)]
+            model.previewChallenge(decided, detail: TogetherChallengeDetail(challenge: decided, standings: final), card: true, button: 0)
+        }
+        render("challenge-loading") { model in model.previewChallenge(trophies, detail: nil) }
+        var data = TogetherNotification.Details()
+        data.challengeId = "c1"
+        data.title = running.title
+        data.titleId = game.titleId
+        data.gameNames = game.names
+        data.metric = "points"
+        data.endsAt = ISO8601DateFormatter().string(from: running.endsAt)
+        var won = data
+        won.title = "Halloween marathon"
+        won.metric = "time"
+        won.rank = 1
+        won.value = 151_200
+        won.entrants = 4
+        var lost = won
+        lost.title = "Trophy rush"
+        lost.metric = "trophies"
+        lost.rank = 7
+        lost.value = 3
+        lost.entrants = 212
+        lost.winner = .init(displayName: "Mira", handle: "mira", value: 14)
+        let notes = [
+            TogetherNotification(id: "0013", kind: .challengeInvite, actor: mira, subjectId: "c1", data: data, createdAt: ago(0.1)),
+            TogetherNotification(id: "0012", kind: .challengeStarted, actor: kenji, subjectId: "c1", data: data, createdAt: ago(0.6)),
+            TogetherNotification(id: "0011", kind: .challengeEnded, actor: nil, subjectId: "c4", data: won, createdAt: ago(3)),
+            TogetherNotification(id: "0010", kind: .challengeEnded, actor: nil, subjectId: "c3", data: lost, read: true, createdAt: ago(26)),
+        ]
+        render("notifications-challenges") { model in model.previewNotifications(notes, unread: 3) }
     }
 }
