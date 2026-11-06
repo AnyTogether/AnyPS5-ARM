@@ -519,9 +519,9 @@ final class TogetherCallTests: TogetherSignedInCase {
         XCTAssertNil(TogetherSocket.event(["op": "ready"]))
         let moved: [String: Any] = ["op": "event", "id": "10", "type": "call.moved",
                                     "data": ["callId": "call1", "partyId": "p1", "userId": "me", "device": "phone-session", "client": "phone"]]
-        let decoded = TogetherSocket.event(moved)?.decode(TogetherVoiceMoved.self)
-        XCTAssertEqual(decoded, TogetherVoiceMoved(callId: "call1", partyId: "p1", device: "phone-session", client: "phone"))
-        XCTAssertEqual(decoded?.toPhone, true)
+        let movedEvent = TogetherSocket.event(moved)?.decode(TogetherVoiceMoved.self)
+        XCTAssertEqual(movedEvent, TogetherVoiceMoved(callId: "call1", partyId: "p1", device: "phone-session", client: "phone"))
+        XCTAssertEqual(movedEvent?.toPhone, true)
         // An older server's event without the client still reads.
         let bare: [String: Any] = ["op": "event", "id": "11", "type": "call.moved", "data": ["callId": "call1", "partyId": NSNull(), "device": "web-session"]]
         XCTAssertEqual(TogetherSocket.event(bare)?.decode(TogetherVoiceMoved.self)?.toPhone, false)

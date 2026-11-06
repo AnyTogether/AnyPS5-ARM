@@ -321,7 +321,7 @@ class PhonePush extends ChangeNotifier {
       'token': token.token,
       if (token.app != null) 'app': token.app,
       if (_channel.platform == 'apns') 'sandbox': token.sandbox,
-      'lang': language?.call() == 'tr' ? 'tr' : 'en',
+      'lang': language?.call() == 'tr' ? 'tr' : 'en', // not a text: the server's language code
     });
     registered = true;
     offering = false;
