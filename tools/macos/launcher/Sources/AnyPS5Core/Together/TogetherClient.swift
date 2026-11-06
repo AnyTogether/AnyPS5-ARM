@@ -57,6 +57,8 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var downloadUrl: String? = nil
     /// With "conflict" on starting Play Together: the party's game already running.
     public var sessionId: String? = nil
+    /// With "media_server_off": the most viewers this server takes.
+    public var max: Int? = nil
     /// With "e2ee_devices": each person's active device IDs now, by user ID.
     public var devices: TogetherProblemDevices? = nil
     public var description: String { title }

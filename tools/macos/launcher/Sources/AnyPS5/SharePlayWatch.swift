@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5MediaServer
 import AnyPS5SharePlay
 import GameController
 import SwiftUI
@@ -6,13 +7,26 @@ import WebRTC
 
 /// Watching a friend's share play in the launcher: their game full screen, its sound, and, once
 /// they let this user play, the controller as player 2, 3 or 4 in their game (its packets on the
-/// share play's pad channel, 120 times a second and at once on a change).
+/// share play's pad channel, 120 times a second and at once on a change). Straight from the host
+/// (the mesh), or, in a big share play while the user holds no pad, from the media server.
 @MainActor
 final class ShareWatchSession {
     let id: String
     let watcher: SharePlayWatcher
     let speaker: SharePlaySpeaker
     let video: RTCMTLNSVideoView
+    /// Where the picture comes from now; nil until started.
+    private(set) var route: TogetherMediaRoute?
+    /// The media server's side, while the route is "sfu".
+    private(set) var mediaServer: SfuShareWatcher?
+    /// A fresh media server token (the join's first, then GET /share-plays/:id/sfu).
+    var access: () async throws -> TogetherSfuAccess = { throw CancellationError() }
+    /// The picture showing or not, from whichever route is on.
+    var connected: (Bool) -> Void = { _ in }
+    /// The media server could not be reached.
+    var failed: () -> Void = {}
+    /// The view the picture is in now.
+    var view: NSView { mediaServer?.view ?? video }
     private var pump: Timer?
     private var stats: Timer?
     private var sequence: UInt32 = 0
@@ -31,12 +45,53 @@ final class ShareWatchSession {
         self.video = video
     }
 
-    func start(measured: @escaping (Double?, Double?, Int?) -> Void) {
+    func start(route: TogetherMediaRoute = .mesh, measured: @escaping (Double?, Double?, Int?) -> Void) {
         try? speaker.start()
-        watcher.start()
+        go(route)
         stats = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
-                self?.watcher.statistics { roundTrip, fps, height in Task { @MainActor in measured(roundTrip, fps, height) } }
+                guard let self else { return }
+                if let server = self.mediaServer {
+                    let stats = server.statistics()
+                    measured(stats.roundTrip, stats.fps, stats.height)
+                } else {
+                    self.watcher.statistics { roundTrip, fps, height in Task { @MainActor in measured(roundTrip, fps, height) } }
+                }
+            }
+        }
+    }
+
+    /// Onto a route: the mesh asks the host for a connection (and leaves the media server's
+    /// room); the media server says goodbye to the host's connection and joins the room.
+    func go(_ next: TogetherMediaRoute) {
+        guard next != route else { return }
+        let before = route
+        route = next
+        switch next {
+        case .mesh:
+            if let server = mediaServer {
+                mediaServer = nil
+                Task { await server.close() }
+            }
+            connected(false)
+            watcher.start()
+        case .sfu:
+            if before == .mesh { watcher.close() }
+            let server = SfuShareWatcher(hostId: watcher.hostId) { [weak self] on in
+                guard let self, self.route == .sfu else { return }
+                self.connected(on)
+            }
+            mediaServer = server
+            connected(false)
+            Task {
+                do {
+                    let given = try await access()
+                    guard mediaServer === server else { return }
+                    try await server.start(given)
+                } catch {
+                    RemoteServer.log.error("share play: media server: \(String(describing: error), privacy: .public)")
+                    if mediaServer === server { failed() }
+                }
             }
         }
     }
@@ -46,6 +101,10 @@ final class ShareWatchSession {
         stats?.invalidate()
         speaker.stop()
         watcher.close()
+        if let server = mediaServer {
+            mediaServer = nil
+            Task { await server.close() }
+        }
     }
 
     private func startPad() {
@@ -109,6 +168,7 @@ extension AppModel {
             do {
                 let joined = try await together.joinSharePlay(id)
                 guard let host = joined.sharePlay.host else { return }
+                if mediaLimits == nil { loadMediaLimits() }
                 let video = RTCMTLNSVideoView(frame: .zero)
                 // The sound channel's packets go straight to the speaker, on WebRTC's thread.
                 let speaker = SharePlaySpeaker()
@@ -119,10 +179,26 @@ extension AppModel {
                                                onSound: { packet in speaker.play(packet) },
                                                onPadOutput: { _ in },
                                                changed: { [weak self] state in
-                                                   guard let self else { return }
+                                                   guard let self, self.shareWatch?.route != .sfu else { return }
                                                    self.share.watchConnected = state == .connected
                                                })
                 let session = ShareWatchSession(id: id, watcher: watcher, speaker: speaker, video: video)
+                // The join's room access first, a fresh one after.
+                var first = joined.sfu
+                let client = together
+                session.access = {
+                    if let given = first {
+                        first = nil
+                        return given
+                    }
+                    return try await client.sharePlaySfu(id)
+                }
+                session.connected = { [weak self] on in
+                    guard let self, self.shareWatch === session else { return }
+                    self.share.watchConnected = on
+                    self.share.watchViaServer = session.route == .sfu
+                }
+                session.failed = { [weak self] in self?.show(SP.text(.mediaServerFailed), symbol: "exclamationmark.triangle.fill") }
                 shareWatch = session
                 share.invites.removeAll { $0.sharePlayId == id }
                 withAnimation(Motion.overlay) {
@@ -131,7 +207,9 @@ extension AppModel {
                     share.watchStats = nil
                 }
                 session.slot = joined.sharePlay.viewers.first { $0.user.userId == me }?.slot
-                session.start { [weak self] roundTrip, fps, height in self?.share.watchStats = .init(roundTrip: roundTrip, fps: fps, height: height) }
+                session.start(route: SharePlayMedia.viewerRoute(joined.sharePlay, me: me)) { [weak self] roundTrip, fps, height in
+                    self?.share.watchStats = .init(roundTrip: roundTrip, fps: fps, height: height)
+                }
             } catch let problem as TogetherProblem where problem.code == "full" {
                 show(SP.text(.full), symbol: "person.3.fill")
             } catch {
@@ -148,6 +226,7 @@ extension AppModel {
         withAnimation(Motion.overlay) {
             share.watching = nil
             share.watchStats = nil
+            share.watchViaServer = false
         }
     }
 
@@ -161,10 +240,14 @@ extension AppModel {
             if slot != session.slot { show(slot.map { SP.format(.youPlay, $0) } ?? SP.text(.youWatch), symbol: slot == nil ? "eye" : "gamecontroller.fill") }
             session.slot = slot
             share.watching = sharePlay
+            // A pad handed over: straight to the host; taken back, or the share play grew past
+            // the mesh: from the media server.
+            if let me = togetherUser?.id { session.go(SharePlayMedia.viewerRoute(sharePlay, me: me)) }
             return true
         case "share_play.signal":
             guard let raw = event.decode(TogetherShareSignal.self), raw.sharePlayId == session.id, let signal = ShareSignal(raw) else { return false }
-            session.watcher.receive(signal, from: raw.from, device: raw.device)
+            // From the media server, no mesh signals at all.
+            if session.route != .sfu { session.watcher.receive(signal, from: raw.from, device: raw.device) }
             return true
         case "share_play.ended":
             guard event.data["sharePlayId"] == session.id else { return false }
@@ -196,7 +279,8 @@ struct ShareWatchView: View {
         ZStack {
             Color.black.ignoresSafeArea()
             if let session = model.shareWatch {
-                ShareVideo(view: session.video)
+                ShareVideo(view: session.view)
+                    .id(ObjectIdentifier(session.view))
                     .aspectRatio(16 / 9, contentMode: .fit)
                     .opacity(model.share.watchConnected ? 1 : 0.0001)
             }
@@ -240,6 +324,7 @@ struct ShareWatchView: View {
 
     private func statusLine(slot: Int?) -> String {
         var parts = [slot.map { SP.format(.player, $0) } ?? SP.text(.onlyWatches)]
+        if model.share.watchViaServer { parts.append(SP.text(.viaServer)) }
         if let stats = model.share.watchStats {
             if let roundTrip = stats.roundTrip { parts.append(SP.format(.roundTrip, Int(roundTrip.rounded()))) }
             if let fps = stats.fps, let height = stats.height { parts.append("\(height)p\(Int(fps.rounded()))") }
@@ -248,9 +333,9 @@ struct ShareWatchView: View {
     }
 }
 
-/// WebRTC's Metal view in SwiftUI.
+/// The picture's view in SwiftUI: WebRTC's Metal view from the host, or LiveKit's from the media server.
 struct ShareVideo: NSViewRepresentable {
-    let view: RTCMTLNSVideoView
-    func makeNSView(context: Context) -> RTCMTLNSVideoView { view }
-    func updateNSView(_ nsView: RTCMTLNSVideoView, context: Context) {}
+    let view: NSView
+    func makeNSView(context: Context) -> NSView { view }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }

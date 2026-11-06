@@ -568,6 +568,7 @@ extension AppModel {
             case "code_expired", "expired_token": return T.text(.togetherCodeExpired)
             case "code_locked": return T.text(.togetherCodeLocked)
             case "rate_limited": return T.text(.togetherTooMany)
+            case "media_server_off": return SP.format(.mediaServerOff, problem.max ?? SharePlayRoster.maxViewers)
             default: return problem.title
             }
         }
