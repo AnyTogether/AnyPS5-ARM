@@ -12,6 +12,7 @@ import '../together/people.dart';
 import '../together/profiles.dart';
 import '../together/together_account.dart';
 import 'avatar_crop.dart';
+import 'theme_picker.dart';
 import 'together_widgets.dart';
 
 /// A picture from the photo library, already made smaller than the server's limits (and turned
@@ -94,6 +95,9 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
 
   /// The server keeps files, so the gallery's privacy is offered.
   bool _storage = false;
+
+  /// A theme going on or off.
+  bool _wearing = false;
 
   @override
   void initState() {
@@ -452,6 +456,91 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     ),
   ];
 
+  /// Saved as it is picked, as privacy is.
+  Future<void> _pickTheme() async {
+    final profile = _profile;
+    if (profile == null || _wearing) return;
+    final picked = await showThemePicker(
+      context,
+      profiles: _profiles,
+      worn: profile.look.theme,
+    );
+    if (picked == null || !mounted) return;
+    final texts = Texts.of(context);
+    setState(() {
+      _wearing = true;
+      _error = null;
+    });
+    try {
+      final look = await _profiles.wearTheme(picked.$1?.id);
+      if (mounted) {
+        setState(() => _profile = _profile?.copyWith(look: look));
+      }
+    } on Object catch (error) {
+      if (mounted) setState(() => _error = _problem(texts, error));
+    }
+    if (mounted) setState(() => _wearing = false);
+  }
+
+  Widget _theme(Strings texts, OwnProfile profile) {
+    final theme = profile.look.theme;
+    return Material(
+      color: const Color(0x0FFFFFFF),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _wearing ? null : _pickTheme,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 8, 14, 8),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 64,
+                height: 36,
+                child: theme == null
+                    ? DecoratedBox(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: const Icon(
+                          Icons.palette_outlined,
+                          size: 17,
+                          color: Colors.white38,
+                        ),
+                      )
+                    : ThemeStill(theme: theme, radius: 8),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  theme?.name ?? texts.themeNone,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: theme == null ? Colors.white54 : Colors.white,
+                    fontSize: 14.5,
+                  ),
+                ),
+              ),
+              if (_wearing)
+                const SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                const Icon(
+                  Icons.expand_more_rounded,
+                  color: Colors.white38,
+                  size: 20,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _pickCountry() async {
     final picked = await showDialog<(String?,)>(
       context: context,
@@ -532,7 +621,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Expanded(child: _left(texts, profile)),
-                        Expanded(child: _right(texts)),
+                        Expanded(child: _right(texts, profile)),
                       ],
                     ),
             ),
@@ -658,7 +747,7 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
     ],
   );
 
-  Widget _right(Strings texts) => ListView(
+  Widget _right(Strings texts, OwnProfile profile) => ListView(
     padding: const EdgeInsets.fromLTRB(14, 10, 22, 24),
     children: [
       _Field(
@@ -668,6 +757,8 @@ class _ProfileEditScreenState extends State<ProfileEditScreen> {
         maxLength: ProfileLimits.bioMax,
         lines: 3,
       ),
+      SectionLabel(texts.profileTheme),
+      _theme(texts, profile),
       SectionLabel(texts.privacy),
       Text(
         texts.privacyLead,

@@ -41,6 +41,19 @@ extension SocialTexts on Strings {
   String get profileFailed => lookup('profileFailed');
   String get friendsList => lookup('friendsList');
 
+  // The showcase and the profile's theme
+
+  String get showcase => lookup('showcase');
+  String get showcaseEmpty => lookup('showcaseEmpty');
+  String get showcaseEdit => lookup('showcaseEdit');
+  String showcasePinned(int count) => fill('showcasePinned', [count]);
+  String get showcaseHint => lookup('showcaseHint');
+  String get profileTheme => lookup('profileTheme');
+  String themeWorn(String name) => fill('themeWorn', [name]);
+  String get themeOff => lookup('themeOff');
+  String get themeNone => lookup('themeNone');
+  String get themesEmpty => lookup('themesEmpty');
+
   // Editing
 
   String get displayName => lookup('displayName');
