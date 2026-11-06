@@ -95,6 +95,8 @@ extension AppModel {
         case .lfgRequest: openFindPlayers(category: 1)
         case .lfgAccepted: followInvite(note.data.invite)
         case .levelUp: openMyProfile()
+        case .challengeInvite, .challengeStarted, .challengeEnded:
+            if let id = note.challengeId { openChallenge(id) }
         case .message: openMessages(conversation: note.data.conversationId)
         case .warning, .other: break
         }
@@ -135,6 +137,9 @@ extension AppModel {
         case .lfgRequest: return FP.format(.notifLfgRequest, name, notificationGame(note))
         case .lfgAccepted: return FP.format(.notifLfgAccepted, name, notificationGame(note))
         case .levelUp: return TL.format(.notifLevelUp, note.data.level ?? togetherProfile?.trophyLevel?.level ?? 0)
+        case .challengeInvite: return TChal.format(.notifInvite, name, note.data.title ?? "")
+        case .challengeStarted: return TChal.format(.notifStarted, note.data.title ?? "")
+        case .challengeEnded: return TChal.format(note.data.wonChallenge ? .notifWon : .notifEnded, note.data.title ?? "")
         case .warning: return TS.text(.notifWarning)
         case .other: return familyNotificationText(note) ?? TS.text(.notifOther)
         }
@@ -155,8 +160,30 @@ extension AppModel {
             let text = note.data.text.map { $0.count > 80 ? String($0.prefix(80)) + "…" : $0 }
             return [note.data.group == true ? note.data.title : nil, text].compactMap { $0 }.joined(separator: ": ").nilIfEmpty
         case .warning: return note.data.reason
+        case .challengeInvite, .challengeStarted, .challengeEnded: return challengeNotificationDetail(note)
         default: return nil
         }
+    }
+
+    /// A challenge's game and time left; once over, the user's place and the winner.
+    func challengeNotificationDetail(_ note: TogetherNotification) -> String? {
+        let data = note.data
+        let metric = TogetherChallenge.Metric(rawValue: data.metric ?? "") ?? .other
+        var parts = [notificationGame(note)]
+        if note.kind == .challengeEnded {
+            if let rank = data.rank, rank > 0, let entrants = data.entrants, entrants > 0, !data.wonChallenge {
+                parts.append(TChal.format(.notifPlace, rank, entrants))
+            }
+            if let winner = data.winner, !data.wonChallenge {
+                parts.append(TChal.format(.notifWinner, winner.displayName ?? winner.handle.map { "@\($0)" } ?? TChal.text(.hidden))
+                    + (winner.value.map { " · " + Self.challengeValue($0, metric: metric) } ?? ""))
+            } else if data.wonChallenge, let value = data.value {
+                parts.append(Self.challengeValue(value, metric: metric))
+            }
+        } else if let ends = data.challengeEndsAt, ends > Date() {
+            parts.append(TChal.format(.endsIn, Self.spanText(.init(seconds: ends.timeIntervalSinceNow))))
+        }
+        return parts.filter { !$0.isEmpty }.joined(separator: " · ").nilIfEmpty
     }
 
     static func notificationSymbol(_ kind: TogetherNotification.Kind) -> String {
@@ -170,6 +197,9 @@ extension AppModel {
         case .lfgRequest: return "hand.raised.fill"
         case .lfgAccepted: return "checkmark.circle.fill"
         case .levelUp: return "arrow.up.circle.fill"
+        case .challengeInvite: return "flag.fill"
+        case .challengeStarted: return "flag.2.crossed.fill"
+        case .challengeEnded: return "flag.checkered"
         case .warning: return "exclamationmark.shield.fill"
         case .other: return "bell.fill"
         }

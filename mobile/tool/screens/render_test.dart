@@ -35,6 +35,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'demo.dart';
+import 'demo_e2ee.dart';
 
 const _size = Size(2400, 1648);
 const _phone = Size(2340, 1080);
@@ -355,14 +356,23 @@ void main() {
     WidgetTester tester, {
     List<double> voice = const [],
     int unseen = 4,
+    DemoE2ee? e2ee,
   }) async {
     final preferences = await tester.runAsync(() async {
-      SharedPreferences.setMockInitialValues(signedIn());
+      SharedPreferences.setMockInitialValues(
+        e2ee?.preferences(signedIn()) ?? signedIn(),
+      );
       return SharedPreferences.getInstance();
     });
     final account = DemoAccount(preferences!);
+    if (e2ee != null) {
+      account
+        ..own = e2ee.answer
+        ..wrap = e2ee.wrap;
+    }
     final hub = TogetherHub(
       account: account,
+      e2eeKeys: e2ee?.keys(account.base),
       socket: DemoSocket(account: account),
       voiceEngine: () => DemoVoice(voice),
       shareEngine: () => DemoShare(
@@ -372,8 +382,9 @@ void main() {
       ),
       shareSound: QuietSound.new,
     );
+    if (e2ee != null) await tester.runAsync(hub.e2ee.start);
     await hub.friends.refresh();
-    await hub.messages.refresh();
+    await tester.runAsync(hub.messages.refresh);
     await hub.parties.refresh();
     await hub.notifications.refresh();
     hub.feed.unseen = unseen;
@@ -454,6 +465,91 @@ void main() {
           'conversationId': 'c-mira',
           'userId': 'mira',
         });
+      },
+    );
+  });
+
+  // End-to-end encrypted messages: the lock and the devices-changed notice, the sheet with the
+  // safety number, a conversation that is not encrypted, the states of messages that do not
+  // open, and the report sheet's note; wide, and on a narrow phone.
+  Future<DemoE2ee> keys(WidgetTester tester) async =>
+      (await tester.runAsync(DemoE2ee.make))!;
+
+  Future<void> showThread(WidgetTester tester, TogetherHub h, String id) =>
+      tester.runAsync(() => h.messages.show(id));
+
+  for (final (suffix, size) in [('', _size), ('-narrow', _phone)]) {
+    testWidgets('e2ee thread$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-thread$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () => showThread(tester, h, 'c-mira'),
+        size: size,
+      );
+    });
+
+    testWidgets('e2ee sheet$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-sheet$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () async {
+          await showThread(tester, h, 'c-mira');
+          await settle(tester);
+          await tester.tap(find.text('End-to-end encrypted').first);
+          await settle(tester);
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 300)),
+          );
+        },
+        size: size,
+      );
+    });
+
+    testWidgets('e2ee plain$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-plain$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () => showThread(tester, h, 'c-theo'),
+        size: size,
+      );
+    });
+
+    testWidgets('e2ee states$suffix', (tester) async {
+      final h = await hub(tester, e2ee: await keys(tester));
+      await shoot(
+        tester,
+        'phone-e2ee-states$suffix',
+        h,
+        together(h, TogetherTab.messages),
+        then: () => showThread(tester, h, 'c-sol'),
+        size: size,
+      );
+    });
+  }
+
+  testWidgets('e2ee report', (tester) async {
+    final h = await hub(tester, e2ee: await keys(tester));
+    await shoot(
+      tester,
+      'phone-e2ee-report',
+      h,
+      together(h, TogetherTab.messages),
+      then: () async {
+        await showThread(tester, h, 'c-mira');
+        await settle(tester);
+        await tester.tap(find.byTooltip('Message actions').first);
+        await settle(tester);
+        await tester.tap(find.text('Report'));
+        await settle(tester);
       },
     );
   });

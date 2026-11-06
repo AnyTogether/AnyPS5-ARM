@@ -3,15 +3,18 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import '../chat_strings.dart';
+import '../e2ee_strings.dart';
 import '../media_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
+import '../together/e2ee_devices.dart';
 import '../together/groups.dart';
 import '../together/messages.dart';
 import '../together/people.dart';
 import '../together/storage.dart';
 import '../together/together_account.dart';
 import '../together/together_hub.dart';
+import 'e2ee_sheet.dart';
 import 'message_media.dart';
 import 'profile_edit.dart' show pickFromLibrary;
 import 'together_widgets.dart';
@@ -132,6 +135,7 @@ class _MessagesPaneState extends State<MessagesPane> {
         me: me,
         canEdit: message.canEdit(me),
         canUnsend: mine,
+        canReport: !mine && !message.deleted && !message.unreadable,
       ),
     );
     if (!mounted || picked == null) return;
@@ -145,6 +149,31 @@ class _MessagesPaneState extends State<MessagesPane> {
         await _edit(message);
       case MessageAction.unsend:
         await _unsend(message);
+      case MessageAction.report:
+        await _report(message);
+    }
+  }
+
+  /// A reason picked for someone's message, and the report sent; a sealed one says the
+  /// moderators will read it.
+  Future<void> _report(ChatMessage message) async {
+    final texts = Texts.of(context);
+    final conversation = _messages.byId(message.conversationId);
+    final name =
+        conversation?.author(message.authorId)?.displayName ?? texts.someone;
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF151821),
+      isScrollControlled: true,
+      builder: (context) =>
+          _ReportSheet(name: name, sealed: message.sealed != null),
+    );
+    if (reason == null || !mounted) return;
+    try {
+      await _messages.report(message, reason);
+      if (mounted) _say(texts.reportSent);
+    } on Object catch (error) {
+      if (mounted) _say(togetherFailure(texts, error));
     }
   }
 
@@ -341,6 +370,7 @@ class _MessagesPaneState extends State<MessagesPane> {
     }
     final me = widget.hub.me;
     final others = conversation.others(me);
+    final lock = _messages.lockOf(conversation);
     final thread = _messages.thread.reversed.toList();
     // The receipt goes under my newest message on the server, and nowhere else.
     final newestMine = thread
@@ -370,14 +400,28 @@ class _MessagesPaneState extends State<MessagesPane> {
                 const Icon(Icons.groups_rounded, color: togetherAccent),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  conversation.name(me),
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      conversation.name(me),
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    _LockLine(
+                      lock: lock,
+                      onTap: () => showEncryptionSheet(
+                        context,
+                        messages: _messages,
+                        conversation: conversation,
+                      ),
+                    ),
+                  ],
                 ),
               ),
               if (!conversation.group && others.length == 1)
@@ -405,6 +449,16 @@ class _MessagesPaneState extends State<MessagesPane> {
           ),
         ),
         const Divider(height: 1, color: Color(0x14FFFFFF)),
+        _DevicesNotice(
+          notice: lock.notice,
+          name: others.length == 1 ? others.single.displayName : '',
+          onCompare: () => showEncryptionSheet(
+            context,
+            messages: _messages,
+            conversation: conversation,
+          ),
+          onDismiss: () => _messages.e2ee?.dismissNotice(conversation.id),
+        ),
         Expanded(
           child: _messages.loadingThread && thread.isEmpty
               ? const Center(
@@ -467,7 +521,10 @@ class _MessagesPaneState extends State<MessagesPane> {
         ),
         _typing(texts, conversation),
         if (_replyTo case final reply?) _replying(texts, conversation, reply),
-        _composer(texts),
+        if (lock.state == ChatLock.noDevice)
+          _NoDevice(name: others.length == 1 ? others.single.displayName : '')
+        else
+          _composer(texts),
       ],
     );
   }
@@ -868,7 +925,18 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final texts = Texts.of(context);
-    final shown = message.words ?? (message.kind == MediaKind.text ? '' : null);
+    // A sealed message that is not open here never shows the server's stand-in text.
+    final sealedNote = message.deleted
+        ? null
+        : switch (message.seal) {
+            SealState.opening => texts.e2eePreview,
+            SealState.noKey => texts.e2eeBeforeDevice,
+            SealState.failed => texts.e2eeUndecryptable,
+            _ => null,
+          };
+    final shown = sealedNote != null
+        ? null
+        : message.words ?? (message.kind == MediaKind.text ? '' : null);
     final bubble = Container(
       constraints: const BoxConstraints(maxWidth: 380),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
@@ -889,7 +957,14 @@ class MessageBubble extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           ?quote,
-          if (!message.deleted && message.attachments.isNotEmpty)
+          if (sealedNote != null)
+            _SealedNote(
+              text: sealedNote,
+              broken: message.seal != SealState.opening,
+            ),
+          if (sealedNote == null &&
+              !message.deleted &&
+              message.attachments.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2, bottom: 4),
               child: MessageMedia(message: message, mine: mine),
@@ -1284,7 +1359,7 @@ class MessageSheet extends StatelessWidget {
             if (canReport)
               _SheetRow(
                 icon: Icons.flag_outlined,
-                label: texts.report,
+                label: texts.messageReport,
                 color: togetherError,
                 onTap: () => Navigator.of(context).pop(MessageAction.report),
               ),
@@ -1635,4 +1710,289 @@ class _Pickable extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Under the name in a direct conversation's header: whether it is end-to-end encrypted, a tap
+/// away from what that means. Nothing in a group, or while it is still being checked.
+class _LockLine extends StatelessWidget {
+  const _LockLine({required this.lock, required this.onTap});
+
+  final ConversationLock lock;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    final (icon, text, color) = switch (lock.state) {
+      ChatLock.encrypted || ChatLock.noDevice => (
+        lock.compared ? Icons.verified_user_rounded : Icons.lock_rounded,
+        texts.e2eeOn,
+        lock.compared ? togetherAccent : Colors.white54,
+      ),
+      ChatLock.plain => (
+        Icons.lock_open_rounded,
+        texts.e2eeOff,
+        Colors.white38,
+      ),
+      _ => (null, null, Colors.white38),
+    };
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOut,
+      alignment: Alignment.topLeft,
+      child: text == null
+          ? const SizedBox(height: 0, width: double.infinity)
+          : Semantics(
+              button: true,
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(6),
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 1, bottom: 1, right: 6),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(icon, size: 12, color: color),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          text,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: color,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
+}
+
+/// Someone's devices changed since this conversation last saw them: shown over the thread until
+/// it is dismissed or the safety number is compared again.
+class _DevicesNotice extends StatelessWidget {
+  const _DevicesNotice({
+    required this.notice,
+    required this.name,
+    required this.onCompare,
+    required this.onDismiss,
+  });
+
+  final DevicesNotice? notice;
+  final String name;
+  final VoidCallback onCompare;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    final notice = this.notice;
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      child: notice == null
+          ? const SizedBox(width: double.infinity)
+          : Container(
+              margin: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+              padding: const EdgeInsets.fromLTRB(14, 10, 6, 10),
+              decoration: BoxDecoration(
+                color: const Color(0x1AFFC266),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0x40FFC266)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(
+                    Icons.shield_outlined,
+                    size: 18,
+                    color: togetherAway,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      notice == DevicesNotice.theirs
+                          ? texts.e2eeDevicesChanged(name)
+                          : texts.e2eeMyDevicesChanged,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  TextButton(
+                    onPressed: onCompare,
+                    style: TextButton.styleFrom(
+                      foregroundColor: togetherAway,
+                      shape: const StadiumBorder(),
+                    ),
+                    child: Text(
+                      texts.e2eeCompare,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: onDismiss,
+                    style: TextButton.styleFrom(
+                      foregroundColor: Colors.white60,
+                      shape: const StadiumBorder(),
+                    ),
+                    child: Text(texts.e2eeDismiss),
+                  ),
+                ],
+              ),
+            ),
+    );
+  }
+}
+
+/// In place of the composer when the conversation is encrypted but the other person has no
+/// device that could read a message now.
+class _NoDevice extends StatelessWidget {
+  const _NoDevice({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.fromLTRB(14, 6, 14, 10),
+    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+    decoration: BoxDecoration(
+      color: const Color(0x0FFFFFFF),
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.lock_clock_outlined, size: 18, color: togetherAway),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            Texts.of(context).e2eeNoDevice(name),
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// A sealed message that is not shown: opening, sent before this phone was added, or one that
+/// did not open. Never the server's stand-in text.
+class _SealedNote extends StatelessWidget {
+  const _SealedNote({required this.text, required this.broken});
+
+  final String text;
+  final bool broken;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(
+        broken ? Icons.no_encryption_outlined : Icons.lock_outline_rounded,
+        size: 14,
+        color: Colors.white38,
+      ),
+      const SizedBox(width: 6),
+      Flexible(
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: Colors.white54,
+            fontSize: 14,
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+/// Why a message is reported, picked from the API's reasons; for a sealed one, the note that the
+/// moderators will read it. Pops the reason.
+class _ReportSheet extends StatelessWidget {
+  const _ReportSheet({required this.name, required this.sealed});
+
+  final String name;
+  final bool sealed;
+
+  @override
+  Widget build(BuildContext context) {
+    final texts = Texts.of(context);
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(12, 16, 12, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                texts.messageReport,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+              child: Text(
+                texts.messageReportLead(name),
+                style: const TextStyle(color: Colors.white60, fontSize: 13),
+              ),
+            ),
+            if (sealed)
+              Container(
+                margin: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0x148AB4FF),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.lock_open_rounded,
+                      size: 16,
+                      color: togetherAccent,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        texts.e2eeReportNote,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12.5,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 4),
+            for (final reason in E2eeTexts.reportReasons)
+              _SheetRow(
+                icon: Icons.chevron_right_rounded,
+                label: texts.reportReason(reason),
+                onTap: () => Navigator.of(context).pop(reason),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
