@@ -1,9 +1,11 @@
 import 'strings.dart';
 import 'together/activity.dart';
 import 'together/calls.dart';
+import 'together/challenges.dart';
 import 'together/leaderboards.dart';
 import 'together/notifications.dart';
 import 'together/profiles.dart';
+import 'together/together_account.dart';
 
 /// AnyTogether's social texts (profiles, the feed, leaderboards, calls), beside [Strings], their
 /// texts in assets/l10n. The wording follows the website's.
@@ -196,6 +198,128 @@ extension SocialTexts on Strings {
     BoardKind.time => totalTime(value),
     BoardKind.completion => percent(value),
   };
+
+  // Challenges
+
+  String get challenges => lookup('challenges');
+  String challengeMetric(ChallengeMetric metric) =>
+      lookup('challengeMetric_${metric.name}');
+
+  /// A challenge's value as it reads: "1,230 pts", "7 trophies", and play time as the boards
+  /// show it.
+  String challengeValue(ChallengeMetric metric, int value) => switch (metric) {
+    ChallengeMetric.points => boardValue(BoardKind.points, value),
+    ChallengeMetric.trophies => fill(
+      value == 1 ? 'trophiesValueOne' : 'trophiesValue',
+      [number(value)],
+    ),
+    ChallengeMetric.time => boardValue(BoardKind.time, value),
+  };
+
+  /// "Ends in 2 days", "Starts in 3 h", "Ended yesterday", "Called off".
+  String challengeWhen(ChallengeView challenge, {DateTime? now}) {
+    final at = now ?? DateTime.now();
+    if (challenge.state == ChallengeState.cancelled) {
+      return lookup('challengeCancelled');
+    }
+    if (challenge.state == ChallengeState.upcoming &&
+        at.isBefore(challenge.startsAt)) {
+      return fill('challengeStartsIn', [
+        span(challenge.startsAt.difference(at)),
+      ]);
+    }
+    if (challenge.state != ChallengeState.ended &&
+        at.isBefore(challenge.endsAt)) {
+      return fill('challengeEndsIn', [span(challenge.endsAt.difference(at))]);
+    }
+    return fill('challengeEnded', [daysAgo(challenge.endsAt, now: at)]);
+  }
+
+  /// A time ahead, roughly: "45 min" under an hour, "5 h" under a day, then "2 days".
+  String span(Duration left) {
+    final minutes = (left.inSeconds / 60).ceil();
+    if (minutes < 60) return fill('minutes', [minutes < 1 ? 1 : minutes]);
+    if (left.inHours < 24) return fill('hoursOnly', [left.inHours]);
+    final days = left.inHours ~/ 24;
+    return fill(days == 1 ? 'dayOne' : 'daysN', [days]);
+  }
+
+  String challengeEntrants(int n) => fill('challengeEntrants', [number(n)]);
+  String get challengeLeading => lookup('challengeLeading');
+  String get yourPlace => lookup('challengeYourPlace');
+  String get challengeWinner => lookup('challengeWinner');
+  String rankShort(int rank) => fill('rankShort', [rank]);
+  String get hiddenPlayer => lookup('hiddenPlayer');
+  String get joinChallenge => lookup('challengeJoin');
+  String get leaveChallenge => lookup('challengeLeave');
+  String get challengeJoinNote => lookup('challengeJoinNote');
+  String get makeChallenge => lookup('challengeMake');
+  String get challengeStandings => lookup('challengeStandings');
+  String get challengeFinalStandings => lookup('challengeFinalStandings');
+  String get challengeNotFinal => lookup('challengeNotFinal');
+  String get challengeNoScores => lookup('challengeNoScores');
+  String get challengeNotStarted => lookup('challengeNotStarted');
+  String get challengeFailed => lookup('challengeFailed');
+  String challengeMadeBy(String name) => fill('challengeMadeBy', [name]);
+
+  /// Who it is for: friends, a community by its name, or everyone; null for a kind this app
+  /// does not know.
+  String? challengeFor(ChallengeView challenge) => switch (challenge.audience) {
+    ChallengeAudience.community => fill('challengeFor_community', [
+      challenge.communityName ?? '',
+    ]),
+    final audience? => lookup('challengeFor_${audience.name}'),
+    null => null,
+  };
+
+  /// "06.11.2026 21:00" in the phone's time zone.
+  String moment(DateTime when) {
+    final local = when.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${day(local)} ${two(local.hour)}:${two(local.minute)}';
+  }
+
+  /// Why joining or leaving did not go, in words, for the codes the API uses; [mine]: the
+  /// reader made it (a maker cannot leave).
+  String? challengeProblem(Object error, {bool mine = false}) =>
+      switch (error) {
+        TogetherProblem(code: 'full') => lookup('challengeFull'),
+        TogetherProblem(code: 'restricted_by_family') => lookup(
+          'challengeFamily',
+        ),
+        TogetherProblem(code: 'conflict') when mine => lookup(
+          'challengeMakerStays',
+        ),
+        TogetherProblem(code: 'conflict') => lookup('challengeOver'),
+        _ => null,
+      };
+
+  /// Under a challenge_ended notification: whether the reader won, or who did and their place.
+  String? challengeResult(Notice n) {
+    final metric =
+        ChallengeMetric.values
+            .where((m) => m.name == n.data['metric'])
+            .firstOrNull ??
+        ChallengeMetric.points;
+    final rank = n.data['rank'];
+    final value = n.data['value'];
+    if (rank == 1 && value is num && value > 0) {
+      return fill('challengeYouWon', [challengeValue(metric, value.toInt())]);
+    }
+    final winner = n.data['winner'];
+    final entrants = n.data['entrants'];
+    return [
+      if (winner is Map &&
+          winner['displayName'] is String &&
+          winner['value'] is num)
+        fill('challengeWinnerWas', [
+          winner['displayName'],
+          challengeValue(metric, (winner['value'] as num).toInt()),
+        ]),
+      if (rank is num && entrants is num)
+        fill('challengeYouCame', [rank.toInt(), number(entrants.toInt())]),
+    ].join(' ');
+  }
 
   // Calls
 

@@ -16,6 +16,9 @@ enum NoticeKind {
   missedCall('missed_call'),
   lfgRequest('lfg_request'),
   lfgAccepted('lfg_accepted'),
+  challengeInvite('challenge_invite'),
+  challengeStarted('challenge_started'),
+  challengeEnded('challenge_ended'),
   warning('warning');
 
   const NoticeKind(this.wire);
@@ -37,6 +40,9 @@ const optionalNoticeKinds = [
   NoticeKind.missedCall,
   NoticeKind.lfgRequest,
   NoticeKind.lfgAccepted,
+  NoticeKind.challengeInvite,
+  NoticeKind.challengeStarted,
+  NoticeKind.challengeEnded,
 ];
 
 /// One notification under the bell.
@@ -82,13 +88,15 @@ class Notice {
   /// Who did it; null for a warning.
   final Person? actor;
 
-  /// A conversation, party, game session or call ID; null for friends.
+  /// A conversation, party, game session, call or challenge ID; null for friends.
   final String? subjectId;
 
   /// message: conversationId, title, group, count, text; party_invite: partyId, size;
   /// game_invite: sessionId, titleId; missed_call: callId; warning: reason; lfg_request:
   /// postId, titleId, gameNames, purpose, count; lfg_accepted: postId, titleId, gameNames,
-  /// purpose, invite {kind, id}.
+  /// purpose, invite {kind, id}; challenge_invite and challenge_started: challengeId, title,
+  /// titleId, gameNames, metric, endsAt; challenge_ended: the same and rank, value, entrants,
+  /// winner {displayName, handle, value} or null.
   final Map<String, dynamic> data;
   final bool read;
   final DateTime createdAt;

@@ -663,6 +663,31 @@ void main() {
     );
   });
 
+  testWidgets('leaderboards', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'phone-leaderboards',
+      h,
+      together(h, TogetherTab.leaderboards),
+    );
+  });
+
+  testWidgets('challenge', (tester) async {
+    final h = await hub(tester);
+    await shoot(
+      tester,
+      'phone-challenge',
+      h,
+      together(h, TogetherTab.leaderboards),
+      then: () async {
+        await tester.ensureVisible(find.text('Pharloom sprint'));
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Pharloom sprint'));
+      },
+    );
+  });
+
   testWidgets('share play', (tester) async {
     final h = await hub(tester);
     await h.sharePlays.watch('sp-mira');

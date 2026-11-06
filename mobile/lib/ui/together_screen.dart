@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 import '../discover_strings.dart';
 import '../social_strings.dart';
 import '../strings.dart';
+import '../together/challenges.dart';
 import '../together/discover.dart';
 import '../together/notifications.dart';
 import '../together/people.dart';
 import '../together/together_hub.dart';
 import '../together/together_socket.dart';
+import 'challenge_view.dart';
 import 'feed_view.dart';
 import 'find_players_view.dart';
 import 'friends_view.dart';
@@ -127,9 +129,14 @@ class _TogetherScreenState extends State<TogetherScreen> {
   /// Calls a friend; the call shows over every screen.
   void _call(Person friend) => widget.hub.calls.ring(friend);
 
-  /// Where a notification leads: the requests, the conversation, the party, or the person.
+  /// Where a notification leads: the requests, the conversation, the party, the challenge, or
+  /// the person.
   void _openNotice(Notice notice) {
     final actor = notice.actor;
+    if (challengeOf(notice) case final id?) {
+      openChallenge(context, hub: widget.hub, id: id, onProfile: _profile);
+      return;
+    }
     switch (notice.kind) {
       case NoticeKind.friendRequest:
         _show(TogetherTab.friends);

@@ -11,6 +11,34 @@ const togetherInk = Color(0xFF07080B);
 const togetherPlaying = Color(0xFF4CD964);
 const togetherAway = Color(0xFFFFC266);
 const togetherError = Color(0xFFFF8A80);
+const togetherGold = Color(0xFFFFC94D);
+
+/// First, second and third place's colours, as the leaderboards show them; null further down.
+Color? medalColor(int rank) => switch (rank) {
+  1 => togetherGold,
+  2 => const Color(0xFFC9D1DC),
+  3 => const Color(0xFFD08A5A),
+  _ => null,
+};
+
+/// A number at the end of a row: as it is, or made smaller to fit [maxWidth] when the row is
+/// narrow or the text large.
+class FittedValue extends StatelessWidget {
+  const FittedValue({super.key, required this.child, this.maxWidth = 110});
+
+  final Widget child;
+  final double maxWidth;
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: BoxConstraints(maxWidth: maxWidth),
+    child: FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: AlignmentDirectional.centerEnd,
+      child: child,
+    ),
+  );
+}
 
 /// A person's picture, or their initials on a tinted disc; [ring] draws a coloured ring around
 /// it (speaking), [presence] a dot at the bottom right.

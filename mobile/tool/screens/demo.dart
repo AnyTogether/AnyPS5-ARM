@@ -466,6 +466,26 @@ Map<String, dynamic> get _notifications => {
       read: true,
     ),
     _notice(
+      7,
+      'challenge_ended',
+      null,
+      const Duration(hours: 2),
+      subject: 'ch-catquest',
+      data: {
+        'challengeId': 'ch-catquest',
+        'title': 'Purrfect week',
+        'titleId': catQuest.titleId,
+        'gameNames': {'en': catQuest.name},
+        'metric': 'trophies',
+        'endsAt': _at(const Duration(hours: 3)),
+        'rank': 1,
+        'value': 14,
+        'entrants': 6,
+        'winner': {'displayName': ines.name, 'handle': ines.handle, 'value': 14},
+      },
+      read: true,
+    ),
+    _notice(
       5,
       'missed_call',
       sol,
@@ -587,6 +607,132 @@ Map<String, dynamic> get shareView => {
   'startedAt': _at(const Duration(minutes: 30)),
 };
 
+Map<String, dynamic> _row(int rank, DemoPerson p, int value) => {
+  'rank': rank,
+  'user': p.card,
+  'value': value,
+};
+
+Map<String, dynamic> get _board => {
+  'board': 'points',
+  'scope': 'friends',
+  'game': null,
+  'entries': [
+    _row(1, mira, 14210),
+    _row(2, ines, 12480),
+    _row(3, kenji, 9935),
+    _row(4, theo, 7120),
+    _row(5, sol, 4390),
+    _row(6, ada, 2015),
+  ],
+  'me': {'rank': 2, 'value': 12480, 'listed': true},
+  'around': [],
+  'total': 6,
+  'updatedAt': _at(const Duration(minutes: 2)),
+};
+
+Map<String, dynamic> _standing(int rank, DemoPerson? p, int value) => {
+  'rank': rank,
+  'user': p?.card,
+  'value': value,
+  'me': p == ines,
+};
+
+/// A challenge as AnyTogether answers it: [startedAgo] and [endsIn] set its window.
+Map<String, dynamic> _challenge(
+  String id,
+  String title,
+  DemoGame g, {
+  required String metric,
+  required Duration startedAgo,
+  required Duration endsIn,
+  required int entrants,
+  bool joined = true,
+  DemoPerson creator = mira,
+  Map<String, dynamic>? leader,
+  Map<String, dynamic>? mine,
+  String? description,
+}) {
+  final now = DateTime.now();
+  final starts = now.subtract(startedAgo);
+  final ends = now.add(endsIn);
+  return {
+    'id': id,
+    'title': title,
+    'description': description,
+    'game': g.ref,
+    'metric': metric,
+    'audience': 'friends',
+    'community': null,
+    'creator': creator.card,
+    'startsAt': starts.toUtc().toIso8601String(),
+    'endsAt': ends.toUtc().toIso8601String(),
+    'state': now.isBefore(starts) ? 'upcoming' : 'active',
+    'final': false,
+    'entrants': entrants,
+    'joined': joined,
+    'mine': creator == ines,
+    'canCancel': creator == ines,
+    'leader': leader,
+    'myStanding': mine,
+    'createdAt': _at(const Duration(days: 3)),
+  };
+}
+
+Map<String, dynamic> get silksongSprint => _challenge(
+  'ch-silksong',
+  'Pharloom sprint',
+  silksong,
+  metric: 'points',
+  startedAgo: const Duration(days: 4, hours: 6),
+  endsIn: const Duration(days: 2, hours: 5),
+  entrants: 7,
+  description:
+      'Most trophy points in Silksong by Sunday night. No Moss Mother cheese.',
+  leader: _standing(1, mira, 1350),
+  mine: {'rank': 2, 'value': 1080},
+);
+
+Map<String, dynamic> get _catQuestWeekend => _challenge(
+  'ch-catquest-2',
+  'Weekend of naps',
+  catQuest,
+  metric: 'time',
+  startedAgo: const Duration(hours: -9),
+  endsIn: const Duration(days: 3),
+  entrants: 4,
+  joined: false,
+  creator: kenji,
+);
+
+Map<String, dynamic> get _doomRace => _challenge(
+  'ch-doom',
+  'Rip and tear',
+  doom,
+  metric: 'trophies',
+  startedAgo: const Duration(days: 1),
+  endsIn: const Duration(hours: 7),
+  entrants: 3,
+  creator: ines,
+  leader: _standing(1, ines, 6),
+  mine: {'rank': 1, 'value': 6},
+);
+
+Map<String, dynamic> get silksongStandings => {
+  ...silksongSprint,
+  'standings': [
+    _standing(1, mira, 1350),
+    _standing(2, ines, 1080),
+    _standing(3, kenji, 765),
+    _standing(4, null, 420),
+    _standing(5, theo, 300),
+    _standing(6, sol, 90),
+    _standing(7, ada, 0),
+  ],
+  'around': [],
+  'updatedAt': _at(const Duration(seconds: 20)),
+};
+
 final _empty = <String, dynamic>{};
 
 Map<String, dynamic> answer(
@@ -611,6 +757,22 @@ Map<String, dynamic> answer(
     ('GET', 'me/notifications/unread') => {'unread': 3},
     ('GET', 'me/party') => {'party': partyJson, 'invites': []},
     ('GET', 'me/share-play') => {'invites': [], 'watching': null},
+    ('GET', 'leaderboards/games') => {
+      'games': [
+        {...silksong.ref, 'players': 7, 'mine': true},
+        {...catQuest.ref, 'players': 5, 'mine': true},
+        {...doom.ref, 'players': 4, 'mine': true},
+        {...astroBot.ref, 'players': 12, 'mine': false},
+      ],
+    },
+    ('GET', 'leaderboards/points') => _board,
+    ('GET', 'me/challenges') => {
+      'challenges': [_doomRace, silksongSprint, _catQuestWeekend],
+    },
+    ('GET', 'challenges') => {
+      'challenges': [silksongSprint],
+    },
+    ('GET', 'challenges/ch-silksong') => silksongStandings,
     ('POST', 'calls') => {
       'call': {
         'id': 'call-party',
