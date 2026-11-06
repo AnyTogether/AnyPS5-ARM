@@ -114,7 +114,10 @@ class _RemoteAppState extends State<RemoteApp> {
           ..enabled = widget.preferences.getBool('motion') ?? true);
 
   /// AnyTogether's live side: friends, messages, the party and its voice, on every screen.
-  late final TogetherHub _together = TogetherHub(account: _session.together);
+  late final TogetherHub _together = TogetherHub(
+    account: _session.together,
+    deviceName: widget.deviceName,
+  );
   StreamSubscription<(InternetAddress, int, String)>? _discovery;
   Timer? _manualTimer;
   Timer? _readyTimer;

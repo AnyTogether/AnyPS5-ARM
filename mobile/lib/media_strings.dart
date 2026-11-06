@@ -1,3 +1,4 @@
+import 'e2ee_strings.dart';
 import 'strings.dart';
 import 'together/messages.dart';
 import 'together/storage.dart';
@@ -29,8 +30,12 @@ extension MediaTexts on Strings {
   };
 
   /// What a conversation's line shows of a message: its text, or what media it holds and its
-  /// caption.
+  /// caption; "Encrypted message" for a sealed one not open here.
   String messagePreview(ChatMessage message) {
+    // A sealed one this phone has not opened (or cannot): never the server's stand-in.
+    if (message.sealed != null && message.seal != SealState.open) {
+      return e2eePreview;
+    }
     if (message.kind == MediaKind.text) return message.text ?? '';
     final caption = message.caption;
     final label = mediaLabel(message.kind);

@@ -612,6 +612,16 @@ class DemoAccount extends TogetherAccount {
 
   final asked = <String>[];
 
+  /// Answers that take work first (end-to-end encryption): one of its own, or [answer]'s
+  /// changed; null leaves [answer]'s as it is.
+  Future<Map<String, dynamic>?> Function(String method, String path)? own;
+  Future<Map<String, dynamic>> Function(
+    String method,
+    String path,
+    Map<String, dynamic> base,
+  )?
+  wrap;
+
   @override
   Future<Map<String, dynamic>> call(
     String method,
@@ -619,8 +629,13 @@ class DemoAccount extends TogetherAccount {
     Map<String, dynamic>? body,
   ]) async {
     asked.add('$method $path');
-    return jsonDecode(jsonEncode(answer(method, path, body)))
-        as Map<String, dynamic>;
+    final special = await own?.call(method, path);
+    var json =
+        special ??
+        jsonDecode(jsonEncode(answer(method, path, body)))
+            as Map<String, dynamic>;
+    if (special == null && wrap != null) json = await wrap!(method, path, json);
+    return json;
   }
 }
 

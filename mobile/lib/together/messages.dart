@@ -3,7 +3,11 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import 'e2ee.dart';
+import 'e2ee_devices.dart';
 import 'people.dart';
+import 'photo_clean.dart';
+import 'sealed_media.dart';
 import 'storage.dart';
 import 'together_account.dart';
 import 'together_socket.dart';
@@ -77,10 +81,16 @@ class ReactionCount {
   final List<String> userIds;
 }
 
+/// Where a sealed message is on this phone: [plain] for one that is not sealed, [opening] until
+/// it is opened, [open] when it opened and its author's signature holds, [noKey] when it was sent
+/// before this phone was added, [failed] for anything else (it is never shown as plain text).
+enum SealState { plain, opening, open, noKey, failed }
+
 /// One message in a conversation; a deleted one keeps its place with no text. [pending] while
 /// it is on its way, [failed] when it did not get there. A message with media has its [kind]
 /// and [attachments]; its [text] is then the caption or a stand-in such as "[photo]" for
-/// clients that know no media, and [caption] the caption alone.
+/// clients that know no media, and [caption] the caption alone. A sealed one (end-to-end
+/// encrypted) has its text and the keys of its media in [sealed], and shows them once opened.
 class ChatMessage {
   const ChatMessage({
     required this.id,
@@ -101,31 +111,51 @@ class ChatMessage {
     this.replyTo,
     this.editCount = 0,
     this.reactions = const [],
+    this.sealed,
+    this.seal = SealState.plain,
+    this.payload,
   });
 
-  factory ChatMessage.fromJson(Map<String, dynamic> json) => ChatMessage(
-    id: json['id'] as String,
-    conversationId: json['conversationId'] as String,
-    seq: (json['seq'] as num).toInt(),
-    authorId: json['authorId'] as String?,
-    text: json['text'] as String?,
-    createdAt:
-        DateTime.tryParse(json['createdAt'] as String? ?? '') ?? DateTime.now(),
-    edited: json['editedAt'] != null,
-    deleted: json['deletedAt'] != null,
-    kind: MediaKind.parse(json['kind']),
-    caption: json['caption'] as String?,
-    attachments: [
-      for (final attachment in (json['attachments'] as List? ?? const []))
-        if (attachment is Map<String, dynamic>) Attachment.fromJson(attachment),
-    ],
-    replyTo: (json['replyTo'] as num?)?.toInt(),
-    editCount: (json['editCount'] as num? ?? 0).toInt(),
-    // An unsent message keeps none.
-    reactions: json['deletedAt'] != null
-        ? const []
-        : reactionsFrom(json['reactions']),
-  );
+  factory ChatMessage.fromJson(Map<String, dynamic> json) {
+    final deleted = json['deletedAt'] != null;
+    Sealed? sealed;
+    var seal = SealState.plain;
+    if (json['sealed'] != null && !deleted) {
+      try {
+        sealed = Sealed.fromJson(json['sealed']);
+        seal = SealState.opening;
+      } on E2eeError {
+        seal = SealState.failed;
+      }
+    }
+    final plain = seal == SealState.plain;
+    return ChatMessage(
+      id: json['id'] as String,
+      conversationId: json['conversationId'] as String,
+      seq: (json['seq'] as num).toInt(),
+      authorId: json['authorId'] as String?,
+      // A sealed message's text is only the stand-in for older apps.
+      text: plain ? json['text'] as String? : null,
+      createdAt:
+          DateTime.tryParse(json['createdAt'] as String? ?? '') ??
+          DateTime.now(),
+      edited: json['editedAt'] != null,
+      deleted: deleted,
+      kind: MediaKind.parse(json['kind']),
+      caption: plain ? json['caption'] as String? : null,
+      attachments: [
+        for (final attachment in (json['attachments'] as List? ?? const []))
+          if (attachment is Map<String, dynamic>)
+            Attachment.fromJson(attachment),
+      ],
+      replyTo: (json['replyTo'] as num?)?.toInt(),
+      editCount: (json['editCount'] as num? ?? 0).toInt(),
+      // An unsent message keeps none.
+      reactions: deleted ? const [] : reactionsFrom(json['reactions']),
+      sealed: sealed,
+      seal: seal,
+    );
+  }
 
   static List<ReactionCount> reactionsFrom(Object? json) => [
     for (final item in (json is List ? json : const []))
@@ -166,15 +196,27 @@ class ChatMessage {
   /// Its reactions in the fixed order; none once unsent.
   final List<ReactionCount> reactions;
 
+  /// End-to-end encrypted: as the server keeps it.
+  final Sealed? sealed;
+  final SealState seal;
+
+  /// What it says once opened (or, on its way from this phone, what is sealed for it, with the
+  /// photo's keys once it is uploaded).
+  final Payload? payload;
+
+  /// A sealed message that this phone cannot show: no key, or it did not open.
+  bool get unreadable => seal == SealState.noKey || seal == SealState.failed;
+
   /// [me] added this reaction.
   bool reacted(MessageReaction reaction, String? me) => reactions.any(
     (r) => r.reaction == reaction && me != null && r.userIds.contains(me),
   );
 
   /// One's own text (or caption) on the server, within [editWindow] and under
-  /// [maxMessageEdits].
+  /// [maxMessageEdits]; a sealed one only once it is open here.
   bool canEdit(String? me, {DateTime? now}) {
     if (me == null || authorId != me || deleted || seq == 0) return false;
+    if (sealed != null && seal != SealState.open) return false;
     if (editCount >= maxMessageEdits) return false;
     if ((now ?? DateTime.now()).difference(createdAt) >= editWindow) {
       return false;
@@ -193,6 +235,49 @@ class ChatMessage {
   ChatMessage withReactions(List<ReactionCount> reactions) =>
       _copy(reactions: reactions);
 
+  /// A sealed message opened: its words and the keys of its media from [payload]. Media named
+  /// in the payload that is not the message's own does not open.
+  ChatMessage opened(Payload payload) {
+    final keys = payload.attachment;
+    final media = attachments.firstOrNull;
+    if (keys != null && (media == null || media.id != keys.mediaId)) {
+      return withSeal(SealState.failed);
+    }
+    if (keys == null && attachments.isNotEmpty) {
+      return withSeal(SealState.failed);
+    }
+    final words = payload.text?.isEmpty ?? true ? null : payload.text;
+    return ChatMessage(
+      id: id,
+      conversationId: conversationId,
+      seq: seq,
+      authorId: authorId,
+      text: words,
+      createdAt: createdAt,
+      edited: edited,
+      deleted: deleted,
+      pending: pending,
+      failed: failed,
+      problem: problem,
+      kind: keys == null ? MediaKind.text : MediaKind.parse(keys.kind),
+      caption: keys == null ? null : words,
+      attachments: [
+        if (media != null && keys != null)
+          media.local != null ? media : media.opened(keys),
+      ],
+      mediaId: mediaId,
+      replyTo: replyTo,
+      editCount: editCount,
+      reactions: reactions,
+      sealed: sealed,
+      seal: SealState.open,
+      payload: payload,
+    );
+  }
+
+  /// The same sealed message, not (or not yet) opened.
+  ChatMessage withSeal(SealState seal) => _copy(seal: seal);
+
   /// The same message unsent: its place kept, nothing in it.
   ChatMessage get unsent => ChatMessage(
     id: id,
@@ -208,26 +293,30 @@ class ChatMessage {
     editCount: editCount,
   );
 
-  ChatMessage _copy({List<ReactionCount>? reactions}) => ChatMessage(
-    id: id,
-    conversationId: conversationId,
-    seq: seq,
-    authorId: authorId,
-    text: text,
-    createdAt: createdAt,
-    edited: edited,
-    deleted: deleted,
-    pending: pending,
-    failed: failed,
-    problem: problem,
-    kind: kind,
-    caption: caption,
-    attachments: attachments,
-    mediaId: mediaId,
-    replyTo: replyTo,
-    editCount: editCount,
-    reactions: reactions ?? this.reactions,
-  );
+  ChatMessage _copy({List<ReactionCount>? reactions, SealState? seal}) =>
+      ChatMessage(
+        id: id,
+        conversationId: conversationId,
+        seq: seq,
+        authorId: authorId,
+        text: text,
+        createdAt: createdAt,
+        edited: edited,
+        deleted: deleted,
+        pending: pending,
+        failed: failed,
+        problem: problem,
+        kind: kind,
+        caption: caption,
+        attachments: attachments,
+        mediaId: mediaId,
+        replyTo: replyTo,
+        editCount: editCount,
+        reactions: reactions ?? this.reactions,
+        sealed: sealed,
+        seal: seal ?? this.seal,
+        payload: payload,
+      );
 
   /// Sending it again would only be refused again.
   bool get refused => switch (problem?.code) {
@@ -242,12 +331,14 @@ class ChatMessage {
     _ => false,
   };
 
-  /// The same message on its way again, or failed with [problem].
+  /// The same message on its way again, or failed with [problem]; [payload] once a photo is
+  /// sealed and uploaded, so sending again does not upload it twice.
   ChatMessage settling({
     bool pending = false,
     bool failed = false,
     TogetherProblem? problem,
     String? mediaId,
+    Payload? payload,
   }) => ChatMessage(
     id: id,
     conversationId: conversationId,
@@ -263,6 +354,7 @@ class ChatMessage {
     attachments: attachments,
     mediaId: mediaId ?? this.mediaId,
     replyTo: replyTo,
+    payload: payload ?? this.payload,
   );
 }
 
@@ -341,6 +433,7 @@ class Conversation {
     this.pinned = false,
     this.muted = false,
     this.receipts,
+    this.encrypted = false,
   }) : unread = unread ?? (lastSeq > readSeq ? lastSeq - readSeq : 0);
 
   factory Conversation.fromJson(Map<String, dynamic> json) => Conversation(
@@ -368,6 +461,7 @@ class Conversation {
               if (r is Map<String, dynamic>) MemberReceipt.fromJson(r),
           ]
         : null,
+    encrypted: json['encrypted'] == true,
   );
 
   final String id;
@@ -386,6 +480,9 @@ class Conversation {
 
   /// One for each other member; null from an older server.
   final List<MemberReceipt>? receipts;
+
+  /// A direct conversation with an end-to-end encrypted message in it, as the server says.
+  final bool encrypted;
 
   /// Everyone in it but [me].
   List<Person> others(String? me) =>
@@ -421,6 +518,7 @@ class Conversation {
     pinned: pinned,
     muted: muted,
     receipts: receipts ?? this.receipts,
+    encrypted: encrypted,
   );
 
   /// After a read or delivered mark from another member: their receipt raised, never lowered.
@@ -458,14 +556,20 @@ List<Conversation> pinnedFirst(Iterable<Conversation> list) {
 }
 
 /// Messages on the phone: the conversations newest first with what is unread, the one open
-/// with its thread, sending (kept once however often it is sent), and everything live.
+/// with its thread, sending (kept once however often it is sent), and everything live. In a
+/// direct conversation where both people have a device key, every message is sealed on this
+/// phone and opened here ([e2ee]); without it, everything works as before.
 class Messages extends ChangeNotifier {
-  Messages({required this.account, required this.socket}) {
+  Messages({required this.account, required this.socket, this.e2ee}) {
     _events = socket.events.listen(_event);
+    e2ee?.addListener(_e2eeChanged);
   }
 
   final TogetherAccount account;
   final TogetherSocket socket;
+
+  /// End-to-end encryption; null where there is none (tests of other things).
+  final E2ee? e2ee;
   late final StreamSubscription<TogetherEvent> _events;
 
   List<Conversation> conversations = const [];
@@ -484,12 +588,156 @@ class Messages extends ChangeNotifier {
   /// My own read receipts setting as another device last told it; null until it does.
   bool? readReceipts;
 
+  /// How often a sealed message is sealed again after the server said the devices changed.
+  static const sealTries = 3;
+
   String? get _me => account.user?.id;
 
   Conversation? byId(String? id) =>
       conversations.where((c) => c.id == id).firstOrNull;
 
   Conversation? get open => byId(openId);
+
+  // End-to-end encryption
+
+  /// A direct conversation as encryption sees it; null for a group.
+  DirectChat? chatOf(Conversation? conversation) {
+    final me = _me;
+    if (conversation == null || conversation.group || me == null) return null;
+    final others = conversation.others(me);
+    if (others.length != 1) return null;
+    return (
+      id: conversation.id,
+      me: me,
+      other: others.single.id,
+      encrypted: conversation.encrypted,
+    );
+  }
+
+  /// The lock a conversation shows; [ConversationLock.none] for a group or without encryption.
+  ConversationLock lockOf(Conversation? conversation) {
+    final chat = chatOf(conversation);
+    final e = e2ee;
+    if (chat == null || e == null) return ConversationLock.none;
+    return e.lockOf(chat);
+  }
+
+  E2eeAvailability? _availability;
+
+  void _e2eeChanged() {
+    final now = e2ee?.availability;
+    if (now != _availability) {
+      _availability = now;
+      _openAgain().catchError((_) {});
+    }
+    notifyListeners();
+  }
+
+  /// Encryption came on (or turned out to be off): what waited to be opened is opened now.
+  Future<void> _openAgain() async {
+    final id = openId;
+    final chat = chatOf(open);
+    if (chat != null) {
+      e2ee?.watched = chat;
+      await e2ee?.prepare(chat).catchError((_) {});
+    }
+    if (id != null && openId == id) {
+      final opened = await _revealAll(thread);
+      if (openId == id) thread = opened;
+    }
+    conversations = await _revealLast(conversations);
+    notifyListeners();
+  }
+
+  /// A sealed message opened on this phone; any other message as it is. Not opened yet while
+  /// encryption is still being set up.
+  Future<ChatMessage> _reveal(ChatMessage message) async {
+    final sealed = message.sealed;
+    if (sealed == null || message.seal != SealState.opening) return message;
+    final e = e2ee;
+    if (e == null || e.availability == E2eeAvailability.off) {
+      return message.withSeal(SealState.failed);
+    }
+    if (!e.on) return message;
+    final author = message.authorId;
+    if (author == null) return message.withSeal(SealState.failed);
+    e.markEncrypted(message.conversationId);
+    final opened = await e.open(
+      conversationId: message.conversationId,
+      messageId: message.id,
+      authorId: author,
+      sealed: sealed,
+    );
+    final payload = opened.payload;
+    if (payload != null) return message.opened(payload);
+    return message.withSeal(
+      opened.error == E2eeErrorCode.noKey ? SealState.noKey : SealState.failed,
+    );
+  }
+
+  Future<List<ChatMessage>> _revealAll(List<ChatMessage> messages) async {
+    if (!messages.any((m) => m.seal == SealState.opening)) return messages;
+    return [for (final m in messages) await _reveal(m)];
+  }
+
+  /// The conversations with their last messages opened, the authors' devices fetched at once.
+  Future<List<Conversation>> _revealLast(List<Conversation> list) async {
+    final waiting = [
+      for (final c in list)
+        if (c.lastMessage?.seal == SealState.opening) c,
+    ];
+    final e = e2ee;
+    if (waiting.isEmpty || e == null) return list;
+    if (e.on) {
+      final unknown = {
+        for (final c in waiting)
+          if (c.lastMessage!.authorId case final author?)
+            if (e.devicesOf(author) == null) author,
+      };
+      if (unknown.isNotEmpty) await e.fetch(unknown).catchError((_) {});
+    }
+    final opened = <String, ChatMessage>{
+      for (final c in waiting) c.id: await _reveal(c.lastMessage!),
+    };
+    return [
+      for (final c in conversations)
+        if (opened[c.id] case final last?
+            when c.lastMessage?.id == last.id &&
+                c.lastMessage?.seal == SealState.opening)
+          c.copyWith(lastMessage: last)
+        else
+          c,
+    ];
+  }
+
+  /// Gateway events and answers handled in the order they came, a sealed one once it is open.
+  Future<void> _queue = Future.value();
+
+  void _inOrder(ChatMessage message, void Function(ChatMessage) then) {
+    if (message.seal != SealState.opening) {
+      _queue = _queue.then((_) => then(message));
+      return;
+    }
+    _queue = _queue
+        .then((_) async => then(await _reveal(message)))
+        .catchError((Object _) {});
+  }
+
+  /// Opening a direct conversation: both people's devices, checked against what it last saw.
+  Future<void> _prepare(Conversation conversation) async {
+    final chat = chatOf(conversation);
+    final e = e2ee;
+    if (chat == null || e == null) return;
+    e.watched = chat;
+    if (!e.on) return;
+    try {
+      await e.prepare(chat);
+    } on Object {
+      // Fetched again before anything is sent.
+    }
+  }
+
+  // The list and the thread
 
   Future<void> refresh() async {
     final list = await account.call('GET', 'me/conversations');
@@ -499,6 +747,7 @@ class Messages extends ChangeNotifier {
         Conversation.fromJson(json as Map<String, dynamic>),
     ];
     loaded = true;
+    conversations = await _revealLast(conversations);
     await _countUnread();
     final shown = open;
     if (shown != null && shown.unread > 0) await _read(shown);
@@ -517,13 +766,22 @@ class Messages extends ChangeNotifier {
     more = false;
     loadingThread = true;
     notifyListeners();
+    final conversation = byId(id);
     try {
       final page = await account.call(
         'GET',
         'conversations/$id/messages?limit=50',
       );
       if (openId != id) return;
-      thread = _page(page);
+      final messages = _page(page);
+      if (conversation != null &&
+          (conversation.encrypted || messages.any((m) => m.sealed != null))) {
+        e2ee?.markEncrypted(id);
+      }
+      if (conversation != null) await _prepare(conversation);
+      final opened = await _revealAll(messages);
+      if (openId != id) return;
+      thread = opened;
       more = page['more'] == true;
     } finally {
       if (openId == id) {
@@ -531,8 +789,8 @@ class Messages extends ChangeNotifier {
         notifyListeners();
       }
     }
-    final conversation = byId(id);
-    if (conversation != null) await _read(conversation);
+    final now = byId(id);
+    if (now != null) await _read(now);
   }
 
   /// Nothing shown any more: new messages count as unread again.
@@ -540,6 +798,7 @@ class Messages extends ChangeNotifier {
     openId = null;
     thread = const [];
     more = false;
+    e2ee?.watched = null;
     notifyListeners();
   }
 
@@ -560,21 +819,26 @@ class Messages extends ChangeNotifier {
     final id = openId;
     if (id == null || !more || thread.isEmpty || _older) return;
     _older = true;
-    final Map<String, dynamic> page;
+    final List<ChatMessage> page;
+    final bool left;
     try {
-      page = await account.call(
+      final json = await account.call(
         'GET',
         'conversations/$id/messages?limit=50&before=${thread.first.seq}',
       );
+      left = json['more'] == true;
+      page = await _revealAll(_page(json));
     } finally {
       _older = false;
     }
     if (openId != id) return;
     final known = thread.map((m) => m.id).toSet();
-    thread = [..._page(page).where((m) => !known.contains(m.id)), ...thread];
-    more = page['more'] == true;
+    thread = [...page.where((m) => !known.contains(m.id)), ...thread];
+    more = left;
     notifyListeners();
   }
+
+  // Sending
 
   /// Sends a text to the open conversation, as an answer to [replyTo] when given; it shows at
   /// once and settles when the server has it.
@@ -599,7 +863,7 @@ class Messages extends ChangeNotifier {
 
   /// Sends a photo (PNG, JPEG or WebP bytes) with an optional caption to the open
   /// conversation: it shows at once from the phone's own bytes, goes up as media, then in a
-  /// message.
+  /// message. Sealed, it is drawn again without its metadata and encrypted before it goes up.
   Future<void> sendPhoto(Uint8List bytes, {String? caption}) async {
     final id = openId;
     if (id == null || bytes.isEmpty) return;
@@ -628,43 +892,195 @@ class Messages extends ChangeNotifier {
     await _deliver(again);
   }
 
+  /// Sealed or plain, as the conversation is: sealed when both people have a device; never
+  /// plain where this phone saw it encrypted.
   Future<void> _deliver(ChatMessage message) async {
-    var mediaId = message.mediaId;
+    var sending = message;
     try {
-      final local = message.attachments.firstOrNull?.local;
-      if (mediaId == null && local != null) {
-        mediaId = (await account.uploadImage(local)).id;
+      final chat = chatOf(byId(message.conversationId));
+      final e = e2ee;
+      if (chat != null && e != null) {
+        final sealedBefore = chat.encrypted || e.seenEncrypted(chat.id);
+        if (!e.on && sealedBefore) await e.start();
+        if (e.on) {
+          var lock = e.lockOf(chat);
+          if (lock.state == ChatLock.checking) {
+            await e.prepare(chat);
+            lock = e.lockOf(chat);
+          }
+          if (lock.state == ChatLock.encrypted) {
+            sending = await _deliverSealed(message, chat);
+            return;
+          }
+          if (lock.state == ChatLock.noDevice) throw _noDevice;
+        } else if (sealedBefore) {
+          throw _noDevice;
+        }
       }
-      final json = await account.call(
+      try {
+        sending = await _deliverPlain(message);
+      } on TogetherProblem catch (problem) {
+        if (problem.code != 'e2ee_required' || chat == null || e == null) {
+          rethrow;
+        }
+        // Encrypted after all (on another device, or by the other person).
+        e.markEncrypted(chat.id);
+        if (!e.on) throw _noDevice;
+        await e.prepare(chat);
+        if (e.lockOf(chat).state != ChatLock.encrypted) throw _noDevice;
+        sending = await _deliverSealed(sending, chat);
+      }
+    } on Object catch (error) {
+      final now = thread.where((m) => m.id == message.id).firstOrNull;
+      _replace(
+        message.settling(
+          failed: true,
+          problem: error is TogetherProblem ? error : null,
+          mediaId: now?.mediaId ?? sending.mediaId,
+          payload: now?.payload ?? sending.payload,
+        ),
+      );
+    }
+  }
+
+  static const _noDevice = TogetherProblem(409, 'e2ee_no_device', '');
+
+  /// The message as it was before encryption: text, or the photo uploaded as plain media.
+  /// Returns the message with its media ID once uploaded.
+  Future<ChatMessage> _deliverPlain(ChatMessage message) async {
+    var mediaId = message.mediaId;
+    final local = message.attachments.firstOrNull?.local;
+    if (mediaId == null && local != null) {
+      mediaId = (await account.uploadImage(local)).id;
+      message = message.settling(pending: true, mediaId: mediaId);
+      _replace(message);
+    }
+    final json = await account.call(
+      'POST',
+      'conversations/${message.conversationId}/messages',
+      {
+        'clientId': message.id,
+        if (message.text != null) 'text': message.text,
+        if (message.replyTo != null) 'replyTo': message.replyTo,
+        if (mediaId != null)
+          'attachments': [
+            {'mediaId': mediaId},
+          ],
+      },
+    );
+    _arrived(ChatMessage.fromJson(json));
+    return message;
+  }
+
+  /// The message sealed on this phone: a photo drawn again without its metadata, encrypted and
+  /// uploaded first (once), then the text and the photo's keys sealed for every device of both.
+  Future<ChatMessage> _deliverSealed(
+    ChatMessage message,
+    DirectChat chat,
+  ) async {
+    var payload = message.payload ?? Payload(text: message.text);
+    final local = message.attachments.firstOrNull?.local;
+    if (local != null && payload.attachment == null) {
+      final clean = await cleanPhoto(local);
+      if (clean == null) {
+        throw const TogetherProblem(400, 'bad_image', 'Not a picture');
+      }
+      final file = await sealFile(clean.bytes, FilePart.file);
+      final media = await uploadSealedMedia(
+        account,
+        MediaKind.image,
+        file.ciphertext,
+      );
+      payload = Payload(
+        text: message.text,
+        attachment: SealedAttachment(
+          mediaId: media.id,
+          kind: MediaKind.image.name,
+          type: clean.type,
+          size: clean.bytes.length,
+          key: file.key,
+          nonce: file.nonce,
+          width: clean.width,
+          height: clean.height,
+        ),
+      );
+      message = message.settling(
+        pending: true,
+        mediaId: media.id,
+        payload: payload,
+      );
+      _replace(message);
+    }
+    final mediaId = payload.attachment?.mediaId;
+    final json = await _sealedCall(
+      chat,
+      message.id,
+      payload,
+      (sealed) => account.call(
         'POST',
         'conversations/${message.conversationId}/messages',
         {
           'clientId': message.id,
-          if (message.text != null) 'text': message.text,
+          'sealed': sealed.toJson(),
           if (message.replyTo != null) 'replyTo': message.replyTo,
           if (mediaId != null)
             'attachments': [
               {'mediaId': mediaId},
             ],
         },
-      );
-      _arrived(ChatMessage.fromJson(json));
-    } on Object catch (error) {
-      _replace(
-        message.settling(
-          failed: true,
-          problem: error is TogetherProblem ? error : null,
-          mediaId: mediaId,
-        ),
-      );
+      ),
+    );
+    _arrived(await _reveal(ChatMessage.fromJson(json)));
+    return message;
+  }
+
+  /// Seals [payload] for the devices both people have now and sends it; when the server says
+  /// they changed (409 e2ee_devices), fetches them again, shows the change and seals again, a few
+  /// times at most.
+  Future<Map<String, dynamic>> _sealedCall(
+    DirectChat chat,
+    String messageId,
+    Payload payload,
+    Future<Map<String, dynamic>> Function(Sealed sealed) send,
+  ) async {
+    final e = e2ee!;
+    for (var attempt = 1; ; attempt++) {
+      if (e.lockOf(chat).state != ChatLock.encrypted) throw _noDevice;
+      final sealed = await e.seal(chat, messageId, payload);
+      try {
+        return await send(sealed);
+      } on TogetherProblem catch (problem) {
+        if (problem.code != 'e2ee_devices' || attempt >= sealTries) rethrow;
+        await e.fetch([chat.me, chat.other]);
+        e.observe(chat);
+      }
     }
   }
 
   /// New words for one's own message (or its caption); the server's copy replaces it. A
-  /// [TogetherProblem] when it may not be edited any more (403, or 409 edit_limit).
+  /// [TogetherProblem] when it may not be edited any more (403, or 409 edit_limit). A sealed
+  /// message is sealed again with the new words.
   Future<void> edit(ChatMessage message, String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty || message.seq == 0) return;
+    if (message.sealed != null) {
+      final chat = chatOf(byId(message.conversationId));
+      final e = e2ee;
+      if (chat == null || e == null || !e.on) throw _noDevice;
+      if (e.lockOf(chat).state == ChatLock.checking) await e.prepare(chat);
+      final json = await _sealedCall(
+        chat,
+        message.id,
+        Payload(text: trimmed, attachment: message.payload?.attachment),
+        (sealed) => account.call(
+          'PATCH',
+          'conversations/${message.conversationId}/messages/${message.seq}',
+          {'sealed': sealed.toJson()},
+        ),
+      );
+      _changed(await _reveal(ChatMessage.fromJson(json)));
+      return;
+    }
     final json = await account.call(
       'PATCH',
       'conversations/${message.conversationId}/messages/${message.seq}',
@@ -681,6 +1097,33 @@ class Messages extends ChangeNotifier {
       'conversations/${message.conversationId}/messages/${message.seq}',
     );
     _changed(message.unsent);
+  }
+
+  /// Reports someone's message to the moderators for [reason] (the API's reasons). A sealed one
+  /// goes with its content key, so they can read it and check its author's signature.
+  Future<void> report(ChatMessage message, String reason) async {
+    String? contentKey;
+    final sealed = message.sealed;
+    if (sealed != null) {
+      final author = message.authorId;
+      contentKey = author == null
+          ? null
+          : await e2ee?.contentKeyOf(
+              conversationId: message.conversationId,
+              messageId: message.id,
+              authorId: author,
+              sealed: sealed,
+            );
+      if (contentKey == null) {
+        throw const TogetherProblem(400, 'e2ee_no_key', 'No key here');
+      }
+    }
+    await account.call('POST', 'reports', {
+      'targetKind': 'message',
+      'targetId': message.id,
+      'reason': reason,
+      'contentKey': ?contentKey,
+    });
   }
 
   /// Adds [reaction] to a message, or takes it back when it is mine already: shown at once,
@@ -765,12 +1208,21 @@ class Messages extends ChangeNotifier {
 
   Future<void> _set(String id, String what, Map<String, dynamic> body) async {
     final json = await account.call('PUT', 'conversations/$id/$what', body);
-    final next = Conversation.fromJson(json);
+    var next = Conversation.fromJson(json);
+    final before = byId(id)?.lastMessage;
+    if (before != null && next.lastMessage?.id == before.id) {
+      // Opened here already.
+      next = next.copyWith(lastMessage: before);
+    }
     conversations = pinnedFirst([
       for (final c in conversations)
         if (c.id == id) next else c,
     ]);
     notifyListeners();
+    if (next.lastMessage?.seal == SealState.opening) {
+      conversations = await _revealLast(conversations);
+      notifyListeners();
+    }
   }
 
   /// My read receipts setting changed here: the list again, since what others' receipts
@@ -877,10 +1329,21 @@ class Messages extends ChangeNotifier {
         refresh().then((_) => _catchUp()).catchError((_) {});
       case 'message.created':
         final message = ChatMessage.fromJson(data);
-        _arrived(message);
-        _delivered(message);
+        if (message.seal == SealState.plain) {
+          _arrived(message);
+          _delivered(message);
+        } else {
+          _delivered(message);
+          e2ee?.markEncrypted(message.conversationId);
+          _inOrder(message, _arrived);
+        }
       case 'message.updated':
-        _changed(ChatMessage.fromJson(data));
+        final message = ChatMessage.fromJson(data);
+        if (message.seal == SealState.plain) {
+          _changed(message);
+        } else {
+          _inOrder(message, _changed);
+        }
       case 'message.deleted':
         final message = ChatMessage.fromJson(data);
         final conversation = byId(message.conversationId);
@@ -968,7 +1431,7 @@ class Messages extends ChangeNotifier {
       'GET',
       'conversations/$id/messages?limit=100&after=${last.seq}',
     );
-    _page(page).forEach(_arrived);
+    (await _revealAll(_page(page))).forEach(_arrived);
   }
 
   static List<ChatMessage> _page(Map<String, dynamic> page) => [
@@ -985,6 +1448,7 @@ class Messages extends ChangeNotifier {
   @override
   void dispose() {
     _events.cancel();
+    e2ee?.removeListener(_e2eeChanged);
     super.dispose();
   }
 }
