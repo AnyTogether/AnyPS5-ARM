@@ -118,18 +118,3 @@ public struct TogetherPartyChat: Equatable, Sendable {
         return bySeq.values.sorted { $0.seq < $1.seq }
     }
 }
-
-/// Why something is reported to the moderators, as the server takes it.
-public enum TogetherReportReason: String, CaseIterable, Sendable {
-    case spam, harassment, hate, sexual, impersonation, cheating, piracy, other
-}
-
-extension TogetherClient {
-    /// Someone else's message reported to the moderators (its ID, not its seq); its author is not
-    /// told who sent the report.
-    public func report(message messageId: String, reason: TogetherReportReason, note: String? = nil) async throws {
-        var body: [String: Any] = ["targetKind": "message", "targetId": messageId, "reason": reason.rawValue]
-        if let note = note?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty { body["note"] = String(note.prefix(500)) }
-        _ = try await authorized("POST", "reports", body)
-    }
-}

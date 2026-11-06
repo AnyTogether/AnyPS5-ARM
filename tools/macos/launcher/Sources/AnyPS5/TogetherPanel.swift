@@ -446,6 +446,7 @@ extension AppModel {
         togetherFlush?.cancel()
         togetherSocket?.stop()
         togetherSocket = nil
+        resetE2EE()
         withAnimation(Motion.overlay) {
             togetherUser = nil
             togetherConnected = false
@@ -474,6 +475,7 @@ extension AppModel {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.togetherSocket = nil
+                self.resetE2EE()
                 self.endShareSession()
                 if self.overlay == .compare { self.overlay = .profile }
                 if self.overlay == .profile { self.closeProfile() }
@@ -487,6 +489,7 @@ extension AppModel {
         togetherSocket = socket
         socket.start()
         togetherConnected = true
+        startE2EE()
         updateTogetherPresence()
         refreshFriends()
         loadTogetherProfile()
@@ -565,6 +568,7 @@ extension AppModel {
             case "code_expired", "expired_token": return T.text(.togetherCodeExpired)
             case "code_locked": return T.text(.togetherCodeLocked)
             case "rate_limited": return T.text(.togetherTooMany)
+            case "media_server_off": return SP.format(.mediaServerOff, problem.max ?? SharePlayRoster.maxViewers)
             default: return problem.title
             }
         }

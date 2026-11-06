@@ -2,8 +2,8 @@ import AnyPS5Core
 import Foundation
 
 /// The texts of reactions, replies, editing and unsending, receipts, pinned and muted
-/// conversations, the read receipts setting, the party's chat and reporting a message, from the language
-/// files (l10n) (the same words the website uses). `TChat.text(.key)` reads the launcher's language.
+/// conversations, the read receipts setting, end-to-end encryption, reporting and the party's chat, from the language files (l10n) (the same words the website
+/// uses). `TChat.text(.key)` reads the launcher's language.
 enum TChat {
     static func text(_ key: Key) -> String { T.string(key.rawValue) }
 
@@ -17,37 +17,19 @@ enum TChat {
         case receiptSent, receiptDelivered, receiptRead, seenBy = "chatSeenBy", seenByEveryone = "receiptSeenByEveryone"
         case pin = "conversationPin", unpin = "conversationUnpin", pinned = "conversationPinned", pinFull = "chatPinFull", mute = "conversationMute", unmute = "conversationUnmute", muted = "conversationMuted"
         case readReceipts, readReceiptsHint, hintActions = "chatHintActions"
+        // End-to-end encrypted direct messages (AnyTogether's docs/e2ee.md, its table of texts).
+        case e2eeOn, e2eeOnDetail, e2eeOff, e2eeOffDetail, e2eeNoDevice, e2eeSafetyNumber, e2eeSafetyHow, e2eeMarkCompared, e2eeCompared
+        case e2eeDevicesChanged, e2eeMyDevicesChanged, e2eeCompare, e2eeDismiss, e2eeDevices, e2eeYou, e2eeNewDeviceNote
+        case e2eeBeforeDevice, e2eeUndecryptable, e2eePreview, e2eeNotification, e2eeReportNote
+        // Reporting a message (the website's words).
+        case report = "messagesReport", reportLead = "messagesReportLead", reported = "messagesReported"
+        case reasonSpam = "reportReasonSpam", reasonHarassment = "reportReasonHarassment", reasonHate = "reportReasonHate", reasonSexual = "reportReasonSexual", reasonOther = "reportReasonOther"
+        // The party's chat beside its voice.
         case partyChat = "partyChatTitle", partyChatPlaceholder, partyChatEmpty, formerMember = "messagesFormerMember"
-        case report = "messagesReport", reportTitle = "messagesReportTitle", reportLead = "messagesReportLead", reportSent = "messagesReportSent"
-        case reasonSpam = "reportReasonSpam", reasonHarassment = "reportReasonHarassment", reasonHate = "reportReasonHate", reasonSexual = "reportReasonSexual"
-        case reasonImpersonation = "reportReasonImpersonation", reasonCheating = "reportReasonCheating", reasonPiracy = "reportReasonPiracy", reasonOther = "reportReasonOther"
     }
 
-    static func name(_ reason: TogetherReportReason) -> String {
-        switch reason {
-        case .spam: return text(.reasonSpam)
-        case .harassment: return text(.reasonHarassment)
-        case .hate: return text(.reasonHate)
-        case .sexual: return text(.reasonSexual)
-        case .impersonation: return text(.reasonImpersonation)
-        case .cheating: return text(.reasonCheating)
-        case .piracy: return text(.reasonPiracy)
-        case .other: return text(.reasonOther)
-        }
-    }
-
-    static func symbol(_ reason: TogetherReportReason) -> String {
-        switch reason {
-        case .spam: return "envelope.badge"
-        case .harassment: return "hand.raised"
-        case .hate: return "exclamationmark.bubble"
-        case .sexual: return "eye.slash"
-        case .impersonation: return "person.crop.circle.badge.questionmark"
-        case .cheating: return "gamecontroller"
-        case .piracy: return "externaldrive.badge.xmark"
-        case .other: return "ellipsis.circle"
-        }
-    }
+    /// The reasons a message can be reported for, as the server names them.
+    static let reportReasons: [(reason: String, key: Key)] = [("spam", .reasonSpam), ("harassment", .reasonHarassment), ("hate", .reasonHate), ("sexual", .reasonSexual), ("other", .reasonOther)]
 
     static func name(_ reaction: TogetherMessageReaction) -> String {
         switch reaction {

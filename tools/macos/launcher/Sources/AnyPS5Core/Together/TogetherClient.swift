@@ -57,6 +57,10 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var downloadUrl: String? = nil
     /// With "conflict" on starting Play Together: the party's game already running.
     public var sessionId: String? = nil
+    /// With "media_server_off": the most viewers this server takes.
+    public var max: Int? = nil
+    /// With "e2ee_devices": each person's active device IDs now, by user ID.
+    public var devices: TogetherProblemDevices? = nil
     public var description: String { title }
 
     /// Why a join was refused, when it was for the versions.
@@ -69,6 +73,18 @@ public struct TogetherProblem: Error, Decodable, CustomStringConvertible, Sendab
     public var clientTooOld: TogetherClientTooOld? {
         guard code == "client_too_old", let minimum else { return nil }
         return TogetherClientTooOld(minimum: minimum, current: current, downloadUrl: downloadUrl.flatMap(URL.init(string:)))
+    }
+}
+
+/// The device IDs a "409 e2ee_devices" lists, by user ID; another shape reads as none, so the
+/// problem itself still reads.
+public struct TogetherProblemDevices: Decodable, Equatable, Sendable {
+    public let byUser: [String: [String]]
+
+    public init(_ byUser: [String: [String]]) { self.byUser = byUser }
+
+    public init(from decoder: Decoder) throws {
+        byUser = (try? [String: [String]](from: decoder)) ?? [:]
     }
 }
 

@@ -1,6 +1,8 @@
 package org.anyps5.anyps5_remote
 
+import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -52,6 +54,8 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        // Push: the token, the permission and the taps.
+        Push.listen(this, messenger)
         MethodChannel(messenger, "org.anyps5.remote/haptics").setMethodCallHandler { call, result ->
             if (call.method != "set") return@setMethodCallHandler result.notImplemented()
             rumble((call.argument<Int>("strength") ?: 0).coerceIn(0, 255))
@@ -59,8 +63,39 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        showOverLockScreen(intent)
+        Push.opened(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        showOverLockScreen(intent)
+        Push.opened(intent)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        Push.answered(requestCode, grantResults)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Push.foreground = true
+    }
+
+    /// A friend's call opens the app over the lock screen, the way a phone call does.
+    private fun showOverLockScreen(intent: Intent?) {
+        if (intent?.extras?.getString("kind") != "call" || Build.VERSION.SDK_INT < 27) return
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+    }
+
     override fun onPause() {
         super.onPause()
+        Push.foreground = false
         rumble(0)
     }
 

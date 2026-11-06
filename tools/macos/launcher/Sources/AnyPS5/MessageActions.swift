@@ -17,9 +17,11 @@ struct MessageActions: Equatable {
         enum Target: Equatable {
             case message(conversation: String, seq: Int)
             case unsend(conversation: String, seq: Int)
-            /// Why someone else's message is reported.
+            /// Why the message is reported, picked from the reasons.
             case report(conversation: String, seq: Int)
             case conversation(String)
+            /// A direct conversation's encryption: what it means, the safety number and the devices.
+            case encryption(String)
         }
 
         var target: Target
@@ -29,10 +31,14 @@ struct MessageActions: Equatable {
     }
 
     enum Row: Equatable {
-        case reactions, reply, edit, unsend, confirmUnsend, cancel, report
-        case reason(TogetherReportReason)
+        case reactions, reply, edit, unsend, confirmUnsend, cancel
         /// What choosing it makes the conversation: pinned or not, muted or not.
         case pin(Bool), mute(Bool)
+        /// Reporting a message, then the reason (as the server names it).
+        case report, reportReason(String)
+        /// The encryption sheet; its "We compared them" (on or off); the devices-changed notice
+        /// dismissed; the sheet closed.
+        case encryption, markCompared(Bool), dismissNotice, closeSheet
     }
 }
 
@@ -99,7 +105,7 @@ extension AppModel {
         switch menu.target {
         case .message(let conversation, let seq), .unsend(let conversation, let seq), .report(let conversation, let seq):
             return message(in: conversation, seq: seq).flatMap { $0.deletedAt == nil ? $0 : nil }
-        case .conversation:
+        case .conversation, .encryption:
             return nil
         }
     }
@@ -108,7 +114,7 @@ extension AppModel {
         let id: String
         switch menu.target {
         case .message(let conversation, _), .unsend(let conversation, _), .report(let conversation, _): id = conversation
-        case .conversation(let conversation): id = conversation
+        case .conversation(let conversation), .encryption(let conversation): id = conversation
         }
         return conversation(withId: id)
     }
@@ -118,17 +124,22 @@ extension AppModel {
         case .message:
             guard let message = menuMessage(menu), let me = chatMe else { return [] }
             var rows: [MessageActions.Row] = [.reactions, .reply]
-            if message.canEdit(by: me) { rows.append(.edit) }
-            if message.authorId == me { rows.append(.unsend) }
-            if message.authorId != nil, message.authorId != me { rows.append(.report) }
+            if canEditMessage(message) { rows.append(.edit) }
+            if message.authorId == me { rows.append(.unsend) } else if message.authorId != nil { rows.append(.report) }
             return rows
         case .unsend:
             return menuMessage(menu) == nil ? [] : [.confirmUnsend, .cancel]
         case .report:
-            return menuMessage(menu) == nil ? [] : TogetherReportReason.allCases.map(MessageActions.Row.reason) + [.cancel]
+            return menuMessage(menu) == nil ? [] : TChat.reportReasons.map { .reportReason($0.reason) }
         case .conversation:
             guard let conversation = menuConversation(menu) else { return [] }
-            return [.pin(!conversation.pinned), .mute(!conversation.muted)]
+            var rows: [MessageActions.Row] = [.pin(!conversation.pinned), .mute(!conversation.muted)]
+            if e2eeLock(conversation) != nil { rows.append(.encryption) }
+            if e2ee?.notice(conversation.id) != nil { rows.append(.dismissNotice) }
+            return rows
+        case .encryption:
+            guard let conversation = menuConversation(menu) else { return [] }
+            return e2eeLock(conversation) == .on && e2ee?.safetyNumber(conversation) != nil ? [.markCompared(!(e2ee?.isCompared(conversation) ?? false))] : [.closeSheet]
         }
     }
 
@@ -154,27 +165,6 @@ extension AppModel {
         guard let menu = messageActions.menu, case .message(let conversation, let seq) = menu.target else { return }
         withAnimation(Motion.focus) { messageActions.menu = .init(target: .unsend(conversation: conversation, seq: seq), row: 1) }
         Sounds.shared.play(.select)
-    }
-
-    /// Reporting asks why first, from the message's menu.
-    func askReport() {
-        guard let menu = messageActions.menu, case .message(let conversation, let seq) = menu.target else { return }
-        withAnimation(Motion.focus) { messageActions.menu = .init(target: .report(conversation: conversation, seq: seq)) }
-        Sounds.shared.play(.select)
-    }
-
-    /// The message reported for a reason: the author is not told who sent it.
-    func report(_ message: TogetherMessage, _ reason: TogetherReportReason) {
-        let client = together
-        Sounds.shared.play(.select)
-        Task {
-            do {
-                try await client.report(message: message.id, reason: reason)
-                show(TChat.text(.reportSent), symbol: "flag.fill")
-            } catch {
-                show(togetherMessage(error), symbol: "exclamationmark.triangle.fill")
-            }
-        }
     }
 
     /// The question straight away, from a message's context menu.
@@ -248,12 +238,6 @@ extension AppModel {
             unsend(message)
         case .cancel:
             menuCommand(.back)
-        case .report:
-            askReport()
-        case .reason(let reason):
-            guard let message else { return }
-            closeMessageMenu(sound: false)
-            report(message, reason)
         case .pin(let on):
             guard let conversation else { return }
             closeMessageMenu(sound: false)
@@ -262,7 +246,33 @@ extension AppModel {
             guard let conversation else { return }
             closeMessageMenu(sound: false)
             setMuted(conversation, on)
+        case .report:
+            guard case .message(let conversation, let seq) = menu.target else { return }
+            withAnimation(Motion.focus) { messageActions.menu = .init(target: .report(conversation: conversation, seq: seq)) }
+            Sounds.shared.play(.select)
+        case .reportReason(let reason):
+            guard let message else { return }
+            closeMessageMenu(sound: false)
+            reportMessage(message, reason: reason)
+        case .encryption:
+            guard let conversation else { return }
+            openEncryptionSheet(conversation.id)
+        case .markCompared(let on):
+            guard let conversation else { return }
+            markCompared(conversation, on)
+        case .dismissNotice:
+            guard let conversation else { return }
+            closeMessageMenu(sound: false)
+            dismissE2EENotice(conversation.id)
+        case .closeSheet:
+            closeMessageMenu()
         }
+    }
+
+    /// Reporting straight away, from a message's context menu.
+    func askReport(_ message: TogetherMessage) {
+        withAnimation(Motion.overlay) { messageActions.menu = .init(target: .report(conversation: message.conversationId, seq: message.seq)) }
+        Sounds.shared.play(.select)
     }
 
     // MARK: Reacting
@@ -296,14 +306,14 @@ extension AppModel {
     }
 
     func startEditing(_ message: TogetherMessage) {
-        guard let me = chatMe, message.canEdit(by: me) else { return show(TChat.text(.editLimit), symbol: "pencil.slash") }
+        guard canEditMessage(message) else { return show(TChat.text(.editLimit), symbol: "pencil.slash") }
         withAnimation(Motion.focus) {
             messageActions.replyTo = nil
             messageActions.editing = message.seq
             messageActions.picked = nil
             if partyChatShown { partyChatFocused = true } else { messagesInThread = true }
         }
-        chatDraft = message.words ?? ""
+        chatDraft = editableWords(message) ?? ""
         messageFocus = AppModel.quickReplies.count
         composing = true
     }
@@ -322,7 +332,8 @@ extension AppModel {
     func saveEdit(_ raw: String) {
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let seq = messageActions.editing, let conversation = chatConversation, !text.isEmpty else { return }
-        if message(in: conversation.id, seq: seq)?.words == text {
+        let original = message(in: conversation.id, seq: seq)
+        if let original, editableWords(original) == text {
             chatDraft = ""
             withAnimation(Motion.focus) { messageActions.editing = nil }
             return
@@ -330,7 +341,15 @@ extension AppModel {
         Sounds.shared.play(.select)
         Task {
             do {
-                let edited = try await together.edit(seq, in: conversation.id, to: text)
+                let edited: TogetherMessage
+                if let original, original.sealed != nil {
+                    // A new seal of the same message, its attachment kept.
+                    guard var payload = sealedPayload(original) else { throw E2EERefusal.waiting }
+                    payload.text = text
+                    edited = try await sealAndSend(payload, in: conversation, edit: (seq, original.id))
+                } else {
+                    edited = try await together.edit(seq, in: conversation.id, to: text)
+                }
                 withAnimation(Motion.focus) {
                     storeMessage(edited)
                     messageActions.editing = nil
@@ -339,6 +358,8 @@ extension AppModel {
             } catch let problem as TogetherProblem where problem.code == "edit_limit" || (problem.status == 403 && problem.code == "forbidden") {
                 withAnimation(Motion.focus) { messageActions.editing = nil }
                 show(TChat.text(.editLimit), symbol: "pencil.slash")
+            } catch let refusal as E2EERefusal {
+                showSealedFailure(refusal, in: conversation)
             } catch {
                 show(togetherMessage(error), symbol: "exclamationmark.bubble.fill")
             }
@@ -374,7 +395,7 @@ extension AppModel {
                 switch menu.target {
                 case .message(let conversation, let seq), .unsend(let conversation, let seq), .report(let conversation, let seq):
                     if conversation == message.conversationId, seq == message.seq { messageActions.menu = nil }
-                case .conversation:
+                case .conversation, .encryption:
                     break
                 }
             }
@@ -489,11 +510,6 @@ struct MessageMenuSheet: View {
             if let message = model.menuMessage(menu), let conversation = model.menuConversation(menu) {
                 let mine = message.authorId == me
                 VStack(alignment: .leading, spacing: 8 * scale) {
-                    if case .report = menu.target {
-                        Text(TChat.text(.reportTitle)).font(.display(22 * scale, .semibold)).foregroundStyle(.white)
-                        Text(TChat.text(.reportLead)).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.65))
-                            .fixedSize(horizontal: false, vertical: true).padding(.bottom, 6 * scale)
-                    }
                     Text(mine ? TL.text(.compareYou) : model.authorName(message.authorId, in: conversation))
                         .font(.display(13 * scale, .semibold)).textCase(.uppercase).tracking(0.8).foregroundStyle(.white.opacity(0.55))
                     Text(model.messageWords(message) ?? "")
@@ -504,10 +520,20 @@ struct MessageMenuSheet: View {
                         Text(TChat.text(.unsendConfirm)).font(.display(15 * scale, .medium)).foregroundStyle(.white.opacity(0.8))
                             .fixedSize(horizontal: false, vertical: true).padding(.top, 8 * scale)
                     }
+                    if case .report = menu.target {
+                        Text(TChat.format(.reportLead, model.e2eeName(conversation))).font(.display(15 * scale, .medium)).foregroundStyle(.white.opacity(0.8))
+                            .fixedSize(horizontal: false, vertical: true).padding(.top, 8 * scale)
+                        if message.sealed != nil {
+                            // Reporting a sealed message hands the moderators its key.
+                            Label(TChat.text(.e2eeReportNote), systemImage: "lock.open.fill")
+                                .font(.display(14 * scale, .medium)).foregroundStyle(.white.opacity(0.62))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-        case .conversation:
+        case .conversation, .encryption:
             if let conversation = model.menuConversation(menu) {
                 let other = conversation.others(than: me).first
                 HStack(spacing: 14 * scale) {
@@ -576,10 +602,18 @@ struct MessageMenuSheet: View {
         case .unsend: return (TChat.text(.unsend), "arrow.uturn.backward", true)
         case .confirmUnsend: return (TChat.text(.unsend), "arrow.uturn.backward", true)
         case .cancel: return (T.text(.cancel), "xmark", false)
-        case .report: return (TChat.text(.report), "flag", true)
-        case .reason(let reason): return (TChat.name(reason), TChat.symbol(reason), false)
         case .pin(let on): return (TChat.text(on ? .pin : .unpin), on ? "pin" : "pin.slash", false)
         case .mute(let on): return (TChat.text(on ? .mute : .unmute), on ? "bell.slash" : "bell", false)
+        case .report: return (TChat.text(.report), "exclamationmark.bubble", true)
+        case .reportReason(let reason): return (TChat.text(TChat.reportReasons.first { $0.reason == reason }?.key ?? .reasonOther), "flag", false)
+        case .encryption:
+            let conversation = model.menuConversation(menu)
+            let lock = conversation.flatMap(model.e2eeLock)
+            if let conversation, model.e2ee?.notice(conversation.id) != nil { return (TChat.text(.e2eeCompare), "lock.shield", false) }
+            return (TChat.text(lock == .off ? .e2eeOff : .e2eeOn), lock == .off ? "lock.open" : "lock.fill", false)
+        case .markCompared(let on): return (TChat.text(on ? .e2eeMarkCompared : .e2eeCompared), on ? "checkmark.seal" : "checkmark.seal.fill", false)
+        case .dismissNotice: return (TChat.text(.e2eeDismiss), "checkmark", false)
+        case .closeSheet: return (TChat.text(.e2eeDismiss), "checkmark", false)
         }
     }
 }

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="push_channel_together">Arkadaşlar ve mesajlar</string>
+    <string name="push_channel_together_detail">Mesajlar, davetler ve arkadaşların yaptıkları.</string>
+    <string name="push_channel_calls">Aramalar</string>
+    <string name="push_channel_calls_detail">Bir arkadaşın araması. Kilit ekranının üstünde çalar.</string>
+    <string name="push_answer">Cevapla</string>
+    <string name="push_decline">Reddet</string>
+</resources>

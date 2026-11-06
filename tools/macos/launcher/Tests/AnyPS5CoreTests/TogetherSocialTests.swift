@@ -517,6 +517,14 @@ final class TogetherCallTests: TogetherSignedInCase {
         let mute: [String: Any] = ["op": "event", "id": "9", "type": "call.updated", "data": ["callId": "call1", "partyId": NSNull(), "userId": "f1", "muted": true]]
         XCTAssertEqual(TogetherSocket.event(mute)?.decode(TogetherMuteChange.self), TogetherMuteChange(callId: "call1", partyId: nil, userId: "f1", muted: true))
         XCTAssertNil(TogetherSocket.event(["op": "ready"]))
+        let moved: [String: Any] = ["op": "event", "id": "10", "type": "call.moved",
+                                    "data": ["callId": "call1", "partyId": "p1", "userId": "me", "device": "phone-session", "client": "phone"]]
+        let movedEvent = TogetherSocket.event(moved)?.decode(TogetherVoiceMoved.self)
+        XCTAssertEqual(movedEvent, TogetherVoiceMoved(callId: "call1", partyId: "p1", device: "phone-session", client: "phone"))
+        XCTAssertEqual(movedEvent?.toPhone, true)
+        // An older server's event without the client still reads.
+        let bare: [String: Any] = ["op": "event", "id": "11", "type": "call.moved", "data": ["callId": "call1", "partyId": NSNull(), "device": "web-session"]]
+        XCTAssertEqual(TogetherSocket.event(bare)?.decode(TogetherVoiceMoved.self)?.toPhone, false)
     }
 
     func testMutingTellsTheCall() async throws {

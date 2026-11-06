@@ -94,18 +94,18 @@ final class PartyChatTests: XCTestCase {
         XCTAssertEqual(model.chatDraft, "for Mira")
     }
 
-    func testSomeoneElsesMessageCanBeReportedForAReason() throws {
+    /// The message menu's Report (Messages' own) works on the party's chat: someone else's message only.
+    func testSomeoneElsesMessageCanBeReported() throws {
         let model = try model()
         model.overlay = .party
         let theirs = MessageActions.Menu(target: .message(conversation: "pc1", seq: 1))
         XCTAssertEqual(model.menuRows(theirs), [.reactions, .reply, .report])
         let mine = MessageActions.Menu(target: .message(conversation: "pc1", seq: 2))
         XCTAssertFalse(model.menuRows(mine).contains(.report), "not one's own")
-        model.messageActions.menu = theirs
-        model.askReport()
+        model.askReport(model.message(in: "pc1", seq: 1)!)
         guard let asked = model.messageActions.menu else { return XCTFail("the reasons are asked") }
         XCTAssertEqual(asked.target, .report(conversation: "pc1", seq: 1))
-        XCTAssertEqual(model.menuRows(asked), TogetherReportReason.allCases.map(MessageActions.Row.reason) + [.cancel])
+        XCTAssertEqual(model.menuRows(asked), TChat.reportReasons.map { .reportReason($0.reason) })
         model.menuCommand(.back)
         XCTAssertEqual(model.messageActions.menu?.target, .message(conversation: "pc1", seq: 1), "back to the message's menu")
     }
@@ -143,9 +143,8 @@ final class PartyChatTests: XCTestCase {
 
     func testTheNewTextsAreInEnglishAndTurkish() {
         T.texts = T.load([T.sourceFolder])
-        for key in [TChat.Key.partyChat, .partyChatPlaceholder, .partyChatEmpty, .formerMember, .report, .reportTitle, .reportLead, .reportSent] {
+        for key in [TChat.Key.partyChat, .partyChatPlaceholder, .partyChatEmpty, .formerMember] {
             XCTAssertNotEqual(T.string(key.rawValue), key.rawValue, key.rawValue)
         }
-        XCTAssertEqual(TogetherReportReason.allCases.map(TChat.name).count, Set(TogetherReportReason.allCases.map(TChat.name)).count)
     }
 }

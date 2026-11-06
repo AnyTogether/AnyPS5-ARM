@@ -188,6 +188,29 @@ void main() {
       expect(engines.single.stopped, isTrue);
     });
 
+    test('a call that rang through a push rings here; its Answer is carried out', () async {
+      final ece = Person.fromJson(card('ece', name: 'Ece'));
+      await calls().fromPush('in1', ece);
+      expect(calls().incoming.single.callId, 'in1');
+      expect(calls().incoming.single.from.displayName, 'Ece');
+      await calls().fromPush('in1', ece, answer: true);
+      expect(calls().incoming, isEmpty);
+      expect(calls().active?.id, 'in1');
+      expect(
+        server.requests.where((r) => r.$2 == '/api/v1/calls/in1/answer'),
+        hasLength(1),
+      );
+    });
+
+    test('a push for a call that is over rings nothing', () async {
+      final ended = server.answer;
+      server.answer = (method, path, body) => path == '/api/v1/calls/old1'
+          ? (200, {...callView('old1'), 'endedAt': '2026-11-06T10:00:00Z'})
+          : ended(method, path, body);
+      await calls().fromPush('old1', Person.fromJson(card('ece')));
+      expect(calls().incoming, isEmpty);
+    });
+
     test('declining tells the server and stops ringing', () async {
       ringing('in1');
       await until(() => calls().incoming.isNotEmpty);

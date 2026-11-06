@@ -2,7 +2,7 @@ import XCTest
 @testable import AnyPS5Core
 
 /// The party's chat: a group conversation tied to the party, read beside its voice and kept out
-/// of the inbox's list and unread count; reporting a message.
+/// of the inbox's list and unread count.
 final class TogetherPartyChatTests: TogetherSignedInCase {
     typealias M = TogetherMessagesTests
     typealias P = TogetherPartyTests
@@ -71,19 +71,6 @@ final class TogetherPartyChatTests: TogetherSignedInCase {
         } catch let problem as TogetherProblem {
             XCTAssertEqual(problem.code, "account_muted")
         }
-    }
-
-    func testReportingAMessage() async throws {
-        FakeTogether.handler = { _, _ in (201, ["id": "r1"]) }
-        try await client.report(message: "mpc15", reason: .harassment)
-        XCTAssertEqual(last(), "POST /api/v1/reports")
-        XCTAssertEqual(body()?["targetKind"] as? String, "message")
-        XCTAssertEqual(body()?["targetId"] as? String, "mpc15")
-        XCTAssertEqual(body()?["reason"] as? String, "harassment")
-        XCTAssertNil(body()?["note"])
-        try await client.report(message: "mpc15", reason: .other, note: "  spoilers on purpose  ")
-        XCTAssertEqual(body()?["note"] as? String, "spoilers on purpose")
-        XCTAssertEqual(TogetherReportReason.allCases.map(\.rawValue), ["spam", "harassment", "hate", "sexual", "impersonation", "cheating", "piracy", "other"])
     }
 
     // MARK: The inbox leaves it out

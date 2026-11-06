@@ -1,4 +1,5 @@
 import AnyPS5Core
+import AnyPS5MediaServer
 import AnyPS5Online
 import AppKit
 import Combine
@@ -1085,6 +1086,14 @@ final class AppModel: ObservableObject {
     @Published var groupFocus = 0
     /// The open thread's actions: the message picked, the menu over it, a reply or an edit on its way.
     @Published var messageActions = MessageActions()
+    /// End-to-end encrypted direct messages (MessagesE2EE.swift): this Mac's keys, everyone's
+    /// checked devices, what sealed messages opened to, and what is remembered per conversation.
+    @Published var e2ee: TogetherE2EEBook?
+    /// Sealed attachments opened on this Mac, by media ID, shown from files only this user reads.
+    @Published var e2eeMedia: [String: TogetherMedia] = [:]
+    var e2eeMediaLoading: Set<String> = []
+    var e2eePreparing: Task<Void, Never>?
+    var e2eeFetching: Set<String> = []
     /// The party the user is in, the invites waiting, and whether a new party is open to friends.
     @Published var party: TogetherParty? {
         didSet { partyChanged() }
@@ -1144,9 +1153,16 @@ final class AppModel: ObservableObject {
     }
     var shareSession: ShareSession?
     var shareWatch: ShareWatchSession?
+    /// What AnyTogether holds: a media server for big share plays and parties or not (nil until
+    /// it said; the mesh's limits then).
+    @Published var mediaLimits: TogetherMediaLimits?
     /// The party's voice: the call joined, the mesh, the microphone, ⌥V held, who speaks.
     @Published var voiceCall: String?
+    /// The party's voice moved to another of the user's devices (the phone); joining here takes it back.
+    @Published var voiceElsewhere: TogetherVoiceMoved?
     var partyVoice: PartyVoice?
+    /// The party's voice through the media server, once the call moved there (the mesh is closed then).
+    var sfuVoice: SfuVoice?
     /// The microphone's switch and deafening.
     @Published var mic = TogetherVoiceMic()
     var micOn: Bool { mic.on }
@@ -2370,6 +2386,8 @@ final class AppModel: ObservableObject {
     /// Since when the user is in the party, for Discord; a party left forgets who asked with its code.
     func partyChanged() {
         syncPartyChat()
+        // The party's call moved to the media server: the voice follows.
+        if let call = party?.call, call.media == .sfu, call.id == voiceCall { moveVoiceToMediaServer(call.id) }
         guard party?.id != partySince?.id else { return updateDiscord() }
         partySince = party.map { ($0.id, Date()) }
         codeAskers = []
@@ -2413,7 +2431,7 @@ final class AppModel: ObservableObject {
             }
         }
         let activity = DiscordActivity(game: game?.name, since: game != nil ? discordSince ?? sessionStart : partySince?.at,
-                                       party: party.map { DiscordActivity.Party(id: $0.id, size: $0.members.count, max: TogetherParty.maxSize) },
+                                       party: party.map { DiscordActivity.Party(id: $0.id, size: $0.members.count, max: $0.capacity) },
                                        button: button, partyText: JS.text(.inParty))
         guard activity != discordShown else { return }
         discordShown = activity

@@ -87,9 +87,13 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
     public let editCount: Int
     /// Who reacted with what, in TogetherMessageReaction's order; empty once unsent (and from an older server).
     public var reactions: [TogetherReactionCount]
+    /// End-to-end encrypted (docs/e2ee.md): its words and its attachment's key are in here, and
+    /// `text` is only "[encrypted message]" for older clients. Opened with TogetherE2EE.
+    public var sealed: TogetherE2EE.Sealed?
 
     public init(id: String, conversationId: String, seq: Int, authorId: String?, text: String?, replyTo: Int? = nil, editedAt: Date? = nil, deletedAt: Date? = nil, createdAt: Date,
-                kind: String? = nil, caption: String? = nil, attachments: [TogetherAttachment]? = nil, editCount: Int = 0, reactions: [TogetherReactionCount] = []) {
+                kind: String? = nil, caption: String? = nil, attachments: [TogetherAttachment]? = nil, editCount: Int = 0, reactions: [TogetherReactionCount] = [],
+                sealed: TogetherE2EE.Sealed? = nil) {
         self.id = id
         self.conversationId = conversationId
         self.seq = seq
@@ -104,9 +108,10 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
         self.attachments = attachments
         self.editCount = editCount
         self.reactions = reactions
+        self.sealed = sealed
     }
 
-    enum CodingKeys: String, CodingKey { case id, conversationId, seq, authorId, text, replyTo, editedAt, deletedAt, createdAt, kind, caption, attachments, editCount, reactions }
+    enum CodingKeys: String, CodingKey { case id, conversationId, seq, authorId, text, replyTo, editedAt, deletedAt, createdAt, kind, caption, attachments, editCount, reactions, sealed }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -124,6 +129,13 @@ public struct TogetherMessage: Decodable, Equatable, Sendable, Identifiable {
         attachments = try container.decodeIfPresent([TogetherAttachment].self, forKey: .attachments)
         editCount = container.lenient(Int.self, .editCount) ?? 0
         reactions = container.lenient(KnownReactions.self, .reactions)?.reactions ?? []
+        // A seal this launcher cannot read (another version) still marks it as sealed: it is
+        // never shown as its stand-in text.
+        if deletedAt == nil, container.contains(.sealed), (try? container.decodeNil(forKey: .sealed)) != true {
+            sealed = container.lenient(TogetherE2EE.Sealed.self, .sealed) ?? .unreadable
+        } else {
+            sealed = nil
+        }
     }
 
     /// The media it carries, when it is a media message (and not deleted).
@@ -211,6 +223,9 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
     public var updatedAt: Date
     /// Kept at the top of the list; false from an older server.
     public var pinned: Bool
+    /// A direct conversation with an end-to-end encrypted message in it: plain messages are
+    /// refused from then on. False from an older server.
+    public var encrypted: Bool
     /// No notifications for it; false from an older server.
     public var muted: Bool
     /// One for each other member; nil from an older server (and then none are shown).
@@ -219,7 +234,7 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
     public let partyId: String?
 
     public init(id: String, kind: String, title: String?, members: [TogetherPerson], lastSeq: Int, readSeq: Int, unread: Int, lastMessage: TogetherMessage?, updatedAt: Date,
-                pinned: Bool = false, muted: Bool = false, receipts: [TogetherReceipt]? = nil, partyId: String? = nil) {
+                pinned: Bool = false, muted: Bool = false, receipts: [TogetherReceipt]? = nil, encrypted: Bool = false, partyId: String? = nil) {
         self.id = id
         self.kind = kind
         self.title = title
@@ -232,10 +247,11 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
         self.pinned = pinned
         self.muted = muted
         self.receipts = receipts
+        self.encrypted = encrypted
         self.partyId = partyId
     }
 
-    enum CodingKeys: String, CodingKey { case id, kind, title, members, lastSeq, readSeq, unread, lastMessage, updatedAt, pinned, muted, receipts, partyId }
+    enum CodingKeys: String, CodingKey { case id, kind, title, members, lastSeq, readSeq, unread, lastMessage, updatedAt, pinned, muted, receipts, encrypted, partyId }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -251,6 +267,7 @@ public struct TogetherConversation: Decodable, Equatable, Sendable, Identifiable
         pinned = container.lenient(Bool.self, .pinned) ?? false
         muted = container.lenient(Bool.self, .muted) ?? false
         receipts = container.lenient([TogetherReceipt].self, .receipts)
+        encrypted = container.lenient(Bool.self, .encrypted) ?? false
         partyId = container.lenient(String.self, .partyId)
     }
 
