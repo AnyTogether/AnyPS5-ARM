@@ -2,6 +2,8 @@ import 'package:flutter/widgets.dart';
 
 import 'calls.dart';
 import 'discover.dart';
+import 'e2ee_devices.dart';
+import 'e2ee_keys.dart';
 import 'feed.dart';
 import 'friends.dart';
 import 'media_livekit.dart';
@@ -30,10 +32,18 @@ class TogetherHub extends ChangeNotifier {
     ShareRoom Function()? shareRoom,
     VoiceRoom Function()? voiceRoom,
     PushChannel? pushChannel,
+    DeviceKeyStore? e2eeKeys,
+    String deviceName = 'AnyPS5 Remote',
   }) : socket = socket ?? TogetherSocket(account: account) {
+    e2ee = E2ee(
+      account: account,
+      socket: this.socket,
+      keys: e2eeKeys ?? SecureDeviceKeyStore(),
+      deviceName: deviceName,
+    );
     friends = Friends(account: account, socket: this.socket)
       ..addListener(notifyListeners);
-    messages = Messages(account: account, socket: this.socket)
+    messages = Messages(account: account, socket: this.socket, e2ee: e2ee)
       ..addListener(notifyListeners);
     parties = Parties(account: account, socket: this.socket)
       ..addListener(notifyListeners);
@@ -90,6 +100,9 @@ class TogetherHub extends ChangeNotifier {
   final TogetherAccount account;
   final TogetherSocket socket;
   late final Friends friends;
+
+  /// End-to-end encryption of direct messages: this phone's keys and the people's devices.
+  late final E2ee e2ee;
   late final Messages messages;
   late final Parties parties;
   late final Feed feed;
@@ -157,6 +170,7 @@ class TogetherHub extends ChangeNotifier {
     calls.clear();
     typing.clear();
     socket.stop();
+    e2ee.clear();
     friends.clear();
     messages.clear();
     parties.clear();
@@ -165,6 +179,7 @@ class TogetherHub extends ChangeNotifier {
     sharePlays.clear();
     discover.clear();
     push.clear();
+    // End-to-end encryption registers once the socket is live (E2ee listens for it).
     if (user != null) {
       socket.start();
       push.start().catchError((_) {});
@@ -181,6 +196,7 @@ class TogetherHub extends ChangeNotifier {
     _lifecycle.dispose();
     friends.dispose();
     messages.dispose();
+    e2ee.dispose();
     calls.dispose();
     typing.dispose();
     voice.dispose();
