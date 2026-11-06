@@ -238,6 +238,7 @@ class ChatMessage {
     'unsupported_media_type' ||
     'bad_image' ||
     'restricted_by_family' ||
+    'account_muted' ||
     'storage_disabled' => true,
     _ => false,
   };
@@ -457,6 +458,47 @@ List<Conversation> pinnedFirst(Iterable<Conversation> list) {
   return [for (final (_, c) in indexed) c];
 }
 
+/// The messages of one page of a thread, oldest first.
+List<ChatMessage> messagesOf(Map<String, dynamic> page) => [
+  for (final json in (page['messages'] as List? ?? const []))
+    ChatMessage.fromJson(json as Map<String, dynamic>),
+];
+
+/// By place in the conversation; the ones still on their way last.
+int byPlace(ChatMessage a, ChatMessage b) {
+  if (a.seq == 0 || b.seq == 0) return a.seq == 0 ? (b.seq == 0 ? 0 : 1) : -1;
+  return a.seq.compareTo(b.seq);
+}
+
+/// A message's reactions as they will be once [me] adds [reaction], or takes it back when it
+/// is theirs already: the guess shown before the server counts it.
+List<ReactionCount> reactionsToggled(
+  ChatMessage message,
+  MessageReaction reaction,
+  String me,
+) {
+  final mine = message.reacted(reaction, me);
+  final before = message.reactions;
+  return [
+    for (final r in MessageReaction.values)
+      if (r == reaction)
+        ?_toggled(before.where((c) => c.reaction == r).firstOrNull, r, me, mine)
+      else
+        ...before.where((c) => c.reaction == r),
+  ];
+}
+
+ReactionCount? _toggled(
+  ReactionCount? count,
+  MessageReaction reaction,
+  String me,
+  bool mine,
+) {
+  final who = [...?count?.userIds];
+  mine ? who.remove(me) : who.add(me);
+  return who.isEmpty ? null : ReactionCount(reaction, who);
+}
+
 /// Messages on the phone: the conversations newest first with what is unread, the one open
 /// with its thread, sending (kept once however often it is sent), and everything live.
 class Messages extends ChangeNotifier {
@@ -487,6 +529,20 @@ class Messages extends ChangeNotifier {
   /// My own read receipts setting as another device last told it; null until it does.
   bool? readReceipts;
 
+  /// Conversations that live beside the list rather than in it (a party's chat): their
+  /// messages are not counted here and never make the list load again.
+  bool Function(String conversationId) aside = _nowhere;
+
+  static bool _nowhere(String _) => false;
+
+  /// Conversations a message came for that the list did not have: asked about once, and
+  /// left alone when the list, loaded again, still did not have them.
+  final _asked = <String>{};
+  final _unlisted = <String>{};
+
+  bool _elsewhere(Object? id) =>
+      id is String && byId(id) == null && (aside(id) || _unlisted.contains(id));
+
   String? get _me => account.user?.id;
 
   Conversation? byId(String? id) =>
@@ -502,6 +558,11 @@ class Messages extends ChangeNotifier {
         Conversation.fromJson(json as Map<String, dynamic>),
     ];
     loaded = true;
+    for (final id in _asked) {
+      if (byId(id) == null) _unlisted.add(id);
+    }
+    _asked.clear();
+    _unlisted.removeWhere((id) => byId(id) != null);
     await _countUnread();
     final shown = open;
     if (shown != null && shown.unread > 0) await _read(shown);
@@ -695,18 +756,7 @@ class Messages extends ChangeNotifier {
     if (me == null) return;
     final mine = message.reacted(reaction, me);
     final before = message.reactions;
-    final guess = <ReactionCount>[
-      for (final r in MessageReaction.values)
-        if (r == reaction)
-          ?_toggled(
-            before.where((c) => c.reaction == r).firstOrNull,
-            r,
-            me,
-            mine,
-          )
-        else
-          ...before.where((c) => c.reaction == r),
-    ];
+    final guess = reactionsToggled(message, reaction, me);
     _reactions(message.conversationId, message.seq, guess);
     try {
       final json = await account.call(
@@ -722,17 +772,6 @@ class Messages extends ChangeNotifier {
       _reactions(message.conversationId, message.seq, before);
       rethrow;
     }
-  }
-
-  static ReactionCount? _toggled(
-    ReactionCount? count,
-    MessageReaction reaction,
-    String me,
-    bool mine,
-  ) {
-    final who = [...?count?.userIds];
-    mine ? who.remove(me) : who.add(me);
-    return who.isEmpty ? null : ReactionCount(reaction, who);
   }
 
   /// A message's reactions replaced, in the thread and as a conversation's last message.
@@ -802,12 +841,13 @@ class Messages extends ChangeNotifier {
       if (at >= 0) {
         thread = [...thread]..[at] = message;
       } else {
-        thread = [...thread, message]..sort(_order);
+        thread = [...thread, message]..sort(byPlace);
       }
     }
     final conversation = byId(message.conversationId);
     if (conversation == null) {
-      refresh().catchError((_) {});
+      final id = message.conversationId;
+      if (!_elsewhere(id) && _asked.add(id)) refresh().catchError((_) {});
       notifyListeners();
       return;
     }
@@ -866,6 +906,8 @@ class Messages extends ChangeNotifier {
 
   void clear() {
     conversations = const [];
+    _asked.clear();
+    _unlisted.clear();
     unread = 0;
     loaded = false;
     openId = null;
@@ -901,6 +943,8 @@ class Messages extends ChangeNotifier {
           (data['seq'] as num? ?? 0).toInt(),
           ChatMessage.reactionsFrom(data['reactions']),
         );
+      case 'conversation.read' when _elsewhere(data['conversationId']):
+        return;
       case 'conversation.read' when data['userId'] == _me:
         // Read on another device.
         final id = data['conversationId'];
@@ -937,6 +981,8 @@ class Messages extends ChangeNotifier {
           notifyListeners();
           refresh().catchError((_) {});
         }
+      case 'conversation.updated' when _elsewhere(data['conversationId']):
+        return;
       case 'conversation.updated':
         if (data['removed'] == true && data['conversationId'] == openId) {
           hide();
@@ -975,16 +1021,7 @@ class Messages extends ChangeNotifier {
     _page(page).forEach(_arrived);
   }
 
-  static List<ChatMessage> _page(Map<String, dynamic> page) => [
-    for (final json in (page['messages'] as List? ?? const []))
-      ChatMessage.fromJson(json as Map<String, dynamic>),
-  ];
-
-  /// By place in the conversation; the ones still on their way last.
-  static int _order(ChatMessage a, ChatMessage b) {
-    if (a.seq == 0 || b.seq == 0) return a.seq == 0 ? (b.seq == 0 ? 0 : 1) : -1;
-    return a.seq.compareTo(b.seq);
-  }
+  static List<ChatMessage> _page(Map<String, dynamic> page) => messagesOf(page);
 
   @override
   void dispose() {

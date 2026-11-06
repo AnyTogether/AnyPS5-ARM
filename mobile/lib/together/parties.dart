@@ -57,6 +57,7 @@ class Party {
     this.deafened = const {},
     this.joinCode,
     this.discord,
+    this.conversationId,
   });
 
   factory Party.fromJson(Map<String, dynamic> json) {
@@ -91,6 +92,7 @@ class Party {
           : const {},
       joinCode: JoinCode.fromJson(json['joinCode']),
       discord: json['discord'] as String?,
+      conversationId: json['conversationId'] as String?,
       listing: PartyListing.fromJson(json['public']),
       requests: [
         for (final person in (json['requests'] as List? ?? const []))
@@ -127,6 +129,10 @@ class Party {
   /// The party's Discord server or channel, set by the leader (members see it).
   final String? discord;
 
+  /// The party's text chat, for its members; null from an older server or for someone who is
+  /// not in it.
+  final String? conversationId;
+
   bool get full => members.length >= maxPartySize;
 
   bool has(String userId) => members.any((person) => person.id == userId);
@@ -153,6 +159,7 @@ class Party {
     deafened: deafened,
     joinCode: joinCode,
     discord: discord,
+    conversationId: conversationId,
   );
 }
 
@@ -326,6 +333,7 @@ class Parties extends ChangeNotifier {
     deafened: p.deafened,
     joinCode: joinCode == null ? p.joinCode : joinCode(),
     discord: p.discord,
+    conversationId: p.conversationId,
   );
 
   /// Leader only: lets someone who asked in (an invite they join with), or says no.

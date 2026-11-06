@@ -469,6 +469,37 @@ void main() {
     );
   });
 
+  testWidgets('party chat on a phone', (tester) async {
+    final h = await hub(tester, voice: [0.4, 0, 0]);
+    await shoot(
+      tester,
+      'phone-party-chat',
+      h,
+      together(h, TogetherTab.party),
+      size: _phone,
+      then: () async {
+        await h.voice.join();
+        await tester.tap(find.text('Chat'));
+        (h.socket as DemoSocket).push('typing', {
+          'conversationId': 'pc-ines',
+          'userId': 'mira',
+        });
+      },
+    );
+  });
+
+  testWidgets('party chat on a large phone', (tester) async {
+    final h = await hub(tester, voice: [0.4, 0, 0]);
+    await shoot(
+      tester,
+      'phone-party-chat-wide',
+      h,
+      together(h, TogetherTab.party),
+      size: const Size(2796, 1290),
+      then: h.voice.join,
+    );
+  });
+
   testWidgets('profile', (tester) async {
     final h = await hub(tester);
     await shoot(tester, 'phone-profile', h, together(h, TogetherTab.profile));

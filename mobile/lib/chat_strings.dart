@@ -1,5 +1,6 @@
 import 'strings.dart';
 import 'together/messages.dart';
+import 'together/reports.dart';
 
 /// Reactions, replies, editing and unsending, receipts, pinning and muting in messages, beside
 /// [Strings], their texts in assets/l10n. The wording follows the website's.
@@ -38,4 +39,26 @@ extension ChatTexts on Strings {
   String get readReceiptsOn => lookup('on');
   String get readReceiptsOff => lookup('off');
   String get readReceiptsHint => lookup('readReceiptsHint');
+
+  /// Why a message was not sent, beyond what [Strings] says: too many at once, or a muted
+  /// account. The launchers' texts.
+  String get tooManyMessages => lookup('joinTooMany');
+  String get accountMuted => lookup('joinAccountMuted');
+
+  // The party's chat
+
+  String get partyChat => lookup('partyChat');
+  String get partyChatWrite => lookup('partyChatWrite');
+  String get partyChatEmpty => lookup('partyChatEmpty');
+  String get formerMember => lookup('formerMember');
+
+  // Reporting a message
+
+  String get report => lookup('report');
+  String get reportMessage => lookup('reportMessage');
+  String get reportMessageLead => lookup('reportMessageLead');
+  String reportReason(ReportReason reason) => lookup('reason_${reason.name}');
+  String get reportNote => lookup('reportNote');
+  String get sendReport => lookup('sendReport');
+  String get reportSent => lookup('reportSent');
 }
