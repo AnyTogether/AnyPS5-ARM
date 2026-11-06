@@ -133,7 +133,12 @@ void main() {
       final media = SealedMedia();
       expect(
         media.open(
-          Attachment(id: 'x', kind: MediaKind.image, url: url('/clip'), sealed: true),
+          Attachment(
+            id: 'x',
+            kind: MediaKind.image,
+            url: url('/clip'),
+            sealed: true,
+          ),
         ),
         throwsA(isA<E2eeError>()),
       );

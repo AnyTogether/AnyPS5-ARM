@@ -1445,8 +1445,17 @@ class Messages extends ChangeNotifier {
     return a.seq.compareTo(b.seq);
   }
 
+  bool _disposed = false;
+
+  /// Answers and openings still on their way after the hub went are dropped.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     _events.cancel();
     e2ee?.removeListener(_e2eeChanged);
     super.dispose();

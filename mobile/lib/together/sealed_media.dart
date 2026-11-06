@@ -86,7 +86,9 @@ class SealedMedia {
           _keepBytes(id, plain);
           return plain;
         })
-        .whenComplete(() => _loading.remove(id));
+        .whenComplete(() {
+          _loading.remove(id);
+        });
   }
 
   void _keepBytes(String id, Uint8List bytes) {

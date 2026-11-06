@@ -82,7 +82,6 @@ void main() {
       ('POST', 'reports') => <String, dynamic>{},
       _ => null,
     };
-    await hub.e2ee.start();
   });
 
   tearDown(() => hub.dispose());
@@ -123,35 +122,38 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the lock opens the sheet: the safety number, the mark, the devices', (
-    tester,
-  ) async {
-    await open(tester, theirs: [ecePublic]);
-    expect(find.text('End-to-end encrypted'), findsOneWidget);
-    await tester.tap(find.text('End-to-end encrypted'));
-    await tester.pumpAndSettle();
-    expect(find.text('SAFETY NUMBER'), findsOneWidget);
-    final number = await tester.runAsync(
-      () => hub.e2ee.safetyNumberOf(hub.messages.chatOf(hub.messages.open)!),
-    );
-    await tester.pumpAndSettle();
-    for (final group in safetyGroups(number!)) {
-      expect(find.text(group), findsWidgets);
-    }
-    expect(find.text('Pixel 8'), findsOneWidget);
-    expect(find.text('This device'), findsOneWidget);
-    expect(find.text('Ece Mac'), findsOneWidget);
-    expect(
-      find.text('A new device cannot read messages sent before it was added.'),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('We compared them'));
-    await tester.pumpAndSettle();
-    expect(find.text('Compared'), findsOneWidget);
-    expect(find.text('We compared them'), findsNothing);
-    expect(hub.messages.lockOf(hub.messages.open).compared, isTrue);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'the lock opens the sheet: the safety number, the mark, the devices',
+    (tester) async {
+      await open(tester, theirs: [ecePublic]);
+      expect(find.text('End-to-end encrypted'), findsOneWidget);
+      await tester.tap(find.text('End-to-end encrypted'));
+      await tester.pumpAndSettle();
+      expect(find.text('SAFETY NUMBER'), findsOneWidget);
+      final number = await tester.runAsync(
+        () => hub.e2ee.safetyNumberOf(hub.messages.chatOf(hub.messages.open)!),
+      );
+      await tester.pumpAndSettle();
+      for (final group in safetyGroups(number!)) {
+        expect(find.text(group), findsWidgets);
+      }
+      expect(find.text('Pixel 8'), findsOneWidget);
+      expect(find.text('This device'), findsOneWidget);
+      expect(find.text('Ece Mac'), findsOneWidget);
+      expect(
+        find.text(
+          'A new device cannot read messages sent before it was added.',
+        ),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('We compared them'));
+      await tester.pumpAndSettle();
+      expect(find.text('Compared'), findsOneWidget);
+      expect(find.text('We compared them'), findsNothing);
+      expect(hub.messages.lockOf(hub.messages.open).compared, isTrue);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('someone on an older app: the label says it is not encrypted', (
     tester,

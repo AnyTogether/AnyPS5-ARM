@@ -133,10 +133,8 @@ class TogetherHub extends ChangeNotifier {
     notifications.clear();
     sharePlays.clear();
     discover.clear();
-    if (user != null) {
-      socket.start();
-      e2ee.start().catchError((_) {});
-    }
+    // End-to-end encryption registers once the socket is live (E2ee listens for it).
+    if (user != null) socket.start();
     notifyListeners();
   }
 

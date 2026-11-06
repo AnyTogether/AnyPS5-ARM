@@ -320,9 +320,11 @@ void main() {
     final puts = server.requests.where((r) => r.$1 == 'PUT').length;
 
     // Signed in again on the same phone: the same keys, and nothing to register.
-    hub.dispose();
-    await start(store: keys);
-    expect(hub.e2ee.device!.deviceId, firstId);
+    final again = E2ee(account: hub.account, socket: hub.socket, keys: keys);
+    addTearDown(again.dispose);
+    await again.start();
+    expect(again.on, isTrue);
+    expect(again.device!.deviceId, firstId);
     expect(server.requests.where((r) => r.$1 == 'PUT').length, puts);
   });
 

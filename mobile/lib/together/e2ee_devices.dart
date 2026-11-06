@@ -106,6 +106,10 @@ class E2ee extends ChangeNotifier {
   Future<void>? _starting;
   String? _user;
 
+  /// Bumped by [clear] and [use]: a registration still on its way for an earlier one is dropped.
+  int _generation = 0;
+  bool _disposed = false;
+
   /// The conversation on screen: told when a device list it uses changes.
   DirectChat? watched;
 
@@ -125,6 +129,8 @@ class E2ee extends ChangeNotifier {
   }
 
   Future<void> _register(String user) async {
+    final generation = _generation;
+    bool stale() => _generation != generation || _me != user;
     Map<String, dynamic>? current;
     try {
       final json = await account.call('GET', 'me/e2ee/device');
@@ -152,16 +158,16 @@ class E2ee extends ChangeNotifier {
       debugPrint(
         '[anyps5-remote] no keystore for end-to-end encryption: $error',
       );
-      _set(E2eeAvailability.off);
+      if (!stale()) _set(E2eeAvailability.off);
       return;
     }
-    if (_me != user) return;
+    if (stale()) return;
     final mine = await publicDevice(secrets, user, name: deviceName);
     if (current?['id'] != mine.id || current?['boxKey'] != mine.boxKey) {
       try {
         await account.call('PUT', 'me/e2ee/device', mine.registration());
       } on TogetherProblem catch (problem) {
-        if (problem.status == 404 && current == null) {
+        if (problem.status == 404 && current == null && !stale()) {
           _set(E2eeAvailability.off);
         }
         return;
@@ -169,7 +175,7 @@ class E2ee extends ChangeNotifier {
         return;
       }
     }
-    if (_me != user) return;
+    if (stale()) return;
     device = secrets;
     _devices.remove(user);
     _set(E2eeAvailability.on);
@@ -184,6 +190,8 @@ class E2ee extends ChangeNotifier {
   /// asking a server.
   @visibleForTesting
   void use(DeviceSecrets keys, Map<String, UserDevices> devices) {
+    _generation++;
+    _user = _me;
     device = keys;
     _devices
       ..clear()
@@ -469,6 +477,7 @@ class E2ee extends ChangeNotifier {
   }
 
   void clear() {
+    _generation++;
     availability = E2eeAvailability.unknown;
     device = null;
     _devices.clear();
@@ -505,7 +514,13 @@ class E2ee extends ChangeNotifier {
   }
 
   @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
+  @override
   void dispose() {
+    _disposed = true;
     _events.cancel();
     super.dispose();
   }
