@@ -126,6 +126,145 @@ class TrophyLevel {
   final int progress;
 }
 
+/// The accents a profile can pick, as the launcher offers them (packages/shared accents).
+const profileAccents = <String, int>{
+  'blue': 0xFF4F94FF,
+  'mint': 0xFF5CEBBD,
+  'coral': 0xFFFF8066,
+  'violet': 0xFFA885FF,
+  'gold': 0xFFFFCC5C,
+  'white': 0xFFF0F0F0,
+};
+
+/// 0xFFRRGGBB from "#rrggbb", null for anything else.
+int? hexColor(Object? value) {
+  if (value is! String) return null;
+  final match = RegExp(r'^#([0-9a-fA-F]{6})$').firstMatch(value);
+  return match == null ? null : 0xFF000000 | int.parse(match[1]!, radix: 16);
+}
+
+/// The picture a profile picked for behind its header: a preset or a game's artwork.
+class ProfileCover {
+  const ProfileCover({required this.kind, required this.id, required this.url});
+
+  static ProfileCover? fromJson(Object? json) {
+    if (json is! Map || json['url'] is! String) return null;
+    return ProfileCover(
+      kind: json['kind'] as String? ?? 'preset',
+      id: json['id'] as String? ?? '',
+      url: json['url'] as String,
+    );
+  }
+
+  final String kind;
+  final String id;
+  final String url;
+}
+
+class ThemeColors {
+  const ThemeColors({
+    required this.deep,
+    required this.middle,
+    required this.bright,
+    required this.accent,
+  });
+
+  static ThemeColors? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final [deep, middle, bright, accent] = [
+      for (final key in ['deep', 'middle', 'bright', 'accent'])
+        hexColor(json[key]),
+    ];
+    if (deep == null || middle == null || bright == null || accent == null) {
+      return null;
+    }
+    return ThemeColors(
+      deep: deep,
+      middle: middle,
+      bright: bright,
+      accent: accent,
+    );
+  }
+
+  final int deep;
+  final int middle;
+  final int bright;
+  final int accent;
+}
+
+/// A Theme Hub theme: the one a profile wears, or one of the Hub's to pick from.
+class ProfileTheme {
+  const ProfileTheme({
+    required this.id,
+    required this.name,
+    required this.colors,
+    required this.preview,
+    required this.thumb,
+    this.makerHandle,
+    this.makerName,
+  });
+
+  /// Null for anything that is not a whole theme.
+  static ProfileTheme? fromJson(Object? json) {
+    if (json is! Map) return null;
+    final colors = ThemeColors.fromJson(json['colors']);
+    final [id, name, preview, thumb] = [
+      for (final key in ['id', 'name', 'preview', 'thumb'])
+        json[key] is String ? json[key] as String : null,
+    ];
+    if (id == null || name == null || colors == null) return null;
+    final maker = json['maker'];
+    return ProfileTheme(
+      id: id,
+      name: name,
+      colors: colors,
+      preview: preview ?? thumb ?? '',
+      thumb: thumb ?? preview ?? '',
+      makerHandle: maker is Map ? maker['handle'] as String? : null,
+      makerName: maker is Map ? maker['displayName'] as String? : null,
+    );
+  }
+
+  final String id;
+  final String name;
+  final ThemeColors colors;
+
+  /// 1280x720 and 640x360 stills.
+  final String preview;
+  final String thumb;
+  final String? makerHandle;
+  final String? makerName;
+}
+
+/// How a profile looks: a cover, an accent and a theme, each null on an older server. A cover
+/// and an accent picked win over the theme's.
+class ProfileLook {
+  const ProfileLook({this.cover, this.accent, this.theme});
+
+  factory ProfileLook.fromJson(Map<String, dynamic> json) => ProfileLook(
+    cover: ProfileCover.fromJson(json['cover']),
+    accent: profileAccents.containsKey(json['accent'])
+        ? json['accent'] as String
+        : null,
+    theme: ProfileTheme.fromJson(json['theme']),
+  );
+
+  final ProfileCover? cover;
+  final String? accent;
+  final ProfileTheme? theme;
+
+  /// What goes behind the header; null for the app's own.
+  String? get picture {
+    final url = cover?.url ?? theme?.preview;
+    return url == null || url.isEmpty ? null : url;
+  }
+
+  /// The highlights' colour as 0xFFRRGGBB; null for the app's own.
+  int? get accentColor => profileAccents[accent] ?? theme?.colors.accent;
+
+  bool get isDefault => cover == null && accent == null && theme == null;
+}
+
 /// The signed-in person's own profile, with what only they see.
 class OwnProfile {
   const OwnProfile({
@@ -141,6 +280,7 @@ class OwnProfile {
     this.readReceipts = true,
     this.privateName,
     this.privateAvatar,
+    this.look = const ProfileLook(),
   });
 
   factory OwnProfile.fromJson(Map<String, dynamic> json) => OwnProfile(
@@ -157,6 +297,7 @@ class OwnProfile {
     readReceipts: json['readReceipts'] != false,
     privateName: IdentityBook.clean(json['privateName'] as String?),
     privateAvatar: IdentityBook.clean(json['privateAvatar'] as String?),
+    look: ProfileLook.fromJson(json),
   );
 
   final String handle;
@@ -179,6 +320,7 @@ class OwnProfile {
   /// The name and picture only accepted friends see; null when not set (or an older server).
   final String? privateName;
   final String? privateAvatar;
+  final ProfileLook look;
 
   OwnProfile copyWith({
     String? avatar,
@@ -189,6 +331,7 @@ class OwnProfile {
     bool clearPrivateName = false,
     String? privateAvatar,
     bool clearPrivateAvatar = false,
+    ProfileLook? look,
   }) => OwnProfile(
     handle: handle,
     displayName: displayName,
@@ -204,6 +347,7 @@ class OwnProfile {
     privateAvatar: clearPrivateAvatar
         ? null
         : privateAvatar ?? this.privateAvatar,
+    look: look ?? this.look,
   );
 }
 
@@ -219,6 +363,7 @@ class UserProfile {
     this.visible = const {},
     this.presence,
     this.trophyLevel,
+    this.look = const ProfileLook(),
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
@@ -242,6 +387,7 @@ class UserProfile {
           ? Presence.fromJson(json['presence'] as Map<String, dynamic>)
           : null,
       trophyLevel: TrophyLevel.fromJson(json['trophyLevel']),
+      look: ProfileLook.fromJson(json),
     );
   }
 
@@ -254,6 +400,7 @@ class UserProfile {
 
   /// Null when their trophies are private to the asker (or on an older server).
   final TrophyLevel? trophyLevel;
+  final ProfileLook look;
 }
 
 /// A game in someone's library: play time, and trophies when those are shown too.
@@ -329,6 +476,100 @@ class EarnedTrophy {
   final Rarity? rarityLabel;
 }
 
+/// One pin on a profile's showcase: an earned trophy, or a game from the library.
+class ShowcasePin {
+  const ShowcasePin.trophy(this.titleId, int this.trophyId);
+  const ShowcasePin.game(this.titleId) : trophyId = null;
+
+  final String titleId;
+
+  /// Null for a game.
+  final int? trophyId;
+
+  bool get isGame => trophyId == null;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ShowcasePin &&
+      other.titleId == titleId &&
+      other.trophyId == trophyId;
+
+  @override
+  int get hashCode => Object.hash(titleId, trophyId);
+}
+
+/// The pins being picked: six at most, trophies and games together, in the order picked.
+class ShowcasePicks {
+  ShowcasePicks([Iterable<ShowcasePin> pins = const []])
+    : _pins = pins.toSet().take(max).toList();
+
+  static const max = 6;
+
+  final List<ShowcasePin> _pins;
+
+  int get count => _pins.length;
+  bool get full => _pins.length >= max;
+  bool has(ShowcasePin pin) => _pins.contains(pin);
+
+  /// Unpins a pinned one, or pins another while there is room; false when there is none.
+  bool toggle(ShowcasePin pin) {
+    if (_pins.remove(pin)) return true;
+    if (full) return false;
+    _pins.add(pin);
+    return true;
+  }
+
+  /// What PUT /me/showcase takes: always both lists, since a list left out keeps what is stored
+  /// and that counts towards the six too.
+  Map<String, dynamic> toJson() => {
+    'trophies': [
+      for (final pin in _pins)
+        if (!pin.isGame) {'titleId': pin.titleId, 'trophyId': pin.trophyId},
+    ],
+    'games': [
+      for (final pin in _pins)
+        if (pin.isGame) pin.titleId,
+    ],
+  };
+}
+
+/// What a profile pinned to its top, as far as the asker may see it: a part kept private is null.
+/// At most six show, trophies first.
+class Showcase {
+  const Showcase({this.trophies, this.games});
+
+  factory Showcase.fromJson(Map<String, dynamic> json) {
+    final trophies = json['trophies'] is List
+        ? [
+            for (final t in json['trophies'] as List)
+              if (t is Map<String, dynamic> && t['titleId'] is String)
+                EarnedTrophy.fromJson(t),
+          ].take(ShowcasePicks.max).toList()
+        : null;
+    final games = json['games'] is List
+        ? [
+            for (final g in json['games'] as List)
+              if (g is Map<String, dynamic> && g['titleId'] is String)
+                LibraryGame.fromJson(g),
+          ].take(ShowcasePicks.max - (trophies?.length ?? 0)).toList()
+        : null;
+    return Showcase(trophies: trophies, games: games);
+  }
+
+  final List<EarnedTrophy>? trophies;
+  final List<LibraryGame>? games;
+
+  int get count => (trophies?.length ?? 0) + (games?.length ?? 0);
+  bool get isEmpty => count == 0;
+
+  ShowcasePicks get picks => ShowcasePicks([
+    for (final t in trophies ?? const <EarnedTrophy>[])
+      ShowcasePin.trophy(t.game.titleId, t.trophyId),
+    for (final g in games ?? const <LibraryGame>[])
+      ShowcasePin.game(g.game.titleId),
+  ]);
+}
+
 /// What a profile adds up to, from the games shown.
 class ProfileTotals {
   const ProfileTotals({
@@ -371,6 +612,7 @@ class ProfilePage {
     required this.trophies,
     required this.friends,
     required this.activity,
+    this.showcase,
   });
 
   final UserProfile profile;
@@ -378,6 +620,9 @@ class ProfilePage {
   final List<EarnedTrophy>? trophies;
   final List<Person>? friends;
   final FeedPage activity;
+
+  /// Null when the server has none (an older one) or it could not be read: nothing is shown.
+  final Showcase? showcase;
 
   ProfileTotals? get totals =>
       games == null ? null : ProfileTotals.of(games!, trophies);
@@ -411,6 +656,7 @@ class Profiles {
       trophiesJson,
       friendsJson,
       activity,
+      showcaseJson,
     ] = await Future.wait<Map<String, dynamic>?>([
       account.call('GET', path),
       _shown(account.call('GET', '$path/library')),
@@ -419,6 +665,7 @@ class Profiles {
       account
           .call('GET', '$path/activity?limit=10')
           .catchError((_) => const <String, dynamic>{}),
+      _quiet(account.call('GET', '$path/showcase')),
     ]);
     final profile = UserProfile.fromJson(card!);
     return ProfilePage(
@@ -442,7 +689,38 @@ class Profiles {
                 Person.fromJson(f as Map<String, dynamic>),
             ],
       activity: FeedPage.fromJson(activity ?? const {}),
+      showcase: showcaseJson == null ? null : Showcase.fromJson(showcaseJson),
     );
+  }
+
+  static Future<Map<String, dynamic>?> _quiet(
+    Future<Map<String, dynamic>> load,
+  ) async {
+    try {
+      return await load;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Pins exactly these, trophies and games together; what the server kept comes back.
+  Future<Showcase> saveShowcase(ShowcasePicks picks) async => Showcase.fromJson(
+    await account.call('PUT', 'me/showcase', picks.toJson()),
+  );
+
+  /// Wears a Theme Hub theme on the profile, or with null takes it off; the look kept comes
+  /// back. Putting one on clears the cover and accent.
+  Future<ProfileLook> wearTheme(String? themeId) async => ProfileLook.fromJson(
+    await account.call('PATCH', 'me/look', {'theme': themeId}),
+  );
+
+  /// The Hub's most popular themes, to wear.
+  Future<List<ProfileTheme>> themes() async {
+    final json = await account.call('GET', 'themes?sort=popular&limit=24');
+    return [
+      for (final card in json['themes'] as List? ?? const [])
+        ?ProfileTheme.fromJson(card),
+    ];
   }
 
   /// Older items of someone's recent activity.

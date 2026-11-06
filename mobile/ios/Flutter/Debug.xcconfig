@@ -1,1 +1,5 @@
 #include "Generated.xcconfig"
+// Push: a build signed with an Apple Developer team adds Push.xcconfig (never committed; see
+// mobile/README.md, Push), which turns on the push entitlement. Without it the app is built
+// as before, for AltStore and Sideloadly, and has no push.
+#include? "Push.xcconfig"

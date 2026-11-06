@@ -161,6 +161,7 @@ enum T {
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
         case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
         case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn = "voicePushToTalkOnMac", voicePushToTalkOff = "voicePushToTalkOffMac", voiceLeave, voiceNoMic, voiceJoined
+        case voiceMovedPhone, voiceMovedAway, voiceTakeBack, voiceOnPhone, voiceOnOtherDevice
         case togetherLinkBlocked
         case togetherOnlinePlay, togetherOnlinePlayDetail
         case messagesTyping, messagesTypingMany

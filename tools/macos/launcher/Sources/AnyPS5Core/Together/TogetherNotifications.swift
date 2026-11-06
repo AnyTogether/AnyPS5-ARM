@@ -45,6 +45,8 @@ public struct TogetherNotification: Decodable, Equatable, Sendable, Identifiable
         public var group: Bool?
         public var count: Int?
         public var text: String?
+        /// A message notification for an end-to-end encrypted message: its `text` is empty.
+        public var sealed: Bool?
         public var partyId: String?
         public var size: Int?
         public var sessionId: String?

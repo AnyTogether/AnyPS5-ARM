@@ -40,6 +40,61 @@ public enum MediaPrep {
         throw Failure(description: "the picture cannot be made small enough")
     }
 
+    /// A picture to seal for an end-to-end encrypted message, always drawn again from its pixels
+    /// (the server cannot strip a sealed one): no EXIF, GPS, TIFF, maker or XMP data goes along, and
+    /// the orientation is applied. A PNG when that fits, else a JPEG made smaller until it does.
+    public static func sealableImage(_ file: URL, maxBytes: Int, maxPixels: Int = 40_000_000) throws -> (data: Data, contentType: String, width: Int, height: Int) {
+        let data = try Data(contentsOf: file)
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            throw Failure(description: "not a picture")
+        }
+        let width = properties[kCGImagePropertyPixelWidth] as? Int ?? 0
+        let height = properties[kCGImagePropertyPixelHeight] as? Int ?? 0
+        guard width > 0, height > 0 else { throw Failure(description: "not a picture") }
+        var side = max(width, height)
+        if width * height > maxPixels {
+            side = Int(Double(side) * (Double(maxPixels) / Double(width * height)).squareRoot())
+        }
+        if let image = pixels(source, maxPixel: side), let png = encode(image, as: UTType.png, quality: nil), png.count <= maxBytes {
+            return (png, "image/png", image.width, image.height)
+        }
+        side = min(side, 3840)
+        for quality in [0.88, 0.8, 0.7] {
+            var tried = side
+            repeat {
+                if let image = pixels(source, maxPixel: tried), let jpeg = encode(image, as: UTType.jpeg, quality: quality), jpeg.count <= maxBytes {
+                    return (jpeg, "image/jpeg", image.width, image.height)
+                }
+                tried = tried * 3 / 4
+            } while tried >= 320
+        }
+        throw Failure(description: "the picture cannot be made small enough")
+    }
+
+    /// The picture's pixels alone, turned upright, at most `maxPixel` a side.
+    static func pixels(_ source: CGImageSource, maxPixel: Int) -> CGImage? {
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: maxPixel,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    /// A CGImage written out with no properties of the original: a decoded CGImage carries none,
+    /// and only the encoder's quality is given.
+    static func encode(_ image: CGImage, as type: UTType, quality: Double?) -> Data? {
+        let out = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(out, type.identifier as CFString, 1, nil) else { return nil }
+        var options: [CFString: Any] = [:]
+        if let quality { options[kCGImageDestinationLossyCompressionQuality] = quality }
+        CGImageDestinationAddImage(destination, image, options as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+        return out as Data
+    }
+
     static func jpeg(_ source: CGImageSource, maxPixel: Int, quality: Double) -> Data? {
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,

@@ -155,6 +155,8 @@ extension AppModel {
     func notificationDetail(_ note: TogetherNotification) -> String? {
         switch note.kind {
         case .message:
+            // A sealed message's notification carries no text.
+            if note.data.sealed == true { return TChat.text(.e2eeNotification) }
             let text = note.data.text.map { $0.count > 80 ? String($0.prefix(80)) + "…" : $0 }
             return [note.data.group == true ? note.data.title : nil, text].compactMap { $0 }.joined(separator: ": ").nilIfEmpty
         case .warning: return note.data.reason

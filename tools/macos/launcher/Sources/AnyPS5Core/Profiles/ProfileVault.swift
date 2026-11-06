@@ -38,10 +38,14 @@ public final class KeychainVault: SecretVault, @unchecked Sendable {
     public let service: String
     /// A keychain file of its own (tests); nil is the user's default keychain.
     private let keychain: SecKeychain?
+    /// Items made for this Mac only: readable after the first unlock, never synchronised to iCloud
+    /// Keychain nor moved to another Mac (end-to-end encryption's device keys).
+    public let thisDeviceOnly: Bool
 
-    public init(service: String = "AnyPS5 AnyTogether", keychain: SecKeychain? = nil) {
+    public init(service: String = "AnyPS5 AnyTogether", keychain: SecKeychain? = nil, thisDeviceOnly: Bool = false) {
         self.service = service
         self.keychain = keychain
+        self.thisDeviceOnly = thisDeviceOnly
     }
 
     private func query(_ account: String) -> [String: Any] {
@@ -71,6 +75,10 @@ public final class KeychainVault: SecretVault, @unchecked Sendable {
                                    kSecAttrLabel as String: service, kSecValueData as String: data]
         if let keychain { item[kSecUseKeychain as String] = keychain }
         if let access = Self.anyAppReads(label: service) { item[kSecAttrAccess as String] = access }
+        if thisDeviceOnly {
+            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            item[kSecAttrSynchronizable as String] = false
+        }
         return SecItemAdd(item as CFDictionary, nil) == errSecSuccess
     }
 

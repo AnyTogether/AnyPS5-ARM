@@ -38,14 +38,19 @@ public struct TogetherSharePlay: Codable, Equatable, Sendable, Identifiable {
     public let requests: [TogetherPerson]?
     /// The code anyone may ask to watch with, while one works; only the host is told.
     public let joinCode: TogetherJoinCode?
+    /// "mesh": the host streams to each viewer. "sfu": the host publishes once to the media
+    /// server, viewers without a pad watch from there and pad holders keep the direct connection.
+    /// It turns "sfu" above four viewers and stays so; an older server never says (the mesh).
+    public let media: TogetherMediaRoute
 
     enum CodingKeys: String, CodingKey {
-        case id, host, hostDevice, titleId, title, open, maxViewers, viewers, invited, requests, joinCode
+        case id, host, hostDevice, titleId, title, open, maxViewers, viewers, invited, requests, joinCode, media
         case listing = "public"
     }
 
     public init(id: String, host: TogetherPerson?, hostDevice: String, titleId: String, title: String?, open: Bool, maxViewers: Int, viewers: [Viewer], invited: [TogetherPerson]? = nil,
-                listing: TogetherShareListing? = nil, requests: [TogetherPerson]? = nil, joinCode: TogetherJoinCode? = nil) {
+                listing: TogetherShareListing? = nil, requests: [TogetherPerson]? = nil, joinCode: TogetherJoinCode? = nil, media: TogetherMediaRoute = .mesh) {
+        self.media = media
         self.listing = listing
         self.requests = requests
         self.joinCode = joinCode
@@ -60,10 +65,27 @@ public struct TogetherSharePlay: Codable, Equatable, Sendable, Identifiable {
         self.invited = invited
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        host = try container.decodeIfPresent(TogetherPerson.self, forKey: .host)
+        hostDevice = try container.decode(String.self, forKey: .hostDevice)
+        titleId = try container.decode(String.self, forKey: .titleId)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        open = try container.decode(Bool.self, forKey: .open)
+        maxViewers = try container.decode(Int.self, forKey: .maxViewers)
+        viewers = try container.decode([Viewer].self, forKey: .viewers)
+        invited = try container.decodeIfPresent([TogetherPerson].self, forKey: .invited)
+        listing = try container.decodeIfPresent(TogetherShareListing.self, forKey: .listing)
+        requests = try container.decodeIfPresent([TogetherPerson].self, forKey: .requests)
+        joinCode = try container.decodeIfPresent(TogetherJoinCode.self, forKey: .joinCode)
+        media = try container.decodeIfPresent(TogetherMediaRoute.self, forKey: .media) ?? .mesh
+    }
+
     /// The same share play with a new code, or none (made or stopped here before the server says).
     public func with(joinCode: TogetherJoinCode?) -> TogetherSharePlay {
         TogetherSharePlay(id: id, host: host, hostDevice: hostDevice, titleId: titleId, title: title, open: open, maxViewers: maxViewers, viewers: viewers, invited: invited,
-                          listing: listing, requests: requests, joinCode: joinCode)
+                          listing: listing, requests: requests, joinCode: joinCode, media: media)
     }
 }
 
@@ -72,6 +94,9 @@ public struct TogetherSharePlayJoin: Decodable, Equatable, Sendable {
     public let sharePlay: TogetherSharePlay
     public let iceServers: [TogetherIceServer]
     public let expiresAt: Date?
+    /// The media server's room while the share play goes through it (the host may publish,
+    /// viewers only watch); nil on the mesh and from older servers.
+    public let sfu: TogetherSfuAccess?
 }
 
 /// A friend asking the user to watch.
