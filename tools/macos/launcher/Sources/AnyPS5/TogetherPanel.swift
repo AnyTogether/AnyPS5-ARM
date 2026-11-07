@@ -92,6 +92,14 @@ extension AppModel {
                                      OnlinePlayHost.enabled = value
                                      self?.objectWillChange.send()
                                  }))
+            // The games' online logs for a bug report, as on Windows and Linux.
+            rows.append(PanelRow(id: "together-online-log", title: T.text(.togetherOnlineLog), detail: T.text(.togetherOnlineLogDetail), symbol: "doc.text.magnifyingglass",
+                                 kind: .action(destructive: false) {
+                                     // Made first, so it opens even before a game wrote one.
+                                     let folder = OnlinePlayHost.logFolder
+                                     try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                                     NSWorkspace.shared.open(folder)
+                                 }))
             rows += profileEditRows() + privateIdentityRows() + privacyRows() + (familyAllows(.discovery) ? discoveryRows() : []) + serverRows()
             rows.append(PanelRow(id: "together-signout", title: T.text(.togetherSignOut), symbol: "rectangle.portrait.and.arrow.right", kind: .action(destructive: true) { [weak self] in
                 self?.togetherSignOut()
