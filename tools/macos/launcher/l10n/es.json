@@ -913,5 +913,10 @@
   "engineGitCopied": "Resultado copiado",
   "engineGitRelinkAllDetail": "Juegos instalados creados con la compilación anterior: %d. Se conservan los datos guardados y los trofeos.",
   "engineGitRelinking": "Adaptando juegos instalados: %d",
-  "engineGitWaitUnlock": "Se está desbloqueando un juego. La actualización desde Git podrá ejecutarse cuando termine."
+  "engineGitWaitUnlock": "Se está desbloqueando un juego. La actualización desde Git podrá ejecutarse cuando termine.",
+  "engineGitBeforePlay": "Actualizar desde Git antes de jugar",
+  "engineGitBeforePlayDetail": "Comprueba el servidor remoto antes de iniciar un juego. Si hay nuevas confirmaciones, las descarga, compila el motor y adapta el juego. Se omite si no hay conexión.",
+  "engineGitBeforePlayStart": "Nuevas confirmaciones del motor: actualizando desde Git antes de iniciar el juego",
+  "engineGitChecking": "Buscando nuevas confirmaciones del motor",
+  "engineGitPlayAnywayMac": "No se pudo actualizar el motor: %@. Se jugará con la compilación actual."
 }

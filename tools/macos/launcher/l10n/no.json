@@ -905,5 +905,10 @@
   "engineGitRelinkAllDetail": "Installerte spill laget med forrige versjon: %d. Lagringsfiler og trofeer beholdes.",
   "engineGitRelinking": "Kobler til installerte spill på nytt: %d",
   "engineGitWaitUnlock": "Et spill låses opp. Oppdateringen fra Git kan kjøres når dette er fullført.",
+  "engineGitBeforePlay": "Oppdater fra Git før du spiller",
+  "engineGitBeforePlayDetail": "Før et spill starter, sjekkes det eksterne depotet. Hvis det finnes nye endringer («commits»), hentes og bygges disse først, og deretter kobles spillet til på nytt. Hoppes over ved frakoblet modus.",
+  "engineGitBeforePlayStart": "Nye endringer i motoren: oppdaterer fra Git før spillet starter",
+  "engineGitChecking": "Ser etter nye «commits» i motoren",
+  "engineGitPlayAnywayMac": "Kunne ikke oppdatere motoren: %@. Spiller med gjeldende versjon.",
   "engineGitCopy": "Velg for å kopiere utdataene"
 }

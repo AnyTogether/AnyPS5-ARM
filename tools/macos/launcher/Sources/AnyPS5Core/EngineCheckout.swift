@@ -343,6 +343,30 @@ public final class EngineGit: @unchecked Sendable {
         return first.hasPrefix("v") ? String(first.dropFirst()) : first
     }
 
+    /// Whether the remote has commits the checkout lacks (`git fetch`, then `HEAD..@{u}`), or the
+    /// checkout is not at `built` (pulled by hand since the launcher last built it). nil when it
+    /// cannot tell (offline, no upstream branch, no git) or `timeout` seconds passed. As AnyPS5
+    /// Desktop's needsUpdate, for Update from Git Before Playing.
+    public func needsUpdate(built: String?, timeout: TimeInterval = 20) -> Bool? {
+        let cancel = UnpackCancel()
+        let timer = DispatchWorkItem { cancel.cancel() }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: timer)
+        defer { timer.cancel() }
+        do {
+            let (fetchCode, _) = try run(tools.git, ["fetch", "--quiet"], quiet: true, cancel: cancel)
+            guard fetchCode == 0 else { return nil }
+            let (countCode, count) = try run(tools.git, ["rev-list", "--count", "HEAD..@{u}"], quiet: true, cancel: cancel)
+            guard countCode == 0,
+                  let behind = count.map({ $0.trimmingCharacters(in: .whitespaces) }).first(where: { !$0.isEmpty }).flatMap({ Int($0) }) else { return nil }
+            if behind > 0 { return true }
+            guard let built else { return false }
+            let now = try head(cancel)
+            return !now.isEmpty && now != built
+        } catch {
+            return nil
+        }
+    }
+
     /// Pulls, builds and makes the engine in `folder` (its Vulkan folder copied from `vulkanFrom`, a
     /// toolkit the launcher has); `onStep` and `onLine` say how far it is. Throws GitUpdateFailure.
     public func update(in folder: URL, vulkanFrom: Toolkit?, cancel: UnpackCancel? = nil, onStep: ((GitStep) -> Void)? = nil, onLine: ((String) -> Void)? = nil) throws -> GitUpdateResult {

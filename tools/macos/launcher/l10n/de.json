@@ -914,5 +914,10 @@
   "engineGitCopied": "Ausgabe kopiert",
   "engineGitRelinkAllDetail": "Mit dem vorherigen Build erstellte installierte Spiele: %d. Spielstände und Trophäen bleiben erhalten.",
   "engineGitRelinking": "Installierte Spiele werden neu verknüpft: %d",
-  "engineGitWaitUnlock": "Ein Spiel wird entsperrt. Die Aktualisierung aus Git kann danach ausgeführt werden."
+  "engineGitWaitUnlock": "Ein Spiel wird entsperrt. Die Aktualisierung aus Git kann danach ausgeführt werden.",
+  "engineGitBeforePlay": "Vor dem Spielen aus Git aktualisieren",
+  "engineGitBeforePlayDetail": "Prüft vor dem Spielstart das Remote-Repository. Bei neuen Commits werden diese abgerufen, die Engine erstellt und das Spiel neu verknüpft. Offline wird dies übersprungen.",
+  "engineGitBeforePlayStart": "Neue Engine-Commits: Aktualisierung aus Git vor dem Spielstart",
+  "engineGitChecking": "Suche nach neuen Engine-Commits",
+  "engineGitPlayAnywayMac": "Engine konnte nicht aktualisiert werden: %@. Das Spiel wird mit dem aktuellen Build gestartet."
 }

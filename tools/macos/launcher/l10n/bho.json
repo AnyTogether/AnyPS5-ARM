@@ -912,5 +912,9 @@
   "engineGitCopied": "आउटपुट कॉपी कइल गइल",
   "engineGitRelinkAllDetail": "पिछला बिल्ड के संगे बनावल गइल इंस्टॉल कइल गइल गेम: %d। बचत आ ट्रॉफी बनल रहेली।",
   "engineGitRelinking": "इंस्टॉल कइल गइल गेम के फेर से लिंक करे: %d",
-  "engineGitWaitUnlock": "एक गेम अनलॉक कइल जा रहल बा. Git से अपडेट पूरा होखे के बाद चल सकेला बा।"
+  "engineGitWaitUnlock": "एक गेम अनलॉक कइल जा रहल बा. Git से अपडेट पूरा होखे के बाद चल सकेला बा।",
+  "engineGitBeforePlay": "खेले से पहिले Git से अपडेट करीं",
+  "engineGitBeforePlayDetail": "गेम शुरू होखे से पहिले रिमोट जाँचल जाला। नया commit होखे त पहिले खींच के बिल्ड करीं, फेर गेम के दोबारा relink करीं। ऑफलाइन होखे पर ई कदम छोड़ दिहल जाला।",
+  "engineGitBeforePlayStart": "नया इंजन commit बा: गेम शुरू होखे से पहिले Git से अपडेट करीं",
+  "engineGitChecking": "नया इंजन commit के खोज रहल बा"
 }

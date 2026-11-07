@@ -905,5 +905,9 @@
   "engineGitRelinkAllDetail": "이전 빌드로 설치된 게임: %d. 세이브 데이터와 트로피는 그대로 유지됩니다.",
   "engineGitRelinking": "설치된 게임 다시 연결 중: %d",
   "engineGitWaitUnlock": "게임 잠금 해제 중입니다. 완료되면 Git 업데이트를 실행할 수 있습니다.",
+  "engineGitBeforePlay": "게임을 시작하기 전에 Git에서 업데이트하세요.",
+  "engineGitBeforePlayDetail": "게임 시작 전 원격 저장소를 확인합니다. 새로운 커밋이 있으면 먼저 가져오기(pull) 및 빌드를 수행한 후 게임을 다시 연결합니다. 오프라인 상태일 때는 건너뜁니다.",
+  "engineGitBeforePlayStart": "새로운 엔진 커밋 발견: 게임 시작 전 Git에서 업데이트를 진행합니다.",
+  "engineGitChecking": "새로운 엔진 커밋 확인 중",
   "engineGitCopy": "출력 내용을 복사하려면 선택하세요."
 }

@@ -905,5 +905,10 @@
   "engineGitRelinkAllDetail": "Mga naka-install na laro na ginawa gamit ang nakaraang pagbuo: %d. Mananatili ang mga save at tropeo.",
   "engineGitRelinking": "Muling pag-link ng mga naka-install na laro: %d",
   "engineGitWaitUnlock": "Isang laro ang ina-unlock. Maaaring tumakbo ang pag-update mula sa Git kapag tapos na ito.",
+  "engineGitBeforePlay": "I-update mula sa Git bago maglaro",
+  "engineGitBeforePlayDetail": "Bago magsimula ang laro, tinitingnan ang remote. Kung may mga bagong commit, pull at build muna, pagkatapos ay muling i-link ang laro. Nilaktawan kapag offline.",
+  "engineGitBeforePlayStart": "Mga bagong commit ng engine: ina-update mula sa Git bago magsimula ang laro",
+  "engineGitChecking": "Naghahanap ng mga bagong engine commit",
+  "engineGitPlayAnywayMac": "Hindi ma-update ang engine: %@. Naglalaro gamit ang kasalukuyang build.",
   "engineGitCopy": "piliin para kopyahin ang output"
 }

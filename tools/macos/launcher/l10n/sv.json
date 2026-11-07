@@ -905,5 +905,10 @@
   "engineGitRelinkAllDetail": "Installerade spel skapade med föregående version: %d. Sparfiler och troféer finns kvar.",
   "engineGitRelinking": "Återlänkar installerade spel: %d",
   "engineGitWaitUnlock": "Ett spel låses upp. Uppdateringen från Git kan köras när detta är klart.",
+  "engineGitBeforePlay": "Uppdatera från Git innan du spelar",
+  "engineGitBeforePlayDetail": "Kontrollerar fjärrarkivet innan ett spel startar. Om det finns nya ändringar (commits) hämtas och byggs dessa först, varpå spelet återlänkas. Hoppas över i offlineläge.",
+  "engineGitBeforePlayStart": "Nya ändringar i motorn: uppdaterar från Git innan spelet startar",
+  "engineGitChecking": "Söker efter nya commits i motorn",
+  "engineGitPlayAnywayMac": "Det gick inte att uppdatera motorn: %@. Spelet körs med den nuvarande versionen.",
   "engineGitCopy": "Välj för att kopiera utdata"
 }

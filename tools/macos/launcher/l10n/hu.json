@@ -885,5 +885,10 @@
   "engineGitRelinkAllDetail": "Az előző builddel telepített játékok száma: %d. A mentések és trófeák megmaradnak.",
   "engineGitRelinking": "Telepített játékok újracsatolása: %d",
   "engineGitWaitUnlock": "Egy játék feloldása van folyamatban. A Git frissítése a feloldás befejezése után futtatható.",
+  "engineGitBeforePlay": "Játék előtt frissíts innen: Git",
+  "engineGitBeforePlayDetail": "Játékindítás előtt ellenőrzi a távoli tárolót (remote). Ha vannak új commitok, először letölti és lefordítja (buildeli) azokat, majd újracsatolja a játékot. Offline módban ez a lépés kimarad.",
+  "engineGitBeforePlayStart": "Új motor-commitok: frissítés innen: Git a játék indítása előtt",
+  "engineGitChecking": "Új engine-commitok keresése",
+  "engineGitPlayAnywayMac": "Nem sikerült frissíteni a motort: %@. Játék a jelenlegi builddel.",
   "engineGitCopy": "Válaszd ki a kimenet másolásához"
 }

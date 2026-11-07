@@ -903,5 +903,10 @@
   "engineGitRelinkAllDetail": "Jocuri instalate create cu versiunea anterioară: %d. Salvările și trofeele rămân.",
   "engineGitRelinking": "Reconectarea jocurilor instalate: %d",
   "engineGitWaitUnlock": "Un joc este în curs de deblocare. Actualizarea din Git poate fi rulată odată ce acest proces este finalizat.",
+  "engineGitBeforePlay": "Actualizează din Git înainte de a juca",
+  "engineGitBeforePlayDetail": "Înainte de pornirea unui joc, se verifică sursa de la distanță (remote). Dacă există commit-uri noi, se descarcă și se compilează mai întâi, apoi jocul este reconectat. Acest pas este omis în modul offline.",
+  "engineGitBeforePlayStart": "Commit-uri noi în motorul jocului: se efectuează actualizarea din Git înainte de pornirea jocului",
+  "engineGitChecking": "Se caută noi commit-uri în motor (engine)",
+  "engineGitPlayAnywayMac": "Actualizarea motorului a eșuat: %@. Se continuă cu versiunea curentă.",
   "engineGitCopy": "Selectează pentru a copia rezultatul (output-ul)"
 }
