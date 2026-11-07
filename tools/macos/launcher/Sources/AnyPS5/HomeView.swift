@@ -870,6 +870,8 @@ extension AppModel {
                 if !cancelAsk() { closeOverlay() }
                 return true
             }
+            // △ on a friend: Remove from friends.
+            if command == .options, runRowOption() { return true }
             return panelCommand(command)
         case .profile:
             profileCommand(command)
