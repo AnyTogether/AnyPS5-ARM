@@ -3,6 +3,7 @@
 
 #include "SDL_events.h"
 #include "SDL_gamecontroller.h"
+#include "SDL_hidapi.h"
 #include "prx/libScePad/include/KeyboardMouse.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/Pad.hpp"
@@ -13,10 +14,12 @@
 #include "prx/libSceVideoOut/include/Port0Presence.hpp"
 #include "prx/libSceAgcDriver/Execution/include/PadStatus.hpp"
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 #include "prx/libSceVideoOut/include/Telemetry.hpp"
 
@@ -54,6 +57,10 @@ private:
         PadInputState aimed{};
         std::optional<GyroAim::Aim> aim;
         std::chrono::steady_clock::time_point aimedAt{};
+        // The DualSense trigger state report (upstream), published to the controller's player's port.
+        SDL_hid_device* statusHid = nullptr;
+        // Whether the Bluetooth haptics stream was tried on it as the first player's controller.
+        bool hapticsTried = false;
         // ANYPS5_PAD_IDENTIFY's pulse, and what the pad status panel shows for it.
         Pad::IdentifyScheduler identify;
         AgcDriver::PadKind kind = AgcDriver::PadKind::Unknown;
@@ -98,11 +105,17 @@ private:
     int playerOf(const Controller& controller) const;
     void type(const RemotePad::TypedText& text);
     void identify(Controller& controller, int player);
+    void openStatus(Controller& controller);
+    void pollStatus(Controller& controller);
+    void closeStatus(Controller& controller);
     AgcDriver::PadStatusSnapshot statusSnapshot() const;
     void reportStatus();
     bool port0Bound() const;
     void updatePort0();
     void applyPort0(bool connected);
+    void openHaptics(SDL_GameController* controller);
+    void closeHaptics();
+    void streamHaptics();
 
     Pad::KeyboardMouse keyboardMouse;
     Pad::IdentifyMode identifyMode = Pad::IdentifyMode::Off;
@@ -127,6 +140,13 @@ private:
     Port0Presence::Presence port0;
     bool padCaptured = false;
     bool hostFocusSynced = false;
+    // Bluetooth DualSense haptics (upstream's slot 0): the first player's controller.
+    SDL_hid_device* haptics = nullptr;
+    SDL_JoystickID hapticsController = -1;
+    std::atomic<bool> hapticsRunning{false};
+    std::thread hapticsThread;
+    bool hapticsRumbled = false;
+    std::atomic<std::chrono::steady_clock::rep> hapticsReconfigureAt{0};
 };
 
 #endif

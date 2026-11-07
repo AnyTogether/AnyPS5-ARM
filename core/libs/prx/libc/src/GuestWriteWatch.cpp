@@ -488,6 +488,10 @@ public:
         return (next != coverage->begin() && std::prev(next)->second > begin) || (next != coverage->end() && next->first < end);
     }
 
+    bool HandleFault(std::uintptr_t address) {
+        return _available && record(address);
+    }
+
     // Fresh pages were never collected since they were registered: Take::Fresh reports and arms only them,
     // Take::Armed leaves them for the caller that tracks them separately, as the Linux watch does.
     enum class Take { All, Armed, Fresh };
@@ -1368,6 +1372,15 @@ bool GuestWriteWatchOverlaps_nid_postfix(std::uintptr_t address, std::size_t byt
 #else
     static_cast<void>(address);
     static_cast<void>(bytes);
+    return false;
+#endif
+}
+
+bool GuestWriteWatchHandleFault_nid_postfix(std::uintptr_t address) {
+#if defined(__APPLE__)
+    return Watch::Get().HandleFault(address);
+#else
+    static_cast<void>(address);
     return false;
 #endif
 }

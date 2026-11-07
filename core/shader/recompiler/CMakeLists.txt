@@ -251,6 +251,7 @@ function(add_shader_recompiler target runtimeTarget)
             BuildTessellationCaptureGeometryShader
             CaptureResources
             DebugProbeActive
+            DecodeRdnaInstruction
             DepthBitsTextureWidth
             EmulatedMeshSlots
             HashBytes
@@ -270,6 +271,7 @@ function(add_shader_recompiler target runtimeTarget)
             RayTracingStrict
             RayTracingMiss
             ReadWholeFile
+            SetDiagnosticSink
             Recompile
             RecompileCacheKey::ContextHash
             RecompileCacheKey::SealFeatureDigest
@@ -293,6 +295,7 @@ function(add_shader_recompiler target runtimeTarget)
             GcnImagePitch
             GcnImagePow2Pad
             RuntimeAbi::HeapCapacity
+            RuntimeAbi::UintStorageImageBinding
             SampledTextureNumericClass
             SetDebugProbeActive
             SrtEvaluatingBranch

@@ -106,6 +106,7 @@ downloads/
 !mobile/assets/l10n/*.json
 !/docs/run-report.schema.json
 !/docs/run-report-fixtures/*.json
+!tools/titles.json
 
 !/assets/*.jpg
 !/assets/*.png
