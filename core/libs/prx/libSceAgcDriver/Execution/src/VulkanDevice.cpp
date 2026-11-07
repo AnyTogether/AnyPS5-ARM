@@ -77,6 +77,9 @@
 #else
 #include <unistd.h>
 #endif
+#ifdef __APPLE__
+#include <crt_externs.h>
+#endif
 #include <atomic>
 #include <chrono>
 #include <charconv>
@@ -2629,6 +2632,8 @@ VulkanDevice::VulkanDevice(const PresentationWindow* window, bool compileOnly) :
                         const std::uint32_t maxScannedEnvs = 512;
 #ifdef _WIN32
                         char** entries = _environ;
+#elif defined(__APPLE__)
+                        char** entries = *_NSGetEnviron();
 #else
                         char** entries = ::environ;
 #endif
