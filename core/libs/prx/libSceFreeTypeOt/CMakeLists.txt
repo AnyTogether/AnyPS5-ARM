@@ -5,6 +5,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/Stream.cmake")
 target_link_libraries(libSceFreeTypeOt PRIVATE freetype)
 if(MINGW OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(libSceFreeTypeOt PRIVATE LINKER:--exclude-libs,ALL)
+elseif(APPLE)
+    # ld64 has no --exclude-libs: export only the prx's own symbols, not FreeType's FT_*
+    # (FT_Library_Version has the NID of sceFreeTypeOtLibraryVersion's export).
+    target_link_options(libSceFreeTypeOt PRIVATE "LINKER:-exported_symbol,*_nid_*")
 endif()
 configure_windows_unwind(libSceFreeTypeOt)
 
