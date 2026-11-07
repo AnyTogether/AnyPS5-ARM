@@ -1,0 +1,56 @@
+name: macOS engine
+
+# Builds the engine and the patched libraries on a GitHub macOS arm64 runner, configured as
+# tools/release/nightly_mac.sh does (Release, x86-64 under Rosetta, BUILD_TESTING=ON), for checking a
+# branch's macOS build without a Mac: gh workflow run macos-engine.yml --ref <branch>.
+# keep_going (on by default) builds past failed targets (ninja -k 0), so one run lists every error.
+on:
+  workflow_dispatch:
+    inputs:
+      keep_going:
+        description: Build past failed targets (ninja -k 0)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    name: Engine (macOS arm64, x86-64 under Rosetta, nightly options)
+    runs-on: macos-latest
+    timeout-minutes: 150
+    env:
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPILERCHECK: content
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - name: Install Rosetta and Ninja
+        run: |
+          sudo softwareupdate --install-rosetta --agree-to-license
+          brew install ninja
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: macos-engine
+          max-size: 3G
+          evict-old-files: job
+      - id: ffmpeg
+        run: echo "commit=$(git rev-parse HEAD:3rdparty/ffmpeg-core)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: build-mac/externals
+          key: ffmpeg-macos-${{ steps.ffmpeg.outputs.commit }}
+      - name: Configure
+        run: >-
+          cmake -S . -B build-mac -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=x86_64 -DBUILD_TESTING=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Build the engine and the patched libraries
+        run: ninja -C build-mac ${{ inputs.keep_going && '-k 0' || '' }} all libs
