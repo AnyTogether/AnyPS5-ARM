@@ -829,7 +829,10 @@ private:
 #endif
     }
 
-    static void fault(int signal, siginfo_t* info, void* context) {
+public:
+    // The faults the watch owns: a host read probe's, a read trap's and a write to a watched page.
+    // libkernel's exception delivery (Exception.cpp) offers a fault here before a guest handler.
+    static bool claim(siginfo_t* info, void* context) {
         if (t_reading != nullptr) {
             sigset_t faults;
             sigemptyset(&faults);
@@ -840,8 +843,14 @@ private:
         }
         auto& watch = Get();
         const bool write = isWriteFault(info, context);
-        if (info->si_code > 0 && info->si_code < SI_USER && watch.resolveTrap(reinterpret_cast<std::uintptr_t>(info->si_addr), write)) return;
-        if (write && watch.record(reinterpret_cast<std::uintptr_t>(info->si_addr))) return;
+        if (info->si_code > 0 && info->si_code < SI_USER && watch.resolveTrap(reinterpret_cast<std::uintptr_t>(info->si_addr), write)) return true;
+        return write && watch.record(reinterpret_cast<std::uintptr_t>(info->si_addr));
+    }
+
+private:
+    static void fault(int signal, siginfo_t* info, void* context) {
+        if (claim(info, context)) return;
+        auto& watch = Get();
         const auto& previous = signal == SIGBUS ? watch._previousBus : watch._previousSegv;
         if ((previous.sa_flags & SA_SIGINFO) != 0 && previous.sa_sigaction != nullptr) {
             previous.sa_sigaction(signal, info, context);
@@ -1381,6 +1390,16 @@ bool GuestWriteWatchHandleFault_nid_postfix(std::uintptr_t address) {
     return Watch::Get().HandleFault(address);
 #else
     static_cast<void>(address);
+    return false;
+#endif
+}
+
+bool GuestWriteWatchClaimFault_nid_postfix(void* info, void* context) {
+#if defined(__APPLE__)
+    return Watch::Get().Available() && Watch::claim(static_cast<siginfo_t*>(info), context);
+#else
+    static_cast<void>(info);
+    static_cast<void>(context);
     return false;
 #endif
 }

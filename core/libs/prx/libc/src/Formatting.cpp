@@ -318,6 +318,77 @@ public:
     int Scan(const char* directive, bool suppress, void* target, int* count) const {
         return suppress ? HostFscanf(file, directive, count) : HostFscanf(file, directive, target, count);
     }
+
+#ifdef __APPLE__
+    // macOS's fscanf ungets a float field back to its longest valid number: "0x" converts to 0 and
+    // leaves the x, "infi" converts to inf and leaves the i. glibc, Windows and C17 7.21.6.2 read the
+    // longest prefix of a number with one character of look-ahead and fail the conversion when that
+    // is not a whole number. The field is read that way here and only a whole number goes to the host.
+    int ScanFloat(const char* directive, bool suppress, void* target, int* count, unsigned long width) const {
+        std::string field;
+        const unsigned long limit = width == 0 ? ULONG_MAX : width;
+        while (field.size() < limit) {
+            const int next = std::fgetc(file);
+            if (next == EOF) break;
+            field.push_back(static_cast<char>(next));
+            if (FloatField(field).prefix) continue;
+            field.pop_back();
+            if (std::ungetc(next, file) == EOF) throw std::runtime_error("float scan character pushback failed");
+            break;
+        }
+        if (field.empty()) return std::feof(file) || std::ferror(file) ? EOF : 0;
+        if (!FloatField(field).whole) return 0;
+        int consumed = -1;
+        const int matched = suppress ? HostSscanf(field.c_str(), directive, &consumed) : HostSscanf(field.c_str(), directive, target, &consumed);
+        if (consumed != static_cast<int>(field.size())) return 0;
+        *count = consumed;
+        return matched;
+    }
+
+private:
+    struct FloatFieldState {
+        bool prefix;
+        bool whole;
+    };
+
+    // Whether text is a number strtod reads whole (C17 7.22.1.3, the C locale), or begins one.
+    static FloatFieldState FloatField(const std::string& text) {
+        const auto lower = [](char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); };
+        const std::size_t start = !text.empty() && (text[0] == '+' || text[0] == '-') ? 1 : 0;
+        const std::size_t size = text.size() - start;
+        if (size == 0) return {true, false};
+        const auto begins = [&](const char* word) {
+            const std::size_t length = std::strlen(word);
+            if (size > length) return false;
+            for (std::size_t i = 0; i < size; ++i) if (lower(text[start + i]) != word[i]) return false;
+            return true;
+        };
+        if (lower(text[start]) == 'i') return {begins("infinity"), begins("infinity") && (size == 3 || size == 8)};
+        if (lower(text[start]) == 'n') {
+            if (size <= 3) return {begins("nan"), begins("nan") && size == 3};
+            if (lower(text[start + 1]) != 'a' || lower(text[start + 2]) != 'n' || text[start + 3] != '(') return {false, false};
+            for (std::size_t i = start + 4; i < text.size(); ++i) {
+                if (text[i] == ')') return {i + 1 == text.size(), i + 1 == text.size()};
+                if (!std::isalnum(static_cast<unsigned char>(text[i])) && text[i] != '_') return {false, false};
+            }
+            return {true, false};
+        }
+        const bool hex = size >= 2 && text[start] == '0' && lower(text[start + 1]) == 'x';
+        const auto digit = [&](char c) { return hex ? std::isxdigit(static_cast<unsigned char>(c)) != 0 : std::isdigit(static_cast<unsigned char>(c)) != 0; };
+        std::size_t at = start + (hex ? 2 : 0);
+        bool mantissa = false;
+        for (; at < text.size() && digit(text[at]); ++at) mantissa = true;
+        if (at < text.size() && text[at] == '.')
+            for (++at; at < text.size() && digit(text[at]); ++at) mantissa = true;
+        if (at == text.size()) return {true, mantissa};
+        if (!mantissa || lower(text[at]) != (hex ? 'p' : 'e')) return {false, false};
+        ++at;
+        if (at < text.size() && (text[at] == '+' || text[at] == '-')) ++at;
+        bool exponent = false;
+        for (; at < text.size() && std::isdigit(static_cast<unsigned char>(text[at])); ++at) exponent = true;
+        return at == text.size() ? FloatFieldState{true, exponent} : FloatFieldState{false, false};
+    }
+#endif
 };
 
 template <typename TSource, typename NextPointer, typename NextCapacity>
@@ -514,7 +585,12 @@ int ScanSource(TSource source, const char* format, bool secure, NextPointer next
         }
         const int savedError = errno;
         int consumed = -1;
-        const int matched = source.Scan(directive.c_str(), suppress, narrowInteger ? &wideInteger : target, &consumed);
+        const int matched = [&] {
+#ifdef __APPLE__
+            if constexpr (!TSource::Contiguous) if (floating) return source.ScanFloat(directive.c_str(), suppress, target, &consumed, width);
+#endif
+            return source.Scan(directive.c_str(), suppress, narrowInteger ? &wideInteger : target, &consumed);
+        }();
         if constexpr (TSource::Contiguous) if (floating) {
             const bool outOfRange = consumed > 0 && DecimalOutOfRange(std::string(source.Remaining(), static_cast<std::size_t>(consumed)));
             errno = outOfRange ? ERANGE : savedError;

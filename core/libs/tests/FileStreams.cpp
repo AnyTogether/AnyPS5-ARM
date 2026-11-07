@@ -608,7 +608,17 @@ static void CheckOrdinaryCharacterScans() {
             float hostValue = 42.0f;
             char hostOutput = 'Z';
             int hostCount = -77;
+#ifdef __APPLE__
+            // macOS's fscanf converts the 0 of "0x." and the nan of "nan(" and ungets the rest; the
+            // stream scanner reads float fields itself there (Formatting.cpp), as glibc 2.44 and C17
+            // do, and both are a matching failure.
+            static_cast<void>(hostValue);
+            static_cast<void>(hostOutput);
+            static_cast<void>(hostCount);
+            const int hostResult = 0;
+#else
             const int hostResult = std::fscanf(reference, "%64f %1c%n", &hostValue, &hostOutput, &hostCount);
+#endif
             Require(std::fclose(reference) == 0);
             auto* native = std::tmpfile();
             Require(native != nullptr && std::fwrite(input, 1, std::strlen(input), native) == std::strlen(input));

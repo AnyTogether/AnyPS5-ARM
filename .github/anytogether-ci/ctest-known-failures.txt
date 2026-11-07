@@ -75,9 +75,3 @@ macos   guest_dinkumware_float_bits     Upstream test, aborts the same way on up
 macos   guest_dinkumware_division       Upstream test, fails the same way on upstream's tree on macOS/Rosetta (case 69: flags 2a, expected 28).
 macos   agc_unit_flags_allocation_failure_populated  Upstream test, fails the same way on upstream's tree on macOS ("failed growth changed the existing unit flags").
 macos   guest_set_env(_pending_[0-9])?  Upstream test, fails the same way on upstream's tree on macOS/Rosetta: unmasked x87 exceptions are not kept ("independent x87/SSE exception masks restored", "restored pending exception did not trap"), as guest_update_env.
-macos   guest_kernel_sys_execve         Upstream test (new in the 3465-commit merge), fails on the macOS runner: "execve with a 1023 byte pathname did not reach the lookup"; needs a look.
-macos   guest_np_trophy_state           Upstream test (new in the 3465-commit merge), fails on the macOS runner: "registration accepted an unreadable or malformed state record"; libSceNpTrophy is upstream's unchanged; needs a look.
-macos   guest_exception_fault           Upstream test (new in the 3465-commit merge; upstream's form does not link on macOS), SEGFAULT under Rosetta on the runner; needs a look.
-macos   agc_graphics_profile_draw       Upstream test (new in the 3465-commit merge), runs agc_driver_graphics_tests with the draw profile; SIGBUS in memmove after "staging shadow refused: required Vulkan memory type is unavailable" on the runner (no MoltenVK), as agc_driver_graphics.
-macos   file_streams                    Passed on main; upstream's new float scan cases fail on the macOS runner ("Stream scan changed a matching failure to input failure"). The scanner is upstream's unchanged; needs a look.
-macos   guest_program_name              Passed on main; aborts on the macOS runner since upstream's setprogname checks were added. libSceLibcInternal's setprogname is upstream's unchanged; needs a look.

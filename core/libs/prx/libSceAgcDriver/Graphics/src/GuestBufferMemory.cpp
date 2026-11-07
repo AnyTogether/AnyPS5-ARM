@@ -3408,7 +3408,16 @@ std::shared_ptr<ImageMirror> acquireMirror(const Context& context, const std::sh
         if (refreshSparseMirror(*mirror, blocks)) return mirror;
     }
     Pieces pieces;
-    if (!GuestMemory::Accessible(reinterpret_cast<const void*>(selected.address), selected.bytes, range->writable && !heap)) {
+#ifdef __APPLE__
+    // On macOS Accessible answers memory the allocation registry holds from its ranges, without
+    // asking the kernel. A heap's range is held whole while only some of its pages may be committed
+    // (a sparse heap), and reading the others faults: the kernel answers for a heap.
+    const bool accessible = heap ? GuestMemory::DescribeCommitted(selected.address, selected.bytes).whole
+                                 : GuestMemory::Accessible(reinterpret_cast<const void*>(selected.address), selected.bytes, range->writable);
+#else
+    const bool accessible = GuestMemory::Accessible(reinterpret_cast<const void*>(selected.address), selected.bytes, range->writable && !heap);
+#endif
+    if (!accessible) {
         if (!heap || !sparseMirrorsEnabled()) return nullptr;
         pieces = GuestMemory::DescribeCommitted(selected.address, selected.bytes).ranges;
         if (pieces.empty()) return nullptr;

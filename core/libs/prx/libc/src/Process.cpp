@@ -271,6 +271,21 @@ void APS5_VABI exit_nid_postfix(int code) {
     std::abort();
 }
 
+#ifdef __APPLE__
+namespace {
+// The guest's errno is the host's. libc++ on macOS leaves errno at ENOENT after the first
+// std::logic_error or std::runtime_error a process makes and drops (measured on the macOS runner,
+// under Rosetta and on arm64; later ones keep it), so an exception the runtime throws in a guest call
+// would change the guest's errno once. One is made at load with errno kept.
+[[maybe_unused]] const bool standardExceptionsReady = [] {
+    const int saved = errno;
+    static_cast<void>(std::runtime_error(""));
+    errno = saved;
+    return true;
+}();
+}
+#endif
+
 int* APS5_VABI libc_error_nid_postfix() {
     return &errno;
 }
