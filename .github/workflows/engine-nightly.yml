@@ -168,7 +168,7 @@ jobs:
         run: |
           set -euo pipefail
           git fetch -q --tags --force origin
-          previous="$(git tag -l 'v*-arm' 'v*-arm-nightly.*' --sort=-creatordate --merged HEAD | head -n 1)"
+          previous="$(git tag -l 'v*-arm' 'v*-arm-nightly.*' --sort=-creatordate --merged HEAD | sed -n 1p)"
           {
             echo "Nightly build of main, $(date -u +%Y-%m-%d), $(git rev-parse --short=12 HEAD). It may have new bugs: the launchers offer it only on their Nightly update channel."
             echo
@@ -178,7 +178,8 @@ jobs:
             echo
             echo "Since ${previous:-the start}:"
             echo
-            git log --no-merges --format='- %s' ${previous:+"$previous..HEAD"} | head -n 40
+            # git stops at 40 itself: head would close the pipe early and pipefail would fail the job (141).
+            git log --no-merges --max-count=40 --format='- %s' ${previous:+"$previous..HEAD"}
             total="$(git rev-list --no-merges --count ${previous:+"$previous..HEAD"})"
             [ "$total" -le 40 ] || echo "- … and $((total - 40)) more"
           } > "$RUNNER_TEMP/notes.md"
