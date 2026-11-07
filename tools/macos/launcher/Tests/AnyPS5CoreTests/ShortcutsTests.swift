@@ -313,3 +313,36 @@ final class ChordRecorderTests: XCTestCase {
         XCTAssertEqual(recorder.update([], at: 1.1), PadChord([.guide]))
     }
 }
+
+final class TalkKeyTests: XCTestCase {
+    private let shortcuts = ShortcutMap()
+
+    func testTheStandardKeyIsOptionV() {
+        XCTAssertEqual(TalkKey.standard.display, "⌥V")
+        XCTAssertNil(TalkKey.refusal(TalkKey.standard, shortcuts: shortcuts))
+    }
+
+    func testAKeyWithAModifierOrAnFKeyIsFine() {
+        XCTAssertNil(TalkKey.refusal(KeyChord(keyCode: 11, modifiers: [.control], name: "B"), shortcuts: shortcuts))
+        XCTAssertNil(TalkKey.refusal(KeyChord(keyCode: 98, name: "F7"), shortcuts: shortcuts))
+    }
+
+    /// A plain key would be taken from every app while in a call.
+    func testAPlainKeyIsRefused() {
+        XCTAssertEqual(TalkKey.refusal(KeyChord(keyCode: 9, name: "V"), shortcuts: shortcuts), .needsModifier)
+        XCTAssertEqual(TalkKey.refusal(KeyChord(keyCode: 9, modifiers: .shift, name: "V"), shortcuts: shortcuts), .needsModifier)
+        XCTAssertEqual(TalkKey.refusal(KeyChord(keyCode: 53, name: "Escape"), shortcuts: shortcuts), .navigationKey)
+    }
+
+    func testTheCallKeysAndTheMenusKeysAreRefused() {
+        XCTAssertEqual(TalkKey.refusal(KeyChord(keyCode: 0, modifiers: .option, name: "A"), shortcuts: shortcuts), .reservedKey)
+        XCTAssertEqual(TalkKey.refusal(KeyChord(keyCode: 9, modifiers: .command, name: "V"), shortcuts: shortcuts), .reservedKey)
+    }
+
+    func testAShortcutsKeyIsRefused() {
+        XCTAssertEqual(TalkKey.refusal(KeyChord(keyCode: 53, modifiers: .option, name: "Escape"), shortcuts: shortcuts), .sameKey(.home))
+        var moved = ShortcutMap()
+        moved.setKey(KeyChord(keyCode: 11, modifiers: .control, name: "B"), for: .clip)
+        XCTAssertEqual(TalkKey.refusal(KeyChord(keyCode: 11, modifiers: .control, name: "B"), shortcuts: moved), .sameKey(.clip))
+    }
+}

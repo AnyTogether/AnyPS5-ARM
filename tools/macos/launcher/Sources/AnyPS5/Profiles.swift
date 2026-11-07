@@ -35,8 +35,8 @@ extension AppModel {
     /// The settings that are each profile's own; the rest (games folder, engine, Steam, the
     /// server…) belong to the Mac.
     static let personalKeys: Set<String> = [
-        "language", "theme", "accent", "customTheme", "backdrop", "backdropFile", "gameArtwork", "glassTransparency", "glassArtwork", "reducedMotion",
-        "sounds", "soundVolume", "musicVolume", "hideWhilePlaying", "pushToTalk", "friendsJoin", "discordPresence", "discordJoin", "clips", "clipLength",
+        "language", "theme", "accent", "customTheme", "backdrop", "backdropFile", "menuMusicFile", "gameArtwork", "glassTransparency", "glassArtwork", "reducedMotion",
+        "sounds", "soundVolume", "musicVolume", "launcherVolume", "hideWhilePlaying", "pushToTalk", "talkKey", "friendsJoin", "discordPresence", "discordJoin", "clips", "clipLength",
         "saveSync", "syncFolder", "syncThrough", "profileName", "alwaysShowHiddenTrophies", "controllerVibration", "controllerLight", "confirmCircle",
         "stickDeadzone", "pauseOnMenu", "shortcuts", "lastPlayed",
     ]
