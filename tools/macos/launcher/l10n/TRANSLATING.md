@@ -12,11 +12,13 @@ folder: `en.json` is English, the source, and `tr.json` is Turkish.
 | Simplified Chinese, Traditional Chinese, Korean, Khmer, Lao, Amharic | `zh-Hans`, `zh-Hant`, `ko`, `km`, `lo`, `am` | VK |
 
 VK translated these for the Windows/Linux launcher. Their files here hold every text whose
-English reads the same in both launchers' `en.json` (capitals aside), carried over by
-`python3 -I scripts/import-port-translations.py <AnyPS5-Desktop checkout> [code ...]`. A text
-the Mac says in its own words (Mac where the Port says PC) is left out and shows in English until
-someone translates it here. Run the script again after the Port's files change. Name the codes to
-write only those languages.
+English reads the same in both launchers' `en.json` (capitals aside), under the same key or
+another one (a final full stop aside), and the few keys the two word differently but mean the same
+by, carried over by `python3 -I scripts/import-port-translations.py <AnyPS5-Desktop checkout>
+[code ...]`. A text the Mac says in its own words (Mac where the Windows/Linux launcher says PC) is
+left out and shows in English until someone translates it here, under a key only the Mac has
+(`phoneServerDetailMac`). Run the script again after AnyPS5 Desktop's files change. Name the codes
+to write only those languages.
 
 The launcher starts in the Mac's language the first time when it has a file for it. Chinese
 follows the script or region (zh-Hant for Taiwan, Hong Kong and Macau). Norwegian Bokmål and
