@@ -2271,7 +2271,7 @@ bool recordDrawCommandsImpl(const Context& context, VkCommandBuffer commands, co
     if (inputs.emulatedMesh != nullptr) {
         const auto slots = ShaderRecompiler::EmulatedMeshSlots(*state.stages.mesh);
         context.Resolved(&DeviceFunctions::cmdDraw, "vkCmdDraw")(commands, inputs.meshGroups * draw.instanceCount * slots.primitives * 3u, 1, 0, 0);
-        return;
+        return true;
     }
     if (state.stages.mesh && (args != nullptr || state.tessellationCapture != nullptr)) {
         context.Function<PFN_vkCmdDrawMeshTasksIndirectEXT>("vkCmdDrawMeshTasksIndirectEXT")(commands, argumentBuffer, argumentOffset, 1, sizeof(VkDrawMeshTasksIndirectCommandEXT));
