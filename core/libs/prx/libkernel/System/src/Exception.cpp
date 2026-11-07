@@ -31,6 +31,9 @@
 #include <system_error>
 #include <pthread.h>
 #ifdef __APPLE__
+#include <dlfcn.h>
+#include <mach-o/dyld.h>
+#include <string_view>
 #include <sys/ucontext.h>
 #else
 #include <ucontext.h>
@@ -1220,8 +1223,9 @@ void Deliver(int signum, siginfo_t*, void* context) {
     ToHost(ucontext.mcontext, host);
 }
 
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
 constexpr std::array<int, 4> FaultSignals{SIGSEGV, SIGBUS, SIGILL, SIGFPE};
+#ifdef __linux__
 constexpr greg_t VectorDivide = 0;
 constexpr greg_t VectorInvalidOpcode = 6;
 constexpr greg_t VectorSegmentNotPresent = 11;
@@ -1287,6 +1291,91 @@ bool GuestCode(std::uintptr_t rip) {
     return name.empty() || name.ends_with(GuestModuleSuffix);
 }
 
+std::uintptr_t HostRip(const mcontext_t& host) {
+    return static_cast<std::uintptr_t>(host.gregs[REG_RIP]);
+}
+#else
+// macOS reports the x86 vector, error code and fault address in the exception state, also under
+// Rosetta, which leaves out the present bit of the page-fault error code and reports a load from a
+// non-canonical address as a page fault at it, where x86 raises a general protection fault.
+constexpr unsigned VectorDivide = 0;
+constexpr unsigned VectorInvalidOpcode = 6;
+constexpr unsigned VectorSegmentNotPresent = 11;
+constexpr unsigned VectorStack = 12;
+constexpr unsigned VectorProtection = 13;
+constexpr unsigned VectorPage = 14;
+constexpr unsigned VectorFloatingPoint = 16;
+constexpr unsigned VectorAlignment = 17;
+constexpr unsigned VectorSimd = 19;
+constexpr std::string_view GuestModuleSuffix = ".guest.prx";
+
+std::array<struct sigaction, FaultSignals.size()> previousFaultActions{};
+const void* mainImage = nullptr;
+
+bool Canonical(std::uint64_t address) {
+    const auto high = address >> 47;
+    return high == 0 || high == 0x1ffff;
+}
+
+bool Classify(int hostSignal, const siginfo_t& info, const mcontext_t& host, Fault& fault) {
+    const auto& state = host->__es;
+    const std::uint64_t error = state.__err;
+    switch (state.__trapno) {
+    case VectorDivide:
+        fault = {SignalFloatingPoint, {TrapDivide, 0, 0}};
+        return hostSignal == SIGFPE;
+    case VectorInvalidOpcode:
+        fault = {SignalIllegal, {TrapPrivilegedInstruction, 0, 0}};
+        return hostSignal == SIGILL;
+    case VectorSegmentNotPresent:
+        fault = {SignalBus, {TrapSegmentNotPresent, 0, error}};
+        return true;
+    case VectorStack:
+        fault = {SignalBus, {TrapStack, 0, error}};
+        return true;
+    case VectorProtection:
+        fault = {SignalBus, {TrapProtection, 0, error}};
+        return true;
+    case VectorPage: {
+        if (hostSignal != SIGSEGV && hostSignal != SIGBUS) return false;
+        if (!Canonical(state.__faultvaddr)) {
+            fault = {SignalBus, {TrapProtection, 0, 0}};
+            return true;
+        }
+        // macOS raises SIGBUS, or SIGSEGV with SEGV_ACCERR, for a mapped page whose protection refused
+        // the access: FreeBSD's SIGSEGV with the present bit.
+        const bool present = hostSignal == SIGBUS || info.si_code == SEGV_ACCERR;
+        fault = {SignalSegmentation, {TrapPage, state.__faultvaddr, error | PageUser | (present ? PageProtection : 0)}};
+        return true;
+    }
+    case VectorFloatingPoint:
+        fault = {SignalFloatingPoint, {TrapArithmetic, 0, 0}};
+        return hostSignal == SIGFPE;
+    case VectorAlignment:
+        fault = {SignalBus, {TrapAlignment, 0, error}};
+        return true;
+    case VectorSimd:
+        fault = {SignalFloatingPoint, {TrapSimd, 0, 0}};
+        return hostSignal == SIGFPE;
+    default:
+        return false;
+    }
+}
+
+bool GuestCode(std::uintptr_t rip) {
+    if (GuestArena::GuestArenaContains_nid_postfix(reinterpret_cast<const void*>(rip), 1)) return true;
+    Dl_info symbol{};
+    if (dladdr(reinterpret_cast<const void*>(rip), &symbol) == 0 || symbol.dli_fbase == nullptr) return false;
+    if (symbol.dli_fbase == mainImage) return true;
+    const std::string_view name = symbol.dli_fname ? symbol.dli_fname : "";
+    return name.ends_with(GuestModuleSuffix);
+}
+
+std::uintptr_t HostRip(const mcontext_t& host) {
+    return static_cast<std::uintptr_t>(host->__ss.__rip);
+}
+#endif
+
 void ChainFault(int hostSignal, siginfo_t* info, void* context) {
     for (std::size_t i = 0; i < FaultSignals.size(); ++i) {
         if (FaultSignals[i] != hostSignal) continue;
@@ -1308,10 +1397,18 @@ void ChainFault(int hostSignal, siginfo_t* info, void* context) {
 void DeliverFault(int hostSignal, siginfo_t* info, void* context) {
     auto& host = static_cast<ucontext_t*>(context)->uc_mcontext;
     Fault fault{};
+#ifdef __APPLE__
+    const bool deliverable = info->si_code > 0 && Classify(hostSignal, *info, host, fault);
+    const auto handler = deliverable ? Handler(fault.signum) : nullptr;
+    // The write watch owns SIGSEGV and SIGBUS on macOS: a fault it takes never reaches a handler. Without
+    // a handler the fault goes to it below, as the handler installed before this one.
+    if (handler != nullptr && (hostSignal == SIGSEGV || hostSignal == SIGBUS) && GuestWriteWatch::GuestWriteWatchClaimFault_nid_postfix(info, context)) return;
+#else
     const bool deliverable = info->si_code > 0 && Classify(hostSignal, host, fault);
     if (deliverable && fault.trap.number == TrapPage && GuestWriteWatch::GuestWriteWatchHandleFault_nid_postfix(fault.trap.address)) return;
     const auto handler = deliverable ? Handler(fault.signum) : nullptr;
-    if (handler == nullptr || !GuestCode(static_cast<std::uintptr_t>(host.gregs[REG_RIP]))) {
+#endif
+    if (handler == nullptr || !GuestCode(HostRip(host))) {
         ChainFault(hostSignal, info, context);
         return;
     }
@@ -1323,6 +1420,12 @@ void DeliverFault(int hostSignal, siginfo_t* info, void* context) {
 
 void InstallFaultDelivery() {
     static const bool installed = [] {
+#ifdef __APPLE__
+        mainImage = _dyld_get_image_header(0);
+        // The write watch installs its handler when it is first used; started first, it stays behind
+        // this one, which offers it SIGSEGV and SIGBUS before a guest handler.
+        GuestWriteWatch::GuestWriteWatchAvailable_nid_postfix();
+#endif
         struct sigaction action{};
         action.sa_sigaction = DeliverFault;
         action.sa_flags = SA_SIGINFO | SA_NODEFER;
@@ -1490,7 +1593,7 @@ int APS5_VABI sceKernelInstallExceptionHandler(int signum, void* handler) {
  if (!Allowed(signum) || handler == nullptr) return SCE_KERNEL_ERROR_EINVAL;
  void* expected = nullptr;
  if (!handlers[signum].compare_exchange_strong(expected, handler, std::memory_order_acq_rel)) return SCE_KERNEL_ERROR_EAGAIN;
-#if defined(_WIN32) || defined(__linux__)
+#if defined(_WIN32) || defined(__linux__) || defined(__APPLE__)
  if (FaultSignal(signum)) InstallFaultDelivery();
 #endif
  return 0;

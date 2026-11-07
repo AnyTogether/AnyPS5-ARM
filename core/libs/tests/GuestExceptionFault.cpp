@@ -21,6 +21,9 @@
 #include <sys/resource.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
 
 extern char** environ;
 #endif
@@ -404,6 +407,15 @@ static void TestDivide() {
 }
 
 static void TestSimdDivide() {
+#ifdef __APPLE__
+    // Rosetta ignores the MXCSR exception masks: an unmasked divide by zero does not trap there.
+    int translated = 0;
+    std::size_t size = sizeof(translated);
+    if (sysctlbyname("sysctl.proc_translated", &translated, &size, nullptr, 0) == 0 && translated != 0) {
+        std::puts("Rosetta raises no SIMD floating-point exceptions: unmasked divide not tested");
+        return;
+    }
+#endif
     Arm(Mode::Resume, {GUEST_SIGFPE, T_XMMFLT, 0, Address(FaultTestSimdDivideSite), Address(FaultTestSimdDivideResume)});
     Require(FaultTestSimdDivide() == Resumed);
     Require(calls.load() == 1);
@@ -564,7 +576,13 @@ static void TestRemoveAndReturn(const char* self) {
     std::string argument = RemoveAndReturnMode;
     char* arguments[] = {program.data(), argument.data(), nullptr};
     pid_t child = 0;
-    Require(posix_spawn(&child, "/proc/self/exe", &actions, nullptr, arguments, environ) == 0);
+#ifdef __APPLE__
+    // macOS has no /proc: the child is started from the path the test was started with.
+    const char* const image = self;
+#else
+    const char* const image = "/proc/self/exe";
+#endif
+    Require(posix_spawn(&child, image, &actions, nullptr, arguments, environ) == 0);
     posix_spawn_file_actions_destroy(&actions);
     close(pipeEnds[1]);
     int status = 0;
