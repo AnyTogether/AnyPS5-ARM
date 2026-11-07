@@ -9088,7 +9088,8 @@ void verifyPixelInputs() {
     auto bothRequest = twoParameterRequest(bothPairs);
     // The barycentric fallback needs a device with geometry shaders; without them (MoltenVK) the fork
     // keeps host interpolation (Recompile).
-    bothRequest.target.supportedCapabilities.push_back(static_cast<std::uint32_t>(spv::CapabilityGeometry));
+    static constexpr std::array<std::uint32_t, 1> geometry{static_cast<std::uint32_t>(spv::CapabilityGeometry)};
+    bothRequest.target.supportedCapabilities = geometry;
     const auto both = ShaderRecompiler::Recompile(bothRequest);
     require(both.barycentricEmulation.active && both.barycentricEmulation.smooth && both.barycentricEmulation.linear, "a parameter read through both pairs did not fall back to both barycentrics");
 
