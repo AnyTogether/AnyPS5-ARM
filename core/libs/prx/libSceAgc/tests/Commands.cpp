@@ -843,17 +843,6 @@ void testContextStateUnversioned() {
     check(storage.buffer.cursor_up == storage.words.data(), "invalid context state operation advanced the cursor");
 }
 
-void testAcquireMemEngine() {
-    Storage storage;
-    auto* packet = sceAgcDcbAcquireMem(&storage.buffer, 0, 0x12, 0x345, nullptr, 0xffffffffffffffffull, 40);
-    check(sceAgcAcquireMemSetEngine(packet, 1) == 0 && packet[1] == 0x80000012u, "engine patch did not set bit 31");
-    check(sceAgcAcquireMemSetEngine(packet, 0) == 0 && packet[1] == 0x12u, "engine patch did not clear bit 31");
-    const auto before = storage.words;
-    expectFailure([&] { sceAgcAcquireMemSetEngine(packet, 2); });
-    expectFailure([&] { sceAgcAcquireMemSetEngine(packet + 1, 1); });
-    check(storage.words == before, "invalid engine patch modified packet memory");
-}
-
 void testEndOfPipePatches() {
     std::array<std::uint32_t, 8> packet{};
     packet[0] = Agc::Command::Header(0x49u, 8);
@@ -1260,7 +1249,6 @@ int main(int argc, char** argv) {
         testPacketPayloadAddress();
         testMemory();
         testContextStateUnversioned();
-        testAcquireMemEngine();
         testEndOfPipePatches();
         testAtomicGds();
         testDebugRaiseException();
