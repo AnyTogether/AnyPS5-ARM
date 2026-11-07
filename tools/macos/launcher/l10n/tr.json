@@ -442,6 +442,7 @@
   "themeRemoveBackground": "Resmi kaldır",
   "themeMusic": "Menü müziği",
   "themeMusicDetail": "Seçili oyunun şarkısı yoksa çalar",
+  "menuMusicDetail": "Seçili oyunun şarkısı yoksa çalar. Temanın kendi müziği önce gelir.",
   "themeRemoveMusic": "Müziği kaldır",
   "exportTheme": "Dosya olarak kaydet…",
   "exportThemeDetail": "Tek bir .anyps5theme dosyası, istediğine ver",

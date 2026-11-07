@@ -251,6 +251,14 @@ extension AppModel {
                 self?.chooseBackdrop(preferences.backdrop)
             }))
         }
+        // Music without making a theme, as on Windows and Linux.
+        appearance.append(PanelRow(id: "menuMusic", title: T.text(.themeMusic), detail: preferences.menuMusicFile.map { URL(fileURLWithPath: $0).lastPathComponent } ?? T.text(.menuMusicDetail),
+                                   symbol: "music.note", kind: .action(destructive: false) { [weak self] in self?.chooseMenuMusic() }))
+        if preferences.menuMusicFile != nil {
+            appearance.append(PanelRow(id: "menuMusicOff", title: T.text(.themeRemoveMusic), symbol: "speaker.slash", kind: .action(destructive: false) { [weak self] in
+                self?.preferences.menuMusicFile = nil
+            }))
+        }
         if lookStyle.isGlass {
             // The see-through window: how much of the desktop shows, and the key art over it.
             let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
@@ -654,6 +662,16 @@ extension AppModel {
             preferences.backdropFile = url.path
             preferences.backdrop = kind
         }
+    }
+
+    /// Appearance › Menu music: the user's own song for when the selected game has none.
+    func chooseMenuMusic() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.audio]
+        panel.prompt = T.text(.chooseFile)
+        if panel.runModal() == .OK, let url = panel.url { preferences.menuMusicFile = url.path }
     }
 
     // MARK: Panel input

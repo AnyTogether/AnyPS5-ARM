@@ -19,6 +19,9 @@ struct Preferences: Codable, Equatable {
     var customTheme: String?
     var backdrop = Backdrop.theme
     var backdropFile: String?
+    /// Appearance › Menu music: a song of the user's own for when the selected game has none
+    /// (a custom theme's own music comes first).
+    var menuMusicFile: String?
     var gameArtwork = true
     /// The Glass theme's window: how much of the desktop shows through, in percent (nil for
     /// GlassWindowRecipe.defaultTransparency), and whether the selected game's key art is laid
@@ -1010,7 +1013,8 @@ final class AppModel: ObservableObject {
     /// The selected game's song while the launcher is in front and idle, silence otherwise.
     private func updateMusic() {
         let quiet = !preferences.onboarded || !active || running != nil || starting != nil || musicVolume == 0 || launcherVolume == 0
-        let menuMusic = activeDesign.flatMap { themes.file($0.music, of: $0) }
+        let ownMusic = preferences.menuMusicFile.map { URL(fileURLWithPath: $0) }.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+        let menuMusic = activeDesign.flatMap { themes.file($0.music, of: $0) } ?? ownMusic
         ThemeMusic.shared.play(quiet ? nil : selectedGame, fallback: quiet ? nil : menuMusic)
     }
 

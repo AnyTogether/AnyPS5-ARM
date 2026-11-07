@@ -442,6 +442,7 @@
   "themeRemoveBackground": "Remove the picture",
   "themeMusic": "Menu music",
   "themeMusicDetail": "Plays when the selected game has no song",
+  "menuMusicDetail": "Plays when the selected game has no song. A theme's own music comes first.",
   "themeRemoveMusic": "Remove the music",
   "exportTheme": "Save as a file…",
   "exportThemeDetail": "One .anyps5theme file, to give to anyone",
