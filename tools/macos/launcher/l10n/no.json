@@ -893,6 +893,6 @@
   "engineGitBeforePlayDetail": "Før et spill starter, sjekkes det eksterne depotet. Hvis det finnes nye endringer («commits»), hentes og bygges disse først, og deretter kobles spillet til på nytt. Hoppes over ved frakoblet modus.",
   "engineGitBeforePlayStart": "Nye endringer i motoren: oppdaterer fra Git før spillet starter",
   "engineGitChecking": "Ser etter nye «commits» i motoren",
-  "engineGitPlayAnyway": "Kunne ikke oppdatere motoren: %@. Spiller med gjeldende versjon.",
+  "engineGitPlayAnywayMac": "Kunne ikke oppdatere motoren: %@. Spiller med gjeldende versjon.",
   "engineGitCopy": "Velg for å kopiere utdataene"
 }

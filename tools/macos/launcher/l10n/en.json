@@ -1992,7 +1992,7 @@
   "engineGitBeforePlayDetail": "Before a game starts, checks the remote. If there are new commits, pulls and builds first, then relinks the game. Skipped when offline.",
   "engineGitBeforePlayStart": "New engine commits: updating from Git before the game starts",
   "engineGitChecking": "Looking for new engine commits",
-  "engineGitPlayAnyway": "Couldn't update the engine: %@. Playing with the current build.",
+  "engineGitPlayAnywayMac": "Couldn't update the engine: %@. Playing with the current build.",
   "engineGitRunning": "Updating from Git: %@",
   "engineGitBuiltAt": "Nothing new to pull. The engine is built at %@.",
   "engineGitRelinkAll": "Relink All Installed Games",

@@ -893,6 +893,6 @@
   "engineGitBeforePlayDetail": "Sebelum permainan bermula, sistem akan menyemak repositori jauh. Jika terdapat 'commit' baharu, ia akan menarik ('pull') dan membina semula, kemudian memautkan semula permainan tersebut. Langkah ini dilangkau jika berada dalam mod luar talian.",
   "engineGitBeforePlayStart": "'Commit' enjin baharu: mengemas kini daripada Git sebelum permainan bermula",
   "engineGitChecking": "Mencari *commit* enjin yang baharu",
-  "engineGitPlayAnyway": "Tidak dapat mengemas kini enjin: %@. Bermain menggunakan binaan semasa.",
+  "engineGitPlayAnywayMac": "Tidak dapat mengemas kini enjin: %@. Bermain menggunakan binaan semasa.",
   "engineGitCopy": "Pilih untuk menyalin output"
 }

@@ -893,6 +893,6 @@
   "engineGitBeforePlayDetail": "Před spuštěním hry proběhne kontrola vzdáleného úložiště. Pokud existují nové změny (commity), systém je stáhne, provede sestavení a následně hru znovu propojí. V režimu offline se tento krok vynechá.",
   "engineGitBeforePlayStart": "Nové změny v enginu: před spuštěním hry probíhá aktualizace z Git",
   "engineGitChecking": "Hledám nové commity v enginu",
-  "engineGitPlayAnyway": "Engine se nepodařilo aktualizovat: %@. Hra bude spuštěna s aktuální verzí sestavení.",
+  "engineGitPlayAnywayMac": "Engine se nepodařilo aktualizovat: %@. Hra bude spuštěna s aktuální verzí sestavení.",
   "engineGitCopy": "Vyberte možnost pro zkopírování výstupu"
 }

@@ -21,6 +21,6 @@ enum TE {
         case engineHint
         case engineGitUpdate, engineGitUpdateDetail, engineGitNoBuild, engineGitRunning, engineGitStepChecking, engineGitStepPulling, engineGitStepSubmodules, engineGitStepBuilding, engineGitStepAssembling
         case engineGitDone, engineGitBuiltAt, engineGitFailed, engineGitStopped, engineGitNotGit, engineGitDirty, engineGitNoBuildReason, engineGitPullFailed, engineGitSubmodulesFailed, engineGitBuildFailed
-        case engineGitToolkitFailed, engineGitNeeds, engineGitNeedsReason, engineGitCopy, engineGitCopied, engineGitStop, engineGitRelinkAll, engineGitRelinkAllDetail, engineGitRelinking, engineGitWaitUnlock, engineGitBeforePlay, engineGitBeforePlayDetail, engineGitBeforePlayStart, engineGitChecking, engineGitPlayAnyway
+        case engineGitToolkitFailed, engineGitNeeds, engineGitNeedsReason, engineGitCopy, engineGitCopied, engineGitStop, engineGitRelinkAll, engineGitRelinkAllDetail, engineGitRelinking, engineGitWaitUnlock, engineGitBeforePlay, engineGitBeforePlayDetail, engineGitBeforePlayStart, engineGitChecking, engineGitPlayAnyway = "engineGitPlayAnywayMac"
     }
 }

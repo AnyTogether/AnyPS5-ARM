@@ -1992,7 +1992,7 @@
   "engineGitBeforePlayDetail": "Bir oyun başlamadan önce uzak depoya bakar. Yeni commit varsa önce çekip derler, sonra oyunu yeniden bağlar. Çevrimdışıyken atlanır.",
   "engineGitBeforePlayStart": "Motorda yeni commit'ler var: oyun başlamadan önce Git'ten güncelleniyor",
   "engineGitChecking": "Motorda yeni commit var mı bakılıyor",
-  "engineGitPlayAnyway": "Motor güncellenemedi: %@. Mevcut derlemeyle oynanıyor.",
+  "engineGitPlayAnywayMac": "Motor güncellenemedi: %@. Mevcut derlemeyle oynanıyor.",
   "engineGitRunning": "Git'ten güncelleniyor: %@",
   "engineGitBuiltAt": "Çekilecek yeni bir şey yok. Motor %@ üzerinde derlendi.",
   "engineGitRelinkAll": "Kurulu tüm oyunları yeniden bağla",

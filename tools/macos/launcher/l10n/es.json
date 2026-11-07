@@ -900,5 +900,5 @@
   "engineGitBeforePlayDetail": "Comprueba el servidor remoto antes de iniciar un juego. Si hay nuevas confirmaciones, las descarga, compila el motor y adapta el juego. Se omite si no hay conexión.",
   "engineGitBeforePlayStart": "Nuevas confirmaciones del motor: actualizando desde Git antes de iniciar el juego",
   "engineGitChecking": "Buscando nuevas confirmaciones del motor",
-  "engineGitPlayAnyway": "No se pudo actualizar el motor: %@. Se jugará con la compilación actual."
+  "engineGitPlayAnywayMac": "No se pudo actualizar el motor: %@. Se jugará con la compilación actual."
 }

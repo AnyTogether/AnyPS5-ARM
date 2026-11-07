@@ -893,6 +893,6 @@
   "engineGitBeforePlayDetail": "Kontrollerar fjärrarkivet innan ett spel startar. Om det finns nya ändringar (commits) hämtas och byggs dessa först, varpå spelet återlänkas. Hoppas över i offlineläge.",
   "engineGitBeforePlayStart": "Nya ändringar i motorn: uppdaterar från Git innan spelet startar",
   "engineGitChecking": "Söker efter nya commits i motorn",
-  "engineGitPlayAnyway": "Det gick inte att uppdatera motorn: %@. Spelet körs med den nuvarande versionen.",
+  "engineGitPlayAnywayMac": "Det gick inte att uppdatera motorn: %@. Spelet körs med den nuvarande versionen.",
   "engineGitCopy": "Välj för att kopiera utdata"
 }

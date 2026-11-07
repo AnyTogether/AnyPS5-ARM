@@ -901,5 +901,5 @@
   "engineGitBeforePlayDetail": "Prüft vor dem Spielstart das Remote-Repository. Bei neuen Commits werden diese abgerufen, die Engine erstellt und das Spiel neu verknüpft. Offline wird dies übersprungen.",
   "engineGitBeforePlayStart": "Neue Engine-Commits: Aktualisierung aus Git vor dem Spielstart",
   "engineGitChecking": "Suche nach neuen Engine-Commits",
-  "engineGitPlayAnyway": "Engine konnte nicht aktualisiert werden: %@. Das Spiel wird mit dem aktuellen Build gestartet."
+  "engineGitPlayAnywayMac": "Engine konnte nicht aktualisiert werden: %@. Das Spiel wird mit dem aktuellen Build gestartet."
 }

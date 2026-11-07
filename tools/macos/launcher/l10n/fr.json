@@ -901,5 +901,5 @@
   "engineGitBeforePlayDetail": "Vérifie le dépôt distant avant le démarrage d’un jeu. En présence de nouveaux commits, les récupère, compile le moteur puis relie le jeu. Ignoré hors ligne.",
   "engineGitBeforePlayStart": "Nouveaux commits du moteur : mise à jour depuis Git avant le démarrage du jeu",
   "engineGitChecking": "Recherche de nouveaux commits du moteur",
-  "engineGitPlayAnyway": "Impossible de mettre à jour le moteur : %@. Le jeu sera lancé avec la compilation actuelle."
+  "engineGitPlayAnywayMac": "Impossible de mettre à jour le moteur : %@. Le jeu sera lancé avec la compilation actuelle."
 }

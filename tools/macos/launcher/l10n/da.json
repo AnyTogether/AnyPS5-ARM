@@ -892,6 +892,6 @@
   "engineGitBeforePlayDetail": "Før et spil starter, tjekkes fjernarkivet (remote). Hvis der er nye commits, hentes og bygges disse først, hvorefter spillets links genoprettes. Dette springes over, hvis du er offline.",
   "engineGitBeforePlayStart": "Nye commits i engine: opdaterer fra Git, før spillet starter",
   "engineGitChecking": "Søger efter nye commits i engine",
-  "engineGitPlayAnyway": "Kunne ikke opdatere engine: %@. Spiller med den nuværende version.",
+  "engineGitPlayAnywayMac": "Kunne ikke opdatere engine: %@. Spiller med den nuværende version.",
   "engineGitCopy": "Vælg for at kopiere outputtet"
 }

@@ -893,6 +893,6 @@
   "engineGitBeforePlayDetail": "Bago magsimula ang laro, tinitingnan ang remote. Kung may mga bagong commit, pull at build muna, pagkatapos ay muling i-link ang laro. Nilaktawan kapag offline.",
   "engineGitBeforePlayStart": "Mga bagong commit ng engine: ina-update mula sa Git bago magsimula ang laro",
   "engineGitChecking": "Naghahanap ng mga bagong engine commit",
-  "engineGitPlayAnyway": "Hindi ma-update ang engine: %@. Naglalaro gamit ang kasalukuyang build.",
+  "engineGitPlayAnywayMac": "Hindi ma-update ang engine: %@. Naglalaro gamit ang kasalukuyang build.",
   "engineGitCopy": "piliin para kopyahin ang output"
 }

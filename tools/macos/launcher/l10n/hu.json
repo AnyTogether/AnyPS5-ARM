@@ -874,6 +874,6 @@
   "engineGitBeforePlayDetail": "Játékindítás előtt ellenőrzi a távoli tárolót (remote). Ha vannak új commitok, először letölti és lefordítja (buildeli) azokat, majd újracsatolja a játékot. Offline módban ez a lépés kimarad.",
   "engineGitBeforePlayStart": "Új motor-commitok: frissítés innen: Git a játék indítása előtt",
   "engineGitChecking": "Új engine-commitok keresése",
-  "engineGitPlayAnyway": "Nem sikerült frissíteni a motort: %@. Játék a jelenlegi builddel.",
+  "engineGitPlayAnywayMac": "Nem sikerült frissíteni a motort: %@. Játék a jelenlegi builddel.",
   "engineGitCopy": "Válaszd ki a kimenet másolásához"
 }
