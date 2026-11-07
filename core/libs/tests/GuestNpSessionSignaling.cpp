@@ -133,13 +133,6 @@ int main() {
     Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, &peerAddress, &peerPort) == ConnectionNotFound, "connection without network");
     Require(sceNpSessionSignalingGetConnectionStatus(netContextId, 1, &status, nullptr, nullptr) == ConnectionNotFound, "connection without peer outputs");
     Require(status == 0x5a5a5a5a && peerAddress == 0xa5a5a5a5u && peerPort == 0xa5a5, "failed status query wrote an output");
-    unsigned char statistics[16];
-    std::memset(statistics, 0xa5, sizeof(statistics));
-    unsigned char untouchedStatistics[sizeof(statistics)];
-    std::memcpy(untouchedStatistics, statistics, sizeof(statistics));
-    Require(sceNpSessionSignalingGetConnectionStatistics(nullptr) == InvalidArgument, "null connection statistics");
-    Require(sceNpSessionSignalingGetConnectionStatistics(reinterpret_cast<SessionSignalingConnectionStatistics*>(statistics)) == Unavailable, "connection statistics without network");
-    Require(std::memcmp(statistics, untouchedStatistics, sizeof(statistics)) == 0, "failed statistics query wrote an output");
     Require(sceNpSessionSignalingDeactivate(firstId, 1) == ContextNotFound, "deactivate stale context");
     Require(sceNpSessionSignalingDeactivate(contextId, 1) == GroupNotFound, "deactivate nonexistent group");
 

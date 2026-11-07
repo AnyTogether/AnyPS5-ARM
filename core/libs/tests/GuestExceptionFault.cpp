@@ -36,27 +36,35 @@ struct RegisterState {
 
 static_assert(offsetof(RegisterState, vectorOut) == 32 && offsetof(RegisterState, avx) == 64 && offsetof(RegisterState, r12) == 72 && offsetof(RegisterState, r13) == 80);
 
+// The asm below names its labels without the leading underscore Mach-O gives C symbols, so on
+// macOS each declaration names its label.
+#ifdef __APPLE__
+#define FAULT_TEST_SYMBOL(name) __asm__(#name)
+#else
+#define FAULT_TEST_SYMBOL(name)
+#endif
+
 extern "C" {
-std::uint64_t APS5_VABI FaultTestRead(std::uintptr_t address);
-void FaultTestReadSite();
-void FaultTestReadResume();
-std::uint64_t APS5_VABI FaultTestWrite(std::uintptr_t address, std::uint64_t value);
-void FaultTestWriteSite();
-void FaultTestWriteResume();
-std::uint64_t APS5_VABI FaultTestIllegal();
-void FaultTestIllegalSite();
-void FaultTestIllegalResume();
-std::uint64_t APS5_VABI FaultTestDivide(std::int32_t dividend, std::int32_t divisor);
-void FaultTestDivideSite();
-void FaultTestDivideResume();
-void APS5_VABI FaultTestRegisters(std::uintptr_t address, RegisterState* state);
-void FaultTestRegistersSite();
-void FaultTestRegistersResume();
-std::uint64_t APS5_VABI FaultTestJump(std::uintptr_t address, void* buffer);
-void FaultTestJumpSite();
-std::uint64_t APS5_VABI FaultTestSimdDivide();
-void FaultTestSimdDivideSite();
-void FaultTestSimdDivideResume();
+std::uint64_t APS5_VABI FaultTestRead(std::uintptr_t address) FAULT_TEST_SYMBOL(FaultTestRead);
+void FaultTestReadSite() FAULT_TEST_SYMBOL(FaultTestReadSite);
+void FaultTestReadResume() FAULT_TEST_SYMBOL(FaultTestReadResume);
+std::uint64_t APS5_VABI FaultTestWrite(std::uintptr_t address, std::uint64_t value) FAULT_TEST_SYMBOL(FaultTestWrite);
+void FaultTestWriteSite() FAULT_TEST_SYMBOL(FaultTestWriteSite);
+void FaultTestWriteResume() FAULT_TEST_SYMBOL(FaultTestWriteResume);
+std::uint64_t APS5_VABI FaultTestIllegal() FAULT_TEST_SYMBOL(FaultTestIllegal);
+void FaultTestIllegalSite() FAULT_TEST_SYMBOL(FaultTestIllegalSite);
+void FaultTestIllegalResume() FAULT_TEST_SYMBOL(FaultTestIllegalResume);
+std::uint64_t APS5_VABI FaultTestDivide(std::int32_t dividend, std::int32_t divisor) FAULT_TEST_SYMBOL(FaultTestDivide);
+void FaultTestDivideSite() FAULT_TEST_SYMBOL(FaultTestDivideSite);
+void FaultTestDivideResume() FAULT_TEST_SYMBOL(FaultTestDivideResume);
+void APS5_VABI FaultTestRegisters(std::uintptr_t address, RegisterState* state) FAULT_TEST_SYMBOL(FaultTestRegisters);
+void FaultTestRegistersSite() FAULT_TEST_SYMBOL(FaultTestRegistersSite);
+void FaultTestRegistersResume() FAULT_TEST_SYMBOL(FaultTestRegistersResume);
+std::uint64_t APS5_VABI FaultTestJump(std::uintptr_t address, void* buffer) FAULT_TEST_SYMBOL(FaultTestJump);
+void FaultTestJumpSite() FAULT_TEST_SYMBOL(FaultTestJumpSite);
+std::uint64_t APS5_VABI FaultTestSimdDivide() FAULT_TEST_SYMBOL(FaultTestSimdDivide);
+void FaultTestSimdDivideSite() FAULT_TEST_SYMBOL(FaultTestSimdDivideSite);
+void FaultTestSimdDivideResume() FAULT_TEST_SYMBOL(FaultTestSimdDivideResume);
 }
 
 asm(".text\n"
