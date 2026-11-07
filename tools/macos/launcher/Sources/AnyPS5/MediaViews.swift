@@ -3,6 +3,10 @@ import AppKit
 import AVFoundation
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// A picture file over the size read to be sent.
+struct PictureTooBig: Error {}
 
 /// Photos, clips and voice notes on AnyTogether: shown in messages and on profiles, and the
 /// gallery's screenshots and clips sent into a chat or pinned to the user's own gallery.
@@ -92,30 +96,103 @@ extension AppModel {
 
     /// A screenshot or clip into a conversation: made small enough, uploaded, sent.
     func sendShot(_ file: URL, to conversation: TogetherConversation) {
-        guard familyPermits(.mediaSharing), !cloud.working else { return }
+        sendFiles([file], to: conversation, pictures: false)
+    }
+
+    /// Picture files of the user's own (picked or dropped) into a conversation, one after the
+    /// other. Each is drawn again from its pixels first, sealed or not, so no location or camera
+    /// data goes along.
+    func sendPictures(_ files: [URL], to conversation: TogetherConversation) {
+        sendFiles(files, to: conversation, pictures: true)
+    }
+
+    private func sendFiles(_ files: [URL], to conversation: TogetherConversation, pictures: Bool) {
+        guard !files.isEmpty, familyPermits(.mediaSharing), !cloud.working else { return }
         cloud.working = true
         show(TCloud.text(.sending), symbol: "paperplane")
         let name = conversation.name(for: inbox?.me ?? "")
         Task {
             defer { cloud.working = false }
-            do {
-                let sent: TogetherMessage
-                if sendsSealed(conversation) {
-                    // Sealed on this Mac: the server keeps only ciphertext of it.
-                    let attachment = try await uploadSealedShot(file)
-                    sent = try await sealAndSend(TogetherE2EE.Payload(attachment: attachment), in: conversation, mediaId: attachment.mediaId)
-                } else {
-                    let media = try await uploadShot(file)
-                    sent = try await together.send(media: media.id, in: conversation.id)
+            for file in files {
+                do {
+                    let sent: TogetherMessage
+                    if sendsSealed(conversation) {
+                        // Sealed on this Mac: the server keeps only ciphertext of it.
+                        let attachment = try await pictures ? uploadSealedPicture(file) : uploadSealedShot(file)
+                        sent = try await sealAndSend(TogetherE2EE.Payload(attachment: attachment), in: conversation, mediaId: attachment.mediaId)
+                    } else {
+                        let media = try await pictures ? uploadPicture(file) : uploadShot(file)
+                        sent = try await together.send(media: media.id, in: conversation.id)
+                    }
+                    _ = inbox?.apply(sent, open: nil)
+                    Sounds.shared.play(.select)
+                    show(TCloud.format(.sentTo, name), symbol: "checkmark.circle.fill")
+                } catch let refusal as E2EERefusal {
+                    return showSealedFailure(refusal, in: conversation)
+                } catch is PictureTooBig {
+                    return show(TCloud.text(.tooBig), symbol: "exclamationmark.bubble.fill")
+                } catch {
+                    return show(cloudMessage(error), symbol: "exclamationmark.bubble.fill")
                 }
-                _ = inbox?.apply(sent, open: nil)
-                Sounds.shared.play(.select)
-                show(TCloud.format(.sentTo, name), symbol: "checkmark.circle.fill")
-            } catch let refusal as E2EERefusal {
-                showSealedFailure(refusal, in: conversation)
-            } catch {
-                show(cloudMessage(error), symbol: "exclamationmark.bubble.fill")
             }
+        }
+    }
+
+    /// The biggest picture file read to be sent, as on Windows and Linux.
+    static let pictureSourceLimit = 50 * 1024 * 1024
+
+    /// A picture file of the user's own made ready to go: any kind macOS reads, drawn again from
+    /// its pixels (PNG when it fits, else JPEG), so nothing of the file but the picture goes along.
+    func readyPicture(_ file: URL) async throws -> (data: Data, contentType: String, width: Int, height: Int) {
+        let size = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard size <= Self.pictureSourceLimit else { throw PictureTooBig() }
+        let limits = cloud.info?.media ?? TogetherStorageInfo.MediaLimits()
+        return try await Task.detached { try MediaPrep.sealableImage(file, maxBytes: limits.image, maxPixels: limits.pixels) }.value
+    }
+
+    func uploadPicture(_ file: URL) async throws -> TogetherMedia {
+        let ready = try await readyPicture(file)
+        return try await together.uploadMedia(kind: "image", data: ready.data, contentType: ready.contentType).media
+    }
+
+    func uploadSealedPicture(_ file: URL) async throws -> TogetherE2EE.Attachment {
+        let ready = try await readyPicture(file)
+        return try await together.uploadSealed(kind: "image", data: ready.data, contentType: ready.contentType, width: ready.width, height: ready.height)
+    }
+
+    /// Messages › a conversation's menu › Send a photo: any picture file, as on Windows and Linux.
+    func pickPictures(for conversation: TogetherConversation) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.image]
+        panel.prompt = TChat.text(.sendPhoto)
+        guard panel.runModal() == .OK else { return }
+        sendPictures(panel.urls, to: conversation)
+    }
+
+    /// Files dropped on the open conversation: its pictures go, anything else is said no to.
+    func dropPictures(_ providers: [NSItemProvider]) -> Bool {
+        guard let conversation = selectedConversation, familyAllows(.mediaSharing) else { return false }
+        let files = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !files.isEmpty else { return false }
+        Task { @MainActor [weak self] in
+            var urls: [URL] = []
+            for provider in files {
+                if let url = await Self.droppedURL(provider) { urls.append(url) }
+            }
+            let pictures = urls.filter { UTType(filenameExtension: $0.pathExtension)?.conforms(to: .image) == true }
+            guard let self else { return }
+            if pictures.count < urls.count { self.show(TCloud.text(.badMedia), symbol: "exclamationmark.bubble.fill") }
+            self.sendPictures(pictures, to: conversation)
+        }
+        return true
+    }
+
+    private nonisolated static func droppedURL(_ provider: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { continuation in
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in continuation.resume(returning: url) }
         }
     }
 

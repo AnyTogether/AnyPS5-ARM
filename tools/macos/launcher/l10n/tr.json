@@ -851,6 +851,7 @@
   "chatSeenBy": "%d kişi gördü",
   "receiptSeenByEveryone": "Herkes gördü",
   "conversationPin": "En üste sabitle",
+  "messagesSendPhoto": "Fotoğraf gönder",
   "conversationUnpin": "Sabitlemeyi kaldır",
   "conversationPinned": "Sabitlendi",
   "chatPinFull": "En fazla %d konuşma sabitleyebilirsin.",

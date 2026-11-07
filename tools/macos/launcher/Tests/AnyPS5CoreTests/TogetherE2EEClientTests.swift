@@ -501,4 +501,33 @@ final class TogetherE2EEBookTests: XCTestCase {
         XCTAssertNil((smallAfter[kCGImagePropertyTIFFDictionary] as? [CFString: Any])?[kCGImagePropertyTIFFModel])
         XCTAssertFalse(String(decoding: small.data, as: UTF8.self).contains("Secret Camera"))
     }
+
+    /// A picture file of the user's own (Messages › Send a photo) of a kind the server does not
+    /// take, a TIFF here, goes as a PNG drawn from its pixels, its location left behind.
+    func testAPictureOfAnotherKindGoesAsAPNGWithoutItsLocation() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("e2ee-tiff-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let file = folder.appendingPathComponent("scan.tiff")
+        let context = CGContext(data: nil, width: 64, height: 48, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.setFillColor(red: 0.2, green: 0.5, blue: 0.9, alpha: 1)
+        context.fill(CGRect(x: 0, y: 0, width: 64, height: 48))
+        let destination = CGImageDestinationCreateWithURL(file as CFURL, UTType.tiff.identifier as CFString, 1, nil)!
+        CGImageDestinationAddImage(destination, context.makeImage()!, [
+            kCGImagePropertyGPSDictionary: [kCGImagePropertyGPSLatitude: 41.0082, kCGImagePropertyGPSLatitudeRef: "N", kCGImagePropertyGPSLongitude: 28.9784, kCGImagePropertyGPSLongitudeRef: "E"],
+            kCGImagePropertyTIFFDictionary: [kCGImagePropertyTIFFMake: "Secret Camera Co"],
+        ] as CFDictionary)
+        XCTAssertTrue(CGImageDestinationFinalize(destination))
+        let before = CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithURL(file as CFURL, nil)!, 0, nil) as! [CFString: Any]
+        XCTAssertNotNil(before[kCGImagePropertyGPSDictionary], "the test picture has a location to lose")
+
+        let ready = try MediaPrep.sealableImage(file, maxBytes: 10 * 1_048_576)
+        XCTAssertEqual(ready.contentType, "image/png")
+        XCTAssertEqual(ready.width, 64)
+        XCTAssertEqual(ready.height, 48)
+        let after = CGImageSourceCopyPropertiesAtIndex(CGImageSourceCreateWithData(ready.data as CFData, nil)!, 0, nil) as! [CFString: Any]
+        XCTAssertNil(after[kCGImagePropertyGPSDictionary])
+        XCTAssertFalse(String(decoding: ready.data, as: UTF8.self).contains("Secret Camera"))
+    }
 }
