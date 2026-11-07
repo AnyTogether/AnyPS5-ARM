@@ -392,6 +392,8 @@
   "phonePairingText": "A telefon ugyanazt a kódot mutatja.",
   "phoneAllow": "Engedélyezze a",
   "phoneConnected": "%@ csatlakoztatva a",
+  "phoneServer": "Telefonvezérlő",
+  "phoneAddress": "Cím a telefonhoz",
   "phones": "Telefonok",
   "phonesNone": "Még nincs ilyen",
   "phoneRemove": "Távolítsa el a",

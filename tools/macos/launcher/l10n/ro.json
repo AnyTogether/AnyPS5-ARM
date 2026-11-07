@@ -408,6 +408,8 @@
   "phoneAllow": "Permite",
   "phoneDeny": "Refuză",
   "phoneConnected": "%@ conectat",
+  "phoneServer": "Controler pe telefon",
+  "phoneAddress": "Adresă pentru telefon",
   "phones": "Telefoane",
   "phonesNone": "Încă niciunul",
   "phoneRemove": "Elimină",

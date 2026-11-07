@@ -402,6 +402,12 @@ extension AppModel {
             PanelRow(id: "showScreenshots", title: T.text(.showScreenshots), symbol: "photo.on.rectangle.angled", kind: .action(destructive: false) { [weak self] in self?.showScreenshots() }),
             PanelRow(id: "screenshotsHint", title: T.text(.screenshotsHint), kind: .info("")),
         ]
+        // The phone server, and where a phone without Bonjour finds it, as on Windows and Linux.
+        advanced.append(PanelRow(id: "phoneServer", title: T.text(.phoneServer), detail: T.text(.phoneServerDetail), symbol: "iphone.gen3.radiowaves.left.and.right",
+                                 kind: .toggle(phoneServerOn) { [weak self] value in self?.setPhoneServer(value) }))
+        if let port = remote?.controlPort {
+            advanced.append(PanelRow(id: "phoneAddress", title: T.text(.phoneAddress), kind: .info("\(Host.current().localizedName ?? "Mac") · \(port)")))
+        }
         advanced.append(PanelRow(id: "phones", title: T.text(.phones), kind: .info(phones.isEmpty ? T.text(.phonesNone)
             : connectedPhones.isEmpty ? "" : T.format(.phonesConnectedCount, connectedPhones.count))))
         for device in phones {
@@ -411,7 +417,7 @@ extension AppModel {
                 self?.removePhone(device.id)
             }))
         }
-        advanced += browserPlayRows()
+        if phoneServerOn { advanced += browserPlayRows() }
 
         return [
             PanelCategory(id: "profiles", title: TPro.text(.profilesCategory), symbol: "person.crop.circle", rows: profileRows()),

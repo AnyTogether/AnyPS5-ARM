@@ -408,6 +408,8 @@
   "phoneAllow": "Povolit",
   "phoneDeny": "Zamítnout",
   "phoneConnected": "%@ připojeno",
+  "phoneServer": "Ovládání přes telefon",
+  "phoneAddress": "Adresa pro telefon",
   "phones": "Telefony",
   "phonesNone": "Zatím žádné",
   "phoneRemove": "Odstranit",

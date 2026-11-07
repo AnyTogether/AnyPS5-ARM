@@ -45,6 +45,8 @@ struct Preferences: Codable, Equatable {
     var friendsJoin: Bool?
     /// Play from a browser (BrowserPlay.swift): nil is on; browserPlayAlways keeps its server up.
     var browserPlay: Bool?
+    /// The phone server (Settings › Advanced › Phone controller): nil is on.
+    var phoneServer: Bool?
     var browserPlayAlways: Bool?
     /// Another AnyTogether server than AnyTogether's own; nil is AnyTogether's.
     var togetherServer: String?
@@ -721,7 +723,7 @@ final class AppModel: ObservableObject {
             musicSink = objectWillChange.debounce(for: .milliseconds(120), scheduler: RunLoop.main).sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateMusic() }
             }
-            startRemote()
+            if phoneServerOn { startRemote() }
             // Once soon after start, then every six hours while the launcher stays open.
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(4))
@@ -2253,6 +2255,38 @@ final class AppModel: ObservableObject {
     }
 
     // MARK: Phone
+
+    var phoneServerOn: Bool { preferences.phoneServer != false }
+
+    /// Settings › Advanced › Phone controller: the phone server on or off, as on Windows and Linux.
+    /// Off, no phone finds this Mac and the browser pad has nothing to serve through.
+    func setPhoneServer(_ on: Bool) {
+        preferences.phoneServer = on ? nil : false
+        guard persists else { return }
+        if on {
+            if remote == nil { startRemote() }
+        } else {
+            stopRemote()
+        }
+    }
+
+    private func stopRemote() {
+        librarySink = nil
+        cable?.stop()
+        cable = nil
+        androidCable?.stop()
+        androidCable = nil
+        remote?.stop()
+        remote = nil
+        pairing = nil
+        withAnimation(Motion.overlay) {
+            phone = nil
+            phoneConnecting = nil
+            connectedPhones = []
+            phonePlayers = [:]
+        }
+        updateBrowserPlay()
+    }
 
     /// Starts the phone server; a launcher that cannot open it still works without phones.
     private func startRemote() {
