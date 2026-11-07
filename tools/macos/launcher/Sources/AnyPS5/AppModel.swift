@@ -111,6 +111,9 @@ struct Preferences: Codable, Equatable {
     var engineCheckout: String?
     /// The commit each checkout was last built at by Update from Git.
     var engineGitBuilt: [String: String]?
+    /// Settings › Engine › Update from Git Before Playing: the checkout's remote asked before each
+    /// game starts; nil is off, as on Windows and Linux.
+    var engineGitBeforePlay: Bool?
     /// Settings → Game Library: new games unlocked in the background (PrepareQueue); nil means on.
     var prepareNewGames: Bool?
     /// The window full screen at start (WindowStart): nil the first time, then as it was left.
@@ -1813,7 +1816,12 @@ final class AppModel: ObservableObject {
     func primaryAction(_ game: Game) {
         if familyPrimaryAction(game) { return }
         switch state(of: game) {
-        case .installed(let outdated): outdated ? open(.updateChoice) : play(game)
+        case .installed(let outdated):
+            let go: () -> Void = { [weak self] in
+                if outdated { self?.open(.updateChoice) } else { self?.play(game) }
+            }
+            // Settings › Engine › Update from Git Before Playing: the checkout's remote first.
+            updatesBeforePlay ? playAfterGitCheck(game, play: go) : go()
         case .locked, .failed: unlock(game)
         case .installing where isPreparing(game): promotePreparation(game)
         case .installing, .queued: cancelUnlock(game)

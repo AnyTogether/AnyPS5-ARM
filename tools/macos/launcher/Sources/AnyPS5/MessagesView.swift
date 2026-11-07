@@ -1,6 +1,7 @@
 import AnyPS5Core
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Messages on AnyTogether: the conversations (and friends to start one with) on the left, the
 /// thread on the right with quick replies a controller can send and a field to type in. The
@@ -435,6 +436,8 @@ extension AppModel {
 struct MessagesView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
+    /// Files dragged over the open conversation: let go, their pictures are sent.
+    @State private var dropping = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 28 * scale) {
@@ -542,6 +545,24 @@ struct MessagesView: View {
             }
             .padding(24 * scale)
             .glass(24 * scale, opacity: 0.25)
+            .overlay {
+                if dropping {
+                    RoundedRectangle(cornerRadius: 24 * scale, style: .continuous)
+                        .strokeBorder(model.accent, style: StrokeStyle(lineWidth: 3 * scale, dash: [10 * scale, 8 * scale]))
+                        .background(RoundedRectangle(cornerRadius: 24 * scale, style: .continuous).fill(model.accent.opacity(0.12)))
+                        .overlay {
+                            Label(TChat.text(.sendPhoto), systemImage: "photo.badge.plus")
+                                .font(.display(20 * scale, .semibold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 22 * scale).padding(.vertical, 12 * scale)
+                                .background(Capsule().fill(Color.black.opacity(0.45)))
+                        }
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
+            .animation(Motion.focus, value: dropping)
+            .onDrop(of: [.fileURL], isTargeted: $dropping) { providers in model.dropPictures(providers) }
         } else if model.selectingNewGroup {
             GroupComposer()
         } else if targets.indices.contains(model.messagesIndex), case .friend(let friend) = targets[model.messagesIndex] {
