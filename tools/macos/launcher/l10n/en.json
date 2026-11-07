@@ -851,6 +851,7 @@
   "chatSeenBy": "Seen by %d",
   "receiptSeenByEveryone": "Seen by everyone",
   "conversationPin": "Pin to top",
+  "messagesSendPhoto": "Send a photo",
   "conversationUnpin": "Unpin",
   "conversationPinned": "Pinned",
   "chatPinFull": "You can pin up to %d conversations.",

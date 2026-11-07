@@ -563,6 +563,7 @@
   "receiptRead": "已读",
   "receiptSeenByEveryone": "所有人已读",
   "conversationPin": "置顶对话",
+  "messagesSendPhoto": "发送照片",
   "conversationUnpin": "取消置顶",
   "conversationPinned": "已置顶",
   "conversationMute": "静音通知",
