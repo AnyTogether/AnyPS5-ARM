@@ -59,7 +59,8 @@ env:
     online_probe online_observation_tests remote_pad_tests guest_appcontent_tests
     guest_appcontent_addons_tests guest_appcontent_license_tests guest_user_service_tests
     guest_user_service_user_name_tests guest_user_service_user_kind_tests guest_appcontent_download_tests
-    guest_user_service_lifecycle_tests guest_user_service_presets_tests power_control_tests
+    guest_user_service_lifecycle_tests guest_user_service_presets_tests guest_user_service_group_io_tests
+    power_control_tests
   SMOKE_TESTS: online|remote_pad|appcontent|user_service|power_control
   # For another repository's build: of the tests SMOKE_TESTS matches (ctest's JSON on stdin), those
   # whose program was built, as an exact regular expression in UPSTREAM_SMOKE_TESTS (empty: none).
