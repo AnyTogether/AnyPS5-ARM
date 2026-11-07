@@ -34,6 +34,8 @@ struct MessageActions: Equatable {
         case reactions, reply, edit, unsend, confirmUnsend, cancel
         /// What choosing it makes the conversation: pinned or not, muted or not.
         case pin(Bool), mute(Bool)
+        /// A picture file of the user's own into the conversation.
+        case sendPhoto
         /// Reporting a message, then the reason (as the server names it).
         case report, reportReason(String)
         /// The encryption sheet; its "We compared them" (on or off); the devices-changed notice
@@ -136,6 +138,8 @@ extension AppModel {
             var rows: [MessageActions.Row] = [.pin(!conversation.pinned), .mute(!conversation.muted)]
             if e2eeLock(conversation) != nil { rows.append(.encryption) }
             if e2ee?.notice(conversation.id) != nil { rows.append(.dismissNotice) }
+            // As on Windows and Linux; a conversation whose other side has no device takes none.
+            if familyAllows(.mediaSharing), e2eeLock(conversation) != .noDevice { rows.append(.sendPhoto) }
             return rows
         case .encryption:
             guard let conversation = menuConversation(menu) else { return [] }
@@ -238,6 +242,11 @@ extension AppModel {
             unsend(message)
         case .cancel:
             menuCommand(.back)
+        case .sendPhoto:
+            guard let conversation else { return }
+            closeMessageMenu(sound: false)
+            Sounds.shared.play(.select)
+            pickPictures(for: conversation)
         case .pin(let on):
             guard let conversation else { return }
             closeMessageMenu(sound: false)
@@ -602,6 +611,7 @@ struct MessageMenuSheet: View {
         case .unsend: return (TChat.text(.unsend), "arrow.uturn.backward", true)
         case .confirmUnsend: return (TChat.text(.unsend), "arrow.uturn.backward", true)
         case .cancel: return (T.text(.cancel), "xmark", false)
+        case .sendPhoto: return (TChat.text(.sendPhoto), "photo.badge.plus", false)
         case .pin(let on): return (TChat.text(on ? .pin : .unpin), on ? "pin" : "pin.slash", false)
         case .mute(let on): return (TChat.text(on ? .mute : .unmute), on ? "bell.slash" : "bell", false)
         case .report: return (TChat.text(.report), "exclamationmark.bubble", true)
