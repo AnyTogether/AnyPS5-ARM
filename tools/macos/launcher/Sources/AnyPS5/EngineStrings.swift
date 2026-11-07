@@ -10,6 +10,7 @@ enum TE {
     }
 
     enum Key: String, CaseIterable {
+        case engineUpstreamNotOnMac, engineUpstreamNotOnMacDetail
         case engineTitle, engineDefault, engineDefaultDetail, engineBuiltIn, engineCustomName, engineFollow
         case engineGameDetail, engineUnlockedWith, engineNotUnlocked, engineSwitch
         case engineDownloadedSection, engineAvailableSection, engineCustomSection

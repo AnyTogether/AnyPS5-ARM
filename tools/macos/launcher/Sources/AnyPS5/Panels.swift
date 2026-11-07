@@ -251,6 +251,14 @@ extension AppModel {
                 self?.chooseBackdrop(preferences.backdrop)
             }))
         }
+        // Music without making a theme, as on Windows and Linux.
+        appearance.append(PanelRow(id: "menuMusic", title: T.text(.themeMusic), detail: preferences.menuMusicFile.map { URL(fileURLWithPath: $0).lastPathComponent } ?? T.text(.menuMusicDetail),
+                                   symbol: "music.note", kind: .action(destructive: false) { [weak self] in self?.chooseMenuMusic() }))
+        if preferences.menuMusicFile != nil {
+            appearance.append(PanelRow(id: "menuMusicOff", title: T.text(.themeRemoveMusic), symbol: "speaker.slash", kind: .action(destructive: false) { [weak self] in
+                self?.preferences.menuMusicFile = nil
+            }))
+        }
         if lookStyle.isGlass {
             // The see-through window: how much of the desktop shows, and the key art over it.
             let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
@@ -292,6 +300,11 @@ extension AppModel {
 
         // The name and picture are the profile's: Settings → Profiles.
         var behaviour: [PanelRow] = [
+            // Over the two below, as on Windows and Linux.
+            PanelRow(id: "launcherVolume", title: T.text(.launcherVolume), detail: T.text(.launcherVolumeDetail), symbol: "speaker.wave.3",
+                     kind: .stepper(value: launcherVolume, range: 0...100, step: 5, format: Self.percent) { [weak self] value in
+                         self?.preferences.launcherVolume = value == 100 ? nil : value
+                     }),
             PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2",
                      kind: .stepper(value: preferences.sounds ? preferences.soundVolume ?? 100 : 0, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
                          self?.preferences.sounds = value > 0
@@ -397,6 +410,12 @@ extension AppModel {
             PanelRow(id: "showScreenshots", title: T.text(.showScreenshots), symbol: "photo.on.rectangle.angled", kind: .action(destructive: false) { [weak self] in self?.showScreenshots() }),
             PanelRow(id: "screenshotsHint", title: T.text(.screenshotsHint), kind: .info("")),
         ]
+        // The phone server, and where a phone without Bonjour finds it, as on Windows and Linux.
+        advanced.append(PanelRow(id: "phoneServer", title: T.text(.phoneServer), detail: T.text(.phoneServerDetail), symbol: "iphone.gen3.radiowaves.left.and.right",
+                                 kind: .toggle(phoneServerOn) { [weak self] value in self?.setPhoneServer(value) }))
+        if let port = remote?.controlPort {
+            advanced.append(PanelRow(id: "phoneAddress", title: T.text(.phoneAddress), kind: .info("\(Host.current().localizedName ?? "Mac") · \(port)")))
+        }
         advanced.append(PanelRow(id: "phones", title: T.text(.phones), kind: .info(phones.isEmpty ? T.text(.phonesNone)
             : connectedPhones.isEmpty ? "" : T.format(.phonesConnectedCount, connectedPhones.count))))
         for device in phones {
@@ -406,7 +425,7 @@ extension AppModel {
                 self?.removePhone(device.id)
             }))
         }
-        advanced += browserPlayRows()
+        if phoneServerOn { advanced += browserPlayRows() }
 
         return [
             PanelCategory(id: "profiles", title: TPro.text(.profilesCategory), symbol: "person.crop.circle", rows: profileRows()),
@@ -643,6 +662,16 @@ extension AppModel {
             preferences.backdropFile = url.path
             preferences.backdrop = kind
         }
+    }
+
+    /// Appearance › Menu music: the user's own song for when the selected game has none.
+    func chooseMenuMusic() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.audio]
+        panel.prompt = T.text(.chooseFile)
+        if panel.runModal() == .OK, let url = panel.url { preferences.menuMusicFile = url.path }
     }
 
     // MARK: Panel input

@@ -47,7 +47,15 @@ extension AppModel {
                                      self?.openProfile(friend.handle, card: TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar,
                                                                                            privateName: friend.privateName, privateAvatar: friend.privateAvatar))
                                  },
-                                 person: panelPerson(friend, status: PanelPerson.Status(friend.presence), level: friend.level)))
+                                 person: panelPerson(friend, status: PanelPerson.Status(friend.presence), level: friend.level),
+                                 option: PanelRow.Option(label: T.text(.friendsRemove)) { [weak self] in self?.ask("friend-remove-\(friend.userId)") }))
+            // △ on the friend asks first, in place under them, as Windows and Linux do.
+            if askingRow == "friend-remove-\(friend.userId)" {
+                let person = TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: identity.name, avatar: friend.avatar)
+                rows += askingFirst(PanelRow(id: "friend-remove-\(friend.userId)", title: T.text(.friendsRemove), symbol: "person.badge.minus",
+                                             kind: .action(destructive: true) { [weak self] in self?.removeFriend(person) }),
+                                    question: T.format(.askRemoveFriend, identity.name))
+            }
             // Online friends can be called, unless the user is in a call with them already.
             if friend.presence?.online == true, callFriend?.userId != friend.userId, familyAllows(.voiceChat) {
                 let person = TogetherPerson(userId: friend.userId, handle: friend.handle, displayName: friend.displayName, avatar: friend.avatar)
@@ -133,6 +141,19 @@ extension AppModel {
             do {
                 try await together.cancelFriendRequest(person.userId)
                 show(T.format(.friendsRequestCancelled, person.displayName), symbol: "person.badge.minus")
+            } catch {
+                show(T.text(.togetherUnreachable), symbol: "exclamationmark.triangle.fill")
+            }
+            refreshFriends()
+        }
+    }
+
+    /// No longer friends: a new request is needed to be friends again.
+    func removeFriend(_ person: TogetherPerson) {
+        Task {
+            do {
+                try await together.removeFriend(person.userId)
+                show(T.format(.friendsRemoved, person.displayName), symbol: "person.badge.minus")
             } catch {
                 show(T.text(.togetherUnreachable), symbol: "exclamationmark.triangle.fill")
             }
