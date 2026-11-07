@@ -102,6 +102,8 @@
   "motionFull": "Teljes",
   "motionReduced": "Csökkentett",
   "sounds": "Interfészhangok",
+  "launcherVolume": "Az indítóprogram hangereje",
+  "launcherVolumeDetail": "Minden, amit az indítóprogram lejátszik: a hangjai és a zenéje. 0% esetén néma; a játékok hangereje nem változik.",
   "language": "Nyelv",
   "rescan": "Újraolvasás",
   "installedSize": "A telepített játékok APFS-klónként tárolódnak, így nem foglalnak plusz tárhelyet.",

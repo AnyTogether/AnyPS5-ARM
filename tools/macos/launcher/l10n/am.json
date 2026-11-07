@@ -114,6 +114,8 @@
   "motionFull": "ሙሉ",
   "motionReduced": "የተቀነሰ",
   "sounds": "የበይነገጽ ድምጾች",
+  "launcherVolume": "የማስጀመሪያው ድምፅ መጠን",
+  "launcherVolumeDetail": "ማስጀመሪያው የሚያጫውተው ሁሉ፦ ድምጾቹ እና ሙዚቃው። 0% ጸጥታ ነው፤ ጨዋታዎች የራሳቸውን ድምፅ ይይዛሉ።",
   "language": "ቋንቋ",
   "storage": "ቤተ-መጽሐፍት",
   "rescan": "እንደገና ይቃኙ",

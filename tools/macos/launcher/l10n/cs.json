@@ -114,6 +114,8 @@
   "motionFull": "Plné",
   "motionReduced": "Omezené",
   "sounds": "Zvuky rozhraní",
+  "launcherVolume": "Hlasitost spouštěče",
+  "launcherVolumeDetail": "Vše, co spouštěč přehrává: jeho zvuky a hudba. 0 % je ticho; hry si ponechají vlastní hlasitost.",
   "language": "Jazyk",
   "storage": "Knihovna",
   "rescan": "Znovu vyhledat",

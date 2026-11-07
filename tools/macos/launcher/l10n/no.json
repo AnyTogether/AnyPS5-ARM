@@ -114,6 +114,8 @@
   "motionFull": "Fullstendige",
   "motionReduced": "Reduserte",
   "sounds": "Grensesnittlyder",
+  "launcherVolume": "Startprogrammets lydstyrke",
+  "launcherVolumeDetail": "Alt startprogrammet spiller av: lydene og musikken. 0 % er stille; spill beholder sin egen lydstyrke.",
   "language": "Språk",
   "storage": "Bibliotek",
   "rescan": "Søk på nytt",

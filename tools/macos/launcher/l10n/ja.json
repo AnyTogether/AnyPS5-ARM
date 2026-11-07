@@ -115,6 +115,8 @@
   "motionFull": "フル",
   "motionReduced": "削減されました",
   "sounds": "インターフェース音",
+  "launcherVolume": "ランチャーの音量",
+  "launcherVolumeDetail": "ランチャーが鳴らすすべての音（効果音と音楽）です。0 % で無音になり、ゲームの音量は変わりません。",
   "language": "言語",
   "storage": "図書館",
   "rescan": "もう一度スキャンしてください",

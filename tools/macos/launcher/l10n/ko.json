@@ -114,6 +114,8 @@
   "motionFull": "전체",
   "motionReduced": "축소",
   "sounds": "인터페이스 사운드",
+  "launcherVolume": "런처 음량",
+  "launcherVolumeDetail": "런처가 재생하는 모든 소리(효과음과 음악)입니다. 0%는 무음이며, 게임 음량은 그대로입니다.",
   "language": "언어",
   "storage": "라이브러리",
   "rescan": "다시 스캔",

@@ -292,6 +292,11 @@ extension AppModel {
 
         // The name and picture are the profile's: Settings → Profiles.
         var behaviour: [PanelRow] = [
+            // Over the two below, as on Windows and Linux.
+            PanelRow(id: "launcherVolume", title: T.text(.launcherVolume), detail: T.text(.launcherVolumeDetail), symbol: "speaker.wave.3",
+                     kind: .stepper(value: launcherVolume, range: 0...100, step: 5, format: Self.percent) { [weak self] value in
+                         self?.preferences.launcherVolume = value == 100 ? nil : value
+                     }),
             PanelRow(id: "sounds", title: T.text(.sounds), symbol: "speaker.wave.2",
                      kind: .stepper(value: preferences.sounds ? preferences.soundVolume ?? 100 : 0, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
                          self?.preferences.sounds = value > 0

@@ -141,6 +141,8 @@
   "motionFull": "Full",
   "motionReduced": "Reduced",
   "sounds": "Interface Sounds",
+  "launcherVolume": "Launcher volume",
+  "launcherVolumeDetail": "Everything the launcher plays: its sounds and music. 0 % is silent; games keep their own volume.",
   "language": "Language",
   "storage": "Library",
   "rescan": "Scan Again",

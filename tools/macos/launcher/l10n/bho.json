@@ -115,6 +115,8 @@
   "motionFull": "भरा भइल",
   "motionReduced": "कम",
   "sounds": "इंटरफ़ेस के आवाज",
+  "launcherVolume": "लॉन्चर के आवाज़",
+  "launcherVolumeDetail": "लॉन्चर जवन कुछ बजावेला: ओकर आवाज आ संगीत। 0% पर चुप; खेल आपन आवाज़ रखेलें।",
   "language": "भाषा",
   "storage": "लाइब्रेरी",
   "rescan": "फेर से स्कैन करीं",

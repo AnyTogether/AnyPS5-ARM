@@ -115,6 +115,8 @@
   "motionFull": "كامل",
   "motionReduced": "مخفض",
   "sounds": "واجهة الأصوات",
+  "launcherVolume": "مستوى صوت المشغل",
+  "launcherVolumeDetail": "كل ما يشغّله المشغل: أصواته وموسيقاه. 0% صامت، وتحتفظ الألعاب بمستوى صوتها.",
   "language": "اللغة",
   "storage": "مكتبة",
   "rescan": "المسح مرة أخرى",

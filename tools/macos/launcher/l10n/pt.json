@@ -115,6 +115,8 @@
   "motionFull": "Completas",
   "motionReduced": "Reduzidas",
   "sounds": "Sons da interface",
+  "launcherVolume": "Volume do inicializador",
+  "launcherVolumeDetail": "Tudo o que o inicializador toca: seus sons e sua música. 0% é silêncio; os jogos mantêm o próprio volume.",
   "language": "Idioma",
   "storage": "Biblioteca",
   "rescan": "Verificar novamente",

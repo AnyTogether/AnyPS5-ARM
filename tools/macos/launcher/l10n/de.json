@@ -115,6 +115,8 @@
   "motionFull": "Vollständig",
   "motionReduced": "Reduziert",
   "sounds": "Oberflächentöne",
+  "launcherVolume": "Launcher-Lautstärke",
+  "launcherVolumeDetail": "Alles, was der Launcher abspielt: seine Töne und Musik. 0 % ist stumm; Spiele behalten ihre eigene Lautstärke.",
   "language": "Sprache",
   "storage": "Bibliothek",
   "rescan": "Erneut suchen",

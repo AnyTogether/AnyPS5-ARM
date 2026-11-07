@@ -114,6 +114,8 @@
   "motionFull": "完整",
   "motionReduced": "減少",
   "sounds": "介面音效",
+  "launcherVolume": "啟動器音量",
+  "launcherVolumeDetail": "啟動器播放的一切：音效與音樂。0% 為靜音；遊戲保持各自的音量。",
   "language": "語言",
   "storage": "遊戲庫",
   "rescan": "重新掃描",

@@ -114,6 +114,8 @@
   "motionFull": "Fullständiga",
   "motionReduced": "Reducerade",
   "sounds": "Gränssnittsljud",
+  "launcherVolume": "Startprogrammets volym",
+  "launcherVolumeDetail": "Allt som startprogrammet spelar: dess ljud och musik. 0 % är tyst; spel behåller sin egen volym.",
   "language": "Språk",
   "storage": "Bibliotek",
   "rescan": "Skanna igen",

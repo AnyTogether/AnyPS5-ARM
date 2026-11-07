@@ -114,6 +114,8 @@
   "motionFull": "Penuh",
   "motionReduced": "Dikurangkan",
   "sounds": "Bunyi Antara Muka",
+  "launcherVolume": "Kelantangan pelancar",
+  "launcherVolumeDetail": "Semua yang dimainkan oleh pelancar: bunyi dan muziknya. 0% bermaksud senyap; permainan mengekalkan kelantangan sendiri.",
   "language": "Bahasa",
   "storage": "Pustaka",
   "rescan": "Imbas Semula",

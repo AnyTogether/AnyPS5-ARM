@@ -114,6 +114,8 @@
   "motionFull": "完整",
   "motionReduced": "减少",
   "sounds": "界面音效",
+  "launcherVolume": "启动器音量",
+  "launcherVolumeDetail": "启动器播放的一切：音效和音乐。0% 为静音；游戏保持各自的音量。",
   "language": "语言",
   "storage": "游戏库",
   "rescan": "重新扫描",

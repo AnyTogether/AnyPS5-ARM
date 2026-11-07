@@ -115,6 +115,8 @@
   "motionFull": "Completas",
   "motionReduced": "Reducidas",
   "sounds": "Sonidos de la interfaz",
+  "launcherVolume": "Volumen del lanzador",
+  "launcherVolumeDetail": "Todo lo que reproduce el lanzador: sus sonidos y su música. 0 % es silencio; los juegos mantienen su propio volumen.",
   "language": "Idioma",
   "storage": "Biblioteca",
   "rescan": "Volver a buscar",

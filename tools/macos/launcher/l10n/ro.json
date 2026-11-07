@@ -114,6 +114,8 @@
   "motionFull": "Complete",
   "motionReduced": "Reduse",
   "sounds": "Sunete interfață",
+  "launcherVolume": "Volumul lansatorului",
+  "launcherVolumeDetail": "Tot ce redă lansatorul: sunetele și muzica sa. 0% înseamnă liniște; jocurile își păstrează volumul propriu.",
   "language": "Limbă",
   "storage": "Bibliotecă",
   "rescan": "Scanează din nou",

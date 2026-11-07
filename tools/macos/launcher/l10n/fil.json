@@ -114,6 +114,8 @@
   "motionFull": "Buo",
   "motionReduced": "Nabawasang",
   "sounds": "Mga Tunog ng Interface",
+  "launcherVolume": "Volume ng launcher",
+  "launcherVolumeDetail": "Lahat ng pinapatugtog ng launcher: ang mga tunog at musika nito. Tahimik sa 0%; may sariling volume ang mga laro.",
   "language": "Wika",
   "storage": "Aklatan",
   "rescan": "I-scan Muli",

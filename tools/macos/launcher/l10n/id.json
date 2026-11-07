@@ -115,6 +115,8 @@
   "motionFull": "Penuh",
   "motionReduced": "Dikurangi",
   "sounds": "Suara Antarmuka",
+  "launcherVolume": "Volume peluncur",
+  "launcherVolumeDetail": "Semua yang diputar peluncur: suara dan musiknya. 0% berarti senyap; game tetap memakai volumenya sendiri.",
   "language": "Bahasa",
   "storage": "Perpustakaan",
   "rescan": "Pindai Lagi",

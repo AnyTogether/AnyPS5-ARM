@@ -114,6 +114,8 @@
   "motionFull": "Fuld",
   "motionReduced": "Reduceret",
   "sounds": "Lyde i brugerfladen",
+  "launcherVolume": "Launcherens lydstyrke",
+  "launcherVolumeDetail": "Alt, hvad launcheren afspiller: dens lyde og musik. 0 % er lydløs; spil beholder deres egen lydstyrke.",
   "language": "Sprog",
   "storage": "Bibliotek",
   "rescan": "Skan igen",

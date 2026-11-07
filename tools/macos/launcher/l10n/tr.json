@@ -141,6 +141,8 @@
   "motionFull": "Tam",
   "motionReduced": "Azaltılmış",
   "sounds": "Arayüz sesleri",
+  "launcherVolume": "Başlatıcı ses düzeyi",
+  "launcherVolumeDetail": "Başlatıcının çaldığı her şey: arayüz sesleri ve müzik. %0 sessizdir; oyunların sesi değişmez.",
   "language": "Dil",
   "storage": "Kütüphane",
   "rescan": "Yeniden tara",

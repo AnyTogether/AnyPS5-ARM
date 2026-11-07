@@ -143,7 +143,7 @@ enum T {
         case newGame, newGames, newGameDetail
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
-        case motion, motionFull, motionReduced, sounds, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
+        case motion, motionFull, motionReduced, sounds, launcherVolume, launcherVolumeDetail, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
         case profileName, behaviour, hideWhilePlaying, rosettaMissing, rosettaInstall, rosettaInstalled
         case moveToApplications, moveToApplicationsText, moveNow, later, noToolkit
         case emptyLibraryTitle, emptyLibraryText, scanning, allGames, sortName, playTime

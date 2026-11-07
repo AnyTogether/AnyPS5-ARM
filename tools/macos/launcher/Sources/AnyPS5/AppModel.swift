@@ -30,6 +30,8 @@ struct Preferences: Codable, Equatable {
     /// Interface sounds and the selected game's theme song, in percent; nil keeps the default.
     var soundVolume: Int?
     var musicVolume: Int?
+    /// The launcher's own volume over both, in percent; nil is 100.
+    var launcherVolume: Int?
     /// nil checks GitHub for a newer launcher, as true does.
     var checkUpdates: Bool?
     /// Which releases the update check offers (Updates.Channel); nil is Stable.
@@ -781,10 +783,12 @@ final class AppModel: ObservableObject {
         if persists { DispatchQueue.main.async { [weak self] in self?.stepPrepare() } }
         power.profiles = preferences.powerProfiles ?? PowerProfiles()
         Motion.reduced = preferences.reducedMotion || power.adjustment.dimEffects
-        Sounds.shared.enabled = preferences.sounds
-        Sounds.shared.volume = Float(preferences.soundVolume ?? 100) / 100
+        // Every sound and song the launcher plays: the launcher's volume over each one's own.
+        let master = Float(launcherVolume) / 100
+        Sounds.shared.enabled = preferences.sounds && launcherVolume > 0
+        Sounds.shared.volume = master * Float(preferences.soundVolume ?? 100) / 100
         Feel.shared.vibration = preferences.controllerVibration ?? true
-        ThemeMusic.shared.volume = Float(musicVolume) / 100
+        ThemeMusic.shared.volume = master * Float(musicVolume) / 100
         Input.shared.circleConfirms = preferences.confirmCircle == true
         if persists, Input.shared.shortcuts != shortcutMap { Input.shared.apply(shortcutMap) }
         Input.shared.deadzone = preferences.stickDeadzone ?? 0
@@ -799,6 +803,9 @@ final class AppModel: ObservableObject {
     static let defaultMusicVolume = 50
 
     var musicVolume: Int { preferences.musicVolume ?? AppModel.defaultMusicVolume }
+
+    /// The launcher's own volume, over its sounds and its music (Settings › Behaviour).
+    var launcherVolume: Int { min(100, max(0, preferences.launcherVolume ?? 100)) }
 
     // MARK: Updates
 
@@ -1000,7 +1007,7 @@ final class AppModel: ObservableObject {
 
     /// The selected game's song while the launcher is in front and idle, silence otherwise.
     private func updateMusic() {
-        let quiet = !preferences.onboarded || !active || running != nil || starting != nil || musicVolume == 0
+        let quiet = !preferences.onboarded || !active || running != nil || starting != nil || musicVolume == 0 || launcherVolume == 0
         let menuMusic = activeDesign.flatMap { themes.file($0.music, of: $0) }
         ThemeMusic.shared.play(quiet ? nil : selectedGame, fallback: quiet ? nil : menuMusic)
     }
