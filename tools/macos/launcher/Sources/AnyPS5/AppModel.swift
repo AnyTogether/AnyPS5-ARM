@@ -35,8 +35,10 @@ struct Preferences: Codable, Equatable {
     /// Which releases the update check offers (Updates.Channel); nil is Stable.
     var updateChannel: String?
     var hideWhilePlaying = false
-    /// The party's voice sends only while ⌥V is held; nil means off (open microphone).
+    /// The party's voice sends only while the talk key is held; nil means off (open microphone).
     var pushToTalk: Bool?
+    /// The key that talks (Party › Talk key); nil is ⌥V (TalkKey.standard).
+    var talkKey: KeyChord?
     /// A session friends can join while a game runs; nil means on.
     var friendsJoin: Bool?
     /// Play from a browser (BrowserPlay.swift): nil is on; browserPlayAlways keeps its server up.
@@ -340,6 +342,7 @@ final class AppModel: ObservableObject {
                 if rowEditor.editing != nil { rowEditor.stop() }
                 if typingRow != nil { typingRow = nil }
                 if shortcutCapture != nil { endShortcutCapture() }
+                if capturingTalkKey { endTalkKeyCapture() }
             }
             // The controller test takes the pads' buttons: only PS acts while it is open.
             Input.shared.testing = overlay == .controllerTest
@@ -402,6 +405,8 @@ final class AppModel: ObservableObject {
     @Published var menuIndex = 0
     /// The shortcut waiting for a key or a chord in Settings → Shortcuts.
     @Published var shortcutCapture: ShortcutCapture?
+    /// Party › Talk key waits for the key to talk with.
+    @Published var capturingTalkKey = false
     /// The quick menu went up after the launcher pressed Options in the game.
     @Published var pausedGame = false
     /// The pad action waiting for a key in the controls panel.

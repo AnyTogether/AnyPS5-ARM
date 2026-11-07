@@ -160,7 +160,7 @@ enum T {
         case partyTitle, partyStart, partyStartDetail, partyOpen, partyOpenDetail, partyJoinOf, partySize, partyDecline, partyNone, partyMembers, partyLeader, partyInVoice, partyInviteFriends, partyInvite, partyInvited, partyLeave, partyInvites, partyInvitedYou, partyJoined, partyLeft, partyKicked, partyEnded, partyFull, friendsInParty
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
         case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
-        case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn = "voicePushToTalkOnMac", voicePushToTalkOff = "voicePushToTalkOffMac", voiceLeave, voiceNoMic, voiceJoined
+        case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn, voicePushToTalkOff, voiceTalkKey, voiceTalkKeyDetail, voiceTalkKeySet, voiceLeave, voiceNoMic, voiceJoined
         case voiceMovedPhone, voiceMovedAway, voiceTakeBack, voiceOnPhone, voiceOnOtherDevice
         case togetherLinkBlocked
         case togetherOnlinePlay, togetherOnlinePlayDetail

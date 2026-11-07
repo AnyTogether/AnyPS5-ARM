@@ -472,3 +472,26 @@ public struct ChordRecorder: Sendable {
         return chord
     }
 }
+
+/// The key a party's voice talks with (push-to-talk, or the microphone on and off): ⌥V unless the
+/// user chose another, as on Windows and Linux. It is a hot key that reaches the launcher from any
+/// app, so it follows the rules of a shortcut that works in a game.
+public enum TalkKey {
+    public static let standard = KeyChord(keyCode: 9, modifiers: .option, name: "V")
+
+    public enum Refusal: Equatable, Sendable {
+        case navigationKey
+        case needsModifier
+        case reservedKey
+        case sameKey(ShortcutAction)
+    }
+
+    /// Why `chord` cannot be the talk key, nil when it can.
+    public static func refusal(_ chord: KeyChord, shortcuts: ShortcutMap) -> Refusal? {
+        if chord == standard { return nil }
+        if !chord.hasModifier && !chord.isFunctionKey { return chord.isNavigation ? .navigationKey : .needsModifier }
+        if chord.isReserved { return .reservedKey }
+        if let action = ShortcutAction.allCases.first(where: { shortcuts.binding($0).key == chord }) { return .sameKey(action) }
+        return nil
+    }
+}

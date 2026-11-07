@@ -865,6 +865,14 @@ extension AppModel {
                 partyChatCommand(command)
                 return true
             }
+            // The talk key being chosen: ○ gives it up, the rest waits for the key.
+            if capturingTalkKey {
+                if command == .back {
+                    endTalkKeyCapture()
+                    Sounds.shared.play(.back)
+                }
+                return true
+            }
             if command == .back {
                 // A question asked in place (AskFirst.swift) is answered Cancel first.
                 if !cancelAsk() { closeOverlay() }
