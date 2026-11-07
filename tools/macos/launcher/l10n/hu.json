@@ -297,6 +297,8 @@
   "voiceOnPhone": "Most a telefonodon beszélsz és hallgatsz.",
   "voiceOnOtherDevice": "Most a másik eszközödön beszélsz és hallgatsz.",
   "togetherOnlinePlay": "Online játék (kísérleti)",
+  "togetherOnlineLog": "Online napló megnyitása",
+  "togetherOnlineLogDetail": "Az egyes játékok által küldött online kérések – játékonként egy fájl –, hibajelentéshez.",
   "messagesTyping": "%@ éppen ír…",
   "voiceMuted": "némítva",
   "partyKick": "%@ eltávolítása a csoportból",

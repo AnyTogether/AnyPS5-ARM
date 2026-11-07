@@ -311,6 +311,8 @@
   "voiceOnPhone": "你现在用手机说话和收听。",
   "voiceOnOtherDevice": "你现在用另一台设备说话和收听。",
   "togetherOnlinePlay": "在线游玩（实验性）",
+  "togetherOnlineLog": "打开在线日志",
+  "togetherOnlineLogDetail": "记录每个游戏的在线请求，每个游戏一个文件，可用于提交错误报告。",
   "messagesTyping": "%@ 正在输入…",
   "voiceMuted": "已静音",
   "partyKick": "将 %@ 移出派对",

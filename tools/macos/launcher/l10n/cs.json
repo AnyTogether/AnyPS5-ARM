@@ -311,6 +311,8 @@
   "voiceOnPhone": "Teď mluvíte a posloucháte v telefonu.",
   "voiceOnOtherDevice": "Teď mluvíte a posloucháte na svém dalším zařízení.",
   "togetherOnlinePlay": "Online hraní (experimentální)",
+  "togetherOnlineLog": "Otevřít online protokol",
+  "togetherOnlineLogDetail": "Záznam online požadavků jednotlivých her (jeden soubor na hru) pro účely hlášení chyb.",
   "messagesTyping": "%@ píše…",
   "voiceMuted": "ztlumeno",
   "partyKick": "Odstranit %@ ze skupiny",

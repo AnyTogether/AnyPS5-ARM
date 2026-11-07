@@ -311,6 +311,8 @@
   "voiceOnPhone": "አሁን በስልክዎ ይናገራሉ እና ያዳምጣሉ።",
   "voiceOnOtherDevice": "አሁን በሌላኛው መሣሪያዎ ይናገራሉ እና ያዳምጣሉ።",
   "togetherOnlinePlay": "በመስመር ላይ መጫወት (በሙከራ ደረጃ)",
+  "togetherOnlineLog": "የኦንላይን መዝገብ (log) ክፈት",
+  "togetherOnlineLogDetail": "ለስህተት ሪፖርት (bug report) እንዲሆን፣ እያንዳንዱ ጨዋታ በኦንላይን የጠየቀውን መረጃ የያዘ ፋይል (ለእያንዳንዱ ጨዋታ አንድ ፋይል)።",
   "messagesTyping": "%@ እየጻፈ/ች ነው…",
   "voiceMuted": "ድምፅ ተዘግቷል (muted)",
   "partyKick": "%@ን ከቡድኑ (party) አስወግድ",

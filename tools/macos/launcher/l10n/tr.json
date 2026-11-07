@@ -354,6 +354,8 @@
   "togetherLinkBlocked": "Bu bağlantıya izin verilmiyor",
   "togetherOnlinePlay": "Çevrimiçi oyun (deneysel)",
   "togetherOnlinePlayDetail": "Oyunlar seni @%@ olarak oturum açmış ve AnyTogether arkadaşlarınla görür; her oyunun ne istediği bir kayda yazılır. Oyunu yeniden başlatınca geçerli olur",
+  "togetherOnlineLog": "Çevrimiçi kaydı aç",
+  "togetherOnlineLogDetail": "Her oyunun çevrimiçi ne istediği, oyun başına bir dosyada. Hata bildirimi için.",
   "messagesTyping": "%@ yazıyor…",
   "messagesTypingMany": "%@ yazıyor…",
   "callRinging": "Seni arıyor",

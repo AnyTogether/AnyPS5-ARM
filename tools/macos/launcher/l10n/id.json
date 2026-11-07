@@ -312,6 +312,8 @@
   "voiceOnPhone": "Anda sekarang berbicara dan mendengar di ponsel.",
   "voiceOnOtherDevice": "Anda sekarang berbicara dan mendengar di perangkat lain.",
   "togetherOnlinePlay": "Permainan daring (eksperimental)",
+  "togetherOnlineLog": "Buka log online",
+  "togetherOnlineLogDetail": "Apa yang diminta setiap game online, satu file per game, untuk laporan bug.",
   "messagesTyping": "%@ sedang mengetik…",
   "voiceMuted": "dibisukan",
   "partyKick": "Hapus %@ dari pesta",

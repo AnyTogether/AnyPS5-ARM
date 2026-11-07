@@ -312,6 +312,8 @@
   "voiceOnPhone": "अब रउआ फोन पर बोलत आ सुनत बानी।",
   "voiceOnOtherDevice": "अब रउआ दोसर डिवाइस पर बोलत आ सुनत बानी।",
   "togetherOnlinePlay": "ऑनलाइन गेम (प्रयोग के तौर पर)",
+  "togetherOnlineLog": "ऑनलाइन लॉग खोलीं",
+  "togetherOnlineLogDetail": "बग रिपोर्ट खातिर प्रत्येक गेम ने ऑनलाइन के मांगा, प्रति गेम एक फाइल।",
   "messagesTyping": "%@ टाइप कर रहल बा...",
   "voiceMuted": "मौन कर दिहल गइल",
   "partyKick": "%@ के पार्टी से निकाल दीं",

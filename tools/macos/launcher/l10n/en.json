@@ -354,6 +354,8 @@
   "togetherLinkBlocked": "That link isn't allowed",
   "togetherOnlinePlay": "Online play (experimental)",
   "togetherOnlinePlayDetail": "Games see you signed in as @%@ with your AnyTogether friends, and what each game asks for is written to a log. Takes effect when a game starts",
+  "togetherOnlineLog": "Open online log",
+  "togetherOnlineLogDetail": "What each game asked for online, one file per game, for a bug report.",
   "messagesTyping": "%@ is typing…",
   "messagesTypingMany": "%@ are typing…",
   "callRinging": "is calling you",

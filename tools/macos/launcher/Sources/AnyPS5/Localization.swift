@@ -163,7 +163,7 @@ enum T {
         case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn, voicePushToTalkOff, voiceTalkKey, voiceTalkKeyDetail, voiceTalkKeySet, voiceLeave, voiceNoMic, voiceJoined
         case voiceMovedPhone, voiceMovedAway, voiceTakeBack, voiceOnPhone, voiceOnOtherDevice
         case togetherLinkBlocked
-        case togetherOnlinePlay, togetherOnlinePlayDetail
+        case togetherOnlinePlay, togetherOnlinePlayDetail, togetherOnlineLog, togetherOnlineLogDetail
         case messagesTyping, messagesTypingMany
         case callRinging, callAnswer, callDecline, callKeys, callWith, callCalling, callFriend, callHangUp, callMissed, callDeclined, callEnded, callNoAnswer, callAnsweredElsewhere, voiceMuted, voiceSpeaking
         case messagesNewGroup, messagesNewGroupDetail, messagesGroupName, messagesGroupPicked, messagesGroupCreate, messagesGroupPick, messagesGroupMade

@@ -311,6 +311,8 @@
   "voiceOnPhone": "Anda kini bercakap dan mendengar di telefon.",
   "voiceOnOtherDevice": "Anda kini bercakap dan mendengar di peranti lain.",
   "togetherOnlinePlay": "Permainan dalam talian (eksperimental)",
+  "togetherOnlineLog": "Buka log dalam talian",
+  "togetherOnlineLogDetail": "Rekod permintaan dalam talian bagi setiap permainan—satu fail untuk setiap permainan—sebagai laporan pepijat.",
   "messagesTyping": "%@ sedang menaip…",
   "voiceMuted": "diredamkan",
   "partyKick": "Keluarkan %@ daripada kumpulan",

@@ -311,6 +311,8 @@
   "voiceOnPhone": "이제 휴대폰으로 말하고 듣습니다.",
   "voiceOnOtherDevice": "이제 다른 기기로 말하고 듣습니다.",
   "togetherOnlinePlay": "온라인 플레이 (실험적 기능)",
+  "togetherOnlineLog": "온라인 로그 열기",
+  "togetherOnlineLogDetail": "버그 신고를 위해 각 게임에서 온라인으로 요청한 정보(게임당 파일 1개).",
   "messagesTyping": "%@ 님이 입력 중…",
   "voiceMuted": "음소거됨",
   "partyKick": "파티에서 %@ 제거",

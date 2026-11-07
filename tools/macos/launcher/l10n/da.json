@@ -311,6 +311,8 @@
   "voiceOnPhone": "Du taler og lytter nu på din telefon.",
   "voiceOnOtherDevice": "Du taler og lytter nu på din anden enhed.",
   "togetherOnlinePlay": "Onlinespil (eksperimentelt)",
+  "togetherOnlineLog": "Åbn onlinelog",
+  "togetherOnlineLogDetail": "En oversigt over, hvad hvert spil har forespurgt online (én fil pr. spil) – til brug ved fejlrapportering.",
   "messagesTyping": "%@ skriver…",
   "voiceMuted": "slået fra",
   "partyKick": "Fjern %@ fra gruppen",

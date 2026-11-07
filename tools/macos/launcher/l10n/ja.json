@@ -312,6 +312,8 @@
   "voiceOnPhone": "今はスマホで話して聞いています。",
   "voiceOnOtherDevice": "今は別のデバイスで話して聞いています。",
   "togetherOnlinePlay": "オンラインプレイ (実験的)",
+  "togetherOnlineLog": "オンラインログを開く",
+  "togetherOnlineLogDetail": "各ゲームがバグ レポートとしてオンラインで要求したもの (ゲームごとに 1 つのファイル)。",
   "messagesTyping": "%@ が入力中です…",
   "voiceMuted": "ミュート",
   "partyKick": "%@ をパーティーから削除してください",

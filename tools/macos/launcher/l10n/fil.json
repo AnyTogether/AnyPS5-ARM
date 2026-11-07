@@ -311,6 +311,8 @@
   "voiceOnPhone": "Sa phone ka na nagsasalita at nakikinig.",
   "voiceOnOtherDevice": "Sa iba mong device ka na nagsasalita at nakikinig.",
   "togetherOnlinePlay": "Online na paglalaro (eksperimento)",
+  "togetherOnlineLog": "Buksan ang online log",
+  "togetherOnlineLogDetail": "Ang hinihingi ng bawat laro online, isang file bawat laro, para sa ulat ng bug.",
   "messagesTyping": "%@ ay nagta-type…",
   "voiceMuted": "naka-mute",
   "partyKick": "Alisin si %@ sa grupo",

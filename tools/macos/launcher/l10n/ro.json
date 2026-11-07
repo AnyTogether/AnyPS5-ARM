@@ -311,6 +311,8 @@
   "voiceOnPhone": "Acum vorbești și asculți pe telefon.",
   "voiceOnOtherDevice": "Acum vorbești și asculți pe celălalt dispozitiv.",
   "togetherOnlinePlay": "Joc online (experimental)",
+  "togetherOnlineLog": "Deschide jurnalul online",
+  "togetherOnlineLogDetail": "Solicitările online ale fiecărui joc (un fișier per joc), utile pentru raportarea erorilor.",
   "messagesTyping": "%@ scrie…",
   "voiceMuted": "pe mut",
   "partyKick": "Elimină pe %@ din grup",

@@ -312,6 +312,8 @@
   "voiceOnPhone": "Ahora hablas y escuchas en tu teléfono.",
   "voiceOnOtherDevice": "Ahora hablas y escuchas en tu otro dispositivo.",
   "togetherOnlinePlay": "Juego en línea (experimental)",
+  "togetherOnlineLog": "Abrir registro de actividad en línea",
+  "togetherOnlineLogDetail": "Lo que cada juego solicitó en línea, en un archivo por juego, para informar de errores.",
   "messagesTyping": "%@ está escribiendo…",
   "voiceMuted": "silenciado",
   "partyKick": "Eliminar a %@ del grupo",
