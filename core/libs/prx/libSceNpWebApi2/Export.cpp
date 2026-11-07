@@ -481,8 +481,9 @@ int APS5_VABI sceNpWebApi2PushEventDeletePushContext(int user_context_id, const 
 int APS5_VABI sceNpWebApi2PushEventRegisterCallback(int user_context_id, int filter_id, void* callback, void* user_arg) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("user_context_id", static_cast<std::int64_t>(user_context_id)).Int("filter_id", static_cast<std::int64_t>(filter_id)).Ptr("callback", callback).Ptr("user_arg", user_arg); });
+    if (!callback) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
     const int callbackId = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
-    if (callback) {
+    {
         std::lock_guard lock(g_pushMutex);
         g_pushCallbacks[callbackId] = PushCallback{user_context_id, filter_id, callback, user_arg, false};
     }
@@ -598,8 +599,9 @@ int APS5_VABI sceNpWebApi2PushEventSetHandleTimeout(int libraryContextId, int ha
 int APS5_VABI sceNpWebApi2PushEventRegisterPushContextCallback(std::int32_t userContextId, std::int32_t filterId, void* callback, void* userArg) {
     Online::Call call("libSceNpWebApi2", __func__);
     call.Args([&](Online::Fields& in) { in.Int("userContextId", static_cast<std::int64_t>(userContextId)).Int("filterId", static_cast<std::int64_t>(filterId)).Ptr("callback", callback).Ptr("userArg", userArg); });
+    if (!callback) return call.Return(SCE_NP_WEBAPI2_ERROR_INVALID_ARGUMENT);
     const int callbackId = g_nextHandle.fetch_add(1, std::memory_order_relaxed);
-    if (callback) {
+    {
         std::lock_guard lock(g_pushMutex);
         g_pushCallbacks[callbackId] = PushCallback{userContextId, filterId, callback, userArg, true};
     }

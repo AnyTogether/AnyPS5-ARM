@@ -1,5 +1,6 @@
 #include "prx/libSceAgcDriver/Graphics/include/Sampler.hpp"
 #include "prx/libSceAgcDriver/Graphics/include/TextureFormat.hpp"
+#include "PipelineSpecialization.hpp"
 #include <algorithm>
 #include <bit>
 #include <cstdlib>
@@ -16,6 +17,8 @@ namespace AgcDriver::Graphics {
     void validateSampler(const Context& context, const GuestSamplerResource& descriptor) {
         refuseSampler(!descriptor.anisotropyEnable || context.samplerAnisotropy, "guest sampler descriptor requests anisotropic filtering which the device does not support");
         refuseSampler(descriptor.maxAnisotropy <= context.limits.maxSamplerAnisotropy, "guest sampler descriptor requests an anisotropy ratio beyond the device limit");
+        const auto mirrorsOnce = [](VkSamplerAddressMode mode) { return mode == VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE; };
+        refuseSampler(context.samplerMirrorClampToEdge || !(mirrorsOnce(descriptor.addressModeU) || mirrorsOnce(descriptor.addressModeV) || mirrorsOnce(descriptor.addressModeW)), "guest sampler descriptor uses a mirror-once clamp mode which the device does not support");
         refuseSampler(!(descriptor.unnormalizedCoordinates && descriptor.compareEnable), "guest sampler descriptor with unnormalized coordinates enables depth comparison, which is not implemented");
         if (descriptor.reductionMode != VK_SAMPLER_REDUCTION_MODE_WEIGHTED_AVERAGE_EXT) {
             refuseSampler(context.samplerFilterMinmax, "guest sampler descriptor uses a min or max reduction which the device does not support");
@@ -25,9 +28,13 @@ namespace AgcDriver::Graphics {
 
     }
 
+    bool Sampler::ShaderAppliesLodBias(const GuestSamplerResource& descriptor) {
+        return descriptor.lodBias < -ShaderRecompiler::PipelineSpecialization::SamplerLodBiasShaderThreshold || descriptor.lodBias > ShaderRecompiler::PipelineSpecialization::SamplerLodBiasShaderThreshold;
+    }
+
     void Sampler::Validate(const Context& context, const GuestSamplerResource& descriptor) {
         validateSampler(context, descriptor);
-        refuseSampler(descriptor.lodBias >= -context.limits.maxSamplerLodBias && descriptor.lodBias <= context.limits.maxSamplerLodBias, "guest sampler descriptor requests a LOD bias beyond the device limit");
+        refuseSampler(ShaderAppliesLodBias(descriptor) || (descriptor.lodBias >= -context.limits.maxSamplerLodBias && descriptor.lodBias <= context.limits.maxSamplerLodBias), "guest sampler descriptor requests a LOD bias beyond the device limit");
     }
 
     Sampler::Sampler(const Context& context, const GuestSamplerResource& descriptor) : context(context) {
@@ -46,7 +53,7 @@ namespace AgcDriver::Graphics {
         info.addressModeU = descriptor.addressModeU;
         info.addressModeV = descriptor.addressModeV;
         info.addressModeW = descriptor.addressModeW;
-        info.mipLodBias = std::clamp(descriptor.lodBias, -context.limits.maxSamplerLodBias, context.limits.maxSamplerLodBias);
+        info.mipLodBias = ShaderAppliesLodBias(descriptor) ? 0.0f : std::clamp(descriptor.lodBias, -context.limits.maxSamplerLodBias, context.limits.maxSamplerLodBias);
         info.anisotropyEnable = descriptor.anisotropyEnable ? VK_TRUE : VK_FALSE;
         info.maxAnisotropy = descriptor.maxAnisotropy;
         info.compareEnable = descriptor.compareEnable ? VK_TRUE : VK_FALSE;
