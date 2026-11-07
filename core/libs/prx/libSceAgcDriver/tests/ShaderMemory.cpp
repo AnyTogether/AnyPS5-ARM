@@ -9085,7 +9085,11 @@ void verifyPixelInputs() {
     const auto linear = noPerspectiveLocations(byPair);
     require(linear.size() == 1u && linear[0] == 1u, "only the parameter interpolated through the linear pair must be NoPerspective");
     static constexpr std::array<std::uint32_t, 7> bothPairs{0xc8100000u, 0xc8110001u, 0xc8140002u, 0xc8150003u, 0xf800180fu, 0x05040504u, 0xbf810000u};
-    const auto both = ShaderRecompiler::Recompile(twoParameterRequest(bothPairs));
+    auto bothRequest = twoParameterRequest(bothPairs);
+    // The barycentric fallback needs a device with geometry shaders; without them (MoltenVK) the fork
+    // keeps host interpolation (Recompile).
+    bothRequest.target.supportedCapabilities.push_back(static_cast<std::uint32_t>(spv::CapabilityGeometry));
+    const auto both = ShaderRecompiler::Recompile(bothRequest);
     require(both.barycentricEmulation.active && both.barycentricEmulation.smooth && both.barycentricEmulation.linear, "a parameter read through both pairs did not fall back to both barycentrics");
 
     static constexpr std::array<std::uint32_t, 1> code{0xbf810000u};

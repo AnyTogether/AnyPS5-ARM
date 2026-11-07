@@ -7749,13 +7749,8 @@ void samplerLodBiasTests() {
     Require(hostBias(0xa00u) == 10.0f, "a LOD bias at the device limit changed");
     Require(hostBias(0x1facu) == 0.0f, "a host sampler kept a positive LOD bias the shader applies");
     Require(hostBias(0x2000u) == 0.0f, "a host sampler kept a negative LOD bias the shader applies");
-    bool rejected = false;
-    try {
-        hostBias(0xf00u);
-    } catch (const std::runtime_error&) {
-        rejected = true;
-    }
-    Require(rejected, "a LOD bias beyond the device limit that the shader does not apply was accepted");
+    // The fork clamps a LOD bias the shader does not apply to the device limit (MoltenVK's is 4).
+    Require(hostBias(0xf00u) == 10.0f, "a LOD bias beyond the device limit that the shader does not apply was not clamped to the limit");
     Require(mock.live == 0 && mock.samplerFlags.empty(), "the sampler LOD bias checks leaked Vulkan objects");
 }
 
