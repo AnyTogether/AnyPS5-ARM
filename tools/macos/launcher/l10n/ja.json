@@ -896,5 +896,9 @@
   "engineGitCopied": "出力がコピーされました",
   "engineGitRelinkAllDetail": "以前のビルドで作成されたゲームがインストールされています: %d。セーブとトロフィーはそのまま残ります。",
   "engineGitRelinking": "インストールされているゲームの再リンク: %d",
-  "engineGitWaitUnlock": "ゲームのロックを解除中です。 Git からの更新が完了すると、実行できるようになります。"
+  "engineGitWaitUnlock": "ゲームのロックを解除中です。 Git からの更新が完了すると、実行できるようになります。",
+  "engineGitBeforePlay": "プレイ前に Git から更新してください",
+  "engineGitBeforePlayDetail": "ゲームを開始する前に、リモコンを確認します。新しいコミットがある場合は、最初にプルしてビルドしてから、ゲームを再リンクします。オフラインの場合はスキップされます。",
+  "engineGitBeforePlayStart": "新しいエンジンのコミット: ゲーム開始前に Git から更新",
+  "engineGitChecking": "新しいエンジンのコミットを探しています"
 }

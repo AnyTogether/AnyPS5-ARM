@@ -889,5 +889,9 @@
   "engineGitRelinkAllDetail": "使用先前建置版本製作的已安裝遊戲：%d。存檔和獎盃會保留。",
   "engineGitRelinking": "正在重新轉換已安裝的遊戲：%d",
   "engineGitWaitUnlock": "正在解鎖遊戲。完成後即可從 Git 更新。",
+  "engineGitBeforePlay": "遊玩前從 Git 更新",
+  "engineGitBeforePlayDetail": "啟動遊戲前檢查遠端。如果有新的提交，則先提取並建置，再重新轉換遊戲。離線時會略過檢查。",
+  "engineGitBeforePlayStart": "發現新的引擎提交：將在遊戲啟動前從 Git 更新",
+  "engineGitChecking": "正在尋找新的引擎提交",
   "engineGitCopy": "選取以複製輸出"
 }

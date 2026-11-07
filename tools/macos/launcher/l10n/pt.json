@@ -896,5 +896,10 @@
   "engineGitCopied": "Saída copiada",
   "engineGitRelinkAllDetail": "Jogos instalados feitos com a compilação anterior: %d. Os dados salvos e os troféus são mantidos.",
   "engineGitRelinking": "Convertendo jogos instalados: %d",
-  "engineGitWaitUnlock": "Um jogo está sendo desbloqueado. A atualização do Git poderá ser executada quando terminar."
+  "engineGitWaitUnlock": "Um jogo está sendo desbloqueado. A atualização do Git poderá ser executada quando terminar.",
+  "engineGitBeforePlay": "Atualizar do Git antes de jogar",
+  "engineGitBeforePlayDetail": "Verifica o repositório remoto antes de iniciar um jogo. Se houver novos commits, baixa-os, compila o mecanismo e converte o jogo. Ignorado quando estiver offline.",
+  "engineGitBeforePlayStart": "Novos commits do mecanismo: atualizando do Git antes de iniciar o jogo",
+  "engineGitChecking": "Procurando novos commits do mecanismo",
+  "engineGitPlayAnyway": "Não foi possível atualizar o mecanismo: %@. O jogo será iniciado com a compilação atual."
 }

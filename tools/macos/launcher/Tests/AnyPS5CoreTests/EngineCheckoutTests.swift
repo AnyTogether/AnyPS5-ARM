@@ -206,6 +206,31 @@ final class EngineCheckoutTests: XCTestCase {
         }
     }
 
+    /// Update from Git Before Playing asks the remote first: new commits there, or a checkout
+    /// pulled by hand since the launcher built it, need an update; anything it cannot tell is nil.
+    func testNeedsUpdateAsksTheRemoteAndTheLastBuild() throws {
+        let checkout = try makeCheckout()
+        let behind = FakeCommands()
+        behind.answers["git rev-list"] = (0, ["3"])
+        XCTAssertEqual(EngineGit(checkout, tools: tools, runner: behind).needsUpdate(built: "aaaa"), true)
+        XCTAssertEqual(behind.calls.map { ([$0.tool] + $0.arguments).joined(separator: " ") }, ["git fetch --quiet", "git rev-list --count HEAD..@{u}"])
+
+        let current = FakeCommands()
+        current.answers["git rev-list"] = (0, ["0"])
+        current.answers["git rev-parse"] = (0, ["aaaa"])
+        XCTAssertEqual(EngineGit(checkout, tools: tools, runner: current).needsUpdate(built: "aaaa"), false)
+        XCTAssertEqual(EngineGit(checkout, tools: tools, runner: current).needsUpdate(built: nil), false, "never built here: the remote alone says")
+        XCTAssertEqual(EngineGit(checkout, tools: tools, runner: current).needsUpdate(built: "bbbb"), true, "pulled by hand since the last build")
+
+        let offline = FakeCommands()
+        offline.answers["git fetch"] = (128, ["fatal: unable to access"])
+        XCTAssertNil(EngineGit(checkout, tools: tools, runner: offline).needsUpdate(built: "aaaa"))
+        let noUpstream = FakeCommands()
+        noUpstream.answers["git rev-list"] = (128, ["fatal: no upstream configured for branch"])
+        XCTAssertNil(EngineGit(checkout, tools: tools, runner: noUpstream).needsUpdate(built: "aaaa"))
+        XCTAssertNil(EngineGit(checkout, tools: DevTools(), runner: FakeCommands()).needsUpdate(built: "aaaa"), "no git on this Mac")
+    }
+
     /// An engine made from a real checkout's build, read only:
     /// `ANYPS5_LIVE_CHECKOUT=<AnyPS5-ARM checkout> ANYPS5_LIVE_TOOLKIT=<a toolkit> swift test --filter EngineCheckoutTests`.
     func testAnEngineFromARealCheckoutsBuild() throws {

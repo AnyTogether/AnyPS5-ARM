@@ -889,5 +889,9 @@
   "engineGitRelinkAllDetail": "በቀድሞው ግንባታ የተጫኑ ጨዋታዎች ብዛት፡ %d። የጨዋታ ማስቀመጫዎች (saves) እና ዋንጫዎች (trophies) እንደነበሩ ይቆያሉ።",
   "engineGitRelinking": "የተጫኑ ጨዋታዎችን እንደገና በማገናኘት ላይ፡ %d",
   "engineGitWaitUnlock": "አንድ ጨዋታ እየተከፈተ (unlocked) ነው። ይህ ሲጠናቀቅ ከGit የሚደረግ ማሻሻያ (update) ሊከናወን ይችላል።",
+  "engineGitBeforePlay": "ከመጫወትዎ በፊት ከGit ያዘምኑ",
+  "engineGitBeforePlayDetail": "ጨዋታ ከመጀመሩ በፊት፣ ከሩቅ ምንጭ (remote) ጋር ይጣራል። አዳዲስ ለውጦች (commits) ካሉ፣ በመጀመሪያ እነሱን ይስባል (pull) እና ይገነባል (build)፤ ከዚያም ጨዋታውን እንደገና ያገናኛል። ከመስመር ውጭ (offline) ሲሆኑ ይህ ሂደት ይዘለላል።",
+  "engineGitBeforePlayStart": "አዳዲስ የኤንጂን (engine) ዝማኔዎች፡ ጨዋታው ከመጀመሩ በፊት ከGit ማዘመን",
+  "engineGitChecking": "ለኤንጂኑ (engine) አዳዲስ ለውጦች (commits) በመፈለግ ላይ",
   "engineGitCopy": "ውጤቱን (output) ለመቅዳት ይምረጡ"
 }

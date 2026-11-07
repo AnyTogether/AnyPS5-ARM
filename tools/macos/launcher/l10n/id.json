@@ -896,5 +896,9 @@
   "engineGitCopied": "Keluaran disalin",
   "engineGitRelinkAllDetail": "Game terinstal yang dibuat dengan build sebelumnya: %d. Penyelamatan dan piala tetap ada.",
   "engineGitRelinking": "Menghubungkan kembali game yang diinstal: %d",
-  "engineGitWaitUnlock": "Sebuah permainan sedang dibuka. Pembaruan dari Git dapat dijalankan setelah selesai."
+  "engineGitWaitUnlock": "Sebuah permainan sedang dibuka. Pembaruan dari Git dapat dijalankan setelah selesai.",
+  "engineGitBeforePlay": "Pembaruan dari Git sebelum bermain",
+  "engineGitBeforePlayDetail": "Sebelum permainan dimulai, periksa remote. Jika ada commit baru, pull dan build terlebih dahulu, lalu tautkan kembali gamenya. Dilewati saat offline.",
+  "engineGitBeforePlayStart": "Komit mesin baru: memperbarui dari Git sebelum permainan dimulai",
+  "engineGitChecking": "Mencari komitmen mesin baru"
 }

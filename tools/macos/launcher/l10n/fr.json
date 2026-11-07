@@ -896,5 +896,10 @@
   "engineGitCopied": "Sortie copiée",
   "engineGitRelinkAllDetail": "Jeux installés créés avec la compilation précédente : %d. Les sauvegardes et les trophées sont conservés.",
   "engineGitRelinking": "Reliaison des jeux installés : %d",
-  "engineGitWaitUnlock": "Un jeu est en cours de déverrouillage. La mise à jour depuis Git pourra démarrer une fois terminée."
+  "engineGitWaitUnlock": "Un jeu est en cours de déverrouillage. La mise à jour depuis Git pourra démarrer une fois terminée.",
+  "engineGitBeforePlay": "Mettre à jour depuis Git avant de jouer",
+  "engineGitBeforePlayDetail": "Vérifie le dépôt distant avant le démarrage d’un jeu. En présence de nouveaux commits, les récupère, compile le moteur puis relie le jeu. Ignoré hors ligne.",
+  "engineGitBeforePlayStart": "Nouveaux commits du moteur : mise à jour depuis Git avant le démarrage du jeu",
+  "engineGitChecking": "Recherche de nouveaux commits du moteur",
+  "engineGitPlayAnyway": "Impossible de mettre à jour le moteur : %@. Le jeu sera lancé avec la compilation actuelle."
 }

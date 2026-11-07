@@ -20,6 +20,8 @@ struct EngineGitState: Equatable {
     var updated = false
     /// The developer tools on this Mac, looked for when Settings opens.
     var tools: DevTools?
+    /// The remote being asked for new commits before a game starts.
+    var checking = false
 }
 
 extension AppModel {
@@ -77,8 +79,54 @@ extension AppModel {
         if !unlockBusy { EngineGit.removeOld(in: AppModel.gitEngineFolder, keeping: toolkit.root) }
     }
 
-    /// Pulls, builds and makes the engine.
-    func updateEngineFromGit() {
+    /// Settings › Engine › Update from Git Before Playing is on and the engine is a checkout.
+    var updatesBeforePlay: Bool { preferences.engineGitBeforePlay == true && engineCheckout != nil }
+
+    /// The checkout's remote asked before `game` starts, as on Windows and Linux: new commits are
+    /// pulled and built first and the game unlocked again with the new build. Offline, without an
+    /// upstream branch, or with nothing changed by a stopped update, the current build plays.
+    func playAfterGitCheck(_ game: Game, play: @escaping () -> Void) {
+        if let step = engineGit.step { return show(TE.format(.engineGitRunning, AppModel.engineGitStepName(step)), symbol: "hammer") }
+        if engineGit.checking { return show(TE.text(.engineGitChecking), symbol: "hammer") }
+        guard let checkout = engineCheckout else { return play() }
+        // Another game is being unlocked with the build as it is: no build now, the game plays.
+        if unlockBusy { return play() }
+        let tools = engineGit.tools ?? DevTools.find(cache: checkout.cache)
+        guard tools.git != nil else { return play() }
+        engineGit.checking = true
+        let built = preferences.engineGitBuilt?[checkout.root.path]
+        let git = EngineGit(checkout, tools: tools)
+        Task { @MainActor in
+            let needed = await Task.detached(priority: .userInitiated) { git.needsUpdate(built: built) }.value
+            engineGit.checking = false
+            // An unlock began while the remote was asked: the build would rewrite what it uses.
+            guard needed == true, !unlockBusy, engineCheckout?.root == checkout.root else { return play() }
+            if !tools.missing.isEmpty {
+                show(TE.format(.engineGitPlayAnyway, AppModel.engineGitReason(.missingTools(tools.missing))), symbol: "exclamationmark.triangle.fill")
+                return play()
+            }
+            show(TE.text(.engineGitBeforePlayStart), symbol: "hammer")
+            updateEngineFromGit(quiet: true) { [weak self] result in
+                guard let self else { return }
+                switch result {
+                case .success:
+                    if case .installed(outdated: true) = self.state(of: game) { self.updateAndPlay(game) } else { play() }
+                case .failure(let stopped) where stopped.kind == .cancelled:
+                    self.show(TE.text(.engineGitStopped), symbol: "stop.circle")
+                case .failure(let stopped) where stopped.untouched:
+                    // Nothing changed (a tree with changes, offline): the current build plays.
+                    self.show(TE.format(.engineGitPlayAnyway, AppModel.engineGitReason(stopped.kind)), symbol: "exclamationmark.triangle.fill")
+                    play()
+                case .failure(let stopped):
+                    Sounds.shared.play(.back)
+                    self.show(TE.format(.engineGitFailed, AppModel.engineGitReason(stopped.kind)), symbol: "exclamationmark.triangle.fill")
+                }
+            }
+        }
+    }
+
+    /// Pulls, builds and makes the engine; `quiet` leaves what it says to `then`.
+    func updateEngineFromGit(quiet: Bool = false, then: ((Result<GitUpdateResult, GitUpdateFailure>) -> Void)? = nil) {
         guard let checkout = engineCheckout, engineGit.step == nil else { return }
         // A game being unlocked uses the engine the update would replace.
         if unlockBusy { return show(TE.text(.engineGitWaitUnlock), symbol: "hourglass") }
@@ -112,11 +160,14 @@ extension AppModel {
                 result = .failure(GitUpdateFailure(.build, [error.localizedDescription]))
             }
             let output = git.output
-            await MainActor.run { self.engineGitFinished(result, output: output, checkout: checkout) }
+            await MainActor.run {
+                self.engineGitFinished(result, output: output, checkout: checkout, quiet: quiet)
+                then?(result)
+            }
         }
     }
 
-    private func engineGitFinished(_ result: Result<GitUpdateResult, GitUpdateFailure>, output: [String], checkout: EngineCheckout) {
+    private func engineGitFinished(_ result: Result<GitUpdateResult, GitUpdateFailure>, output: [String], checkout: EngineCheckout, quiet: Bool = false) {
         engineGitCancel = nil
         engineGit.step = nil
         engineGit.lines = []
@@ -129,11 +180,13 @@ extension AppModel {
             useGitToolkit(done.toolkit)
             engineGit.failure = nil
             engineGit.updated = true
+            guard !quiet else { return }
             Sounds.shared.play(.unlocked)
             let commit = String(done.after.prefix(7))
             show(done.pulled ? TE.format(.engineGitDone, commit) : TE.format(.engineGitBuiltAt, commit), symbol: "hammer.fill")
         case .failure(let stopped):
             engineGit.failure = stopped.kind == .cancelled ? nil : stopped
+            if quiet { return }
             if stopped.kind == .cancelled {
                 show(TE.text(.engineGitStopped), symbol: "stop.circle")
             } else {
@@ -226,6 +279,8 @@ extension AppModel {
             rows.append(PanelRow(id: "engineGitRelinkAll", title: TE.text(.engineGitRelinkAll), detail: TE.format(.engineGitRelinkAllDetail, outdated),
                                  symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.relinkAll() }))
         }
+        rows.append(PanelRow(id: "engineGitBeforePlay", title: TE.text(.engineGitBeforePlay), detail: TE.text(.engineGitBeforePlayDetail), symbol: "arrow.down.circle",
+                             kind: .toggle(preferences.engineGitBeforePlay == true) { [weak self] value in self?.preferences.engineGitBeforePlay = value ? true : nil }))
         return rows
     }
 }
