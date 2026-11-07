@@ -331,8 +331,9 @@ extension AppModel {
     }
 }
 
-/// The party's voice: joining and leaving the call, the microphone, push-to-talk on ⌥V (a global
-/// hot key, so it works with a game in front), and who is speaking.
+/// The party's voice: joining and leaving the call, the microphone, push-to-talk on the talk key
+/// (⌥V unless the user chose another; a global hot key, so it works with a game in front), and
+/// who is speaking.
 extension AppModel {
     func voiceRows(_ party: TogetherParty) -> [PanelRow] {
         guard familyAllows(.voiceChat) else { return [] }
@@ -353,21 +354,25 @@ extension AppModel {
     /// The microphone, push-to-talk and leaving: the same in the party's voice and a friend's call.
     func voiceControlRows() -> [PanelRow] {
         let pushToTalk = preferences.pushToTalk ?? false
+        let key = talkChord.display
         var rows: [PanelRow] = []
         if !pushToTalk {
-            rows.append(PanelRow(id: "voice-mic", title: T.text(.voiceMic), detail: T.text(.voicePushToTalkOff), symbol: micOn ? "mic.fill" : "mic.slash.fill",
+            rows.append(PanelRow(id: "voice-mic", title: T.text(.voiceMic), detail: T.format(.voicePushToTalkOff, key), symbol: micOn ? "mic.fill" : "mic.slash.fill",
                                  kind: .toggle(micOn) { [weak self] value in self?.setMic(value) }))
         }
         rows.append(PanelRow(id: "voice-deafen", title: JS.text(.deafen), detail: JS.text(.deafenDetail), symbol: deafened ? "headphones.slash" : "headphones",
                              kind: .toggle(deafened) { [weak self] value in self?.setDeafened(value) }))
-        rows.append(PanelRow(id: "voice-ptt", title: T.text(.voicePushToTalk), detail: pushToTalk ? T.text(.voicePushToTalkOn) : nil, symbol: "keyboard",
+        rows.append(PanelRow(id: "voice-ptt", title: T.text(.voicePushToTalk), detail: pushToTalk ? T.format(.voicePushToTalkOn, key) : nil, symbol: "keyboard",
                              kind: .toggle(pushToTalk) { [weak self] value in self?.setPushToTalk(value) }))
+        // The key itself, chosen as on Windows and Linux.
+        rows.append(PanelRow(id: "voice-key", title: T.text(.voiceTalkKey), detail: T.text(.voiceTalkKeyDetail), symbol: "command",
+                             kind: .keys([key], capturing: capturingTalkKey) { [weak self] in self?.captureTalkKey() }))
         rows.append(PanelRow(id: "voice-leave", title: T.text(callFriend == nil ? .voiceLeave : .callHangUp), symbol: "phone.down.fill",
                              kind: .action(destructive: true) { [weak self] in self?.leaveVoice() }))
         return rows
     }
 
-    /// The microphone sends: on (open mic), or ⌥V held (push-to-talk).
+    /// The microphone sends: on (open mic), or the talk key held (push-to-talk).
     var micSending: Bool { voiceCall != nil && mic.sending(pushToTalk: preferences.pushToTalk ?? false, held: talkHeld) }
 
     func joinVoice() {
@@ -412,7 +417,7 @@ extension AppModel {
         } else {
             for peer in joined.peersToCall(me: me.id) { voice.connect(to: peer) }
         }
-        Input.shared.registerHotKey(id: Input.talkKey, keyCode: kVK_ANSI_V, modifiers: optionKey) { [weak self] pressed in self?.talkKey(pressed) }
+        registerTalkKey()
         voiceChanged()
         renewIceServers(at: TogetherVoice.renewal(expiresAt: joined.expiresAt), call: call)
     }
@@ -483,7 +488,7 @@ extension AppModel {
         voiceChanged()
     }
 
-    /// ⌥V: held to talk in push-to-talk, else it turns the microphone on and off.
+    /// The talk key: held to talk in push-to-talk, else it turns the microphone on and off.
     private func talkKey(_ pressed: Bool) {
         if preferences.pushToTalk ?? false {
             talkHeld = pressed
@@ -492,6 +497,57 @@ extension AppModel {
             Sounds.shared.play(.move)
         }
         voiceChanged()
+    }
+
+    /// The key that talks: the chosen one, else ⌥V.
+    var talkChord: KeyChord { preferences.talkKey ?? TalkKey.standard }
+
+    /// The talk key as a hot key from any app, while in a call.
+    func registerTalkKey() {
+        let chord = talkChord
+        Input.shared.registerHotKey(id: Input.talkKey, keyCode: Int(chord.keyCode), modifiers: Input.carbon(chord.modifiers)) { [weak self] pressed in self?.talkKey(pressed) }
+    }
+
+    /// The Talk key row waits for a key (Esc, ○ or Back cancels).
+    func captureTalkKey() {
+        capturingTalkKey = true
+        Sounds.shared.play(.select)
+        Input.shared.capture = { [weak self] event in
+            guard let self, event.type == .keyDown else { return true }
+            if event.keyCode == KeyChord.escape && Input.modifiers(event.modifierFlags).isEmpty {
+                self.endTalkKeyCapture()
+                Sounds.shared.play(.back)
+            } else if let chord = Input.chord(of: event) {
+                self.chooseTalkKey(chord)
+            }
+            return true
+        }
+    }
+
+    func endTalkKeyCapture() {
+        capturingTalkKey = false
+        Input.shared.capture = nil
+    }
+
+    /// The new talk key, refused (the old one stays) when it cannot be one.
+    func chooseTalkKey(_ chord: KeyChord) {
+        endTalkKeyCapture()
+        if let refusal = TalkKey.refusal(chord, shortcuts: shortcutMap) {
+            Sounds.shared.play(.bump)
+            let reason: String
+            switch refusal {
+            case .navigationKey: reason = TH.text(.conflictNavigationKey)
+            case .needsModifier: reason = TH.text(.conflictNeedsModifier)
+            case .reservedKey: reason = TH.text(.conflictReservedKey)
+            case .sameKey(let action): reason = TH.format(.conflictSame, TH.name(action))
+            }
+            return show(TH.format(.refused, reason), symbol: "exclamationmark.triangle.fill")
+        }
+        preferences.talkKey = chord == TalkKey.standard ? nil : chord
+        talkHeld = false
+        if voiceCall != nil { registerTalkKey() }
+        Sounds.shared.play(.select)
+        show(T.format(.voiceTalkKeySet, chord.display), symbol: "keyboard")
     }
 
     func voiceChanged() {

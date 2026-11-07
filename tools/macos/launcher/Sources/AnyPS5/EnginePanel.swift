@@ -178,6 +178,8 @@ extension AppModel {
                      kind: .choice(options: options.map(engineName), selected: current) { [weak self] index in
                          self?.preferences.engine = options[index].stored
                      }),
+            // Windows and Linux offer upstream's own engine: here it is said why the Mac does not.
+            PanelRow(id: "engineUpstreamNotOnMac", title: TE.text(.engineUpstreamNotOnMac), detail: TE.text(.engineUpstreamNotOnMacDetail), symbol: "info.circle", kind: .info("")),
         ]
         let used = enginesInUse
         let notes = Dictionary(engineCatalogue.map { ($0.release, $0) }, uniquingKeysWith: { first, _ in first })
