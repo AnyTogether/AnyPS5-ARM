@@ -613,6 +613,8 @@
   "padNoVibration": "%@ kann hier nicht vibrieren",
   "padArrived": "%@ verbunden",
   "padLeft": "%@ getrennt",
+  "engineUpstreamNotOnMac": "Die eigene Engine von Upstream wird hier nicht angeboten",
+  "engineUpstreamNotOnMacDetail": "boykopovar/AnyPS5 baut seine Engine nur für Windows und Linux, nicht für Macs mit Apple Silicon.",
   "engineInUse": "In Verwendung",
   "enginePrerelease": "Vorabversion",
   "familyTitle": "Familie",

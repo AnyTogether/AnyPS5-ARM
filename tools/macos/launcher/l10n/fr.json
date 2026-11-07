@@ -613,6 +613,8 @@
   "padNoVibration": "%@ ne peut pas vibrer ici",
   "padArrived": "%@ connecté",
   "padLeft": "%@ déconnecté",
+  "engineUpstreamNotOnMac": "Le moteur d'upstream n'est pas proposé ici",
+  "engineUpstreamNotOnMacDetail": "boykopovar/AnyPS5 compile son moteur pour Windows et Linux uniquement, pas pour les Mac à puce Apple.",
   "engineInUse": "En cours d’utilisation",
   "enginePrerelease": "Préversion",
   "familyTitle": "Famille",

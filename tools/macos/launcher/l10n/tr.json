@@ -1133,6 +1133,8 @@
   "engineTitle": "Motor",
   "engineDefault": "Varsayılan motor",
   "engineDefaultDetail": "Kendi motoru seçilmemiş her oyunun kilidini bununla açar",
+  "engineUpstreamNotOnMac": "Upstream'in kendi motoru burada sunulmuyor",
+  "engineUpstreamNotOnMacDetail": "boykopovar/AnyPS5 motorunu yalnızca Windows ve Linux için derliyor, Apple silicon'lu Mac'ler için derlemiyor.",
   "engineBuiltIn": "Yerleşik, %@",
   "engineCustomName": "Senin klasörün, %@",
   "engineFollow": "Varsayılan (%@)",

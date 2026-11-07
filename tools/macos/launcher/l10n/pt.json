@@ -613,6 +613,8 @@
   "padNoVibration": "%@ não pode vibrar aqui",
   "padArrived": "%@ conectado",
   "padLeft": "%@ desconectado",
+  "engineUpstreamNotOnMac": "O mecanismo do upstream não é oferecido aqui",
+  "engineUpstreamNotOnMacDetail": "O boykopovar/AnyPS5 compila o mecanismo só para Windows e Linux, não para Macs com Apple silicon.",
   "engineInUse": "Em uso",
   "enginePrerelease": "Pré-lançamento",
   "familyTitle": "Família",

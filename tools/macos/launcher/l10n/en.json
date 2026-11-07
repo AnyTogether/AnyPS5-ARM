@@ -1133,6 +1133,8 @@
   "engineTitle": "Engine",
   "engineDefault": "Default Engine",
   "engineDefaultDetail": "Unlocks every game that has no engine of its own",
+  "engineUpstreamNotOnMac": "Upstream's own engine isn't offered here",
+  "engineUpstreamNotOnMacDetail": "boykopovar/AnyPS5 builds its engine for Windows and Linux only, not for Macs with Apple silicon.",
   "engineBuiltIn": "Built in, %@",
   "engineCustomName": "Your folder, %@",
   "engineFollow": "Default (%@)",
