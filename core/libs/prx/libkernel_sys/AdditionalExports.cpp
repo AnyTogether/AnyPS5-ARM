@@ -296,6 +296,20 @@ static int GuestExecve_nid_no_patch(const char* path, char* const* argv, char* c
     std::error_code statusError;
     const auto status = std::filesystem::status(native, statusError);
     if (status.type() == std::filesystem::file_type::not_found) return fail(NotFoundError_nid_no_patch(native));
+#ifdef __APPLE__
+    // macOS limits a whole host path to 1024 bytes (PATH_MAX), so a guest path within the guest's
+    // 1024 can be too long once the working directory is put in front of it. A component that is
+    // missing before the host limit still makes the path missing, as the guest kernel's lookup finds.
+    if (statusError == std::errc::filename_too_long) {
+        std::filesystem::path prefix;
+        for (const auto& component : native) {
+            prefix /= component;
+            std::error_code prefixError;
+            if (std::filesystem::status(prefix, prefixError).type() == std::filesystem::file_type::not_found) return fail(NotFoundError_nid_no_patch(native));
+            if (prefixError) break;
+        }
+    }
+#endif
     if (statusError) return fail(FilesystemError(statusError));
 #ifdef _WIN32
     const bool executable = std::filesystem::is_regular_file(status);

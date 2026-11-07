@@ -117,8 +117,11 @@ std::set<int> LoadState(const Context& context) {
     const bool exists = std::filesystem::exists(context.state, error);
     if (error) throw std::filesystem::filesystem_error("sceNpTrophy: cannot check the unlock state", context.state, error);
     if (!exists) return {};
+    // libc++ (macOS) opens a directory and then reads it as an empty file, where libstdc++ reports
+    // the read error and Windows refuses the open: a state record that is not a file is unreadable.
+    const bool directory = std::filesystem::is_directory(context.state, error);
     std::ifstream file(context.state);
-    if (!file) throw std::runtime_error("sceNpTrophy: cannot read the unlock state " + context.state.string());
+    if (directory || !file) throw std::runtime_error("sceNpTrophy: cannot read the unlock state " + context.state.string());
     std::set<int> unlocked;
     for (;;) {
         file >> std::ws;
