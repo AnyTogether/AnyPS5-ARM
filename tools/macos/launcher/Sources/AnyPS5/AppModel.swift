@@ -40,6 +40,8 @@ struct Preferences: Codable, Equatable {
     /// Which releases the update check offers (Updates.Channel); nil is Stable.
     var updateChannel: String?
     var hideWhilePlaying = false
+    /// Glass as solid surfaces, Settings › Appearance; nil means off. macOS's own setting does the same.
+    var reduceTransparency: Bool?
     /// The party's voice sends only while the talk key is held; nil means off (open microphone).
     var pushToTalk: Bool?
     /// The key that talks (Party › Talk key); nil is ⌥V (TalkKey.standard).
@@ -1113,6 +1115,10 @@ final class AppModel: ObservableObject {
     @Published var messageFocus = 0
     @Published var composing = false
     @Published var messageDraft = ""
+    /// Messages that did not get there, in the order they failed (UnsentMessages.swift).
+    @Published var unsentMessages: [UnsentMessage] = []
+    /// A plain message's send; replaced in tests.
+    var sendText: ((UnsentMessage) async throws -> TogetherMessage)?
     /// Each phone's pad as the launcher's screens last read it, by device ID.
     var phonePads: [String: PadState] = [:]
     /// The conversation a notification opened Messages on, entered once the list has it.
@@ -2435,6 +2441,8 @@ final class AppModel: ObservableObject {
 
     func previewPairing(_ request: PairingRequest) { pairing = request }
 
+    func previewFailure(_ game: Game, _ text: String) { failures[game.id] = text }
+
     func previewTrophies(_ game: Game, _ set: TrophySet) { trophies[game.id] = set }
 
     func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
@@ -2979,6 +2987,21 @@ final class AppModel: ObservableObject {
     func gameFolder(_ game: Game) -> URL? {
         guard let root = root(of: game) else { return nil }
         return Installer.bundle(for: game, root: root).appendingPathComponent("Contents/Resources/game").resolvingSymlinksInPath()
+    }
+
+    /// Copies a failed unlock's error and the unlock's output, as on Windows and Linux.
+    func copyFailure(_ game: Game) {
+        guard let text = failureText(game) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        show(TC.text(.unlockErrorCopied), symbol: "doc.on.doc")
+    }
+
+    /// The whole of a failed unlock's error, then the unlock's own output when it says more.
+    func failureText(_ game: Game) -> String? {
+        guard let failure = failures[game.id] else { return nil }
+        let log = GameLog.readUnlockLog(titleID: game.titleID)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return [failure, log].compactMap { $0 }.filter { !$0.isEmpty }.reduce(into: [String]()) { if !$0.contains($1) { $0.append($1) } }.joined(separator: "\n\n")
     }
 
     func lastBackup(of game: Game) -> Date? {

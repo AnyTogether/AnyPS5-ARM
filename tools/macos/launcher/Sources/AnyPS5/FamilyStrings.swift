@@ -12,7 +12,7 @@ enum FS {
         case warnMinutes = "familyWarnMinutes", warnOne = "familyWarnOne", warnDetail = "familyWarnDetail", noticeTitle = "familyNoticeTitle", noticeCloses = "familyNoticeCloses", noticeClosing = "familyNoticeClosing", noticeNotify = "familyNoticeNotify", noticeAsk = "familyNoticeAsk", moreTime = "familyMoreTime"
         case hoursMinutes = "familyHoursMinutes", minutes = "familyMinutes"
         case refusedVoice = "familyRefusedVoice", refusedShare = "familyRefusedShare", refusedPublic = "familyRefusedPublic", refusedMessages = "familyRefusedMessages", refusedFriends = "familyRefusedFriends", refusedDiscovery = "familyRefusedDiscovery", refusedMedia = "familyRefusedMedia", refusedProfile = "familyRefusedProfile", refusedCommunities = "familyRefusedCommunities", refusedAge = "familyRefusedAge", refusedFamily = "familyRefusedFamily"
-        case refusedOther = "familyOtherSide", otherServer = "familyOtherServer"
+        case refusedOther = "familyOtherSide", otherServer = "familyOtherServer", refresh = "familyRefresh", upToDate = "familyUpToDate"
         case notifAsksTime = "familyNotifAsksTime", notifAsksGame = "familyNotifAsksGame", notifAsksFriend = "familyNotifAsksFriend", notifSaidNo = "familyNotifSaidNo", notifGaveTime = "familyNotifGaveTime", notifGameYes = "familyNotifGameYes", notifFriendYes = "familyNotifFriendYes"
         case notifReachedLimit = "familyNotifReachedLimit", notifJoinedFamily = "familyNotifJoinedFamily", notifDeclinedFamily = "familyNotifDeclinedFamily", notifFamilyInvite = "familyNotifFamilyInvite", notifSummary = "familyNotifSummary"
     }

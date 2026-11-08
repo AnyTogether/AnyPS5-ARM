@@ -3,6 +3,7 @@ import Foundation
 /// The Glass theme's see-through window: its settings' texts, from the language files (l10n).
 enum TG {
     enum Key: String, CaseIterable {
+        case reduceTransparency, reduceTransparencyDetail
         case transparency = "glassTransparency", transparencyDetail = "glassTransparencyDetail", transparencyReduced = "glassTransparencyReduced"
         case artworkBehind = "glassArtwork", artworkBehindDetail = "glassArtworkBehindDetail", desktop = "glassDesktop"
     }

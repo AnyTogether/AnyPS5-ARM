@@ -447,6 +447,7 @@ extension AppModel {
     /// Everything of the account here stops (socket, voice, share play, the social screens),
     /// its session kept: a profile switch or going offline, not a sign-out.
     func disconnectTogether() {
+        unsentMessages = []
         leaveVoice()
         stopSharePlay()
         share.invites = []
