@@ -61,7 +61,7 @@ extension AppModel {
     /// -1 picks the newest. Past the newest the field has the focus again. False when nothing moved.
     @discardableResult
     func pickMessage(_ step: Int) -> Bool {
-        let seqs = openThread.filter { $0.deletedAt == nil }.map(\.seq)
+        let seqs = openThread.filter { $0.deletedAt == nil }.map(\.seq) + openUnsent.indices.map(AppModel.unsentSeq(at:))
         guard !seqs.isEmpty else { return false }
         let next: Int?
         if let picked = messageActions.picked, let at = seqs.firstIndex(of: picked) {
@@ -85,7 +85,14 @@ extension AppModel {
         case .down:
             pickMessage(1)
         case .select, .options:
-            if let seq = messageActions.picked { openMessageMenu(seq) }
+            guard let seq = messageActions.picked else { break }
+            // A message that did not get there has no menu: choosing it sends it again.
+            if seq < 0 {
+                if openUnsent.indices.contains(-1 - seq) { retryMessage(openUnsent[-1 - seq]) }
+                withAnimation(Motion.focus) { messageActions.picked = nil }
+            } else {
+                openMessageMenu(seq)
+            }
         case .back, .right:
             withAnimation(Motion.focus) { messageActions.picked = nil }
             Sounds.shared.play(.back)

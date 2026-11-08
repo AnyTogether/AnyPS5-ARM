@@ -207,7 +207,7 @@ extension AppModel {
         case .right:
             if messageFocus < count - 1 { messageFocus += 1; Sounds.shared.play(.move) } else { leavePartyChat() }
         case .select:
-            if messageFocus < AppModel.quickReplies.count { sendMessage(AppModel.quickReplies[messageFocus]) } else { composing = true }
+            if messageFocus < AppModel.quickReplies.count { sendMessage(AppModel.quickReplies[messageFocus]) } else if !retryNewestUnsent() { composing = true }
         case .up:
             pickMessage(-1)
         case .back:

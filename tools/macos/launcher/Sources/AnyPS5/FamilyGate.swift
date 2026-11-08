@@ -339,7 +339,20 @@ extension AppModel {
     /// The Together panel's family rows for a child: today's time, a stale or locked status, and
     /// asking for more time.
     func familyRows() -> [PanelRow] {
-        familyStandingRows() + familyServerRows()
+        familyStandingRows() + familyServerRows() + familyRefreshRows()
+    }
+
+    /// Check Family Settings Now, as on Windows and Linux: besides the five-minute refresh, for a
+    /// parent's change to count at once.
+    private func familyRefreshRows() -> [PanelRow] {
+        guard family != .free, togetherUser != nil else { return [] }
+        return [PanelRow(id: "family-refresh", title: FS.text(.refresh), symbol: "arrow.clockwise", kind: .action(destructive: false) { [weak self] in
+            guard let self else { return }
+            Task {
+                await self.refreshFamilyNow()
+                if self.family != .locked { self.show(FS.text(.upToDate), symbol: "checkmark.circle") }
+            }
+        })]
     }
 
     /// Limits kept from another server than the one used now.

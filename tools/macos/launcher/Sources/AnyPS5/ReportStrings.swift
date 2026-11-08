@@ -12,6 +12,7 @@ enum TC {
     enum Key: String, CaseIterable {
         case reportStopped, reportLastSession, reportReading, reportKicker, reportKickerShare
         case reportExport, reportExportDetail, reportOpenIssue, reportOpenIssueDetail, reportShowLog
+        case reportCopy, reportCopyDetail, reportCopied, unlockError, unlockErrorCopy, unlockErrorCopied
         case reportPlayTraced, reportPlayTracedDetail
         case reportPlayGoInstalled = "reportPlayGoInstalledMac", reportPlayGoInstalledDetail = "reportPlayGoInstalledDetailMac"
         case reportShareTitle, reportShareDetail, reportGitHub, reportGitHubDetail = "reportGitHubRepoDetail", reportEngine, reportEngineDetail, reportBack

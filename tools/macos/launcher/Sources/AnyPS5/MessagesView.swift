@@ -164,7 +164,7 @@ extension AppModel {
         case .select:
             if messageFocus < AppModel.quickReplies.count {
                 sendMessage(AppModel.quickReplies[messageFocus])
-            } else {
+            } else if !retryNewestUnsent() {
                 composing = true
             }
         case .up:
@@ -306,35 +306,17 @@ extension AppModel {
         // The field's text while editing says the message again; a quick reply is still a new one.
         if messageActions.editing != nil, raw == chatDraft { return saveEdit(raw) }
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let conversation = chatConversation, !text.isEmpty else { return }
+        guard let conversation = chatConversation else { return }
+        // Enter on an empty field: the newest message that did not get there goes again.
+        guard !text.isEmpty else {
+            if raw == chatDraft { retryNewestUnsent() }
+            return
+        }
         if raw == chatDraft { chatDraft = "" }
         let replyTo = messageActions.replyTo
         withAnimation(Motion.focus) { messageActions.replyTo = nil }
         Sounds.shared.play(.select)
-        // End-to-end encrypted, or to be: sealed on this Mac, never plain.
-        if sendsSealed(conversation) { return sendSealedText(text, raw: raw, in: conversation, replyTo: replyTo) }
-        Task {
-            do {
-                let sent = try await together.send(text, in: conversation.id, replyTo: replyTo)
-                withAnimation(Motion.focus) { storeMessage(sent) }
-                if conversation.partyId == nil { keepSelection(conversation.id) }
-            } catch let problem as TogetherProblem where problem.code == "e2ee_required" {
-                // Encrypted on the server's side (both people have a device): sealed instead.
-                await e2eeRequired(conversation)
-                sendSealedText(text, raw: raw, in: conversation, replyTo: replyTo)
-            } catch {
-                if messageActions.replyTo == nil, chatConversation?.id == conversation.id { messageActions.replyTo = replyTo }
-                // The words go back to the field they were typed in.
-                if !AppModel.quickReplies.contains(raw) {
-                    if conversation.partyId != nil { if partyDraft.isEmpty { partyDraft = raw } } else if messageDraft.isEmpty { messageDraft = raw }
-                }
-                if let problem = error as? TogetherProblem, problem.code == "link_blocked" {
-                    show(T.text(.togetherLinkBlocked), symbol: "link.badge.plus")
-                } else {
-                    show(sendRefusal(error), symbol: "exclamationmark.bubble.fill")
-                }
-            }
-        }
+        deliver(UnsentMessage(id: UUID(), conversationId: conversation.id, text: text, replyTo: replyTo), in: conversation, raw: raw)
     }
 
     /// Why a message was not sent: the family's rules, a muted account, too many at once, else
@@ -901,6 +883,10 @@ struct MessageList: View {
                         guard let picked = messages.first(where: { $0.seq == seq }) else { return }
                         withAnimation(Motion.focus) { proxy.scrollTo(picked.id, anchor: .center) }
                     }
+                    .onChange(of: unsent.last?.id) { _, id in
+                        guard let id else { return }
+                        withAnimation(Motion.focus) { proxy.scrollTo(id, anchor: .bottom) }
+                    }
             }
         }
     }
@@ -914,10 +900,20 @@ struct MessageList: View {
         }
     }
 
+    /// What the user wrote that did not get there, under the thread.
+    private var unsent: [UnsentMessage] { model.unsent(in: conversation.id) }
+
+    @ViewBuilder private var unsentRows: some View {
+        let picked = model.messageActions.picked
+        ForEach(Array(unsent.enumerated()), id: \.element.id) { index, message in
+            UnsentBubble(message: message, focused: picked == AppModel.unsentSeq(at: index))
+        }
+    }
+
     private var rows: some View {
         let receipt = model.inbox?.receipt(in: conversation.id)
         let picked = model.messageActions.picked
-        return ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
+        return Group { ForEach(Array(messages.enumerated()), id: \.element.id) { index, message in
             let mine = message.authorId == me
             let first = index == 0 || messages[index - 1].authorId != message.authorId
             let runEnd = index == messages.count - 1 || messages[index + 1].authorId != message.authorId
@@ -966,6 +962,7 @@ struct MessageList: View {
             .id(message.id)
             .padding(.top, first && index > 0 ? 6 * scale : 0)
         }
+        unsentRows }
     }
 
     /// A message's right-click menu: the same actions the controller's menu has.

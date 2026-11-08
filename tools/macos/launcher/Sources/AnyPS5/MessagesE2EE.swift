@@ -171,7 +171,7 @@ extension AppModel {
     /// sealing again when the server says the devices changed. Refused when the other person has
     /// no device, or the devices are not known even after fetching them.
     func sealAndSend(_ payload: TogetherE2EE.Payload, in conversation: TogetherConversation, replyTo: Int? = nil, mediaId: String? = nil,
-                     edit: (seq: Int, id: String)? = nil) async throws -> TogetherMessage {
+                     edit: (seq: Int, id: String)? = nil, id: UUID? = nil) async throws -> TogetherMessage {
         if e2ee?.availability == .unknown {
             prepareE2EE()
             await e2eePreparing?.value
@@ -184,7 +184,7 @@ extension AppModel {
         case .noDevice, .off: throw E2EERefusal.noDevice
         default: throw E2EERefusal.waiting
         }
-        let message = try await together.sendSealed(payload, in: conversation.id, messageId: edit?.id ?? UUID().uuidString.lowercased(), replyTo: replyTo, mediaId: mediaId,
+        let message = try await together.sendSealed(payload, in: conversation.id, messageId: edit?.id ?? (id ?? UUID()).uuidString.lowercased(), replyTo: replyTo, mediaId: mediaId,
                                                     edit: edit?.seq, from: me, device: device) { attempt in
             // 409 e2ee_devices: the lists anew, the change shown, sealed again.
             if attempt > 0 { await self.refreshE2EEDevices([me, other]) }
@@ -202,21 +202,6 @@ extension AppModel {
     func sendsSealed(_ conversation: TogetherConversation) -> Bool {
         guard conversation.kind == "direct", let lock = e2eeLock(conversation) else { return false }
         return lock != .off
-    }
-
-    /// Text into an end-to-end encrypted conversation; the draft comes back if it does not go.
-    func sendSealedText(_ text: String, raw: String, in conversation: TogetherConversation, replyTo: Int?) {
-        Task {
-            do {
-                let sent = try await sealAndSend(TogetherE2EE.Payload(text: text), in: conversation, replyTo: replyTo)
-                withAnimation(Motion.focus) { _ = inbox?.apply(sent, open: conversation.id) }
-                keepSelection(conversation.id)
-            } catch {
-                if messageActions.replyTo == nil, selectedConversation?.id == conversation.id { messageActions.replyTo = replyTo }
-                if messageDraft.isEmpty, !AppModel.quickReplies.contains(raw) { messageDraft = raw }
-                showSealedFailure(error, in: conversation)
-            }
-        }
     }
 
     func showSealedFailure(_ error: Error, in conversation: TogetherConversation) {
