@@ -57,6 +57,20 @@ final class CrashReportTests: XCTestCase {
 
     // MARK: Why the game stopped
 
+    /// A dump without a PlayGo chunk table stops the engine with its PlayGo message; the report
+    /// offers a start with the chunks counted as installed, for any title, as on Windows and Linux.
+    func testThePlayGoMessageIsReadWhateverTheTitle() {
+        let scenario = "scePlayGo: sce_sys/playgo-chunk.dat is missing and sce_sys/playgo-scenario.json lists no chunks, so chunk ID 1200 outside the listed ids 0 to 999 cannot be checked; set APS5_PLAYGO_UNLISTED_CHUNKS=installed or =absent to answer for this dump"
+        let upstream = "scePlayGo: sce_sys/playgo-chunk.dat and sce_sys/playgo-scenario.json are missing, so chunk ID 1 cannot be checked; set APS5_PLAYGO_UNLISTED_CHUNKS=installed or =absent to answer for this dump"
+        XCTAssertTrue(SessionReport.playGoChunksUnknown(in: "--- start\nlibc++abi: terminating due to uncaught exception of type std::runtime_error: " + scenario + "\n"))
+        XCTAssertTrue(SessionReport.playGoChunksUnknown(in: upstream))
+        XCTAssertFalse(SessionReport.playGoChunksUnknown(in: "scePlayGo: sce_sys/playgo-chunk.dat could not be read"))
+        let report = SessionReport(gameName: "Orbit Runner", titleID: "PPSA01234", gameVersion: "01.000", settings: GameSettings(), system: system,
+                                   launcherVersion: "0.2.35", session: scenario, privacy: privacy)
+        XCTAssertTrue(report.playGoChunksUnknown)
+        XCTAssertEqual(SessionReport.playGoInstalled, ["APS5_PLAYGO_UNLISTED_CHUNKS": "installed"])
+    }
+
     func testAnAbortAndANonZeroExitAreReasons() {
         XCTAssertEqual(Diagnosis.read(session: "booting\n[libc] abort() called from 0x1234\n"), .aborted)
         XCTAssertEqual(Diagnosis.read(session: "[libc] exit(3) called from 0x99\n"), .exited(3))
