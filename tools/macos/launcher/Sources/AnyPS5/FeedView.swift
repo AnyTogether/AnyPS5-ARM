@@ -158,6 +158,27 @@ extension AppModel {
         games.first { $0.titleID == game.titleId }?.name ?? game.name(in: T.language.rawValue)
     }
 
+    /// What someone did as `activityText` writes it, after a space, with the game's name a link
+    /// to the game's hub, as the website links it to the game's page. ActivityRow opens it.
+    func activityLine(_ item: TogetherActivity) -> AttributedString {
+        var line = AttributedString(" " + activityText(item))
+        guard let game = item.game, let link = Self.hubLink(game.titleId) else { return line }
+        let name = gameName(game)
+        guard !name.isEmpty, let range = line.range(of: name) else { return line }
+        line[range].link = link
+        return line
+    }
+
+    /// The link an activity line's game name carries: the scheme is the launcher's own, never
+    /// opened outside it.
+    static func hubLink(_ titleId: String) -> URL? { URL(string: "anyps5-hub:\(titleId)") }
+
+    /// An activity item's game: its hub, from a click on its name or select on a profile's item.
+    func openActivityGame(_ item: TogetherActivity) {
+        guard let game = item.game else { return }
+        openHub(titleId: game.titleId, name: gameName(game))
+    }
+
     /// What someone did, after their name: "earned 4 trophies in Stray".
     func activityText(_ item: TogetherActivity) -> String {
         let game = item.game.map(gameName) ?? item.game?.titleId ?? ""
@@ -269,9 +290,16 @@ struct ActivityRow: View {
         HStack(alignment: .center, spacing: (compact ? 14 : 20) * scale) {
             picture
             VStack(alignment: .leading, spacing: (compact ? 5 : 8) * scale) {
+                // The game's name is a link to its hub, in white beside the rest of the line.
                 (Text(item.actor.displayName).font(.display((compact ? 15 : 18) * scale, .semibold)).foregroundColor(.white)
-                    + Text(" " + model.activityText(item)).font(.display((compact ? 15 : 18) * scale)).foregroundColor(.white.opacity(0.82)))
+                    + Text(model.activityLine(item)).font(.display((compact ? 15 : 18) * scale)).foregroundColor(.white.opacity(0.82)))
                     .lineLimit(compact ? 2 : 1)
+                    .tint(.white)
+                    .environment(\.openURL, OpenURLAction { url in
+                        guard url == AppModel.hubLink(item.game?.titleId ?? "") else { return .discarded }
+                        model.openActivityGame(item)
+                        return .handled
+                    })
                 if !compact, let trophies = item.trophies, !trophies.isEmpty { trophyLine(trophies) }
                 HStack(spacing: 8 * scale) {
                     Text(ProfileView.relative(item.createdAt))

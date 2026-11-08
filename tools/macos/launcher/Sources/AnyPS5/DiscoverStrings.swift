@@ -23,6 +23,7 @@ enum FP {
         case letWatch = "discoverLetWatch", findParty = "discoverFindParty", findPartyDetail = "discoverFindPartyDetail"
         case discoveryTitle, showMe = "discoverShowMe", showMeDetail = "discoverShowMeDetail", followLibrary = "discoverFollowLibrary", on = "discoverOn", off = "discoverOff", languagesTitle = "discoverLanguagesTitle", languagesDetail = "discoverLanguagesDetail", languagesFull = "discoverLanguagesFull"
         case notifLfgRequest = "discoverNotifLfgRequest", notifLfgAccepted = "discoverNotifLfgAccepted"
+        case onlineNowOne = "discoverOnlineNowOne", onlineNowMany = "discoverOnlineNowMany", onlineNowHint = "discoverOnlineNowHint"
     }
 
     static func text(_ key: Key) -> String { T.string(key.rawValue) }

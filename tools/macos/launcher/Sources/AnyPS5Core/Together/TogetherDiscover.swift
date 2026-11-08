@@ -575,6 +575,13 @@ extension TogetherClient {
         return try JSONDecoder.together.decode(List.self, from: try await authorized("GET", "lfg/games", nil)).games
     }
 
+    /// How many are online now, a number only (stats/online): accounts that are invisible or show
+    /// their presence to nobody are not in it.
+    public func onlineNow() async throws -> Int {
+        struct Count: Decodable { let online: Int }
+        return try JSONDecoder.together.decode(Count.self, from: try await authorized("GET", "stats/online", nil)).online
+    }
+
     /// The user's posts of the last two days with who asked, and the posts they said "I'm in" to.
     public func myLfg() async throws -> (posts: [TogetherLfgPost], asked: [TogetherLfgPost]) {
         struct Mine: Decodable { let posts: [TogetherLfgPost]; let asked: [TogetherLfgPost] }
