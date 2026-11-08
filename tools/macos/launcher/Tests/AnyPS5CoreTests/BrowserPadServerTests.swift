@@ -404,6 +404,20 @@ final class BrowserPadPageTests: XCTestCase {
         XCTAssertFalse(page.contains("https://"), "no outside requests")
         XCTAssertLessThan(page.utf8.count, 64 * 1024)
     }
+
+    /// Turned to landscape, the page goes full screen with the next finished touch: a browser takes
+    /// full screen from pointerup on a touch screen, never from pointerdown.
+    func testLandscapeGoesFullScreenOnTheNextTouch() throws {
+        let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../BrowserPad/index.html").standardized
+        let page = try String(contentsOf: file, encoding: .utf8)
+        XCTAssertTrue(page.contains(#"stage.addEventListener("pointerup", fullscreenOnTouch)"#))
+        let down = try XCTUnwrap(page.range(of: "function down(event)"))
+        let move = try XCTUnwrap(page.range(of: "function move(event)"))
+        XCTAssertFalse(page[down.lowerBound..<move.lowerBound].contains("ullscreen"), "pointerdown gives no user activation on a touch screen")
+        XCTAssertTrue(page.contains(#"matchMedia("(orientation: landscape)")"#))
+        XCTAssertTrue(page.contains("goFullscreen().catch(() => { fullscreenWanted = true; })"))
+        XCTAssertFalse(page.contains("Android/i.test"), "any browser that has the Fullscreen API")
+    }
 }
 
 /// A real browser against the real servers, run by hand: `ANYPS5_BROWSER_PAD_E2E=<folder> swift
