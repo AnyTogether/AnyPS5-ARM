@@ -13,6 +13,7 @@ enum TC {
         case reportStopped, reportLastSession, reportReading, reportKicker, reportKickerShare
         case reportExport, reportExportDetail, reportOpenIssue, reportOpenIssueDetail, reportShowLog
         case reportPlayTraced, reportPlayTracedDetail
+        case reportPlayGoInstalled = "reportPlayGoInstalledMac", reportPlayGoInstalledDetail = "reportPlayGoInstalledDetailMac"
         case reportShareTitle, reportShareDetail, reportGitHub, reportGitHubDetail = "reportGitHubRepoDetail", reportEngine, reportEngineDetail, reportBack
         case reportLogTail, reportNoLog, reportFactMac, reportFactEngine, reportFactSession, reportFactLogging, reportFactCrash
         case reportCrashNone, reportOn, reportRan, reportNoWindow, reportNormal
