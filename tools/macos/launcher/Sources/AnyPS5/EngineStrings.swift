@@ -20,8 +20,9 @@ enum TE {
         case engineRefresh, engineChecked, engineChecking, engineOffline = "engineOfflineList", engineNeverChecked, engineNoneYet, engineCheckFailed
         case engineFolder, engineFolderNone, engineFolderReset, engineFolderInvalid, engineFolderPick, engineFolderUsed
         case engineHint
-        case engineGitUpdate, engineGitUpdateDetail, engineGitNoBuild, engineGitRunning, engineGitStepChecking, engineGitStepPulling, engineGitStepSubmodules, engineGitStepBuilding, engineGitStepAssembling
+        case engineGitUpdate, engineGitUpdateDetail, engineGitNoBuild, engineGitRunning, engineGitStepChecking, engineGitStepPulling, engineGitStepSubmodules, engineGitStepConfiguring, engineGitStepBuilding, engineGitStepAssembling
         case engineGitDone, engineGitBuiltAt, engineGitFailed, engineGitStopped, engineGitNotGit, engineGitDirty, engineGitNoBuildReason, engineGitPullFailed, engineGitSubmodulesFailed, engineGitBuildFailed
         case engineGitToolkitFailed, engineGitNeeds, engineGitNeedsReason, engineGitCopy, engineGitCopied, engineGitStop, engineGitRelinkAll, engineGitRelinkAllDetail, engineGitRelinking, engineGitWaitUnlock, engineGitBeforePlay, engineGitBeforePlayDetail, engineGitBeforePlayStart, engineGitChecking, engineGitPlayAnyway = "engineGitPlayAnywayMac"
+        case engineGitSetUpDetail = "engineGitSetUpDetailMac", engineGitConfigureFailed, engineGitGuideMac
     }
 }

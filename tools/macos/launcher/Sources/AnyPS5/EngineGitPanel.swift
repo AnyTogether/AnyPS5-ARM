@@ -25,8 +25,8 @@ struct EngineGitState: Equatable {
 }
 
 extension AppModel {
-    /// The build guide: configuring a build folder once is the player's (CMake, Ninja, the Command
-    /// Line Tools).
+    /// The build guide: what to install (CMake, Ninja, the Command Line Tools) and the build
+    /// folder's setup, which Update from Git runs itself when there is none.
     static let engineBuildGuide = URL(string: "https://github.com/AnyTogether/AnyPS5-ARM/blob/main/docs/dev/MACOS_PORT.md")!
 
     /// Where the engines made from the checkout's build are kept.
@@ -205,6 +205,7 @@ extension AppModel {
         case .notGit: return TE.text(.engineGitNotGit)
         case .dirty: return TE.text(.engineGitDirty)
         case .noBuild: return TE.text(.engineGitNoBuildReason)
+        case .configure: return TE.text(.engineGitConfigureFailed)
         case .pull: return TE.text(.engineGitPullFailed)
         case .submodules: return TE.text(.engineGitSubmodulesFailed)
         case .build: return TE.text(.engineGitBuildFailed)
@@ -218,6 +219,7 @@ extension AppModel {
         case .checking: return TE.text(.engineGitStepChecking)
         case .pulling: return TE.text(.engineGitStepPulling)
         case .submodules: return TE.text(.engineGitStepSubmodules)
+        case .configuring: return TE.text(.engineGitStepConfiguring)
         case .building: return TE.text(.engineGitStepBuilding)
         case .assembling: return TE.text(.engineGitStepAssembling)
         }
@@ -265,14 +267,20 @@ extension AppModel {
             rows.append(PanelRow(id: "engineGitUpdate", title: TE.text(.engineGitUpdate), detail: TE.format(.engineGitUpdateDetail, build.lastPathComponent),
                                  symbol: "hammer", kind: .action(destructive: false) { [weak self] in self?.updateEngineFromGit() }, wraps: true))
         } else {
-            rows.append(PanelRow(id: "engineGitUpdate", title: TE.text(.engineGitUpdate), detail: TE.text(.engineGitNoBuild),
-                                 symbol: "hammer", kind: .action(destructive: false) { NSWorkspace.shared.open(AppModel.engineBuildGuide) }, wraps: true))
+            // No build folder yet: the update sets one up first, as on Windows and Linux.
+            rows.append(PanelRow(id: "engineGitUpdate", title: TE.text(.engineGitUpdate), detail: TE.text(.engineGitSetUpDetail),
+                                 symbol: "hammer", kind: .action(destructive: false) { [weak self] in self?.updateEngineFromGit() }, wraps: true))
         }
         if state.step == nil, let stopped = state.failure {
             let shown = (stopped.tail.isEmpty ? state.output : stopped.tail).suffix(2).map { $0.trimmingCharacters(in: .whitespaces) }
             rows.append(PanelRow(id: "engineGitFailed", title: TE.format(.engineGitFailed, AppModel.engineGitReason(stopped.kind)),
                                  detail: (shown + [TE.text(.engineGitCopy)]).joined(separator: "\n"), symbol: "exclamationmark.triangle",
                                  kind: .action(destructive: false) { [weak self] in self?.copyEngineGitFailure() }, wraps: true))
+            // A tool to install, or CMake's setup: the guide says how.
+            if stopped.guideHelps {
+                rows.append(PanelRow(id: "engineGitGuide", title: TE.text(.engineGitGuideMac), detail: AppModel.engineBuildGuide.host.map { $0 + AppModel.engineBuildGuide.path } ?? "",
+                                     symbol: "book", kind: .action(destructive: false) { NSWorkspace.shared.open(AppModel.engineBuildGuide) }, wraps: true))
+            }
         }
         let outdated = state.updated && state.step == nil ? outdatedGames.count : 0
         if outdated > 0 {

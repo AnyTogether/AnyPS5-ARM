@@ -2047,5 +2047,9 @@
   "reportReasonHate": "Hate speech",
   "reportReasonSexual": "Sexual content",
   "reportReasonOther": "Something else",
-  "messagesReported": "Thanks. A moderator will look at it."
+  "messagesReported": "Thanks. A moderator will look at it.",
+  "engineGitStepConfiguring": "Setting up the build folder with CMake",
+  "engineGitSetUpDetailMac": "No build folder yet: this sets one up with CMake first, then pulls and builds. It needs the Xcode Command Line Tools, Git, CMake and Ninja.",
+  "engineGitConfigureFailed": "CMake couldn't set up the build folder",
+  "engineGitGuideMac": "Open the Mac build guide"
 }
