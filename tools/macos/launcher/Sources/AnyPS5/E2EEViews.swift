@@ -352,15 +352,40 @@ struct EncryptionSheet: View {
             Text(who).font(.display(13 * scale, .semibold)).foregroundStyle(.white.opacity(0.85)).frame(width: 92 * scale, alignment: .leading).lineLimit(1)
             VStack(alignment: .leading, spacing: 4 * scale) {
                 if devices.isEmpty { Text("—").font(.display(13 * scale)).foregroundStyle(.white.opacity(0.4)) }
+                // Each device as its kind and the day it was added: never the name its app
+                // registered (often the computer's own) or its ID.
                 ForEach(devices) { device in
                     let here = device.id == model.e2ee?.device?.deviceId
-                    HStack(spacing: 6 * scale) {
-                        Image(systemName: "key.fill").font(.system(size: 9 * scale, weight: .bold)).foregroundStyle(here ? model.accent : .white.opacity(0.4))
-                        Text(device.name ?? String(device.id.prefix(8))).font(.display(13 * scale, here ? .semibold : .regular)).foregroundStyle(.white.opacity(0.72)).lineLimit(1)
+                    HStack(alignment: .firstTextBaseline, spacing: 7 * scale) {
+                        Image(systemName: Self.symbol(device.kind)).font(.system(size: 11 * scale, weight: .semibold)).foregroundStyle(here ? model.accent : .white.opacity(0.45))
+                        VStack(alignment: .leading, spacing: 1 * scale) {
+                            Text(TChat.name(device.kind)).font(.display(13 * scale, here ? .semibold : .regular)).foregroundStyle(.white.opacity(0.78)).lineLimit(1)
+                            if let added = device.added {
+                                Text(TChat.format(.e2eeDeviceAdded, Self.day(added))).font(.display(11 * scale, .medium)).foregroundStyle(.white.opacity(0.42)).lineLimit(1)
+                            }
+                        }
                     }
-                    .help(device.id)
                 }
             }
         }
+    }
+
+    static func symbol(_ kind: TogetherE2EE.DeviceKind) -> String {
+        switch kind {
+        case .windows, .linux: return "desktopcomputer"
+        case .mac: return "laptopcomputer"
+        case .iphone, .android: return "iphone"
+        case .ipad: return "ipad"
+        case .browser: return "globe"
+        case .device: return "display"
+        }
+    }
+
+    /// "3 November 2026" in the launcher's language.
+    static func day(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = T.locale
+        formatter.setLocalizedDateFormatFromTemplate("dMMMMy")
+        return formatter.string(from: date)
     }
 }

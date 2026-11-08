@@ -21,6 +21,7 @@ enum TChat {
         // End-to-end encrypted direct messages (AnyTogether's docs/e2ee.md, its table of texts).
         case e2eeOn, e2eeOnDetail, e2eeOff, e2eeOffDetail, e2eeNoDevice, e2eeSafetyNumber, e2eeSafetyHow, e2eeMarkCompared, e2eeCompared
         case e2eeDevicesChanged, e2eeMyDevicesChanged, e2eeCompare, e2eeDismiss, e2eeDevices, e2eeYou, e2eeNewDeviceNote
+        case e2eeDeviceAdded, e2eeDeviceWindows, e2eeDeviceMac, e2eeDeviceLinux, e2eeDeviceIphone, e2eeDeviceIpad, e2eeDeviceAndroid, e2eeDeviceBrowser, e2eeDeviceOther
         case e2eeBeforeDevice, e2eeUndecryptable, e2eePreview, e2eeNotification, e2eeReportNote
         // Reporting a message (the website's words).
         case report = "messagesReport", reportLead = "messagesReportLead", reported = "messagesReported"
@@ -31,6 +32,20 @@ enum TChat {
 
     /// The reasons a message can be reported for, as the server names them.
     static let reportReasons: [(reason: String, key: Key)] = [("spam", .reasonSpam), ("harassment", .reasonHarassment), ("hate", .reasonHate), ("sexual", .reasonSexual), ("other", .reasonOther)]
+
+    /// What a device is, in words: "Windows PC", "iPhone", "Device".
+    static func name(_ kind: TogetherE2EE.DeviceKind) -> String {
+        switch kind {
+        case .windows: return text(.e2eeDeviceWindows)
+        case .mac: return text(.e2eeDeviceMac)
+        case .linux: return text(.e2eeDeviceLinux)
+        case .iphone: return text(.e2eeDeviceIphone)
+        case .ipad: return text(.e2eeDeviceIpad)
+        case .android: return text(.e2eeDeviceAndroid)
+        case .browser: return text(.e2eeDeviceBrowser)
+        case .device: return text(.e2eeDeviceOther)
+        }
+    }
 
     static func name(_ reaction: TogetherMessageReaction) -> String {
         switch reaction {

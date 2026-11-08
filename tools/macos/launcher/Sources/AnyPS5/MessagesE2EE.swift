@@ -47,7 +47,8 @@ extension AppModel {
     func prepareE2EE() {
         guard persists, e2eePreparing == nil, let book = e2ee, book.availability == .unknown, let device = book.device else { return }
         let client = together, me = book.me
-        let name = "\(Host.current().localizedName ?? "Mac") · AnyPS5"
+        // What it is, never the Mac's own name: friends' device lists read it (docs/e2ee.md).
+        let name = TogetherE2EE.macDeviceName
         e2eePreparing = Task {
             defer { e2eePreparing = nil }
             do {
