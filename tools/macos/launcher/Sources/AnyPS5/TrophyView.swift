@@ -138,6 +138,10 @@ struct TrophyRow: View {
                 }
             }
             Spacer(minLength: 12 * scale)
+            // The moment the focused trophy was earned, when the launcher caught it.
+            if focused, let shot = model.trophyShots[trophy.id] {
+                TrophyShot(url: shot)
+            }
             if hidden.canToggle(trophy) {
                 Button { model.toggleHiddenTrophy(game, trophy) } label: {
                     Label(T.text(secret ? .trophyShow : .trophyHide), systemImage: secret ? "eye" : "eye.slash")
@@ -172,6 +176,32 @@ struct TrophyRow: View {
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+}
+
+/// The picture taken when a trophy was earned: its small image and the line saying a press opens
+/// it, as on Windows and Linux.
+private struct TrophyShot: View {
+    let url: URL
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        Button { model.openGallery(shot: url) } label: {
+            HStack(spacing: 12 * scale) {
+                Label(TH.text(.trophyShot), systemImage: "camera.fill")
+                    .font(.display(13 * scale, .medium))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .frame(maxWidth: 200 * scale, alignment: .trailing)
+                    .multilineTextAlignment(.trailing)
+                Thumbnail(url: url, focused: false, accent: model.accent)
+                    .frame(width: 121 * scale, height: 68 * scale)
+                    .clipShape(RoundedRectangle(cornerRadius: 10 * scale, style: .continuous))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .hoverTick("trophy-shot")
     }
 }
 

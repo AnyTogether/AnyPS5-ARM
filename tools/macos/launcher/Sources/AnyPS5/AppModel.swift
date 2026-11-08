@@ -178,6 +178,8 @@ enum GameState: Equatable {
     case installed(outdated: Bool)
     case starting
     case running
+    /// Stop asked it to close: it may still be saving (GameStop.swift).
+    case stopping
 }
 
 enum HomeFocus: Equatable {
@@ -430,6 +432,10 @@ final class AppModel: ObservableObject {
     @Published var galleryIndex = 0
     /// One screenshot over the whole screen, instead of the grid.
     @Published var galleryViewing = false
+    /// The trophy list a picture of it opened the gallery from, to go back to.
+    var galleryFrom: Int?
+    /// The picture taken when each trophy of the selected game was earned, by trophy id.
+    @Published var trophyShots: [String: URL] = [:]
     /// What the mouse's Forward button opens again (BackForward.swift).
     var forwardStep: ForwardStep?
     /// The launcher's own crash or stall last time, until offered (LauncherReport.swift).
@@ -442,6 +448,14 @@ final class AppModel: ObservableObject {
     @Published private(set) var progress: [String: (Installer.Step, Double)] = [:]
     @Published private(set) var queue: [String] = []
     @Published private(set) var failures: [String: String] = [:]
+    /// Stop asked the game playing to close: its tile reads Closing the game until it is gone, and
+    /// `gameStopWatch` ends it after `gameStopGrace` if it still is not (GameStop.swift).
+    @Published var stopping = false
+    var gameStopWatch: Task<Void, Never>?
+    var gameStopGrace: Duration = .seconds(8)
+    /// Asking a game to close, and ending it now; replaced in tests.
+    var askGameToClose: (NSRunningApplication) -> Bool = { $0.terminate() }
+    var endGame: (NSRunningApplication) -> Void = { $0.forceTerminate() }
     @Published private(set) var running: (game: Game, app: NSRunningApplication)? {
         didSet {
             guard (oldValue == nil) != (running == nil) else { return }
@@ -770,6 +784,10 @@ final class AppModel: ObservableObject {
 
     func previewProgress(_ game: Game, step: Installer.Step, fraction: Double) {
         progress[game.id] = (step, fraction)
+    }
+
+    func previewRunning(_ game: Game, app: NSRunningApplication) {
+        running = (game, app)
     }
 
     func previewStarting(_ game: Game) {
@@ -1416,7 +1434,7 @@ final class AppModel: ObservableObject {
 
     func state(of game: Game) -> GameState {
         if starting?.id == game.id { return .starting }
-        if running?.game.id == game.id { return .running }
+        if running?.game.id == game.id { return stopping ? .stopping : .running }
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
@@ -1826,7 +1844,7 @@ final class AppModel: ObservableObject {
         case .installing where isPreparing(game): promotePreparation(game)
         case .installing, .queued: cancelUnlock(game)
         case .running: running?.app.activate()
-        case .starting: break
+        case .starting, .stopping: break
         case .unreadable: show(T.text(.unreadableDump), symbol: "xmark.octagon")
         }
     }
@@ -2228,6 +2246,7 @@ final class AppModel: ObservableObject {
         guard let running, running.app.processIdentifier == pid else { return }
         self.running = nil
         defer { restartIfWaiting() }
+        gameStopped()
         // The game's own menus go with it.
         pausedGame = false
         if overlay == .quickMenu || overlay == .closeGame { overlay = nil }
@@ -2415,6 +2434,8 @@ final class AppModel: ObservableObject {
     }
 
     func previewPairing(_ request: PairingRequest) { pairing = request }
+
+    func previewTrophies(_ game: Game, _ set: TrophySet) { trophies[game.id] = set }
 
     func previewPhone(_ name: String, latency: Double?) { phone = (name, latency) }
 
@@ -2620,7 +2641,7 @@ final class AppModel: ObservableObject {
         case .queued, .installing: state = .installing
         case .installed(let outdated): state = outdated ? .update : .installed
         case .starting: state = .starting
-        case .running: state = .running
+        case .running, .stopping: state = .running
         }
         let set = trophies[game.id]
         return RemoteGame(id: game.id, name: game.name, state: state, trophies: set.map { "\($0.unlockedCount)/\($0.trophies.count)" },
@@ -2743,6 +2764,7 @@ final class AppModel: ObservableObject {
                         TrophyBanner.shared.show(trophy, sounds: self.preferences.sounds)
                         Feel.shared.vibrate(.trophy)
                         self.tellPhone(trophy)
+                        self.takeTrophyShot(of: game, trophy: trophy)
                     }
                 }
             }
@@ -2918,8 +2940,33 @@ final class AppModel: ObservableObject {
 
     func loadGallery() {
         galleryShots = selectedGame.map(screenshots) ?? []
+        trophyShots = Screenshots.trophyShots(galleryShots)
         galleryIndex = 0
         galleryViewing = false
+    }
+
+    /// The picture of the trophy focused in the list, when the launcher caught that moment.
+    var focusedTrophyShot: URL? {
+        guard let game = selectedGame, let set = trophies[game.id], set.trophies.indices.contains(trophyIndex) else { return nil }
+        return trophyShots[set.trophies[trophyIndex].id]
+    }
+
+    /// The gallery open on one picture, over the whole screen, as a trophy opens its own.
+    func openGallery(shot: URL) {
+        galleryFrom = overlay == .trophies ? trophyIndex : nil
+        open(.gallery)
+        // The file name is what it is known by: one path may read differently from the listing's.
+        guard let index = galleryShots.firstIndex(where: { $0.lastPathComponent == shot.lastPathComponent }) else { return }
+        galleryIndex = index
+        galleryViewing = true
+    }
+
+    /// Back from the gallery: the trophy list it came from, else home.
+    func leaveGallery() {
+        guard let index = galleryFrom else { return closeOverlay() }
+        galleryFrom = nil
+        open(.trophies)
+        trophyIndex = index
     }
 
     /// The folder the unlocked game reads and writes, its saves included.
@@ -3017,7 +3064,7 @@ final class AppModel: ObservableObject {
             trophyIndex = 0
             revealedTrophies = []
         }
-        if next == .gallery { loadGallery() }
+        if next == .gallery || next == .trophies { loadGallery() }
         if next == .advanced || next == .updateRequired { panelRow = 1 }
         panelInRows = panelInRows || next == .advanced || next == .themes || next == .studio || next == .friends || next == .party
         if next == .friends { refreshFriends() }
@@ -3041,6 +3088,7 @@ final class AppModel: ObservableObject {
     }
 
     func closeOverlay() {
+        galleryFrom = nil
         // A zip's question closed some other way than its rows: Not Now.
         if overlay == .gameFiles, gameFiles.working == nil, let archive = gameFiles.asked?.archive { gameFilesWork.later.insert(archive.url.path) }
         endCapture()
