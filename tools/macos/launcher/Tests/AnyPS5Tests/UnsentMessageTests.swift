@@ -77,8 +77,9 @@ final class UnsentMessageTests: XCTestCase {
         XCTAssertEqual(model.messageActions.picked, AppModel.unsentSeq(at: 0))
         answers = [.success(message(1, text: "hello"))]
         model.pickedCommand(.select)
-        XCTAssertEqual(sent.count, 2)
         XCTAssertNil(model.messageActions.picked)
+        await settle(model) { self.sent.count == 2 }
+        XCTAssertEqual(sent.count, 2, "sent again")
     }
 
     func testAWordsFieldThatIsNotEmptySendsThemNotTheBubble() async throws {
