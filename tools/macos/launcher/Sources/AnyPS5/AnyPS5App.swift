@@ -117,7 +117,7 @@ struct RootView: View {
 
     private var look: Look {
         // On battery or hot, Settings → Battery & Heat can turn the blur and the motion down.
-        Look.make(style: model.lookStyle, reduceTransparency: reduceTransparency || model.powerDimmed, offscreen: stillBackground != nil,
+        Look.make(style: model.lookStyle, reduceTransparency: reduceTransparency || model.preferences.reduceTransparency == true || model.powerDimmed, offscreen: stillBackground != nil,
                   reduceMotion: model.preferences.reducedMotion || systemReduceMotion || model.powerDimmed,
                   transparency: model.preferences.glassTransparency, seeThrough: stillBackground == nil || mockDesktop != nil)
     }

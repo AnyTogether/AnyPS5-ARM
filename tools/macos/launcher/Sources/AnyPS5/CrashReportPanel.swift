@@ -120,6 +120,8 @@ extension AppModel {
         }
         rows += [
             export,
+            PanelRow(id: "copy", title: TC.text(.reportCopy), detail: TC.text(.reportCopyDetail), symbol: "doc.on.doc",
+                     kind: .action(destructive: false) { [weak self] in self?.copyReport() }),
             PanelRow(id: "issue", title: TC.text(.reportOpenIssue), detail: TC.text(.reportOpenIssueDetail), symbol: "exclamationmark.bubble",
                      kind: .action(destructive: false) { [weak self] in self?.enterSharing() }),
             PanelRow(id: "log", title: TC.text(.reportShowLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }),
@@ -133,6 +135,15 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "close", title: T.text(.close), symbol: "xmark", kind: .action(destructive: false) { [weak self] in self?.closeOverlay() }))
         return rows
+    }
+
+    /// Copy Report: the report and the end of the log on the clipboard, for Discord or an issue,
+    /// as on Windows and Linux. Nothing yet while the report is still being made.
+    func copyReport() {
+        guard let report = sessionReport?.report else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report.text(), forType: .string)
+        show(TC.text(.reportCopied), symbol: "doc.on.doc")
     }
 
     /// Back steps out of the shared text first; Options closes the panel.

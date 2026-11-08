@@ -237,7 +237,7 @@ extension AppModel {
         appearance += [
             PanelRow(id: "themes", title: T.text(.themes), detail: T.text(.themesDetail), symbol: "square.grid.2x2", kind: .action(destructive: false) { [weak self] in self?.open(.themes) }),
             PanelRow(id: "studio", title: T.text(.themeStudio), detail: T.text(.themeStudioDetail), symbol: "wand.and.stars", kind: .action(destructive: false) { [weak self] in self?.openStudio() }),
-            PanelRow(id: "backdrop", title: T.text(.background), symbol: "photo.on.rectangle", kind: .choice(options: [lookStyle.isGlass && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency && (preferences.glassTransparency ?? 1) > 0 ? TG.text(.desktop) : T.text(.backgroundTheme), T.text(.backgroundImage), T.text(.backgroundVideo)], selected: [Preferences.Backdrop.theme, .image, .video].firstIndex(of: preferences.backdrop) ?? 0) { [weak self] index in
+            PanelRow(id: "backdrop", title: T.text(.background), symbol: "photo.on.rectangle", kind: .choice(options: [lookStyle.isGlass && !NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency && preferences.reduceTransparency != true && (preferences.glassTransparency ?? 1) > 0 ? TG.text(.desktop) : T.text(.backgroundTheme), T.text(.backgroundImage), T.text(.backgroundVideo)], selected: [Preferences.Backdrop.theme, .image, .video].firstIndex(of: preferences.backdrop) ?? 0) { [weak self] index in
                 let backdrop = [Preferences.Backdrop.theme, .image, .video][index]
                 if backdrop != .theme && (self?.preferences.backdropFile == nil || self?.preferences.backdrop != backdrop) {
                     self?.chooseBackdrop(backdrop)
@@ -260,13 +260,18 @@ extension AppModel {
             }))
         }
         if lookStyle.isGlass {
+            // Only Glass has transparency to reduce, as on Windows and Linux.
+            appearance.append(PanelRow(id: "transparency", title: TG.text(.reduceTransparency), detail: TG.text(.reduceTransparencyDetail), symbol: "square.stack",
+                                       kind: .toggle(preferences.reduceTransparency == true) { [weak self] value in self?.preferences.reduceTransparency = value ? true : nil }))
             // The see-through window: how much of the desktop shows, and the key art over it.
             let reduced = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
-            appearance += [
+            appearance += preferences.reduceTransparency == true ? [] : [
                 PanelRow(id: "glassTransparency", title: TG.text(.transparency), detail: TG.text(reduced ? .transparencyReduced : .transparencyDetail), symbol: "square.on.square.dashed",
                          kind: .stepper(value: preferences.glassTransparency ?? GlassWindowRecipe.defaultTransparency, range: 0...100, step: 10, format: Self.percent) { [weak self] value in
                              self?.preferences.glassTransparency = value == GlassWindowRecipe.defaultTransparency ? nil : value
                          }),
+            ]
+            appearance += [
                 PanelRow(id: "glassArtwork", title: TG.text(.artworkBehind), detail: TG.text(.artworkBehindDetail), symbol: "photo",
                          kind: .toggle(preferences.glassArtwork == true) { [weak self] value in self?.preferences.glassArtwork = value ? true : nil }),
             ]
@@ -522,6 +527,13 @@ extension AppModel {
         rows.append(PanelRow(id: "cache", title: T.text(.clearShaderCache), symbol: "sparkles", kind: .action(destructive: false) { [weak self] in self?.clearShaderCache(game) }))
         if case .installed = state {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
+        }
+        // A failed unlock's error first: the end of it, as Update from Git shows its own; all of it
+        // goes to the clipboard, as on Windows and Linux.
+        if let failure = failures[game.id] {
+            let lines = failure.split(whereSeparator: \.isNewline).suffix(2).map { $0.trimmingCharacters(in: .whitespaces) }
+            rows.insert(PanelRow(id: "unlockError", title: TC.text(.unlockError), detail: (lines + [TC.text(.unlockErrorCopy)]).joined(separator: " · "), symbol: "exclamationmark.triangle",
+                                 kind: .action(destructive: false) { [weak self] in self?.copyFailure(game) }, wraps: true), at: 0)
         }
         return rows
     }
