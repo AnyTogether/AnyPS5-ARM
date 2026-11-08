@@ -2065,6 +2065,10 @@
   "reportReasonSexual": "Cinsel içerik",
   "reportReasonOther": "Başka bir şey",
   "messagesReported": "Teşekkürler. Bir moderatör bakacak.",
+  "engineGitStepConfiguring": "Derleme klasörü CMake ile kuruluyor",
+  "engineGitSetUpDetailMac": "Henüz derleme klasörü yok: önce CMake ile bir tane kurulur, sonra çekilip derlenir. Xcode Komut Satırı Araçları, Git, CMake ve Ninja gerekir.",
+  "engineGitConfigureFailed": "CMake derleme klasörünü kuramadı",
+  "engineGitGuideMac": "Mac derleme kılavuzunu aç",
   "reportPlayGoInstalledMac": "Eksik parçaları kurulu sayarak yeniden oyna",
   "reportPlayGoInstalledDetailMac": "Yalnızca bu açılış için. Dump'ta PlayGo parça tablosu yok ve oyunun eksik bölümleri yüklenemeyebilir."
 }

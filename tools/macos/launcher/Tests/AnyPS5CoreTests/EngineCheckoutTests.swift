@@ -154,6 +154,57 @@ final class EngineCheckoutTests: XCTestCase {
         XCTAssertTrue(git.output.contains("$ git pull --ff-only"))
     }
 
+    /// A checkout without a build folder: set up with CMake as the Mac guide does, then pulled,
+    /// built and made into an engine, as on Windows and Linux.
+    func testACheckoutWithoutABuildFolderIsSetUpThenBuilt() throws {
+        try write("engine/CMakeLists.txt")
+        try write("engine/core/relinker/main.cpp")
+        try write("engine/core/libs/libc.cpp")
+        try write("engine/tools/macos/patches/PPSA01234.json", "{}")
+        try write("engine/.git/HEAD", "ref: refs/heads/main")
+        let checkout = try XCTUnwrap(EngineCheckout.at(root.appendingPathComponent("engine")))
+        XCTAssertNil(checkout.buildFolder)
+        let commands = FakeCommands()
+        commands.answers["git rev-parse"] = (0, ["aaaaaaa1111"])
+        commands.answers["cmake -S"] = (0, ["-- Configuring done", "-- Generating done"])
+        commands.onRun = { call in
+            if call.tool == "cmake" { try? self.write("engine/build-mac/CMakeCache.txt", "# cache\n") }
+            if call.tool == "ninja" { try? self.buildFiles("set up") }
+        }
+        var steps: [GitStep] = []
+        var lines: [String] = []
+        let result = try EngineGit(checkout, tools: tools, runner: commands).update(in: root.appendingPathComponent("engines"), vulkanFrom: try makeToolkit(),
+                                                                                    onStep: { steps.append($0) }, onLine: { lines.append($0) })
+        XCTAssertEqual(steps, [.checking, .pulling, .submodules, .configuring, .building, .assembling])
+        let run = commands.calls.map { ([$0.tool] + $0.arguments).joined(separator: " ") }
+        XCTAssertTrue(run.contains("cmake -S . -B build-mac -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64"), "\(run)")
+        XCTAssertTrue(run.contains("ninja -C \(checkout.build.path) relinker libs"), "\(run)")
+        XCTAssertTrue(lines.contains("-- Generating done"))
+        XCTAssertEqual(try String(contentsOf: result.toolkit.relinker, encoding: .utf8), "set up")
+    }
+
+    func testASetupCMakeCannotFinishLeavesNoBuildFolder() throws {
+        try write("engine/CMakeLists.txt")
+        try write("engine/core/relinker/main.cpp")
+        try write("engine/core/libs/libc.cpp")
+        try write("engine/tools/macos/patches/PPSA01234.json", "{}")
+        try write("engine/.git/HEAD", "ref: refs/heads/main")
+        let checkout = try XCTUnwrap(EngineCheckout.at(root.appendingPathComponent("engine")))
+        let commands = FakeCommands()
+        commands.answers["cmake -S"] = (1, ["CMake Error: Could NOT find Python3"])
+        commands.onRun = { call in
+            if call.tool == "cmake" { try? self.write("engine/build-mac/CMakeCache.txt", "# cache\n") }
+        }
+        XCTAssertThrowsError(try EngineGit(checkout, tools: tools, runner: commands).update(in: root.appendingPathComponent("e"), vulkanFrom: try makeToolkit())) { error in
+            let failure = error as? GitUpdateFailure
+            XCTAssertEqual(failure?.kind, .configure)
+            XCTAssertEqual(failure?.tail, ["CMake Error: Could NOT find Python3"])
+            XCTAssertEqual(failure?.guideHelps, true)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("engine/build-mac").path))
+        XCTAssertFalse(commands.calls.contains { $0.tool == "ninja" })
+    }
+
     func testTheSameBuildMakesTheSameEngineAndOldOnesAreCleared() throws {
         let checkout = try makeCheckout()
         let kit = try makeToolkit()

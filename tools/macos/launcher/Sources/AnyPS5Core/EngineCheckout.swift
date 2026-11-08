@@ -50,6 +50,11 @@ public struct EngineCheckout: Sendable {
 
     /// The build folder the relinker and the libraries come from (build-mac/ before one is configured).
     public var build: URL { buildFolder ?? root.appendingPathComponent("build-mac") }
+
+    /// `cmake -S . -B build-mac -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64`:
+    /// the setup the Mac guide (docs/dev/MACOS_PORT.md) runs once, which Update from Git runs for a
+    /// checkout without a build folder.
+    public static let configureArguments = ["-S", ".", "-B", "build-mac", "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_OSX_ARCHITECTURES=x86_64"]
     public var relinker: URL { build.appendingPathComponent("core/relinker/relinker") }
     public var libraries: URL { build.appendingPathComponent("core/libs/libs") }
     public var patches: URL { root.appendingPathComponent("tools/macos/patches") }
@@ -220,7 +225,7 @@ public struct SystemCommands: CommandRunner {
 }
 
 /// The steps of an update from git.
-public enum GitStep: Equatable, Sendable { case checking, pulling, submodules, building, assembling }
+public enum GitStep: Equatable, Sendable { case checking, pulling, submodules, configuring, building, assembling }
 
 /// Why an update from git stopped.
 public enum GitFailureKind: Equatable, Sendable {
@@ -230,8 +235,10 @@ public enum GitFailureKind: Equatable, Sendable {
     case notGit
     /// The tree has changes not committed: nothing was pulled.
     case dirty
-    /// CMake never configured a build folder: the build guide does that once.
+    /// CMake never configured a build folder (no longer said: the update sets one up).
     case noBuild
+    /// CMake could not set up the build folder (a library or tool it looks for is missing).
+    case configure
     /// git pull --ff-only failed (the branch went another way, no upstream, offline).
     case pull
     /// git submodule update failed.
@@ -256,6 +263,14 @@ public struct GitUpdateFailure: Error, Equatable {
 
     /// Whether nothing was changed: the tree and the build are as they were.
     public var untouched: Bool { kind != .submodules && kind != .build && kind != .toolkit }
+
+    /// Whether the build guide says how to put it right (a tool to install, CMake's setup).
+    public var guideHelps: Bool {
+        switch kind {
+        case .missingTools, .configure: return true
+        default: return false
+        }
+    }
 }
 
 /// What an update from git did: the commit before and after, and the engine it made.
@@ -268,7 +283,8 @@ public struct GitUpdateResult: Sendable {
 
 /// Pulls an engine checkout, builds its relinker and libraries and makes an engine of them:
 /// `git pull --ff-only`, `git submodule update --init --recursive`, `ninja -C <build> relinker
-/// libs`. Refuses a tree with changes not committed, and never configures a build folder itself.
+/// libs`. Refuses a tree with changes not committed. A checkout without a build folder gets one
+/// first, as the Mac guide sets it up (EngineCheckout.configureArguments), as on Windows and Linux.
 public final class EngineGit: @unchecked Sendable {
     public let checkout: EngineCheckout
     public let tools: DevTools
@@ -374,7 +390,6 @@ public final class EngineGit: @unchecked Sendable {
         onStep?(.checking)
         if !tools.missing.isEmpty { throw GitUpdateFailure(.missingTools(tools.missing)) }
         guard checkout.isGit else { throw GitUpdateFailure(.notGit) }
-        guard let build = checkout.buildFolder else { throw GitUpdateFailure(.noBuild) }
         let (statusCode, changes) = try run(tools.git, ["status", "--porcelain", "--untracked-files=no"], quiet: true, cancel: cancel)
         guard statusCode == 0 else { throw GitUpdateFailure(.notGit, EngineGit.tail(changes)) }
         let changed = changes.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
@@ -389,15 +404,35 @@ public final class EngineGit: @unchecked Sendable {
         let (subCode, subLines) = try run(tools.git, ["submodule", "update", "--init", "--recursive"], cancel: cancel, onLine: onLine)
         guard subCode == 0 else { throw GitUpdateFailure(.submodules, EngineGit.tail(subLines)) }
 
+        var configured = checkout
+        if checkout.buildFolder == nil {
+            onStep?(.configuring)
+            let made = checkout.build
+            let existed = FileManager.default.fileExists(atPath: made.path)
+            do {
+                let (configureCode, configureLines) = try run(tools.cmake, EngineCheckout.configureArguments, cancel: cancel, onLine: onLine)
+                guard configureCode == 0 else { throw GitUpdateFailure(.configure, EngineGit.tail(configureLines)) }
+            } catch {
+                // A setup that stopped half way leaves no cache behind to be taken for a build folder.
+                if existed {
+                    try? FileManager.default.removeItem(at: made.appendingPathComponent("CMakeCache.txt"))
+                } else {
+                    try? FileManager.default.removeItem(at: made)
+                }
+                throw error
+            }
+            configured = EngineCheckout.at(checkout.root) ?? checkout
+        }
+
         onStep?(.building)
-        let (buildCode, buildLines) = try run(tools.ninja, ["-C", build.path, "relinker", "libs"], cancel: cancel, onLine: onLine)
+        let (buildCode, buildLines) = try run(tools.ninja, ["-C", configured.build.path, "relinker", "libs"], cancel: cancel, onLine: onLine)
         guard buildCode == 0 else { throw GitUpdateFailure(.build, EngineGit.tail(buildLines)) }
 
         onStep?(.assembling)
         let after = try head(cancel)
         let toolkit: Toolkit
         do {
-            toolkit = try EngineGit.makeToolkit(from: checkout, vulkanFrom: vulkanFrom, in: folder, release: describe(cancel))
+            toolkit = try EngineGit.makeToolkit(from: configured, vulkanFrom: vulkanFrom, in: folder, release: describe(cancel))
         } catch {
             keep(error.localizedDescription)
             throw GitUpdateFailure(.toolkit, [error.localizedDescription])
