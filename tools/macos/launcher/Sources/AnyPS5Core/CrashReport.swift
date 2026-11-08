@@ -167,6 +167,20 @@ public struct SessionReport: Sendable {
     /// The game stopped on an error, a crash, or before it ever showed its window.
     public var abnormal: Bool { diagnosis != nil || startedWithoutWindow }
 
+    /// The engine stopped because the dump has no PlayGo chunk table to check a chunk ID against
+    /// (no sce_sys/playgo-chunk.dat, and a playgo-scenario.json that lists no chunks; a dump with
+    /// neither file is taken as installed here). APS5_PLAYGO_UNLISTED_CHUNKS answers it. As on
+    /// Windows and Linux, where upstream's engine also stops on a dump with neither file.
+    public var playGoChunksUnknown: Bool { SessionReport.playGoChunksUnknown(in: session) }
+
+    /// Whether `log` says so (any title: the rule is the engine's message).
+    public static func playGoChunksUnknown(in log: String) -> Bool {
+        log.range(of: #"scePlayGo: [^\n]*playgo-chunk\.dat[^\n]*cannot be checked"#, options: .regularExpression) != nil
+    }
+
+    /// What Play Again with Missing Chunks Counted as Installed starts the game with, once.
+    public static let playGoInstalled = ["APS5_PLAYGO_UNLISTED_CHUNKS": "installed"]
+
     /// Why the game stopped, in English.
     public var reason: String {
         if let diagnosis { return diagnosis.report }

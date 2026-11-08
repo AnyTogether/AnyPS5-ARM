@@ -329,6 +329,23 @@ final class TogetherE2EETests: XCTestCase {
         try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]).write(to: URL(fileURLWithPath: out))
     }
 
+    func testADeviceGoesByItsKindReadFromItsNameAsAnyTogetherReadsIt() throws {
+        let cases: [(String, TogetherE2EE.DeviceKind)] = [
+            ("AnyPS5 on Mac", .mac), ("AnyPS5 on Windows", .windows), ("AnyPS5 on Linux", .linux),
+            ("Chrome on Windows", .browser), ("Safari on iOS", .browser),
+            // Older names: the computer's own, often with its owner's name.
+            ("Utku's MacBook Pro · AnyPS5", .mac), ("DESKTOP-7F3K2LQ", .windows), ("LAPTOP-Q1W2E3", .windows),
+            ("Robin's iPhone · AnyPS5 Remote", .iphone), ("Pixel 8", .android), ("steamdeck", .linux), ("gokalp-rig", .device), ("Machine", .device),
+            // The server's names for other people's devices keep their kind.
+            ("Windows PC", .windows), ("Linux PC", .linux), ("Mac", .mac), ("iPad", .ipad), ("Android phone", .android), ("Web browser", .browser), ("Device", .device),
+        ]
+        for (name, kind) in cases { XCTAssertEqual(TogetherE2EE.deviceKind(of: name), kind, name) }
+        XCTAssertEqual(TogetherE2EE.macDeviceName, "AnyPS5 on Mac")
+        let listed = try JSONDecoder.together.decode(TogetherE2EE.Device.self, from: Data(#"{"id":"a","signKey":"s","boxKey":"b","sig":"g","name":"Utku's MacBook Pro · AnyPS5","createdAt":"2026-11-03T10:00:00.000Z","removedAt":null}"#.utf8))
+        XCTAssertEqual(listed.kind, .mac)
+        XCTAssertEqual(listed.added, ISO8601DateFormatter().date(from: "2026-11-03T10:00:00Z"))
+    }
+
     func testStrictBase64() {
         XCTAssertEqual(try E.base64("AAEC", length: 3), Data([0, 1, 2]))
         XCTAssertThrowsError(try E.base64("AAEC", length: 4))

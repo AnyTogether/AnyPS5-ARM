@@ -38,6 +38,17 @@ final class DisplayDefaultsPanelTests: XCTestCase {
         XCTAssertFalse(model.gameDisplayRows(game, model.settings(for: game)).contains { $0.id == "useDisplayDefaults" }, "nothing of its own to put back")
     }
 
+    /// Slick Daddy's report of 7 November 2026 (a per-game "start full screen, borderless"): the
+    /// row was there as Display, so it says what it is and that full screen is borderless.
+    func testAGamesRowSaysWindowOrFullScreenAndThatFullScreenIsBorderless() throws {
+        let model = try LauncherFixture.model()
+        let game = try XCTUnwrap(model.selectedGame)
+        let display = try row(model.gameDisplayRows(game, model.settings(for: game)), "display")
+        XCTAssertEqual(display.title, "Window or full screen")
+        XCTAssertEqual(display.detail, T.text(.displayBorderless))
+        XCTAssertTrue(display.detail?.contains("borderless") == true)
+    }
+
     func testAGamesOwnChoiceWinsAndUseDefaultDisplayPutsItBack() throws {
         let model = try LauncherFixture.model()
         let game = try XCTUnwrap(model.selectedGame)

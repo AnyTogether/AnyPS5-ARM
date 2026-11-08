@@ -1832,15 +1832,16 @@ final class AppModel: ObservableObject {
     }
 
     /// Plays the game, its saves brought in step first where save sync is on; `trace` turns
-    /// detailed logging on for this start only.
-    func play(_ game: Game, trace: Bool = false) {
+    /// detailed logging on for this start only, and `once` adds to the engine's environment for
+    /// this start only (the crash report's PlayGo answer).
+    func play(_ game: Game, trace: Bool = false, once: [String: String] = [:]) {
         guard root(of: game) != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
         // The profile's own saves and trophies in the game folder before anything reads them.
         activateProfileSaves(game)
-        familyGate(game) { self.syncSaves(game) { self.ensureFonts(game) { self.start(game, trace: trace) } } }
+        familyGate(game) { self.syncSaves(game) { self.ensureFonts(game) { self.start(game, trace: trace, once: once) } } }
     }
 
-    private func start(_ game: Game, trace: Bool = false) {
+    private func start(_ game: Game, trace: Bool = false, once: [String: String] = [:]) {
         guard let root = root(of: game), starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         let configuration = NSWorkspace.OpenConfiguration()
@@ -1867,7 +1868,8 @@ final class AppModel: ObservableObject {
             .merging(togetherUser == nil ? [:] : ["ANYPS5_TOGETHER_SESSION": TogetherGameSession.bridgeFile.path]) { own, _ in own }
             // The battery and heat profiles' frame cap, and the file they change it through live.
             .merging(powerEnvironment()) { _, power in power }
-        markStart(of: game, traced: trace || settings.trace == true)
+            .merging(once) { _, once in once }
+        markStart(of: game, traced: trace || settings.trace == true, once: once)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -2767,7 +2769,7 @@ final class AppModel: ObservableObject {
 
     /// The log line the diagnosis reads from, so only this start's output counts. A log grown
     /// too big is set aside first; a detailed one is kept under its cap while the game runs.
-    private func markStart(of game: Game, traced: Bool) {
+    private func markStart(of game: Game, traced: Bool, once: [String: String] = [:]) {
         diagnoses[game.id] = nil
         starts[game.id] = Date()
         lastSessions[game.id] = LastSession(traced: traced)
@@ -2787,7 +2789,8 @@ final class AppModel: ObservableObject {
         }
         // The controllers connected at the start, in the log a crash report reads.
         let pads = Controllers.shared.reportLines.map { "[anyps5-launcher] controllers: \($0)\n" }.joined()
-        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n" + pads
+        let onlyThisStart = once.sorted { $0.key < $1.key }.map { "[anyps5-launcher] this start only: \($0.key)=\($0.value)\n" }.joined()
+        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n" + pads + onlyThisStart
         if let handle = try? FileHandle(forWritingTo: file) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: Data(line.utf8))

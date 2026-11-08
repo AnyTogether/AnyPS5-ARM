@@ -38,7 +38,9 @@ extension AppModel {
         func followed(_ value: String) -> String { T.format(.followDefault, value) }
         func own(_ value: Bool?) -> Int { value.map { $0 ? 2 : 1 } ?? 0 }
         var rows = [
-            PanelRow(id: "display", title: T.text(.display), symbol: "macwindow",
+            // The engine opens it borderless full screen (SDL's desktop full screen): the line
+            // says what that is, as on Windows and Linux with the AnyPS5-ARM engine.
+            PanelRow(id: "display", title: T.text(.display), detail: T.text(.displayBorderless), symbol: "macwindow",
                      kind: .choice(options: [followed(T.text(defaults.fullscreen ? .fullscreen : .windowed)), T.text(.windowed), T.text(.fullscreen)],
                                    selected: own(settings.ownFullscreen)) { [weak self] index in
                          self?.update(game) { $0.ownFullscreen = index == 0 ? nil : index == 2 }

@@ -931,10 +931,31 @@ extension AppModel {
     }
 }
 
+/// "12 players online now" under Find players' heading: the online dot and the count, with who
+/// is left out (invisible accounts) as its help. A number only, never who.
+struct OnlineNowLine: View {
+    let text: String
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        let green = Color(red: 0.3, green: 0.85, blue: 0.45)
+        let hint = FP.text(.onlineNowHint)
+        HStack(spacing: 10 * scale) {
+            Circle().fill(green).frame(width: 9 * scale, height: 9 * scale).shadow(color: green.opacity(0.55), radius: 5 * scale)
+            Text(text).font(.display(15 * scale, .medium)).foregroundStyle(.white.opacity(0.62)).lineLimit(1)
+        }
+        .help(hint)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text + ". " + hint)
+    }
+}
+
 /// The settings screen: categories on the left, their rows on the right.
 struct SettingsPanel: View {
     var title = T.text(.settings)
     var subtitle: String?
+    /// Find players: how many are online now, with the online dot, under the subtitle.
+    var live: String?
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
@@ -949,10 +970,11 @@ struct SettingsPanel: View {
         HStack(alignment: .top, spacing: 0) {
             VStack(alignment: .leading, spacing: 6 * scale) {
                 Text(title).font(.display(40 * scale, .light)).foregroundStyle(.white).lineLimit(2).minimumScaleFactor(0.6)
-                    .padding(.bottom, subtitle == nil ? 26 * scale : 0)
+                    .padding(.bottom, subtitle == nil && live == nil ? 26 * scale : 0)
                 if let subtitle {
-                    Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)).padding(.bottom, 26 * scale)
+                    Text(subtitle).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.6)).padding(.bottom, live == nil ? 26 * scale : 0)
                 }
+                if let live { OnlineNowLine(text: live).padding(.top, 4 * scale).padding(.bottom, 26 * scale) }
                 if searchable {
                     SettingsSearchField().padding(.top, -12 * scale).padding(.bottom, 8 * scale)
                 }

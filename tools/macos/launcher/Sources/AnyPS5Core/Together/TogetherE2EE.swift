@@ -101,7 +101,43 @@ public enum TogetherE2EE {
             self.createdAt = createdAt
             self.removedAt = removedAt
         }
+
+        /// What it is, as device lists show it: never its name (older launchers registered the
+        /// computer's own) or its ID.
+        public var kind: DeviceKind { TogetherE2EE.deviceKind(of: name ?? "") }
+
+        /// When it was added, from `createdAt`.
+        public var added: Date? {
+            guard let createdAt else { return nil }
+            let fractional = ISO8601DateFormatter()
+            fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return fractional.date(from: createdAt) ?? ISO8601DateFormatter().date(from: createdAt)
+        }
     }
+
+    /// What kind of device a device key is on, read from the name its app registered (docs/e2ee.md
+    /// in AnyTogether). Lists show this, never the name, which often holds a person's name.
+    public enum DeviceKind: String, CaseIterable, Sendable {
+        case windows, mac, linux, iphone, ipad, android, browser, device
+    }
+
+    /// The same reading as deviceKindOf in AnyTogether's packages/e2ee, so the server's names for
+    /// other people's devices ("Windows PC", "iPhone") keep their kind.
+    public static func deviceKind(of name: String) -> DeviceKind {
+        let n = name.lowercased()
+        func has(_ pattern: String) -> Bool { n.range(of: pattern, options: .regularExpression) != nil }
+        if has(#"chrome|firefox|safari|\bedge\b|opera|browser"#) { return .browser }
+        if has(#"iphone|\bios\b"#) { return .iphone }
+        if has("ipad") { return .ipad }
+        if has("android|pixel|galaxy|samsung|oneplus|xiaomi|redmi|huawei") { return .android }
+        if has(#"\bmac\b|macbook|imac|mac ?mini|mac ?studio|mac ?pro|macos"#) { return .mac }
+        if has(#"linux|ubuntu|fedora|debian|\barch\b|steam ?deck|steamos"#) { return .linux }
+        if has(#"windows|\bpc\b|^desktop-|^laptop-"#) { return .windows }
+        return .device
+    }
+
+    /// What this Mac registers as: what it is, never the Mac's own name.
+    public static let macDeviceName = "AnyPS5 on Mac"
 
     /// The first 16 bytes of SHA-256(signKey), lowercase hex.
     public static func deviceId(of signKey: Data) -> String {
