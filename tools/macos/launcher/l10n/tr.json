@@ -2050,5 +2050,7 @@
   "reportReasonHate": "Nefret söylemi",
   "reportReasonSexual": "Cinsel içerik",
   "reportReasonOther": "Başka bir şey",
-  "messagesReported": "Teşekkürler. Bir moderatör bakacak."
+  "messagesReported": "Teşekkürler. Bir moderatör bakacak.",
+  "reportPlayGoInstalledMac": "Eksik parçaları kurulu sayarak yeniden oyna",
+  "reportPlayGoInstalledDetailMac": "Yalnızca bu açılış için. Dump'ta PlayGo parça tablosu yok ve oyunun eksik bölümleri yüklenemeyebilir."
 }

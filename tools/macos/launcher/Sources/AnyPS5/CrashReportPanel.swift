@@ -108,7 +108,17 @@ extension AppModel {
                 PanelRow(id: "back", title: TC.text(.reportBack), symbol: "chevron.left", kind: .action(destructive: false) { [weak self] in self?.leaveSharing() }),
             ]
         }
-        var rows = [
+        var rows: [PanelRow] = []
+        // The dump has no PlayGo chunk table: this start only with the chunks it does not list
+        // counted as installed, as on Windows and Linux.
+        if case .installed = state(of: game), current.report?.playGoChunksUnknown == true {
+            rows.append(PanelRow(id: "playGoInstalled", title: TC.text(.reportPlayGoInstalled), detail: TC.text(.reportPlayGoInstalledDetail), symbol: "shippingbox",
+                                 kind: .action(destructive: false) { [weak self] in
+                self?.closeOverlay()
+                self?.play(game, once: SessionReport.playGoInstalled)
+            }))
+        }
+        rows += [
             export,
             PanelRow(id: "issue", title: TC.text(.reportOpenIssue), detail: TC.text(.reportOpenIssueDetail), symbol: "exclamationmark.bubble",
                      kind: .action(destructive: false) { [weak self] in self?.enterSharing() }),
@@ -148,7 +158,8 @@ extension AppModel {
     private func leaveSharing() {
         Sounds.shared.play(.back)
         withAnimation(Motion.overlay) { sessionReport?.sharing = false }
-        panelRow = 1
+        // Back onto Open an Issue, wherever it is in the rows now.
+        panelRow = crashReportRows().firstIndex { $0.id == "issue" } ?? 1
     }
 
     private func openIssue(engine: Bool) {

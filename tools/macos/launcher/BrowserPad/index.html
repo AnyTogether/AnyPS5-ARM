@@ -475,7 +475,6 @@ body.typing #turn { display: none !important; }
   const lastStickTap = [0, 0];
   function down(event) {
     event.preventDefault();
-    tryFullscreenOnce();
     const name = claim(event.clientX, event.clientY);
     if (name === "menu") return showMenu();
     if (!name) return;
@@ -555,6 +554,7 @@ body.typing #turn { display: none !important; }
   stage.addEventListener("pointerdown", down, { passive: false });
   stage.addEventListener("pointermove", move, { passive: false });
   stage.addEventListener("pointerup", up);
+  stage.addEventListener("pointerup", fullscreenOnTouch);
   stage.addEventListener("pointercancel", up);
   for (const type of ["touchstart", "touchmove", "touchend", "gesturestart", "gesturechange", "dblclick", "contextmenu"]) {
     document.addEventListener(type, (event) => { if (event.target.closest && !event.target.closest("#card")) event.preventDefault(); }, { passive: false });
@@ -886,22 +886,35 @@ body.typing #turn { display: none !important; }
     document.getElementById("leave").addEventListener("click", disconnect);
     if (fromKeyboard) document.getElementById("done").focus();
     const full = document.getElementById("full");
-    if (full) full.addEventListener("click", () => { goFullscreen(); hideCard(); });
+    if (full) full.addEventListener("click", () => { goFullscreen().catch(() => {}); hideCard(); });
   }
 
-  // Full screen and landscape where the browser allows it (Android); iPhones need the Home Screen.
-  let triedFullscreen = false;
+  // Full screen and landscape where the browser allows it (Android, iPad); iPhones need the Home Screen.
   function goFullscreen() {
     const root = document.documentElement;
-    if (!root.requestFullscreen || document.fullscreenElement) return;
-    root.requestFullscreen({ navigationUI: "hide" }).then(() => {
+    if (!root.requestFullscreen || document.fullscreenElement) return Promise.resolve();
+    return root.requestFullscreen({ navigationUI: "hide" }).then(() => {
       if (screen.orientation && screen.orientation.lock) screen.orientation.lock("landscape").catch(() => {});
-    }).catch(() => {});
+    });
   }
-  function tryFullscreenOnce() {
-    if (triedFullscreen || !welcomed || !/Android/i.test(navigator.userAgent)) return;
-    triedFullscreen = true;
-    goFullscreen();
+  // Turned to landscape, the pad goes full screen with the next touch on it. A browser takes full
+  // screen only from a finished touch (pointerup), never from pointerdown. Left with the browser's
+  // back gesture, it comes again once the phone is turned again.
+  let fullscreenWanted = true;
+  const touchScreen = window.matchMedia && matchMedia("(pointer: coarse)").matches;
+  const landscapeQuery = window.matchMedia ? matchMedia("(orientation: landscape)") : null;
+  function fullscreenOnTouch(event) {
+    if (!fullscreenWanted || !touchScreen || !welcomed || cardKind || event.pointerType === "mouse") return;
+    if (!document.documentElement.requestFullscreen || document.fullscreenElement) return;
+    if (landscapeQuery && !landscapeQuery.matches) return;
+    fullscreenWanted = false;
+    // Refused (no touch the browser counts): the next touch tries again.
+    goFullscreen().catch(() => { fullscreenWanted = true; });
+  }
+  if (landscapeQuery) {
+    const turned = () => { if (landscapeQuery.matches) fullscreenWanted = true; };
+    if (landscapeQuery.addEventListener) landscapeQuery.addEventListener("change", turned);
+    else if (landscapeQuery.addListener) landscapeQuery.addListener(turned);
   }
 
   window.addEventListener("resize", () => { layout(); dirty = true; });

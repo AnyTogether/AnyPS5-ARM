@@ -2050,5 +2050,7 @@
   "reportReasonHate": "Hate speech",
   "reportReasonSexual": "Sexual content",
   "reportReasonOther": "Something else",
-  "messagesReported": "Thanks. A moderator will look at it."
+  "messagesReported": "Thanks. A moderator will look at it.",
+  "reportPlayGoInstalledMac": "Play Again with Missing Chunks Counted as Installed",
+  "reportPlayGoInstalledDetailMac": "For this start only. The dump has no PlayGo chunk table, and parts of the game it lacks may fail to load."
 }
