@@ -445,7 +445,7 @@ struct GameTile: View {
             .background(Color.black.opacity(0.3))
         case .queued:
             ZStack { Color.black.opacity(0.42); Image(systemName: "clock").font(.system(size: size * 0.18)).foregroundStyle(.white.opacity(0.85)) }
-        case .starting:
+        case .starting, .stopping:
             ZStack { Color.black.opacity(0.42); ProgressView().controlSize(.small).tint(.white) }
         case .running:
             ZStack(alignment: .topTrailing) {
@@ -479,6 +479,7 @@ struct StateLabel: View {
             case .installed(let outdated): return (outdated ? "arrow.triangle.2.circlepath" : "checkmark.circle.fill", outdated ? T.text(.updateAvailable) : T.text(.ready), outdated ? Color(red: 1, green: 0.82, blue: 0.4) : .white.opacity(0.75))
             case .starting: return ("hourglass", T.text(.starting), model.accent)
             case .running: return ("play.circle.fill", T.text(.running), model.accent)
+            case .stopping: return ("stop.circle", TH.text(.gameStoppingState), Color(red: 1, green: 0.6, blue: 0.55))
             }
         }()
         Label(text, systemImage: symbol)
@@ -600,6 +601,7 @@ struct HeroInfo: View {
         case .installing, .queued: return T.text(.cancel)
         case .starting: return T.text(.starting)
         case .running: return T.text(.running)
+        case .stopping: return TH.text(.gameStopping)
         }
     }
 
@@ -611,6 +613,7 @@ struct HeroInfo: View {
         case .installing, .queued: return "xmark"
         case .starting: return "hourglass"
         case .running: return "play.circle"
+        case .stopping: return "stop.circle"
         }
     }
 }
@@ -973,7 +976,9 @@ extension AppModel {
             switch command {
             case .up: moveTrophy(-1)
             case .down: moveTrophy(1)
-            case .select: if togetherUser != nil { openLeaderboard(selectedGame) }
+            case .select:
+                // The moment the focused trophy was earned first; without one, the leaderboard.
+                if let shot = focusedTrophyShot { openGallery(shot: shot) } else if togetherUser != nil { openLeaderboard(selectedGame) }
             // △ shows (or hides again) the focused hidden trophy; on any other it closes the list.
             case .options: if !toggleFocusedHiddenTrophy() { closeOverlay() }
             case .back: closeOverlay()
@@ -1060,7 +1065,7 @@ extension AppModel {
                 Sounds.shared.play(.back)
                 withAnimation(Motion.overlay) { galleryViewing = false }
             } else {
-                closeOverlay()
+                leaveGallery()
             }
         case .options:
             // Share (a chat, the user's gallery, Finder) where AnyTogether keeps files; else Finder.

@@ -102,11 +102,13 @@ extension AppModel {
         running.app.activate()
     }
 
+    /// Close Game from the quick menu or its question, as on Windows and Linux: the game is
+    /// asked to close so it can save, and ended if it does not (GameStop.swift).
     func closeRunningGame() {
         pausedGame = false
         withAnimation(Motion.overlay) { overlay = nil }
         Sounds.shared.play(.select)
-        running?.app.forceTerminate()
+        stopRunningGame()
     }
 
     /// Quit AnyPS5 from the home menu: a game playing closes first.
@@ -119,6 +121,61 @@ extension AppModel {
         }
     }
 
+    /// One row of the quick menu.
+    struct QuickMenuRow {
+        let id: Int
+        let title: String
+        var detail: String?
+        let symbol: String
+        var destructive = false
+        /// What choosing it does; nil for a row that only says something (a broadcast's state).
+        var run: (() -> Void)?
+    }
+
+    /// The quick menu, as on Windows and Linux: Resume, Game Settings, the battery and heat
+    /// profile's Undo while there is one, Broadcast and Share play for the game playing, Close.
+    func quickMenuRows() -> [QuickMenuRow] {
+        var rows: [QuickMenuRow] = []
+        func add(_ title: String, detail: String? = nil, symbol: String, destructive: Bool = false, run: (() -> Void)?) {
+            rows.append(QuickMenuRow(id: rows.count, title: title, detail: detail, symbol: symbol, destructive: destructive, run: run))
+        }
+        add(TH.text(.resume), symbol: "play.fill", run: { [weak self] in self?.resumeGame() })
+        add(T.text(.gameSettings), symbol: "slider.horizontal.3", run: { [weak self] in self?.open(.gameSettings) })
+        if let undo = quickMenuUndo {
+            add(undo.title, detail: undo.detail, symbol: "arrow.uturn.backward", run: { [weak self] in
+                self?.undoPowerAdjustment()
+                withAnimation(Motion.focus) { self?.menuIndex = 0 }
+            })
+        }
+        if let game = running?.game {
+            // Broadcasting's own rows (Go live, or its state, its link and Stop).
+            for row in broadcastGameRows(game) where row.id != "broadcast-live-mic" {
+                let symbol = row.symbol ?? "dot.radiowaves.left.and.right"
+                switch row.kind {
+                case .action(let destructive, let run): add(row.title, detail: row.detail, symbol: symbol, destructive: destructive, run: run)
+                case .info: add(row.title, detail: row.detail, symbol: symbol, run: nil)
+                default: break
+                }
+            }
+            if togetherUser != nil, familyAllows(.sharePlay) {
+                if let hosting = share.hosting {
+                    // The viewers, requests and Stop are the Friends panel's.
+                    add(SP.format(.sharing, hosting.title ?? gameName(hosting.titleId)), detail: SP.format(.watching, hosting.viewers.count, hosting.maxViewers),
+                        symbol: "shareplay", run: { [weak self] in self?.open(.friends) })
+                } else {
+                    add(share.starting ? SP.text(.starting) : SP.format(.start, game.name), detail: SP.text(.startDetail), symbol: "shareplay",
+                        run: { [weak self] in self?.startSharePlay() })
+                }
+            }
+        }
+        add(TH.text(.closeGame), symbol: "xmark.circle", destructive: true, run: { [weak self] in
+            Sounds.shared.play(.select)
+            self?.menuIndex = 0
+            withAnimation(Motion.overlay) { self?.overlay = .closeGame }
+        })
+        return rows
+    }
+
     /// The quick menu, "Close game?" and the home menu, from the keys and the pad.
     func gameMenuCommand(_ command: Command) -> Bool {
         func move(_ delta: Int, count: Int) {
@@ -129,24 +186,14 @@ extension AppModel {
         }
         switch overlay {
         case .quickMenu:
-            // Resume, Game Settings, the battery and heat profiles' Undo while there is one, Close.
-            let undo = quickMenuUndo != nil
+            let rows = quickMenuRows()
             switch command {
-            case .up, .left: move(-1, count: undo ? 4 : 3)
-            case .down, .right: move(1, count: undo ? 4 : 3)
+            case .up, .left: move(-1, count: rows.count)
+            case .down, .right: move(1, count: rows.count)
             case .back: resumeGame()
             case .select:
-                switch menuIndex {
-                case 0: resumeGame()
-                case 1: open(.gameSettings)
-                case 2 where undo:
-                    undoPowerAdjustment()
-                    withAnimation(Motion.focus) { menuIndex = 0 }
-                default:
-                    Sounds.shared.play(.select)
-                    menuIndex = 0
-                    withAnimation(Motion.overlay) { overlay = .closeGame }
-                }
+                guard rows.indices.contains(menuIndex) else { return true }
+                rows[menuIndex].run?()
             default: break
             }
         case .closeGame:
@@ -277,6 +324,23 @@ extension AppModel {
             } catch {
                 TrophyBanner.shared.notice(TH.text(.screenshotFailed), detail: "\(error)", symbol: "exclamationmark.triangle.fill", sounds: self.preferences.sounds)
             }
+        }
+    }
+
+    /// A trophy earned while the game is in front: a picture of the game at that moment into the
+    /// gallery, as on Windows and Linux; it opens from the trophy (Enter, or a click on it). Without
+    /// Screen Recording permission or a window on screen there is simply no picture, and no
+    /// system prompt asking for one in the middle of a game.
+    func takeTrophyShot(of game: Game, trophy: TrophySet.Trophy) {
+        guard running?.game.id == game.id, let pid = running?.app.processIdentifier, familyAllows(.mediaSharing), CGPreflightScreenCaptureAccess() else { return }
+        let folder = screenshotsFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let file = Screenshots.trophyFile(in: folder, titleID: game.titleID, trophyID: trophy.id, stamp: Self.captureStamp())
+        Task { @MainActor in
+            do { try await Self.screenshot(pid: pid, to: file) } catch { return }
+            guard self.selectedGame?.id == game.id else { return }
+            self.trophyShots[trophy.id] = file
+            if self.overlay == .gallery { self.reloadGalleryShots() }
         }
     }
 
@@ -677,13 +741,7 @@ struct GameMenuCard: View {
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         default:
-            var items = [Item(id: 0, title: TH.text(.resume), symbol: "play.fill"),
-                         Item(id: 1, title: T.text(.gameSettings), symbol: "slider.horizontal.3")]
-            if let undo = model.quickMenuUndo {
-                items.append(Item(id: 2, title: undo.title, detail: undo.detail, symbol: "arrow.uturn.backward"))
-            }
-            items.append(Item(id: items.count, title: TH.text(.closeGame), symbol: "xmark.circle", destructive: true))
-            return items
+            return model.quickMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil) }
         }
     }
 

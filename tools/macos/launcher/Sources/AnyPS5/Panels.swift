@@ -495,6 +495,13 @@ extension AppModel {
         rows.append(PanelRow(id: "addUpdate", title: TFiles.text(.addUpdate), detail: TFiles.text(.addUpdateDetail), symbol: "plus.square.on.square",
                              kind: .action(destructive: false) { [weak self] in self?.addUpdate(game) }))
         let state = state(of: game)
+        if case .running = state {
+            rows.insert(PanelRow(id: "stopGame", title: TH.text(.stopGame), detail: TH.text(.stopGameDetail), symbol: "stop.circle",
+                                 kind: .action(destructive: true) { [weak self] in
+                self?.closeOverlay()
+                self?.stopRunningGame()
+            }), at: 0)
+        }
         if case .installed = state {
             rows.append(PanelRow(id: "reinstall", title: T.text(.reinstall), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in
                 self?.closeOverlay()

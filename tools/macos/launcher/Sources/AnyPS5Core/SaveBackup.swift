@@ -103,12 +103,47 @@ public enum SaveBackup {
 /// The F12 screenshots the engine writes, named <title ID>-<yyyyMMdd-HHmmss>[-n].png, and the
 /// launcher's clips beside them, named the same way but .mp4.
 public enum Screenshots {
-    /// The game's screenshots and clips, newest first.
+    /// The game's screenshots and clips, newest first. The time in a name goes first, whichever
+    /// words come before it (a trophy's picture has "trophy…" there), then the name.
     public static func list(titleID: String, in folder: URL) -> [URL] {
         let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
         return files
             .filter { ["png", "mp4"].contains($0.pathExtension.lowercased()) && $0.lastPathComponent.hasPrefix(titleID + "-") }
-            .sorted { $0.deletingPathExtension().lastPathComponent > $1.deletingPathExtension().lastPathComponent }
+            .sorted {
+                let first = (stamp(of: $0), $0.deletingPathExtension().lastPathComponent)
+                let second = (stamp(of: $1), $1.deletingPathExtension().lastPathComponent)
+                return first > second
+            }
+    }
+
+    /// The date and time a capture's name ends in, "" for a name that has none.
+    private static func stamp(of file: URL) -> String {
+        let name = file.deletingPathExtension().lastPathComponent
+        guard let range = name.range(of: #"\d{8}-\d{6}(-\d+)?$"#, options: .regularExpression) else { return "" }
+        return String(name[range])
+    }
+
+    /// Where the picture taken when a trophy was earned goes: beside the game's other captures, as
+    /// on Windows and Linux. A trophy id is <service label>/<number>: its slash becomes an
+    /// underscore.
+    public static func trophyFile(in folder: URL, titleID: String, trophyID: String, stamp: String) -> URL {
+        let id = String(trophyID.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "_" })
+        return folder.appendingPathComponent("\(titleID)-trophy\(id)-\(stamp).png")
+    }
+
+    /// Each picture taken when a trophy was earned, by trophy id: the newest one.
+    public static func trophyShots(_ shots: [URL]) -> [String: URL] {
+        var byTrophy: [String: URL] = [:]
+        for shot in shots {
+            let name = shot.lastPathComponent
+            guard let range = name.range(of: #"-trophy[A-Za-z0-9_]+-\d{8}-\d{6}"#, options: .regularExpression) else { continue }
+            // "-trophy<id>-<date>-<time>": the id is what lies between.
+            let pieces = name[range].dropFirst("-trophy".count).split(separator: "-")
+            guard let id = pieces.first else { continue }
+            let trophy = id.replacingOccurrences(of: "_", with: "/")
+            if byTrophy[trophy] == nil { byTrophy[trophy] = shot }
+        }
+        return byTrophy
     }
 
     public static func isClip(_ file: URL) -> Bool {
