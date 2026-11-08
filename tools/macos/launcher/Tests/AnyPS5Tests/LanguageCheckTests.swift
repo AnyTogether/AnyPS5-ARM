@@ -130,7 +130,7 @@ final class LanguageCheckTests: XCTestCase {
     }
 
     /// VK's twelve languages, carried over from AnyLauncher Port where both launchers' English
-    /// reads the same (scripts/import-port-translations.py): listed by their own names, partial,
+    /// reads the same (scripts/import-port-translations.py): listed by their own names, complete,
     /// and English wherever they have no text.
     func testThePortsLanguagesAreListedAndFallBackToEnglish() throws {
         let saved = T.language
@@ -147,18 +147,19 @@ final class LanguageCheckTests: XCTestCase {
             XCTAssertEqual(language.displayName, name)
             let texts = try file(code).texts
             XCTAssertGreaterThan(texts.count, 500, "\(code).json carries the shared texts")
-            XCTAssertLessThan(texts.count, english.count, "\(code).json is partial")
+            XCTAssertLessThanOrEqual(texts.count, english.count, "\(code).json has no key English lacks")
             for (key, text) in texts {
                 XCTAssertEqual(LanguageFiles.placeholders(text), LanguageFiles.placeholders(english[key] ?? ""), "\(code).json: \(key)")
             }
-            // A key the language leaves out shows in English.
-            let missing = try XCTUnwrap(english.keys.sorted().first { texts[$0] == nil })
+            // A key the language leaves out shows in English (none is left out while the file is complete).
             T.language = language
-            XCTAssertEqual(T.string(missing), english[missing])
+            if let missing = english.keys.sorted().first(where: { texts[$0] == nil }) {
+                XCTAssertEqual(T.string(missing), english[missing])
+            }
         }
         T.language = try XCTUnwrap(Language(rawValue: "de"))
         XCTAssertEqual(T.text(.back), "Zurück")
-        XCTAssertEqual(T.string("welcomeSubtitle"), english["welcomeSubtitle"], "the Mac's own words, which the Port says of a PC, stay English")
+        XCTAssertEqual(T.string("welcomeSubtitle"), try file("de").texts["welcomeSubtitle"], "the Mac's own words, which the Port says of a PC, are translated here")
     }
 
     /// The first start picks the Mac's language, as AnyPS5-Desktop's launcher does: Chinese by
