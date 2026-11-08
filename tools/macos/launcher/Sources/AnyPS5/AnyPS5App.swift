@@ -267,7 +267,7 @@ struct RootView: View {
         case .cloudStorage:
             CloudStorageView().transition(.move(edge: .trailing).combined(with: .opacity))
         case .findPlayers:
-            SettingsPanel(title: FP.text(.findPlayers), subtitle: model.togetherUser.map { "@\($0.handle)" }).transition(.opacity)
+            SettingsPanel(title: FP.text(.findPlayers), subtitle: model.togetherUser.map { "@\($0.handle)" }, live: model.onlineNowText).transition(.opacity)
         case .gameHub:
             SettingsPanel(title: model.discover.hubName, subtitle: FP.text(.hubDetail)).transition(.opacity)
         case .lfgPost:

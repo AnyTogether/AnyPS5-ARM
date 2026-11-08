@@ -304,6 +304,13 @@ final class TogetherDiscoverTests: TogetherSignedInCase {
         XCTAssertEqual(hub.recentPlayers.first?.user.handle, "ada")
     }
 
+    func testHowManyAreOnlineNow() async throws {
+        FakeTogether.handler = { _, _ in (200, ["online": 42]) }
+        let online = try await client.onlineNow()
+        XCTAssertEqual(last(), "GET /api/v1/stats/online")
+        XCTAssertEqual(online, 42)
+    }
+
     // MARK: Topics
 
     func testTopics() throws {

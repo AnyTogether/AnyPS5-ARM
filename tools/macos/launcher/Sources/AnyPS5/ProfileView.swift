@@ -158,6 +158,10 @@ extension AppModel {
             } else {
                 closeProfile()
             }
+        case .select where profileColumn == 2:
+            // A recent activity item: its game's hub, as the game's name links on the website.
+            guard let items = social.profileActivity, items.indices.contains(profileIndex) else { return }
+            openActivityGame(items[profileIndex])
         case .select:
             // A game of someone else's: that game's trophies side by side.
             guard let profile = profilePage?.profile, !profile.isMe, profileColumn == 0, profileGames.indices.contains(profileIndex) else { return }

@@ -19,6 +19,8 @@ struct DiscoverState {
     /// Friend requests sent from here, so the row says so at once.
     var askedFriends: Set<String> = []
     var discovery: TogetherDiscovery?
+    /// How many are online now, by the heading (invisible accounts are not in it).
+    var online: Int?
     /// The hub open: its game, what came back, and whether reading it failed.
     var hubTitle: String?
     var hubName = ""
@@ -118,6 +120,7 @@ extension AppModel {
             async let shares = client.publicSharePlays()
             async let parties = client.publicParties()
             async let suggestions = client.suggestions()
+            async let online = client.onlineNow()
             do {
                 let page = try await board
                 guard discover.filter == filter else { return }
@@ -135,7 +138,15 @@ extension AppModel {
             if let shares = try? await shares { withAnimation(Motion.overlay) { discover.shares = shares.sorted { $0.live && !$1.live } } }
             if let parties = try? await parties { withAnimation(Motion.overlay) { discover.parties = parties } }
             if let suggestions = try? await suggestions { withAnimation(Motion.overlay) { discover.suggestions = suggestions } }
+            if let online = try? await online, online >= 0 { withAnimation(Motion.overlay) { discover.online = online } }
         }
+    }
+
+    /// "12 players online now" under Find players' heading, as on Windows, Linux and the website;
+    /// nothing while there is no count or nobody is counted.
+    var onlineNowText: String? {
+        guard let count = discover.online, count > 0 else { return nil }
+        return FP.format(count == 1 ? .onlineNowOne : .onlineNowMany, LevelCard.number(count))
     }
 
     func loadMoreBoard() {

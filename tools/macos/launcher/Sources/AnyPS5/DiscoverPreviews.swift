@@ -44,6 +44,7 @@ enum DiscoverPreviews {
             TogetherDiscoveredPerson(user: person("x3", "Theo"), friendship: "pending_out", reasons: [.friends(count: 1)]),
         ]
         state.discovery = TogetherDiscovery(discoverable: true, chosen: nil, languages: ["tr", "en"])
+        state.online = 1234
         state.hubTitle = title
         state.hubName = found.first?.name ?? "Stray"
         state.hub = TogetherGameHub(game: .init(titleId: title, names: [:]), players: 128,
