@@ -2945,6 +2945,12 @@ final class AppModel: ObservableObject {
         galleryViewing = false
     }
 
+    /// The selected game's pictures read again (a new one taken), keeping the focus.
+    func reloadGalleryShots() {
+        galleryShots = selectedGame.map(screenshots) ?? []
+        trophyShots = Screenshots.trophyShots(galleryShots)
+    }
+
     /// The picture of the trophy focused in the list, when the launcher caught that moment.
     var focusedTrophyShot: URL? {
         guard let game = selectedGame, let set = trophies[game.id], set.trophies.indices.contains(trophyIndex) else { return nil }

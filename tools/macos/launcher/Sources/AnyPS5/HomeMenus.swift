@@ -340,7 +340,7 @@ extension AppModel {
             do { try await Self.screenshot(pid: pid, to: file) } catch { return }
             guard self.selectedGame?.id == game.id else { return }
             self.trophyShots[trophy.id] = file
-            if self.overlay == .gallery { self.galleryShots = self.screenshots(of: game) }
+            if self.overlay == .gallery { self.reloadGalleryShots() }
         }
     }
 
