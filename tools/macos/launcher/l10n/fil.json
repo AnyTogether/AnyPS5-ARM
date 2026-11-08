@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Sekswal na nilalaman",
   "reportReasonOther": "Iba pa",
   "messagesReported": "Salamat. Titingnan ito ng isang moderator.",
+  "engineGitStepConfiguring": "Inihahanda ang build folder gamit ang CMake",
+  "engineGitSetUpDetailMac": "Wala pang build folder: ihahanda muna ito gamit ang CMake, tapos magpa-pull at magbi-build. Kailangan nito ang Xcode Command Line Tools, Git, CMake, at Ninja.",
+  "engineGitConfigureFailed": "Hindi naihanda ng CMake ang build folder",
+  "engineGitGuideMac": "Buksan ang gabay sa pag-build para sa Mac",
   "reportPlayGoInstalledMac": "Maglaro Ulit na Binibilang na Naka-install ang mga Nawawalang Chunk",
   "reportPlayGoInstalledDetailMac": "Para sa pagsisimulang ito lang. Walang PlayGo chunk table ang dump, at maaaring hindi ma-load ang mga bahagi ng laro na wala rito."
 }

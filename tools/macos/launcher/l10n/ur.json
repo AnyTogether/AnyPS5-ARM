@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "جنسی مواد",
   "reportReasonOther": "کچھ اور",
   "messagesReported": "شکریہ۔ ایک ماڈریٹر اسے دیکھے گا۔",
+  "engineGitStepConfiguring": "CMake کے ساتھ بلڈ فولڈر تیار کیا جا رہا ہے",
+  "engineGitSetUpDetailMac": "ابھی کوئی بلڈ فولڈر نہیں ہے: یہ پہلے CMake سے ایک تیار کرتا ہے، پھر پل اور بلڈ کرتا ہے۔ اس کے لیے Xcode Command Line Tools، Git، CMake اور Ninja درکار ہیں۔",
+  "engineGitConfigureFailed": "CMake بلڈ فولڈر تیار نہیں کر سکا",
+  "engineGitGuideMac": "Mac بلڈ گائیڈ کھولیں",
   "reportPlayGoInstalledMac": "گم شدہ حصوں کو انسٹال شدہ مان کر دوبارہ کھیلیں",
   "reportPlayGoInstalledDetailMac": "صرف اس بار کے لیے۔ ڈمپ میں PlayGo چنک ٹیبل نہیں ہے، اور گیم کے جو حصے اس میں نہیں ہیں وہ لوڈ نہ ہو سکیں۔"
 }

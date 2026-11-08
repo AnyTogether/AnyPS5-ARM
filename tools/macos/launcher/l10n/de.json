@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Sexuelle Inhalte",
   "reportReasonOther": "Etwas anderes",
   "messagesReported": "Danke. Ein Moderator sieht es sich an.",
+  "engineGitStepConfiguring": "Build-Ordner wird mit CMake eingerichtet",
+  "engineGitSetUpDetailMac": "Noch kein Build-Ordner: Dieser wird zuerst mit CMake eingerichtet, danach wird geladen und gebaut. Dafür werden die Xcode Command Line Tools, Git, CMake und Ninja benötigt.",
+  "engineGitConfigureFailed": "CMake konnte den Build-Ordner nicht einrichten",
+  "engineGitGuideMac": "Mac-Build-Anleitung öffnen",
   "reportPlayGoInstalledMac": "Erneut spielen, fehlende Chunks als installiert zählen",
   "reportPlayGoInstalledDetailMac": "Nur für diesen Start. Dem Dump fehlt die PlayGo-Chunk-Tabelle, und fehlende Teile des Spiels können beim Laden Fehler verursachen."
 }

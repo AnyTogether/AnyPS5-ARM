@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Conteúdo sexual",
   "reportReasonOther": "Outra coisa",
   "messagesReported": "Obrigado. Um moderador vai analisar.",
+  "engineGitStepConfiguring": "Configurando a pasta de compilação com o CMake",
+  "engineGitSetUpDetailMac": "Ainda não há pasta de compilação: isto a configura primeiro com o CMake e depois baixa e compila. São necessários o Xcode Command Line Tools, o Git, o CMake e o Ninja.",
+  "engineGitConfigureFailed": "O CMake não conseguiu configurar a pasta de compilação",
+  "engineGitGuideMac": "Abrir o guia de compilação para Mac",
   "reportPlayGoInstalledMac": "Jogar de novo contando partes ausentes como instaladas",
   "reportPlayGoInstalledDetailMac": "Somente para esta inicialização. O dump não tem tabela de partes do PlayGo, e partes do jogo que faltam podem não carregar."
 }

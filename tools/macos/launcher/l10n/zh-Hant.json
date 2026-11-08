@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "色情內容",
   "reportReasonOther": "其他",
   "messagesReported": "謝謝，版主會查看。",
+  "engineGitStepConfiguring": "正在用 CMake 設定建置資料夾",
+  "engineGitSetUpDetailMac": "還沒有建置資料夾：會先用 CMake 建立一個，然後拉取並建置。需要 Xcode 命令列工具、Git、CMake 和 Ninja。",
+  "engineGitConfigureFailed": "CMake 無法設定建置資料夾",
+  "engineGitGuideMac": "開啟 Mac 建置指南",
   "reportPlayGoInstalledMac": "將缺少的區塊視為已安裝並再次遊玩",
   "reportPlayGoInstalledDetailMac": "僅限這次啟動。此轉儲沒有 PlayGo 區塊表，缺少的遊戲部分可能無法載入。"
 }

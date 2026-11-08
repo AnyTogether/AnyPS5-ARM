@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Conținut sexual",
   "reportReasonOther": "Altceva",
   "messagesReported": "Mulțumim. Un moderator se va uita.",
+  "engineGitStepConfiguring": "Se configurează folderul de build cu CMake",
+  "engineGitSetUpDetailMac": "Nu există încă un folder de build: mai întâi se creează unul cu CMake, apoi se descarcă și se compilează. Are nevoie de Xcode Command Line Tools, Git, CMake și Ninja.",
+  "engineGitConfigureFailed": "CMake nu a putut configura folderul de build",
+  "engineGitGuideMac": "Deschide ghidul de build pentru Mac",
   "reportPlayGoInstalledMac": "Joacă din nou cu fragmentele lipsă considerate instalate",
   "reportPlayGoInstalledDetailMac": "Doar pentru această pornire. Dump-ul nu are tabel de fragmente PlayGo, iar părțile jocului care lipsesc pot să nu se încarce."
 }

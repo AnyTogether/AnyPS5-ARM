@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "যৌন বিষয়বস্তু",
   "reportReasonOther": "অন্য কিছু",
   "messagesReported": "ধন্যবাদ। একজন মডারেটর এটি দেখবেন।",
+  "engineGitStepConfiguring": "CMake দিয়ে বিল্ড ফোল্ডার সেট আপ করা হচ্ছে",
+  "engineGitSetUpDetailMac": "এখনো কোনো বিল্ড ফোল্ডার নেই: এটি প্রথমে CMake দিয়ে একটি সেট আপ করে, তারপর পুল ও বিল্ড করে। এর জন্য Xcode Command Line Tools, Git, CMake এবং Ninja লাগবে।",
+  "engineGitConfigureFailed": "CMake বিল্ড ফোল্ডার সেট আপ করতে পারেনি",
+  "engineGitGuideMac": "Mac বিল্ড গাইড খুলুন",
   "reportPlayGoInstalledMac": "অনুপস্থিত চাঙ্ককে ইনস্টল করা ধরে আবার খেলুন",
   "reportPlayGoInstalledDetailMac": "শুধু এই বারের জন্য। ডাম্পে PlayGo চাঙ্ক টেবিল নেই, আর এতে না থাকা গেমের অংশগুলো লোড নাও হতে পারে।"
 }

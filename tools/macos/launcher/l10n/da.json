@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Seksuelt indhold",
   "reportReasonOther": "Noget andet",
   "messagesReported": "Tak. En moderator kigger på det.",
+  "engineGitStepConfiguring": "Opsætter build-mappen med CMake",
+  "engineGitSetUpDetailMac": "Der er ingen build-mappe endnu: først opsættes en med CMake, derefter hentes og bygges der. Kræver Xcode Command Line Tools, Git, CMake og Ninja.",
+  "engineGitConfigureFailed": "CMake kunne ikke opsætte build-mappen",
+  "engineGitGuideMac": "Åbn guiden til Mac-build",
   "reportPlayGoInstalledMac": "Spil igen med manglende bidder talt som installeret",
   "reportPlayGoInstalledDetailMac": "Kun for denne start. Dumpet har ingen PlayGo-chunktabel, og dele af spillet, der mangler, kan fejle ved indlæsning."
 }

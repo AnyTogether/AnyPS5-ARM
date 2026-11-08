@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Kandungan seksual",
   "reportReasonOther": "Lain-lain",
   "messagesReported": "Terima kasih. Seorang moderator akan menelitinya.",
+  "engineGitStepConfiguring": "Menyediakan folder binaan dengan CMake",
+  "engineGitSetUpDetailMac": "Belum ada folder binaan: ini menyediakannya dengan CMake dahulu, kemudian menarik dan membina. Memerlukan Xcode Command Line Tools, Git, CMake dan Ninja.",
+  "engineGitConfigureFailed": "CMake tidak dapat menyediakan folder binaan",
+  "engineGitGuideMac": "Buka panduan binaan Mac",
   "reportPlayGoInstalledMac": "Main semula dengan bahagian yang hilang dikira sebagai dipasang",
   "reportPlayGoInstalledDetailMac": "Untuk permulaan ini sahaja. Dump tiada jadual bahagian PlayGo, dan bahagian permainan yang tiada mungkin gagal dimuatkan."
 }

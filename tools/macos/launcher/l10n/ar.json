@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "محتوى جنسي",
   "reportReasonOther": "شيء آخر",
   "messagesReported": "شكرًا. سيراجعها مشرف.",
+  "engineGitStepConfiguring": "جارٍ إعداد مجلد البناء باستخدام CMake",
+  "engineGitSetUpDetailMac": "لا يوجد مجلد بناء بعد: سيتم إعداده أولًا باستخدام CMake، ثم يتم السحب والبناء. يتطلب Xcode Command Line Tools وGit وCMake وNinja.",
+  "engineGitConfigureFailed": "تعذر على CMake إعداد مجلد البناء",
+  "engineGitGuideMac": "افتح دليل البناء لنظام Mac",
   "reportPlayGoInstalledMac": "اللعب مجددًا مع اعتبار الأجزاء المفقودة مثبّتة",
   "reportPlayGoInstalledDetailMac": "لهذا التشغيل فقط. نسخة اللعبة لا تحتوي على جدول أجزاء PlayGo، وقد يفشل تحميل الأجزاء الناقصة من اللعبة."
 }

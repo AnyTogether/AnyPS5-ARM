@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "ወሲባዊ ይዘት",
   "reportReasonOther": "ሌላ ነገር",
   "messagesReported": "እናመሰግናለን። አወያይ ይመለከተዋል።",
+  "engineGitStepConfiguring": "የግንባታ አቃፊውን በCMake በማዘጋጀት ላይ",
+  "engineGitSetUpDetailMac": "እስካሁን የግንባታ አቃፊ የለም። ይህ መጀመሪያ በCMake ያዘጋጀዋል፣ ከዚያ ያወርዳል እና ይገነባል። Xcode Command Line Tools፣ Git፣ CMake እና Ninja ያስፈልጉታል።",
+  "engineGitConfigureFailed": "CMake የግንባታ አቃፊውን ማዘጋጀት አልቻለም",
+  "engineGitGuideMac": "የMac የግንባታ መመሪያን ክፈት",
   "reportPlayGoInstalledMac": "የጎደሉ ቁርጥራጮችን እንደተጫኑ በመቁጠር እንደገና ተጫወት",
   "reportPlayGoInstalledDetailMac": "ለዚህ ጅምር ብቻ። ዱምፑ የPlayGo ቁርጥራጭ ሠንጠረዥ የለውም፣ የሌሉት የጨዋታው ክፍሎች ላይጫኑ ይችላሉ።"
 }

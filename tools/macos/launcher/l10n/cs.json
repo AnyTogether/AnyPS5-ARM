@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Sexuální obsah",
   "reportReasonOther": "Něco jiného",
   "messagesReported": "Děkujeme. Moderátor se na to podívá.",
+  "engineGitStepConfiguring": "Nastavuje se složka sestavení pomocí CMake",
+  "engineGitSetUpDetailMac": "Složka sestavení zatím neexistuje: nejprve se pomocí CMake vytvoří, poté se stáhnou zdrojové kódy a provede se sestavení. Vyžaduje Xcode Command Line Tools, Git, CMake a Ninja.",
+  "engineGitConfigureFailed": "CMake nedokázal nastavit složku sestavení",
+  "engineGitGuideMac": "Otevřít návod k sestavení pro Mac",
   "reportPlayGoInstalledMac": "Hrát znovu s chybějícími částmi považovanými za nainstalované",
   "reportPlayGoInstalledDetailMac": "Jen pro toto spuštění. Dump nemá tabulku částí PlayGo a části hry, které chybí, se nemusí načíst."
 }

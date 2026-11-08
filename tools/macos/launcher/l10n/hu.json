@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Szexuális tartalom",
   "reportReasonOther": "Valami más",
   "messagesReported": "Köszönjük. Egy moderátor megnézi.",
+  "engineGitStepConfiguring": "A build mappa beállítása CMake-kel",
+  "engineGitSetUpDetailMac": "Még nincs build mappa: ez először létrehozza CMake-kel, majd letölti és lefordítja a kódot. Szükséges hozzá az Xcode Command Line Tools, a Git, a CMake és a Ninja.",
+  "engineGitConfigureFailed": "A CMake nem tudta beállítani a build mappát",
+  "engineGitGuideMac": "A Mac build útmutató megnyitása",
   "reportPlayGoInstalledMac": "Újrajátszás a hiányzó darabok telepítettnek számításával",
   "reportPlayGoInstalledDetailMac": "Csak erre az indításra. A dumpból hiányzik a PlayGo-darabtábla, és a hiányzó játékrészek betöltése sikertelen lehet."
 }

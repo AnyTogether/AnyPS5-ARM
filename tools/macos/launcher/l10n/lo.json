@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "ເນື້ອຫາທາງເພດ",
   "reportReasonOther": "ອື່ນໆ",
   "messagesReported": "ຂອບໃຈ. ຜູ້ກວດກາຈະເບິ່ງມັນ.",
+  "engineGitStepConfiguring": "ກຳລັງຕັ້ງຄ່າໂຟນເດີສຳລັບບິວດ້ວຍ CMake",
+  "engineGitSetUpDetailMac": "ຍັງບໍ່ມີໂຟນເດີສຳລັບບິວ ການນີ້ຈະຕັ້ງຄ່າມັນດ້ວຍ CMake ກ່ອນ, ແລ້ວດຶງ ແລະ ບິວ. ຕ້ອງມີ Xcode Command Line Tools, Git, CMake ແລະ Ninja.",
+  "engineGitConfigureFailed": "CMake ຕັ້ງຄ່າໂຟນເດີສຳລັບບິວບໍ່ໄດ້",
+  "engineGitGuideMac": "ເປີດຄູ່ມືການບິວສຳລັບ Mac",
   "reportPlayGoInstalledMac": "ຫຼິ້ນອີກຄັ້ງໂດຍນັບ chunk ທີ່ຂາດວ່າຕິດຕັ້ງແລ້ວ",
   "reportPlayGoInstalledDetailMac": "ສຳລັບການເລີ່ມຄັ້ງນີ້ເທົ່ານັ້ນ. dump ບໍ່ມີຕາຕະລາງ PlayGo chunk, ແລະ ສ່ວນຂອງເກມທີ່ຂາດອາດໂຫຼດບໍ່ໄດ້."
 }

@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Konten seksual",
   "reportReasonOther": "Hal lain",
   "messagesReported": "Terima kasih. Moderator akan memeriksanya.",
+  "engineGitStepConfiguring": "Menyiapkan folder build dengan CMake",
+  "engineGitSetUpDetailMac": "Belum ada folder build: ini menyiapkannya dengan CMake dulu, lalu menarik dan membangun. Perlu Xcode Command Line Tools, Git, CMake, dan Ninja.",
+  "engineGitConfigureFailed": "CMake tidak dapat menyiapkan folder build",
+  "engineGitGuideMac": "Buka panduan build Mac",
   "reportPlayGoInstalledMac": "Mainkan lagi dengan chunk yang hilang dianggap terpasang",
   "reportPlayGoInstalledDetailMac": "Hanya untuk permulaan ini. Dump tidak memiliki tabel chunk PlayGo, dan bagian game yang tidak ada mungkin gagal dimuat."
 }

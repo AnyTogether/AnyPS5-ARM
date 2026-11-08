@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Contenido sexual",
   "reportReasonOther": "Otra cosa",
   "messagesReported": "Gracias. Un moderador lo revisará.",
+  "engineGitStepConfiguring": "Preparando la carpeta de compilación con CMake",
+  "engineGitSetUpDetailMac": "Aún no hay carpeta de compilación: primero se prepara con CMake y después se descarga y se compila. Necesita las Xcode Command Line Tools, Git, CMake y Ninja.",
+  "engineGitConfigureFailed": "CMake no pudo preparar la carpeta de compilación",
+  "engineGitGuideMac": "Abrir la guía de compilación para Mac",
   "reportPlayGoInstalledMac": "Jugar de nuevo contando los fragmentos que faltan como instalados",
   "reportPlayGoInstalledDetailMac": "Solo para este inicio. El volcado no tiene tabla de fragmentos PlayGo y las partes del juego que le faltan pueden no cargarse."
 }

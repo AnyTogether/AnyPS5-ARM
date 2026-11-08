@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "ខ្លឹមសារផ្លូវភេទ",
   "reportReasonOther": "ផ្សេងទៀត",
   "messagesReported": "សូមអរគុណ។ អ្នកសម្របសម្រួលនឹងពិនិត្យមើល។",
+  "engineGitStepConfiguring": "កំពុងរៀបចំថតសម្រាប់បង្កើតជាមួយ CMake",
+  "engineGitSetUpDetailMac": "មិនទាន់មានថតសម្រាប់បង្កើតនៅឡើយទេ ការនេះនឹងរៀបចំវាជាមួយ CMake ជាមុនសិន បន្ទាប់មកទាញយក និងបង្កើត។ វាត្រូវការ Xcode Command Line Tools, Git, CMake និង Ninja។",
+  "engineGitConfigureFailed": "CMake មិនអាចរៀបចំថតសម្រាប់បង្កើតបានទេ",
+  "engineGitGuideMac": "បើកសេចក្តីណែនាំអំពីការបង្កើតសម្រាប់ Mac",
   "reportPlayGoInstalledMac": "លេងម្តងទៀតដោយរាប់ផ្នែកដែលបាត់ថាបានដំឡើង",
   "reportPlayGoInstalledDetailMac": "សម្រាប់ការចាប់ផ្តើមលើកនេះប៉ុណ្ណោះ។ ដាំងគ្មានតារាងផ្នែក PlayGo ហើយផ្នែកនៃហ្គេមដែលបាត់អាចផ្ទុកមិនបាន។"
 }

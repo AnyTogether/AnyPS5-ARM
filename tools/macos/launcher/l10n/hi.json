@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "यौन सामग्री",
   "reportReasonOther": "कुछ और",
   "messagesReported": "धन्यवाद। एक मॉडरेटर इसे देखेगा।",
+  "engineGitStepConfiguring": "CMake से बिल्ड फ़ोल्डर तैयार किया जा रहा है",
+  "engineGitSetUpDetailMac": "अभी कोई बिल्ड फ़ोल्डर नहीं है: यह पहले CMake से एक तैयार करता है, फिर पुल और बिल्ड करता है। इसके लिए Xcode Command Line Tools, Git, CMake और Ninja चाहिए।",
+  "engineGitConfigureFailed": "CMake बिल्ड फ़ोल्डर तैयार नहीं कर सका",
+  "engineGitGuideMac": "Mac बिल्ड गाइड खोलें",
   "reportPlayGoInstalledMac": "छूटे हुए चंक्स को इंस्टॉल मानकर फिर खेलें",
   "reportPlayGoInstalledDetailMac": "केवल इस बार के लिए। डंप में PlayGo चंक तालिका नहीं है, और गेम के जो हिस्से उसमें नहीं हैं वे लोड न हो पाएँ।"
 }

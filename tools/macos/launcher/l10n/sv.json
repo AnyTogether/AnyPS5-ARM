@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Sexuellt innehåll",
   "reportReasonOther": "Något annat",
   "messagesReported": "Tack. En moderator tittar på det.",
+  "engineGitStepConfiguring": "Konfigurerar byggmappen med CMake",
+  "engineGitSetUpDetailMac": "Det finns ingen byggmapp än: först skapas en med CMake, sedan hämtas och byggs koden. Det kräver Xcode Command Line Tools, Git, CMake och Ninja.",
+  "engineGitConfigureFailed": "CMake kunde inte konfigurera byggmappen",
+  "engineGitGuideMac": "Öppna guiden för Mac-bygget",
   "reportPlayGoInstalledMac": "Spela igen med saknade delar räknade som installerade",
   "reportPlayGoInstalledDetailMac": "Bara för den här starten. Dumpen saknar PlayGo-delstabell, och delar av spelet som saknas kan misslyckas med att laddas."
 }

@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "Сексуальный контент",
   "reportReasonOther": "Другое",
   "messagesReported": "Спасибо. Модератор проверит.",
+  "engineGitStepConfiguring": "Настройка папки сборки с помощью CMake",
+  "engineGitSetUpDetailMac": "Папки сборки пока нет: сначала она настраивается с помощью CMake, затем выполняется загрузка и сборка. Требуются Xcode Command Line Tools, Git, CMake и Ninja.",
+  "engineGitConfigureFailed": "CMake не удалось настроить папку сборки",
+  "engineGitGuideMac": "Открыть руководство по сборке для Mac",
   "reportPlayGoInstalledMac": "Сыграть снова, считая недостающие части установленными",
   "reportPlayGoInstalledDetailMac": "Только для этого запуска. В дампе нет таблицы частей PlayGo, и недостающие части игры могут не загрузиться."
 }

@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "色情内容",
   "reportReasonOther": "其他",
   "messagesReported": "谢谢，审核员会查看。",
+  "engineGitStepConfiguring": "正在用 CMake 设置构建文件夹",
+  "engineGitSetUpDetailMac": "还没有构建文件夹：会先用 CMake 创建一个，然后拉取并构建。需要 Xcode 命令行工具、Git、CMake 和 Ninja。",
+  "engineGitConfigureFailed": "CMake 无法设置构建文件夹",
+  "engineGitGuideMac": "打开 Mac 构建指南",
   "reportPlayGoInstalledMac": "将缺失的分块视为已安装并重新游玩",
   "reportPlayGoInstalledDetailMac": "仅限本次启动。此转储文件没有 PlayGo 分块表，缺失的游戏部分可能无法加载。"
 }

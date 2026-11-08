@@ -2060,6 +2060,10 @@
   "reportReasonSexual": "性的なコンテンツ",
   "reportReasonOther": "その他",
   "messagesReported": "ありがとうございます。モデレーターが確認します。",
+  "engineGitStepConfiguring": "CMake でビルドフォルダーを設定中",
+  "engineGitSetUpDetailMac": "ビルドフォルダーがまだありません。まず CMake で設定し、その後に取得してビルドします。Xcode Command Line Tools、Git、CMake、Ninja が必要です。",
+  "engineGitConfigureFailed": "CMake がビルドフォルダーを設定できませんでした",
+  "engineGitGuideMac": "Mac のビルドガイドを開く",
   "reportPlayGoInstalledMac": "不足しているチャンクをインストール済みとして数えて再プレイ",
   "reportPlayGoInstalledDetailMac": "今回の起動のみ有効です。このダンプには PlayGo のチャンクテーブルがなく、不足している部分は読み込みに失敗する場合があります。"
 }
