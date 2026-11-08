@@ -11,6 +11,9 @@ folder: `en.json` is English, the source, and `tr.json` is Turkish.
 | Czech, Danish, Hungarian, Norwegian, Romanian, Swedish, Filipino, Malay | `cs`, `da`, `hu`, `no`, `ro`, `sv`, `fil`, `ms` | VK |
 | Simplified Chinese, Traditional Chinese, Korean, Khmer, Lao, Amharic | `zh-Hans`, `zh-Hant`, `ko`, `km`, `lo`, `am` | VK |
 
+The texts VK had not translated, in these 26 languages, were filled by machine translation from the English
+source (the same wording in both launchers); translators can correct any of them.
+
 VK translated these for the Windows/Linux launcher. Their files here hold every text whose
 English reads the same in both launchers' `en.json` (capitals aside), under the same key or
 another one (a final full stop aside), and the few keys the two word differently but mean the same
