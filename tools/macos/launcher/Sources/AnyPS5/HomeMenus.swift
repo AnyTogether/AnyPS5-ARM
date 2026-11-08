@@ -465,6 +465,7 @@ struct GameMenuCard: View {
     @Environment(\.scale) private var scale
     @Environment(\.previewRender) private var previewRender
     @ObservedObject private var inputMode = InputModeState.shared
+    @Environment(\.circleConfirms) private var circleConfirms
     @State private var shown = false
 
     private struct Item: Identifiable {
@@ -484,18 +485,35 @@ struct GameMenuCard: View {
                 .onTapGesture { _ = model.gameMenuCommand(.back) }
             VStack(alignment: .leading, spacing: 0) {
                 header(game)
-                    .padding(.bottom, 26 * scale)
-                VStack(spacing: 10 * scale) {
-                    ForEach(items(game)) { item in
-                        row(item)
+                    .padding(.bottom, twoChoice ? 22 * scale : 26 * scale)
+                if twoChoice {
+                    // A plain yes or no: the answers side by side, the way back on the left, the
+                    // one that cannot be undone on the right. Its line (a game closing with the
+                    // launcher) sits under the question rather than in the button.
+                    let answers = items(game)
+                    if let detail = answers.first(where: \.destructive)?.detail {
+                        Text(detail).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.66))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, -10 * scale).padding(.bottom, 20 * scale)
+                    }
+                    HStack(spacing: 12 * scale) {
+                        ForEach(answers) { item in
+                            answer(item)
+                        }
+                    }
+                } else {
+                    VStack(spacing: 10 * scale) {
+                        ForEach(items(game)) { item in
+                            row(item)
+                        }
                     }
                 }
                 hints
-                    .padding(.top, 28 * scale)
+                    .padding(.top, twoChoice ? 22 * scale : 28 * scale)
             }
-            .padding(.horizontal, 40 * scale)
-            .padding(.vertical, 36 * scale)
-            .frame(width: (model.overlay == .closeGame ? 560 : 520) * scale)
+            .padding(.horizontal, twoChoice ? 32 * scale : 40 * scale)
+            .padding(.vertical, twoChoice ? 30 * scale : 36 * scale)
+            .frame(width: (twoChoice ? 480 : model.overlay == .closeGame ? 560 : 520) * scale)
             .glass(30 * scale, opacity: 0.5)
             .overlay(alignment: .top) {
                 // The accent edge the console's cards wear: which game the menu is about.
@@ -651,7 +669,7 @@ struct GameMenuCard: View {
             return [Item(id: 0, title: TH.text(.switchProfile), detail: TPro.others(others), symbol: "person.2.circle"),
                     Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
         case .confirmQuit:
-            return [Item(id: 0, title: T.text(.cancel), detail: TH.text(.quitStay), symbol: "arrow.uturn.backward"),
+            return [Item(id: 0, title: T.text(.cancel), symbol: "arrow.uturn.backward"),
                     Item(id: 1, title: TH.text(.quitApp), detail: model.runningGame.map { TH.format(.quitWithGame, $0.name) }, symbol: "power", destructive: true)]
         case .launcherReport:
             return [Item(id: 0, title: TC.text(.launcherReportSend), detail: TC.text(.launcherReportSendDetail), symbol: "paperplane.fill"),
@@ -714,9 +732,52 @@ struct GameMenuCard: View {
         .accessibilityLabel(item.title)
     }
 
+    /// Quit AnyPS5? and Close the game?: a plain yes or no, drawn as two answers side by side.
+    private var twoChoice: Bool { model.overlay == .confirmQuit || model.overlay == .closeGame }
+
+    /// One answer of a yes or no: a pill. Focused, the way back turns white and the destructive
+    /// one red; the way back wears its key (esc, or ○ with a controller).
+    private func answer(_ item: Item) -> some View {
+        let focused = model.menuIndex == item.id
+        let red = Color(red: 0.86, green: 0.25, blue: 0.24)
+        let foreground: Color = focused ? (item.destructive ? .white : .black) : (item.destructive ? Color(red: 1, green: 0.6, blue: 0.55) : .white)
+        return Button {
+            model.menuIndex = item.id
+            _ = model.gameMenuCommand(.select)
+        } label: {
+            HStack(spacing: 8 * scale) {
+                if item.destructive {
+                    Image(systemName: item.symbol).font(.system(size: 15 * scale, weight: .semibold))
+                }
+                Text(item.title).font(.display(16 * scale, .semibold)).lineLimit(1).minimumScaleFactor(0.75)
+                if !item.destructive {
+                    Text(ConfirmButton.glyphs(HintKeys.keys("esc / ○", for: inputMode.mode), circleConfirms: circleConfirms)).font(.display(11 * scale, .bold)).opacity(0.5)
+                }
+            }
+            .foregroundStyle(foreground)
+            .padding(.horizontal, 16 * scale)
+            .frame(maxWidth: .infinity, minHeight: 50 * scale)
+            .background {
+                if focused && item.destructive {
+                    Capsule().fill(red)
+                } else {
+                    FocusFill(Capsule(), focused: focused, idle: Color.white.opacity(0.08))
+                }
+            }
+            .overlay(Capsule().strokeBorder(Color.white.opacity(focused ? 0 : 0.1), lineWidth: 1))
+            .shadow(color: (item.destructive ? Color(red: 1, green: 0.3, blue: 0.28) : .white).opacity(focused ? 0.28 : 0), radius: 12 * scale)
+            .scaleEffect(focused ? 1.02 : 1)
+            .animation(Motion.focus, value: focused)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .hoverTick("menu-\(item.id)")
+        .accessibilityLabel(item.title)
+    }
+
     private var hints: some View {
         HStack(spacing: 20 * scale) {
-            Hint(keys: "↑ ↓", label: T.text(.hintMove))
+            Hint(keys: twoChoice ? "← →" : "↑ ↓", label: T.text(.hintMove))
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Spacer(minLength: 0)
             if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport {

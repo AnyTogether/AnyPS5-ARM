@@ -28,6 +28,48 @@ struct ProfileTileAvatar: View {
     }
 }
 
+/// AnyTogether's mark: its two rings, on the blue, violet and mint of the website's (drawn on its
+/// 32-unit grid: rings of radius 8.5 at x 12 and 20, a 2.5 stroke).
+struct TogetherMark: View {
+    let size: CGFloat
+
+    static let gradient = LinearGradient(stops: [
+        .init(color: Color(red: 0x4F / 255, green: 0x7C / 255, blue: 1), location: 0),
+        .init(color: Color(red: 0xB6 / 255, green: 0x5C / 255, blue: 1), location: 0.55),
+        .init(color: Color(red: 0x2F / 255, green: 0xE0 / 255, blue: 0xC4 / 255), location: 1),
+    ], startPoint: .topLeading, endPoint: .bottomTrailing)
+
+    var body: some View {
+        let unit = size / 32
+        Self.gradient
+            .frame(width: size, height: size)
+            .mask {
+                ZStack {
+                    Circle().stroke(lineWidth: 2.5 * unit).frame(width: 17 * unit, height: 17 * unit).offset(x: -4 * unit)
+                    Circle().stroke(lineWidth: 2.5 * unit).frame(width: 17 * unit, height: 17 * unit).offset(x: 4 * unit)
+                }
+                .frame(width: size, height: size)
+            }
+            .accessibilityHidden(true)
+    }
+}
+
+/// The mark on a small dark disc, worn on the picker's tile of a profile linked to an account.
+struct TogetherBadge: View {
+    let size: CGFloat
+    @Environment(\.scale) private var scale
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Color(red: 0.047, green: 0.055, blue: 0.086))
+            Circle().strokeBorder(Color.white.opacity(0.18), lineWidth: 1.5 * scale)
+            TogetherMark(size: size * 0.62)
+        }
+        .frame(width: size, height: size)
+        .shadow(color: .black.opacity(0.45), radius: 10 * scale)
+    }
+}
+
 /// "Who's playing?": every profile as a tile, the one in use first, and Add Profile.
 struct ProfilePickerView: View {
     @EnvironmentObject private var model: AppModel
@@ -86,6 +128,14 @@ struct ProfilePickerView: View {
         } label: {
             VStack(spacing: 18 * scale) {
                 ProfileTileAvatar(profile: profile, picture: picture, size: 168 * scale, focused: focused)
+                    .overlay {
+                        // Linked to an AnyTogether account: its mark on a small dark disc on the
+                        // tile's lower right edge. A local profile's tile stays as it is.
+                        if profile.mode == .online {
+                            TogetherBadge(size: 168 * scale * 0.28)
+                                .offset(x: 168 * scale * 0.3536, y: 168 * scale * 0.3536)
+                        }
+                    }
                 Capsule().fill(AppModel.profileColor(profile)).frame(width: (focused ? 54 : 30) * scale, height: 4 * scale)
                     .opacity(focused ? 1 : 0.55)
                 VStack(spacing: 6 * scale) {
@@ -103,11 +153,17 @@ struct ProfilePickerView: View {
         .accessibilityLabel(profile.name)
     }
 
+    /// Under the name: the AnyTogether account a profile is linked to (its @handle, or AnyTogether
+    /// while it has none yet), or Local for one that stays on this Mac.
     private func modeLine(_ profile: LauncherProfile, current: Bool) -> some View {
         let online = profile.mode == .online
-        let text = online ? (profile.account.map { "@\($0.handle)" } ?? TPro.text(.online)) : TPro.text(.offline)
+        let text = online ? (profile.account.map { "@\($0.handle)" } ?? TPro.text(.onlineTag)) : TPro.text(.offlineTag)
         return HStack(spacing: 6 * scale) {
-            Image(systemName: online ? "person.2.wave.2.fill" : "wifi.slash").font(.system(size: 11 * scale, weight: .semibold))
+            if online {
+                TogetherMark(size: 14 * scale)
+            } else {
+                Image(systemName: "laptopcomputer").font(.system(size: 11 * scale, weight: .semibold))
+            }
             Text(text).font(.display(13 * scale, .medium)).lineLimit(1)
             if current && !model.profileFlow.atLaunch {
                 Text("·").opacity(0.5)

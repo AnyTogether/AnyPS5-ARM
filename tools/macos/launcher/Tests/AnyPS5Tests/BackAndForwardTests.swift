@@ -38,6 +38,22 @@ final class EscapeOnHomeTests: XCTestCase {
         XCTAssertEqual(model.menuIndex, 0)
     }
 
+    /// Slick Daddy's report of 7 November 2026: the two answers side by side, so ← and → move
+    /// between them (and stop at the ends), Esc still cancels from Quit.
+    func testLeftAndRightMoveBetweenTheTwoAnswers() throws {
+        let model = try LauncherFixture.model()
+        _ = model.escape()
+        XCTAssertTrue(model.handle(.right))
+        XCTAssertEqual(model.menuIndex, 1, "Quit, on the right")
+        XCTAssertTrue(model.handle(.right))
+        XCTAssertEqual(model.menuIndex, 1, "the arrows stop at the last answer")
+        XCTAssertTrue(model.handle(.left))
+        XCTAssertEqual(model.menuIndex, 0, "Cancel, on the left")
+        _ = model.handle(.right)
+        XCTAssertTrue(model.escape(), "Esc on Quit is still Cancel")
+        XCTAssertNil(model.overlay)
+    }
+
     func testEverywhereElseEscapeKeepsItsMeaning() throws {
         let model = try LauncherFixture.model()
         model.focus = .top(1)
