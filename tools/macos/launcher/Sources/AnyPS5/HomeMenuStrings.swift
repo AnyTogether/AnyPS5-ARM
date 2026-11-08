@@ -15,6 +15,7 @@ enum TH {
         case conflictSame = "menuConflictSame", conflictNavigationKey = "menuConflictNavigationKey", conflictNavigationButton = "menuConflictNavigationButton", conflictReservedKey = "menuConflictReservedKey", conflictNeedsModifier = "menuConflictNeedsModifier", refused = "menuRefused", cleared = "menuCleared"
         case resetShortcuts = "shortcutsReset", resetShortcutsDetail = "menuResetShortcutsDetail", shortcutsReset = "shortcutsResetDone", gameButtons = "shortcutsGameButtons", gameButtonsDetail = "shortcutsGameButtonsDetail", gameButtonsNoGame = "menuGameButtonsNoGame"
         case screenshotSaved, screenshotFailed, minutes = "menuMinutes", clipsCost = "menuClipsCost"
+        case gameStopping = "actionStopping", gameStoppingState = "stateStopping", stopGame, stopGameDetail, trophyShot
         case hintChange = "menuHintChange", hintDone = "menuHintDone", hintClear = "menuHintClear"
     }
 
