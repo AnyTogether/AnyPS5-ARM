@@ -1,6 +1,7 @@
 #include "prx/libc/include/general/ExportMacros.hpp"
 #include "prx/libSceLibcInternal/include/InventoryExports.hpp"
 #include "prx/libc/include/General.hpp"
+#include "prx/libc/include/GuestHeap.hpp"
 
 extern "C" {
 
@@ -1315,10 +1316,10 @@ int APS5_VABI libSceLibcInternalInventory_271_nid_no_patch() {
 }
 APS5_EXPORT("20cUk0qX9zo", libSceLibcInternalInventory_271_nid_no_patch);
 
-int APS5_VABI libSceLibcInternalInventory_272_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
+int APS5_VABI _malloc_init_nid_no_patch() {
+    return GuestHeap::GuestHeapInitialize_nid_postfix();
 }
-APS5_EXPORT("z8GPiQwaAEY", libSceLibcInternalInventory_272_nid_no_patch);
+APS5_EXPORT("z8GPiQwaAEY", _malloc_init_nid_no_patch);
 
 int APS5_VABI libSceLibcInternalInventory_273_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);

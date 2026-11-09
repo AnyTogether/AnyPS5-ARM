@@ -212,6 +212,57 @@ void PadTo(std::vector<std::uint8_t>& out, const std::size_t alignment) {
     while (out.size() % alignment != 0) out.push_back(0);
 }
 
+bool IsUnmappedPadding(const Windows::PeSection& section) {
+    return section.Name != ".amdstub" && section.Data.empty() &&
+        (section.Characteristics & (Windows::SectionRead | Windows::SectionWrite | Windows::SectionExecute)) == 0;
+}
+
+int PaddingAccessCost(const Windows::PeSection& section) {
+    if ((section.Characteristics & Windows::SectionExecute) != 0) return 2;
+    return (section.Characteristics & Windows::SectionWrite) != 0 ? 1 : 0;
+}
+
+void ExtendSectionOverPadding(Windows::PeSection& section, const Windows::PeSection& padding) {
+    const auto end = padding.Rva + padding.MemorySize();
+    if (padding.Rva == section.Rva + section.MemorySize()) {
+        section.VirtualSize = static_cast<std::uint32_t>(end - section.Rva);
+        if (!section.Data.empty() && (section.Characteristics & Windows::SectionWrite) == 0) section.Data.resize(section.VirtualSize);
+        return;
+    }
+    const auto memorySize = section.MemorySize();
+    if (!section.Data.empty()) section.Data.insert(section.Data.begin(), static_cast<std::size_t>(padding.MemorySize()), 0);
+    section.VirtualSize = static_cast<std::uint32_t>(memorySize + padding.MemorySize());
+    section.Rva = padding.Rva;
+}
+
+bool AbsorbUnmappedPadding(std::vector<Windows::PeSection>& sections) {
+    auto padding = sections.end();
+    auto chosen = sections.end();
+    int chosenCost = 0;
+    std::uint64_t chosenBytes = 0;
+    const auto consider = [&](const std::vector<Windows::PeSection>::iterator candidate, const std::vector<Windows::PeSection>::iterator neighbour) {
+        if (neighbour->Name == ".amdstub" || IsUnmappedPadding(*neighbour)) return;
+        const auto cost = PaddingAccessCost(*neighbour);
+        const auto bytes = candidate->MemorySize();
+        if (padding == sections.end() || cost < chosenCost || (cost == chosenCost && bytes < chosenBytes)) {
+            padding = candidate;
+            chosen = neighbour;
+            chosenCost = cost;
+            chosenBytes = bytes;
+        }
+    };
+    for (auto section = sections.begin(); section != sections.end(); ++section) {
+        if (!IsUnmappedPadding(*section)) continue;
+        if (section != sections.begin() && std::prev(section)->Rva + std::prev(section)->MemorySize() == section->Rva) consider(section, std::prev(section));
+        const auto next = std::next(section);
+        if (next != sections.end() && section->Rva + section->MemorySize() == next->Rva) consider(section, next);
+    }
+    if (padding == sections.end()) return false;
+    ExtendSectionOverPadding(*chosen, *padding);
+    sections.erase(padding);
+    return true;
+}
+
 void FitDyldSegmentLimit(std::vector<Windows::PeSection>& sections, const std::size_t limit) {
     while (sections.size() > limit) {
         auto best = sections.end();
@@ -227,7 +278,10 @@ void FitDyldSegmentLimit(std::vector<Windows::PeSection>& sections, const std::s
                 bestGap = gap;
             }
         }
-        if (best == sections.end()) return;
+        if (best == sections.end()) {
+            if (!AbsorbUnmappedPadding(sections)) return;
+            continue;
+        }
         const auto next = std::next(best);
         const auto memorySize = next->Rva + next->MemorySize() - best->Rva;
         if (!next->Data.empty()) {

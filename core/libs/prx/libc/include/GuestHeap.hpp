@@ -15,6 +15,7 @@ void* GuestHeapAlign_nid_postfix(std::size_t alignment, std::size_t bytes);
 void* GuestHeapRealign_nid_postfix(void* pointer, std::size_t bytes, std::size_t alignment);
 void* GuestHeapAlignForGpu_nid_postfix(std::size_t alignment, std::size_t bytes);
 int GuestHeapStatsFast_nid_postfix(void* stats);
+int GuestHeapInitialize_nid_postfix();
 
 }
 

@@ -1,4 +1,5 @@
 #include <domain/ImportModule.hpp>
+#include <elfpatcher/macos/MacOsImage.hpp>
 #include <relinker/guest/GuestImage.hpp>
 #include <io/BufferUtils.hpp>
 #include <cstring>
@@ -47,5 +48,8 @@ int main() {
     if (Domain::ImportModule("nid#A#B", modules, both) != both[0]) return 6;
     const std::array<std::string, 1> normalizedMono{"libmonosgen-module.prx"};
     if (Domain::ImportModule("nid#A#B", modules, normalizedMono) != normalizedMono[0]) return 43;
+    if (Domain::NeededLibraryName("libkernel.sprx") != "libkernel.prx" || Domain::NeededLibraryName("libkernel.prx") != "libkernel.prx") return 44;
+    if (Elfpatcher::MacOs::MachODependency("libSceLibcInternal.sprx", "@executable_path") != "@rpath/libSceLibcInternal.prx") return 45;
+    if (Elfpatcher::MacOs::MachODependency("$ORIGIN/app0/sce_module/libc.sprx", "@executable_path") != "@executable_path/app0/sce_module/libc.sprx") return 46;
     std::cout << "module mapping checks passed\n";
 }

@@ -424,4 +424,15 @@ int GuestHeapStatsFast_nid_postfix(void* stats) {
     return 0;
 }
 
+int GuestHeapInitialize_nid_postfix() {
+    try {
+        usage();
+        blocks();
+        if (GuestArena::GuestArenaAvailable_nid_postfix()) ArenaHeap::Get();
+    } catch (const std::bad_alloc&) {
+        return 12;
+    }
+    return 0;
+}
+
 }

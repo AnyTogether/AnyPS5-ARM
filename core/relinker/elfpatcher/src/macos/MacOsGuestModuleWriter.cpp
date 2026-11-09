@@ -99,7 +99,10 @@ std::vector<std::uint8_t> GuestModuleWriter::WriteMacOs(const Relinker::GuestIma
         input.Exports.push_back({name, image.GetRva(symbol.Value, std::max<std::uint64_t>(symbol.Size, 1)), flags});
     }
 
-    for (const auto& dependency : dependencies) input.Dylibs.push_back(MachODependency(dependency, "@loader_path"));
+    for (const auto& dependency : dependencies) {
+        auto path = MachODependency(dependency, "@loader_path");
+        if (std::find(input.Dylibs.begin(), input.Dylibs.end(), path) == input.Dylibs.end()) input.Dylibs.push_back(std::move(path));
+    }
     if (std::find(input.Dylibs.begin(), input.Dylibs.end(), "@rpath/libkernel.prx") == input.Dylibs.end())
         input.Dylibs.push_back("@rpath/libkernel.prx");
     input.RunPaths = MachORunPaths(runPath, "@loader_path");
