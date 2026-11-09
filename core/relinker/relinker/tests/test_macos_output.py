@@ -15,6 +15,7 @@ from import_fixture import fixture as import_fixture
 from nid import nid
 from tls_fixture import fixture as tls_fixture
 from test_guest_module_directories import module_with_symbol
+from test_needed_libraries import named_module
 
 MH_MAGIC_64 = 0xFEEDFACF
 CPU_TYPE_X86_64 = 0x01000007
@@ -27,6 +28,12 @@ LC_DYLD_INFO_ONLY = 0x80000022
 LC_MAIN = 0x80000028
 PAGE = 0x1000
 IMAGE_BASE = 0x140000000
+LOAD_RVA = 0x10000
+PROT_NONE, PROT_R, PROT_RW, PROT_RX = 0, 1, 3, 5
+OVER_LIMIT_LOADS = [(4, 0x0, 0x926C, 0x926C), (1, 0xC000, 0x8CA0, 0x8CA0), (6, 0x18000, 0x1DA8, 0x2000), (6, 0x1C000, 0x1F90, 0x2191),
+                    (1, 0x20000, 0x61, 0x61), (6, 0x24000, 0x2D8, 0x2D8), (4, 0x28000, 0x570, 0x570), (0, 0x2C000, 0x5F38, 0x5F38)]
+IN_LIMIT_LOADS = [(4, 0x0, 0x8F64, 0x8F64), (1, 0xC000, 0x6430, 0x6430), (6, 0x14000, 0x3568, 0x4000), (6, 0x18000, 0x3788, 0x3991),
+                  (1, 0x1C000, 0x61, 0x61), (6, 0x20000, 0x2D8, 0x2D8), (4, 0x24000, 0x538, 0x538), (0, 0x28000, 0x6278, 0x6278)]
 META_VERSION = 2
 PROT_EXEC = 4
 CODE_SIGNATURE_RESERVE = 0x400
@@ -169,6 +176,61 @@ def check_runtime_dependencies(relinker, directory):
         check(dylibs == expected, f"{name}: dependencies {dylibs}, expected {expected}")
 
 
+def check_sprx_dependencies(relinker, directory):
+    base = Path(directory) / "sprx"
+    modules = base / "sce_module"
+    modules.mkdir(parents=True)
+    source = base / "eboot.elf"
+    source.write_bytes(bytes(import_fixture(library=b"libkernel.sprx", extra_libraries=(b"libkernel.prx", b"libSceLibcInternal.sprx", b"libSceVideoOut.sprx"))))
+    (modules / "dep.prx").write_bytes(named_module(1, "libSceLibcInternal.sprx"))
+    output = base / "eboot"
+    result = subprocess.run([str(relinker), "--macos", str(source), str(output)], capture_output=True, text=True, timeout=120)
+    check(result.returncode == 0, f"sprx: relinker failed: {result.stdout}{result.stderr}")
+    macho = check_structure("sprx", output.read_bytes())
+    host = [dylib for dylib in macho.dylibs if dylib.startswith("@rpath/")]
+    check(host == ["@rpath/libkernel.prx", "@rpath/libSceLibcInternal.prx", "@rpath/libSceVideoOut.prx", "@rpath/libc.prx"], f"sprx: host dependencies {host}")
+    check(len(host) == len(set(host)), f"sprx: duplicate load commands {host}")
+    guest = MachO((base / "app0/sce_module/dep.prx.guest.prx").read_bytes())
+    check(not any(dylib.endswith(".sprx") for dylib in guest.dylibs), f"sprx: guest module dependencies {guest.dylibs}")
+    check("@rpath/libSceLibcInternal.prx" in guest.dylibs, f"sprx: guest module dependencies {guest.dylibs}")
+
+
+def guest_layout(macho):
+    return [(s["vmaddr"] - IMAGE_BASE - LOAD_RVA, s["vmsize"], s["initprot"]) for s in macho.segments if s["name"].startswith("__ELF")]
+
+
+def check_segment_limit(relinker, directory):
+    source = Path(directory) / "over-limit.elf"
+    source.write_bytes(bytes(import_fixture(loads=OVER_LIMIT_LOADS)))
+    output = Path(directory) / "over-limit"
+    result = subprocess.run([str(relinker), "--macos", "--skip-sce-module", str(source), str(output)], capture_output=True, text=True, timeout=120)
+    check(result.returncode == 0, f"over limit: relinker failed: {result.stdout}{result.stderr}")
+    macho = check_structure("over-limit", output.read_bytes())
+    expected = [(0x0, 0xC000, PROT_R), (0xC000, 0x9000, PROT_RX), (0x15000, 0x3000, PROT_NONE), (0x18000, 0x2000, PROT_RW),
+                (0x1A000, 0x2000, PROT_NONE), (0x1C000, 0x3000, PROT_RW), (0x1F000, 0x1000, PROT_NONE), (0x20000, 0x1000, PROT_RX),
+                (0x21000, 0x3000, PROT_NONE), (0x24000, 0x1000, PROT_RW), (0x25000, 0x4000, PROT_R), (0x29000, 0x9000, PROT_NONE)]
+    check(guest_layout(macho) == expected, f"over limit: guest segments {guest_layout(macho)}")
+
+    macho = check_structure("in-limit", relink(relinker, directory, "in-limit", import_fixture(loads=IN_LIMIT_LOADS)))
+    expected = [(0x0, 0x9000, PROT_R), (0x9000, 0x3000, PROT_NONE), (0xC000, 0x7000, PROT_RX), (0x13000, 0x1000, PROT_NONE),
+                (0x14000, 0x8000, PROT_RW), (0x1C000, 0x1000, PROT_RX), (0x1D000, 0x3000, PROT_NONE), (0x20000, 0x1000, PROT_RW),
+                (0x21000, 0x3000, PROT_NONE), (0x24000, 0x1000, PROT_R), (0x25000, 0x3000, PROT_NONE), (0x28000, 0x7000, PROT_NONE)]
+    check(guest_layout(macho) == expected, f"in limit: guest segments {guest_layout(macho)}")
+    for segment in macho.segments:
+        if segment["name"].startswith("__ELF") and segment["initprot"] == PROT_NONE and segment["vmaddr"] - IMAGE_BASE - LOAD_RVA != 0x28000:
+            check(segment["filesize"] == 0, f"in limit: padding gained file data: {segment}")
+
+    loads = [(4, 0x0, PAGE, PAGE), (5, PAGE, PAGE, PAGE)]
+    for index in range(2, 16):
+        loads.append((6 if index % 2 == 0 else 4, index * PAGE, PAGE, PAGE))
+    source = Path(directory) / "no-padding.elf"
+    source.write_bytes(bytes(import_fixture(loads=loads)))
+    output = Path(directory) / "no-padding"
+    result = subprocess.run([str(relinker), "--macos", "--skip-sce-module", str(source), str(output)], capture_output=True, text=True, timeout=120)
+    check(result.returncode == 2 and "Too many Mach-O segments for dyld opcodes" in result.stderr, f"no padding: exit {result.returncode}: {result.stdout}{result.stderr}")
+    check(not output.exists(), "no padding: a rejected image created an output")
+
+
 def check_tls(data):
     check(FS_LOAD in bytes(tls_fixture()), "tls: the fixture no longer loads through %fs")
     macho = check_structure("tls", data)
@@ -295,6 +357,8 @@ def main():
         check_imports(imported)
         check_signed_entry(directory, imported)
         check_runtime_dependencies(relinker, directory)
+        check_sprx_dependencies(relinker, directory)
+        check_segment_limit(relinker, directory)
         check_tls(relink(relinker, directory, "tls", tls_fixture()))
         check_options(relinker, directory)
         check_runpath_lists(relinker, directory)

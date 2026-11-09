@@ -3,6 +3,7 @@
 #include <elfpatcher/general/ElfConstants.hpp>
 #include <elfpatcher/windows/WindowsLoadImage.hpp>
 #include <elfpatcher/windows/WindowsRelocationBuilder.hpp>
+#include <domain/ImportModule.hpp>
 #include <io/BufferUtils.hpp>
 #include <algorithm>
 #include <set>
@@ -40,6 +41,7 @@ std::vector<std::string> ReadNeededLibraries(const Domain::SysVDynamicSection& d
         if (nameOffset >= dynamicSection.DynStrData.size()) throw Domain::RelinkerException("DT_NEEDED string offset is out of bounds", nameOffset);
         auto name = Windows::ReadString(dynamicSection.DynStrData, static_cast<std::size_t>(nameOffset));
         if (name.empty()) throw Domain::RelinkerException("Invalid DT_NEEDED library: " + name);
+        if (!name.starts_with("$ORIGIN")) name = Domain::NeededLibraryName(std::move(name));
         if (unique.insert(name).second) result.push_back(std::move(name));
     }
     return result;
@@ -49,7 +51,7 @@ std::vector<std::string> ReadNeededLibraries(const Domain::SysVDynamicSection& d
 std::string MachODependency(const std::string& name, const std::string& origin) {
     if (name.starts_with("$ORIGIN")) return MachOLoadPath(name, origin);
     if (name.find('/') != std::string::npos) throw Domain::RelinkerException("Unsupported dependency path: " + name);
-    return "@rpath/" + name;
+    return "@rpath/" + Domain::NeededLibraryName(name);
 }
 
 MacOsMachOPatcher::MacOsMachOPatcher(const std::optional<std::uint64_t> fixedBase, std::function<void(std::string_view)> message, const bool traceImports) : fixedBase(fixedBase), message(std::move(message)), traceImports(traceImports) {

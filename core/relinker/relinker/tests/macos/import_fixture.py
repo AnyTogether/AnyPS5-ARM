@@ -3,33 +3,45 @@ import struct, sys
 sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.abspath(__file__)))
 from nid import nid
 
-def fixture(message=b"hello from a PS5 ELF on macOS\0", library=b"libc.prx"):
-    image = bytearray(0x6000)
+def fixture(message=b"hello from a PS5 ELF on macOS\0", library=b"libc.prx", extra_libraries=(), loads=None):
+    code, data = 0x4000, 0x5000
+    size = 0x6000
+    if loads is None:
+        loads = [(5, code, 0x1000, 0x1000), (6, data, 0x1000, 0x1000)]
+    else:
+        code = next(vaddr for flags, vaddr, _, _ in loads if flags & 1)
+        data = next(vaddr for flags, vaddr, _, _ in loads if flags & 2)
+        size = max(vaddr + file_size for _, vaddr, file_size, _ in loads)
+    image = bytearray(size)
     image[:16] = b"\x7fELF\x02\x01\x01" + bytes(9)
-    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, 0x4000, 64, 0, 0, 64, 56, 3, 64, 0, 0)
-    # R+X code, R+W data (GOT, message, dynamic tables), PT_DYNAMIC; identity mapped.
-    struct.pack_into("<IIQQQQQQ", image, 64, 1, 5, 0x4000, 0x4000, 0x4000, 0x1000, 0x1000, 0x1000)
-    struct.pack_into("<IIQQQQQQ", image, 120, 1, 6, 0x5000, 0x5000, 0x5000, 0x1000, 0x1000, 0x1000)
-    code = bytearray(b"\x48\x83\xec\x08")                                   # sub rsp, 8
-    code += b"\x48\x8d\x3d" + struct.pack("<i", 0x5100 - (0x4004 + 7))       # lea rdi, [rip+msg]
-    code += b"\xff\x15" + struct.pack("<i", 0x5000 - (0x400b + 6))           # call [rip+got.puts]
-    code += b"\x31\xff"                                                     # xor edi, edi
-    code += b"\xff\x15" + struct.pack("<i", 0x5008 - (0x4013 + 6))           # call [rip+got.exit]
-    code += b"\x0f\x0b"                                                     # ud2
-    image[0x4000:0x4000 + len(code)] = code
-    image[0x5100:0x5100 + len(message)] = message
-    strings = b"\0" + library + b"\0" +(nid("puts") + "#A#B").encode() + b"\0" + (nid("exit") + "#A#B").encode() + b"\0"
-    image[0x5A00:0x5A00 + len(strings)] = strings
-    puts_name = strings.index(b"\0", 1) + 1
-    exit_name = strings.index(b"\0", puts_name) + 1
-    struct.pack_into("<IBBHQQ", image, 0x5B00 + 24, puts_name, 0x12, 0, 0, 0, 0)
-    struct.pack_into("<IBBHQQ", image, 0x5B00 + 48, exit_name, 0x12, 0, 0, 0, 0)
-    struct.pack_into("<QQq", image, 0x5C00, 0x5000, (1 << 32) | 6, 0)
-    struct.pack_into("<QQq", image, 0x5C18, 0x5008, (2 << 32) | 6, 0)
-    tags = [(1, 1), (5, 0x5A00), (10, len(strings)), (6, 0x5B00), (11, 24), (0x6100003f, 72), (7, 0x5C00), (8, 48), (9, 24), (0, 0)]
+    struct.pack_into("<HHIQQQIHHHHHH", image, 16, 3, 62, 1, code, 64, 0, 0, 64, 56, len(loads) + 1, 64, 0, 0)
+    for index, (flags, vaddr, file_size, memory_size) in enumerate(loads):
+        struct.pack_into("<IIQQQQQQ", image, 64 + index * 56, 1, flags, vaddr, vaddr, vaddr, file_size, memory_size, 0x1000)
+    body = bytearray(b"\x48\x83\xec\x08")
+    body += b"\x48\x8d\x3d" + struct.pack("<i", data + 0x100 - (code + 4 + 7))
+    body += b"\xff\x15" + struct.pack("<i", data - (code + 11 + 6))
+    body += b"\x31\xff"
+    body += b"\xff\x15" + struct.pack("<i", data + 8 - (code + 19 + 6))
+    body += b"\x0f\x0b"
+    image[code:code + len(body)] = body
+    image[data + 0x100:data + 0x100 + len(message)] = message
+    names = [library, *extra_libraries]
+    strings = b"\0" + b"".join(name + b"\0" for name in names)
+    needed = [1 + sum(len(name) + 1 for name in names[:index]) for index in range(len(names))]
+    puts_name = len(strings)
+    strings += (nid("puts") + "#A#B").encode() + b"\0"
+    exit_name = len(strings)
+    strings += (nid("exit") + "#A#B").encode() + b"\0"
+    image[data + 0xA00:data + 0xA00 + len(strings)] = strings
+    struct.pack_into("<IBBHQQ", image, data + 0xB00 + 24, puts_name, 0x12, 0, 0, 0, 0)
+    struct.pack_into("<IBBHQQ", image, data + 0xB00 + 48, exit_name, 0x12, 0, 0, 0, 0)
+    struct.pack_into("<QQq", image, data + 0xC00, data, (1 << 32) | 6, 0)
+    struct.pack_into("<QQq", image, data + 0xC18, data + 8, (2 << 32) | 6, 0)
+    tags = [(1, offset) for offset in needed]
+    tags += [(5, data + 0xA00), (10, len(strings)), (6, data + 0xB00), (11, 24), (0x6100003f, 72), (7, data + 0xC00), (8, 48), (9, 24), (0, 0)]
     for index, tag in enumerate(tags):
-        struct.pack_into("<qQ", image, 0x5800 + index * 16, *tag)
-    struct.pack_into("<IIQQQQQQ", image, 176, 2, 6, 0x5800, 0x5800, 0x5800, len(tags) * 16, len(tags) * 16, 8)
+        struct.pack_into("<qQ", image, data + 0x800 + index * 16, *tag)
+    struct.pack_into("<IIQQQQQQ", image, 64 + len(loads) * 56, 2, 6, data + 0x800, data + 0x800, data + 0x800, len(tags) * 16, len(tags) * 16, 8)
     return image
 
 if __name__ == "__main__":

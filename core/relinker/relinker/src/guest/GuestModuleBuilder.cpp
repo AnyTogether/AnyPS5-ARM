@@ -441,7 +441,7 @@ std::vector<GuestArtifact> GuestModuleBuilder::Build(const std::filesystem::path
     std::vector<std::string> hostLibraries;
     std::vector<std::vector<std::string>> moduleHostLibraries(images.size());
     std::set<std::string> uniqueHosts;
-    const auto hostLibrary = [&](const std::string& name) { return windows || macos ? name : Domain::NeededLibraryName(name); };
+    const auto hostLibrary = [&](const std::string& name) { return windows ? name : Domain::NeededLibraryName(name); };
     std::vector<std::filesystem::path> runDirectories;
     bool runDirectoriesExist = !windows && !macos;
     for (std::size_t begin = 0; runDirectoriesExist && begin <= runPath.size();) {

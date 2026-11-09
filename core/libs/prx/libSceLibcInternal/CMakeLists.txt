@@ -74,6 +74,17 @@ if(BUILD_TESTING)
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceLibcInternal>")
     endif()
 
+    add_test_executable(guest_libc_internal_malloc_init_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcInternalMallocInit.cpp)
+    target_include_directories(guest_libc_internal_malloc_init_tests PRIVATE ${LIBS_INCLUDE_DIR})
+    target_link_libraries(guest_libc_internal_malloc_init_tests PRIVATE libSceLibcInternal libkernel libc)
+    configure_windows_unwind(guest_libc_internal_malloc_init_tests)
+    add_test(NAME guest_libc_internal_malloc_init COMMAND guest_libc_internal_malloc_init_tests)
+    set_tests_properties(guest_libc_internal_malloc_init PROPERTIES TIMEOUT 20)
+    if(WIN32)
+        set_tests_properties(guest_libc_internal_malloc_init PROPERTIES ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceLibcInternal>")
+    endif()
+
     add_test_executable(guest_libc_internal_aligned_new_tests ${LIBS_INCLUDE_DIR}/tests/GuestLibcInternalAlignedNew.cpp)
     target_include_directories(guest_libc_internal_aligned_new_tests PRIVATE ${LIBS_INCLUDE_DIR})
     target_link_libraries(guest_libc_internal_aligned_new_tests PRIVATE libSceLibcInternal libkernel libc)

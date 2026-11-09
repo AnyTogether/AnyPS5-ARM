@@ -54,3 +54,12 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build the engine and the patched libraries
         run: ninja -C build-mac ${{ inputs.keep_going && '-k 0' || '' }} all libs
+      - name: Upload the relinker and the patched libraries
+        uses: actions/upload-artifact@v7
+        with:
+          name: macos-relinker-libs
+          path: |
+            build-mac/core/relinker/relinker
+            build-mac/core/libs/libs/*.prx
+          retention-days: 7
+          if-no-files-found: error
