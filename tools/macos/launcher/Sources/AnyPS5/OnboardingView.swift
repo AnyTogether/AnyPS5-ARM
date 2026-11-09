@@ -17,6 +17,7 @@ struct OnboardingView: View {
                 }
             }
             .animation(Motion.layout, value: model.onboardingStep)
+            .spokenStatus(T.format(.onboardingStep, model.onboardingStep + 1, 4))
             .padding(.bottom, 54 * scale)
             Group {
                 switch model.onboardingStep {
@@ -82,6 +83,7 @@ private struct LanguageStep: View {
                         .scaleEffect(focused ? 1.04 : 1)
                         .shadow(color: .white.opacity(focused ? 0.3 : 0), radius: 20 * scale)
                         .onTapGesture { model.onboardingChoice = index; model.onboardingConfirm() }
+                        .spokenButton(language.displayName, selected: focused) { model.onboardingChoice = index; model.onboardingConfirm() }
                     }
                 }
                 .animation(Motion.focus, value: model.onboardingChoice)
@@ -124,6 +126,11 @@ private struct ThemeStep: View {
                     .scaleEffect(focused ? 1.04 : 0.97)
                     .opacity(focused ? 1 : 0.72)
                     .onTapGesture {
+                        model.onboardingChoice = theme.rawValue
+                        model.preferences.theme = theme
+                        Sounds.shared.play(.move)
+                    }
+                    .spokenButton(theme.title, selected: focused) {
                         model.onboardingChoice = theme.rawValue
                         model.preferences.theme = theme
                         Sounds.shared.play(.move)

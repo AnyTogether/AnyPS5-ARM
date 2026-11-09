@@ -386,6 +386,11 @@ struct ChallengeStrip: View {
                         model.social.challengeStripIndex = index
                         model.openChallenge(challenge.id, shown: challenge)
                     }
+                    .spokenRow {
+                        model.social.boardOnChallenges = true
+                        model.social.challengeStripIndex = index
+                        model.openChallenge(challenge.id, shown: challenge)
+                    }
             }
         }
     }
@@ -456,6 +461,13 @@ struct ChallengeCard: View {
         .focusRing(focused, radius: 20 * scale, width: 2)
         .scaleEffect(focused ? 1.02 : 1)
         .animation(Motion.focus, value: focused)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    private var spoken: String {
+        let leader = challenge.leader.map { "\($0.user?.displayName ?? TChal.text(.hidden)), \(AppModel.challengeValue($0.value, metric: challenge.metric))" } ?? TChal.text(.noLeader)
+        return [challenge.title, model.challengeGameName(challenge.game), AppModel.challengeMetric(challenge.metric), leader, challenge.myStanding.map { "\(TChal.text(.yourPlace)) \($0.rank)" }].compactMap { $0 }.joined(separator: ", ")
     }
 }
 
@@ -594,6 +606,11 @@ struct ChallengePage: View {
                             model.social.challengeColumn = 0
                             model.social.challengeIndex = index
                         }
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityAction(.default) {
+                            model.social.challengeColumn = 0
+                            model.social.challengeIndex = index
+                        }
                     }
                 }
             }
@@ -695,6 +712,8 @@ struct ChallengePage: View {
                             .overlay(shape.strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
                             .focusRing(focused, radius: 14 * scale, width: 2)
                             .onTapGesture { model.openChallengeWebsite() }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction(.default) { model.openChallengeWebsite() }
                             .animation(Motion.focus, value: focused)
                     }
                 }
@@ -866,6 +885,7 @@ struct ChallengeRow: View {
         .background(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(standing.me ? model.accent.opacity(focused ? 0.32 : 0.2) : Color.white.opacity(focused ? 0.13 : 0.05)))
         .focusRing(focused, radius: 16 * scale, width: 2)
         .animation(Motion.focus, value: focused)
+        .spokenStatus([String(standing.rank), standing.user?.displayName ?? TChal.text(.hidden), standing.me ? TS.text(.boardYou) : nil, AppModel.challengeValue(standing.value, metric: metric)].compactMap { $0 }.joined(separator: ", "))
     }
 
     private var medal: Color? {

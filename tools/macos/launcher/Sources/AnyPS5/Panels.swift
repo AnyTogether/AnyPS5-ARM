@@ -1213,6 +1213,10 @@ struct RowList: View {
                         if model.rowEditor.editing != nil { model.rowEditor.stop() }
                         model.activate(row)
                     }
+                    .modifier(RowSpeech(row: row) {
+                        model.focusRow(index, in: rows)
+                        model.activate(row)
+                    })
             }
         }
         .padding(6 * scale)
@@ -1235,6 +1239,30 @@ struct RowList: View {
                 guard let row, rows.indices.contains(row) else { return }
                 withAnimation(Motion.focus) { proxy.scrollTo(rows[row].id, anchor: .center) }
             }
+        }
+    }
+}
+
+/// What VoiceOver says for a row, as Windows and Linux do on these screens: its words, in one
+/// element; a value row keeps its own controls.
+struct RowSpeech: ViewModifier {
+    let row: PanelRow
+    let action: () -> Void
+
+    func body(content: Content) -> some View {
+        let label = [row.title, row.detail].compactMap { $0 }.joined(separator: ", ")
+        switch row.kind {
+        case .action:
+            content.accessibilityElement(children: .ignore).accessibilityLabel(label)
+                .accessibilityAddTraits(.isButton).accessibilityAction(.default, action)
+        case .toggle(let on, _):
+            content.accessibilityElement(children: .ignore).accessibilityLabel(label)
+                .accessibilityValue(T.text(on ? .on : .off))
+                .accessibilityAddTraits(.isButton).accessibilityAction(.default, action)
+        case .info:
+            content.accessibilityElement(children: .ignore).accessibilityLabel(label)
+        default:
+            content
         }
     }
 }

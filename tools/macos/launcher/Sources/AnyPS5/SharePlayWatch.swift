@@ -320,6 +320,8 @@ struct ShareWatchView: View {
         .padding(.horizontal, 16 * scale)
         .padding(.vertical, 10 * scale)
         .glass(22 * scale, opacity: 0.5)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel([sharePlay.map { "\($0.host?.displayName ?? ""), \($0.title ?? model.gameName($0.titleId))" } ?? "", statusLine(slot: slot)].joined(separator: ", "))
     }
 
     private func statusLine(slot: Int?) -> String {
