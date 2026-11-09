@@ -248,7 +248,7 @@ struct LeaderboardView: View {
             }
             Spacer(minLength: 0)
             if let board = social.leaderboard, board.total > 0 {
-                Text(TS.format(.boardPlayers, board.total)).font(.display(14 * scale, .medium)).monospacedDigit().foregroundStyle(.white.opacity(0.45))
+                Text(TS.format(board.total == 1 ? .boardPlayersOne : .boardPlayers, board.total)).font(.display(14 * scale, .medium)).monospacedDigit().foregroundStyle(.white.opacity(0.45))
             }
         }
     }

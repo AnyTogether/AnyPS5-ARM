@@ -111,6 +111,11 @@ final class LanguageCheckTests: XCTestCase {
         XCTAssertEqual(TP.format(.battery, 80), "80%")
         XCTAssertEqual(TL.format(.levelNext, "1,200", 7), "1,200 points to level 7")
         XCTAssertEqual(T.text(.accentMint), "Mint")
+        // One player in the singular, as on Windows and Linux.
+        XCTAssertEqual(TS.format(.boardPlayersOne, 1), "1 player")
+        XCTAssertEqual(TS.format(.boardPlayers, 2), "2 players")
+        XCTAssertEqual(FP.format(.playersOne, 1), "1 player on AnyTogether")
+        XCTAssertEqual(T.format(.gamePlayersOne, 1, 1), "1 of 1 player")
         T.language = .turkish
         XCTAssertEqual(T.format(.profileHoursMinutes, 2, 5), "2 sa 5 dk")
         XCTAssertEqual(TP.format(.battery, 80), "%80")
