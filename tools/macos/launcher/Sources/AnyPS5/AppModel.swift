@@ -1568,7 +1568,7 @@ final class AppModel: ObservableObject {
         failures[game.id] = nil
         guard !queue.contains(game.id), progress[game.id] == nil else { return }
         // The room first: a drive that is short says so before anything is written.
-        if let shortage = Installer.plan(game: game, toolkit: toolkit, root: root).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root)) {
+        if let shortage = Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: settings(for: game).chosenRelinkerFlags).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root)) {
             return tellShortage(shortage, for: game)
         }
         queue.append(game.id)
@@ -1644,6 +1644,7 @@ final class AppModel: ObservableObject {
             }
         })
         installer.background = background
+        installer.relinkerFlags = settings(for: game).chosenRelinkerFlags
         Task.detached(priority: background ? .utility : .userInitiated) {
             let result: Result<URL, Error> = Result {
                 if let downloaded { _ = try store.verifiedToolkit(version: downloaded) }
@@ -1723,7 +1724,7 @@ final class AppModel: ObservableObject {
         while true {
             let action = prepare.step(conditions) { [weak self] id in
                 guard let self, let game = self.games.first(where: { $0.id == id }), let toolkit = self.toolkit(for: game), let root = self.root(of: game) else { return nil }
-                return Installer.plan(game: game, toolkit: toolkit, root: root).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root))
+                return Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: self.settings(for: game).chosenRelinkerFlags).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root))
             }
             switch action {
             case .none:
