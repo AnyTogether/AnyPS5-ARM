@@ -111,6 +111,45 @@ final class QuickMenuMediaTests: XCTestCase {
         XCTAssertFalse(model.quickMenuRows().contains { $0.title == SP.format(.start, game.name) })
     }
 
+    private func sharing(_ model: AppModel, _ game: Game) {
+        model.previewRunning(game, app: .current)
+        signedIn(model)
+        let person = TogetherPerson(userId: "v1", handle: "mira", displayName: "Mira", avatar: nil)
+        let viewer = TogetherSharePlay.Viewer(user: person, device: "d-v1", slot: nil, joinedAt: nil)
+        model.previewShare(TogetherSharePlay(id: "sp1", host: person, hostDevice: "mac", titleId: game.titleID, title: nil, open: true, maxViewers: 4, viewers: [viewer], media: .mesh))
+        model.overlay = .quickMenu
+    }
+
+    func testWhileSharingTheQuickMenuListsEveryControl() throws {
+        let model = try LauncherFixture.model()
+        let game = try XCTUnwrap(model.games.first)
+        sharing(model, game)
+        let rows = model.quickMenuRows()
+        let keys = rows.compactMap(\.key)
+        for key in ["share-on", "share-play-v1", "share-remove-v1", "share-open", "share-max", "share-stop"] { XCTAssertTrue(keys.contains(key), key) }
+        XCTAssertEqual(rows.first { $0.key == "share-open" }?.value, T.text(.on))
+        XCTAssertEqual(rows.first { $0.key == "share-max" }?.value, "4")
+        XCTAssertEqual(rows.last?.title, TH.text(.closeGame))
+    }
+
+    func testLeftAndRightChangeASettingAndAskingFirstFocusesCancel() throws {
+        let model = try LauncherFixture.model()
+        let game = try XCTUnwrap(model.games.first)
+        sharing(model, game)
+        let index = { (key: String) in model.quickMenuRows().firstIndex { $0.key == key } ?? -1 }
+        model.menuIndex = index("share-max")
+        XCTAssertTrue(model.handle(.right))
+        XCTAssertEqual(model.menuIndex, index("share-max"), "the setting changes, the focus stays")
+        model.menuIndex = index("share-stop")
+        XCTAssertTrue(model.handle(.select))
+        XCTAssertEqual(model.askingRow, "share-stop")
+        XCTAssertEqual(model.quickMenuRows()[model.menuIndex].key, "share-stop-cancel", "Cancel focused")
+        XCTAssertTrue(model.handle(.back))
+        XCTAssertNil(model.askingRow)
+        XCTAssertEqual(model.overlay, .quickMenu, "Back only answered the question")
+        XCTAssertEqual(model.quickMenuRows()[model.menuIndex].key, "share-stop")
+    }
+
     func testTheMenuMovesOverEveryRowOfTheGameMenu() throws {
         let model = try LauncherFixture.model()
         let game = try XCTUnwrap(model.games.first)
@@ -144,7 +183,8 @@ final class TrophyShotTests: XCTestCase {
         let game = try XCTUnwrap(model.games.first)
         model.selected = 0
         model.previewTrophies(game, set(game, trophies: 3))
-        let shot = Screenshots.trophyFile(in: folder, titleID: game.titleID, trophyID: "0/1", stamp: "20261108-120000")
+        let shot = Screenshots.trophyFile(in: folder, gameName: game.name, titleID: game.titleID, trophyID: "0/1", stamp: "20261108-120000")
+        try FileManager.default.createDirectory(at: shot.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Data([0x89]).write(to: shot)
         model.open(.trophies)
         model.trophyIndex = 1

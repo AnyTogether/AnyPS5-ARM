@@ -75,6 +75,31 @@ final class DesktopParityTests: XCTestCase {
         XCTAssertNil(model.preferences.talkKey, "back to ⌥V: nothing kept")
     }
 
+    func testNoiseSuppressionSitsBesideTheMicrophoneOnByDefault() throws {
+        let model = try LauncherFixture.model()
+        let ids = model.voiceControlRows().map(\.id)
+        XCTAssertEqual(try XCTUnwrap(ids.firstIndex(of: "voice-noise")), try XCTUnwrap(ids.firstIndex(of: "voice-mic")) + 1)
+        guard case .toggle(true, let set) = try row(model.voiceControlRows(), "voice-noise").kind else { return XCTFail("not a switch, or not on") }
+        XCTAssertEqual(try row(model.voiceControlRows(), "voice-noise").detail, "Background noise is filtered out of your microphone.")
+        set(false)
+        XCTAssertEqual(model.preferences.noiseSuppression, false)
+        XCTAssertEqual(try row(model.voiceControlRows(), "voice-noise").detail, "Your microphone goes as it is: for music, or a quiet room.")
+        XCTAssertTrue(AppModel.personalKeys.contains("noiseSuppression"))
+    }
+
+    func testThePublicProfileSwitchComesFirstInPrivacy() throws {
+        let model = try LauncherFixture.model()
+        model.togetherUser = TogetherUser(id: "u1", handle: "robin", displayName: "Robin", avatar: nil)
+        model.previewOwnProfile(TogetherOwnProfile(handle: "robin", displayName: "Robin", bio: nil, avatar: nil, country: nil, handleChangeAt: nil, privacy: .standard))
+        let ids = model.togetherRows().map(\.id)
+        let open = try XCTUnwrap(ids.firstIndex(of: "privacy-public-profile"))
+        XCTAssertEqual(open, try XCTUnwrap(ids.firstIndex(of: "together-privacy")) + 1)
+        guard case .toggle(false, _) = try row(model.togetherRows(), "privacy-public-profile").kind else { return XCTFail("off for a new account") }
+        XCTAssertTrue(try XCTUnwrap(row(model.togetherRows(), "privacy-public-profile").detail).hasSuffix(TChat.text(.publicProfileOffNote)))
+        model.togetherProfile?.publicProfile = true
+        XCTAssertEqual(try row(model.togetherRows(), "privacy-public-profile").detail, TChat.text(.publicProfileHint))
+    }
+
     func testTheEnginePickerSaysWhyUpstreamIsNotOffered() throws {
         let engine = try rows(try LauncherFixture.model(), "engine")
         XCTAssertEqual(engine.map(\.id).prefix(2), ["engineDefault", "engineUpstreamNotOnMac"])

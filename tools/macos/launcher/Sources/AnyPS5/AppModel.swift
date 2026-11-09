@@ -44,6 +44,8 @@ struct Preferences: Codable, Equatable {
     var reduceTransparency: Bool?
     /// The party's voice sends only while the talk key is held; nil means off (open microphone).
     var pushToTalk: Bool?
+    /// WebRTC's noise suppression on the microphone in calls; nil means on.
+    var noiseSuppression: Bool?
     /// The key that talks (Party › Talk key); nil is ⌥V (TalkKey.standard).
     var talkKey: KeyChord?
     /// A session friends can join while a game runs; nil means on.
@@ -2944,7 +2946,7 @@ final class AppModel: ObservableObject {
 
     // MARK: Screenshots and saves
 
-    func screenshots(of game: Game) -> [URL] { Screenshots.list(titleID: game.titleID, in: screenshotsFolder) }
+    func screenshots(of game: Game) -> [URL] { Screenshots.list(titleID: game.titleID, gameName: game.name, in: screenshotsFolder) }
 
     func loadGallery() {
         galleryShots = selectedGame.map(screenshots) ?? []

@@ -360,6 +360,10 @@ extension AppModel {
             rows.append(PanelRow(id: "voice-mic", title: T.text(.voiceMic), detail: T.format(.voicePushToTalkOff, key), symbol: micOn ? "mic.fill" : "mic.slash.fill",
                                  kind: .toggle(micOn) { [weak self] value in self?.setMic(value) }))
         }
+        // Beside the microphone, as on the website.
+        let noise = preferences.noiseSuppression ?? true
+        rows.append(PanelRow(id: "voice-noise", title: TChat.text(.noiseSuppression), detail: TChat.text(noise ? .noiseSuppressionOnHint : .noiseSuppressionOffHint), symbol: "waveform.path",
+                             kind: .toggle(noise) { [weak self] value in self?.setNoiseSuppression(value) }))
         rows.append(PanelRow(id: "voice-deafen", title: JS.text(.deafen), detail: JS.text(.deafenDetail), symbol: deafened ? "headphones.slash" : "headphones",
                              kind: .toggle(deafened) { [weak self] value in self?.setDeafened(value) }))
         rows.append(PanelRow(id: "voice-ptt", title: T.text(.voicePushToTalk), detail: pushToTalk ? T.format(.voicePushToTalkOn, key) : nil, symbol: "keyboard",
@@ -398,7 +402,7 @@ extension AppModel {
     func startVoice(_ joined: TogetherCallJoin, friend: TogetherPerson? = nil, waiting: Bool = false) {
         guard let me = togetherUser else { return }
         let call = joined.call.id
-        let voice = PartyVoice(me: me.id, call: call, iceServers: joined.iceServers, send: { [weak self] to, device, kind, data in
+        let voice = PartyVoice(me: me.id, call: call, iceServers: joined.iceServers, noiseSuppression: preferences.noiseSuppression ?? true, send: { [weak self] to, device, kind, data in
             self?.togetherSocket?.signal(to: to, device: device, call: call, kind: kind, data: data)
         }, changed: { [weak self] in self?.voiceChanged() })
         partyVoice = voice
@@ -480,6 +484,14 @@ extension AppModel {
     func setDeafened(_ on: Bool) {
         if on { mic.deafen() } else { mic.undeafen() }
         voiceChanged()
+    }
+
+    /// Noise suppression on or off: kept for next time, and changed in the mesh call now (the
+    /// microphone's track is replaced on every connection, nothing reconnects). In a call on the
+    /// media server it applies from the next join, as on the website.
+    func setNoiseSuppression(_ on: Bool) {
+        preferences.noiseSuppression = on
+        partyVoice?.noiseSuppression = on
     }
 
     func setPushToTalk(_ on: Bool) {
@@ -576,7 +588,7 @@ extension AppModel {
         partyVoice = nil
         iceRenewal?.cancel()
         iceRenewal = nil
-        let voice = SfuVoice(me: me, call: call) { [weak self] in self?.voiceChanged() }
+        let voice = SfuVoice(me: me, call: call, noiseSuppression: preferences.noiseSuppression ?? true) { [weak self] in self?.voiceChanged() }
         sfuVoice = voice
         voiceChanged()
         Task {

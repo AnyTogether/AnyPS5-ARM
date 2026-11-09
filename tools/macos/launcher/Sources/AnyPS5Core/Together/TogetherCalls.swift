@@ -336,6 +336,13 @@ public enum TogetherVoice {
         return max(expiresAt.addingTimeInterval(-600), now.addingTimeInterval(30))
     }
 
+    /// The microphone's processing in WebRTC: echo cancellation, gain and the high-pass filter
+    /// always, noise suppression as the user set it (on by default). Read into the audio source's
+    /// options, so a new track on the senders changes a call's processing with no new offer.
+    public static func audioConstraints(noiseSuppression: Bool) -> [String: String] {
+        ["googEchoCancellation": "true", "googAutoGainControl": "true", "googHighpassFilter": "true", "googNoiseSuppression": noiseSuppression ? "true" : "false"]
+    }
+
     /// Two offers at once: the larger user ID is polite and takes the other's.
     public static func polite(me: String, peer: String) -> Bool { me > peer }
 
