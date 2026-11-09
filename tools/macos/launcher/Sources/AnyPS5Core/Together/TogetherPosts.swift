@@ -314,7 +314,36 @@ public struct TogetherCaptures: Equatable, Sendable {
         items[index].comments = max(0, items[index].comments + delta)
     }
 
+    /// What the socket says about the feed: a friend's new post (`post.new`), the counts a post
+    /// has now (`post.counts`), one that is gone (`post.removed`). True when the feed changed.
+    public mutating func apply(_ event: TogetherSocket.Event) -> Bool {
+        switch event.type {
+        case "post.new":
+            guard let post = event.decode(TogetherPost.self) else { return false }
+            upsert(post)
+            return true
+        case "post.counts":
+            guard let counts = event.decode(PostCounts.self), let index = index(of: counts.postId) else { return false }
+            if let likes = counts.likes { items[index].likes = likes }
+            if let comments = counts.comments { items[index].comments = comments }
+            return true
+        case "post.removed":
+            guard let id = event.data["postId"], index(of: id) != nil else { return false }
+            remove(id)
+            return true
+        default:
+            return false
+        }
+    }
+
     public func index(of id: String) -> Int? { items.firstIndex { $0.id == id } }
+}
+
+/// What `post.counts` carries; a count left out stays as it is.
+private struct PostCounts: Decodable {
+    let postId: String
+    let likes: Int?
+    let comments: Int?
 }
 
 /// A post's comments as the comments sheet holds them: top-level newest first, each with its

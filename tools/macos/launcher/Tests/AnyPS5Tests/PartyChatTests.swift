@@ -121,6 +121,19 @@ final class PartyChatTests: XCTestCase {
         XCTAssertEqual(model.authorName("f9", in: model.inbox!.conversations[0], unknown: "?"), "?", "not a party's chat: as before")
     }
 
+    /// ↑ at the oldest message: nothing to pick, which is when the next older page is read.
+    func testUpAtTheOldestMessagePicksNothing() throws {
+        let model = try model()
+        model.overlay = .party
+        model.partyChatFocused = true
+        XCTAssertTrue(model.pickMessage(-1), "from the field, the newest")
+        XCTAssertTrue(model.pickMessage(-1))
+        XCTAssertEqual(model.messageActions.picked, 1)
+        XCTAssertFalse(model.pickMessage(-1), "nothing older here: the launcher reads the next page")
+        model.partyChatCommand(.up)
+        XCTAssertEqual(model.messageActions.picked, 1, "the focus stays on the oldest one")
+    }
+
     /// The controller: ← from the party's rows into the chat, → past its field back to them.
     func testTheControllerGoesIntoTheChatAndBack() throws {
         let model = try model()

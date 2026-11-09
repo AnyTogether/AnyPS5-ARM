@@ -464,6 +464,9 @@ struct VoiceNoteView: View {
         .contentShape(Capsule())
         .onTapGesture { player.toggle(media.url) }
         .onDisappear { player.stop() }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(TChat.text(.voiceNote))
+        .accessibilityAddTraits(.isButton)
     }
 }
 
@@ -481,6 +484,7 @@ struct MediaViewer: View {
                 Group {
                     if media.kind == "clip", let url = media.url.flatMap(URL.init(string:)), !previewRender {
                         ClipPlayer(url: url).aspectRatio(media.aspect ?? 16 / 9, contentMode: .fit)
+                            .accessibilityLabel(TCloud.text(.clip))
                     } else {
                         RemoteImage(url: media.kind == "clip" ? media.still : media.url ?? media.thumb, contentMode: .fit)
                             .aspectRatio(media.aspect ?? 16 / 9, contentMode: .fit)

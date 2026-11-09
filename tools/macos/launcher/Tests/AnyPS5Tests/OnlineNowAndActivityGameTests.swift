@@ -39,6 +39,22 @@ final class OnlineNowAndActivityGameTests: XCTestCase {
         XCTAssertEqual(model.discover.hubName, game.name)
     }
 
+    /// A level_up item says the level reached, in both languages; one the server sent without a
+    /// level says the generic line, as on Windows and Linux.
+    func testALevelUpSaysTheLevelReached() throws {
+        let model = try LauncherFixture.model()
+        let saved = T.language
+        defer { T.language = saved }
+        let item = TogetherActivity(id: "a3", kind: .levelUp, createdAt: Date(), actor: Self.mira, level: TogetherLevelBadge(level: 42))
+        T.language = .english
+        XCTAssertEqual(model.activityText(item), "reached trophy level 42")
+        T.language = .turkish
+        XCTAssertEqual(model.activityText(item), "kupa seviyesi 42 oldu")
+        T.language = .english
+        let none = TogetherActivity(id: "a4", kind: .levelUp, createdAt: Date(), actor: Self.mira)
+        XCTAssertEqual(model.activityText(none), TS.text(.feedOther))
+    }
+
     func testAnItemWithoutAGameHasNoLink() throws {
         let model = try LauncherFixture.model()
         let item = TogetherActivity(id: "a2", kind: .milestone, createdAt: Date(), actor: Self.mira, milestone: .init(kind: "hours", value: 100))

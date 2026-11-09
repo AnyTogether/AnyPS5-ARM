@@ -201,6 +201,8 @@ extension AppModel {
             sharePlayEvent(event)
         case let type where type == "signal" || type.hasPrefix("call."):
             callEvent(event)
+        case let type where type.hasPrefix("post."):
+            capturesEvent(event)
         case "family.updated":
             // A parent changed the limits or gave extra time: read them again now.
             refreshFamily()

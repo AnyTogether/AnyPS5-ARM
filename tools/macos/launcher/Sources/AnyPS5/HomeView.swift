@@ -435,6 +435,7 @@ struct GameTile: View {
                     .foregroundStyle(.white)
                     .padding(size * 0.08)
                     .background(Circle().fill(Color.black.opacity(0.55)).padding(size * 0.035))
+                    .accessibilityLabel(T.text(state == .unreadable ? .unreadableDump : (state == .locked ? .locked : .failed)))
             }
         case .installing(let step, let fraction):
             VStack {

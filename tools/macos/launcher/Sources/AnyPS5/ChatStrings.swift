@@ -16,7 +16,7 @@ enum TChat {
         case react = "messagesReact", reactionLike, reactionLove, reactionLaugh, reactionWow, reactionSad, reactionFire, reactionGg, reactedBy = "chatReactedBy"
         case reply = "messagesReply", replyingTo = "messagesReplyingTo", earlierMessage = "messagesEarlier", edit = "messagesEdit", editing = "chatEditing", editLimit = "messagesEditLimit", unsend = "messagesUnsend", unsendConfirm = "messagesUnsendConfirm"
         case receiptSent, receiptDelivered, receiptRead, seenBy = "chatSeenBy", seenByEveryone = "receiptSeenByEveryone"
-        case sendPhoto = "messagesSendPhoto"
+        case sendPhoto = "messagesSendPhoto", voiceNote = "messagesVoice"
         case pin = "conversationPin", unpin = "conversationUnpin", pinned = "conversationPinned", pinFull = "chatPinFull", mute = "conversationMute", unmute = "conversationUnmute", muted = "conversationMuted"
         case readReceipts, readReceiptsHint, hintActions = "chatHintActions"
         // End-to-end encrypted direct messages (AnyTogether's docs/e2ee.md, its table of texts).

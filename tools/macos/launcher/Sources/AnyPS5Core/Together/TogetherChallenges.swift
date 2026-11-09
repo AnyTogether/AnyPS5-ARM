@@ -175,8 +175,9 @@ public struct TogetherChallenge: Decodable, Equatable, Sendable, Identifiable {
 
     // MARK: Time
 
-    /// Where the challenge stands in time, read from its window (fresher than `state`, which is
-    /// as the server answered).
+    /// Where the challenge stands, by the server's state (as on Windows and Linux and the
+    /// website), with the time left read from its window. A state this launcher does not know is
+    /// read from the window.
     public enum Clock: Equatable, Sendable {
         case startsIn(TimeInterval)
         case endsIn(TimeInterval)
@@ -187,10 +188,16 @@ public struct TogetherChallenge: Decodable, Equatable, Sendable, Identifiable {
     }
 
     public func clock(now: Date = Date()) -> Clock {
-        if state == .cancelled { return .cancelled }
-        if now < startsAt { return .startsIn(startsAt.timeIntervalSince(now)) }
-        if now < endsAt { return .endsIn(endsAt.timeIntervalSince(now)) }
-        return final ? .ended : .finishing
+        switch state {
+        case .cancelled: return .cancelled
+        case .upcoming: return .startsIn(startsAt.timeIntervalSince(now))
+        case .active: return .endsIn(endsAt.timeIntervalSince(now))
+        case .ended: return final ? .ended : .finishing
+        case .other:
+            if now < startsAt { return .startsIn(startsAt.timeIntervalSince(now)) }
+            if now < endsAt { return .endsIn(endsAt.timeIntervalSince(now)) }
+            return final ? .ended : .finishing
+        }
     }
 
     /// How much of the window has gone, 0 before the start to 1 at the end.

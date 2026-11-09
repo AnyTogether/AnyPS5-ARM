@@ -259,6 +259,30 @@ final class TogetherPostsTests: TogetherSignedInCase {
         XCTAssertNil(feed.index(of: "0003"))
     }
 
+    /// The socket's post events on the feed as held.
+    func testTheFeedFollowsTheServersEvents() throws {
+        func event(_ type: String, _ data: [String: Any]) throws -> TogetherSocket.Event {
+            TogetherSocket.Event(id: "e", type: type, json: try JSONSerialization.data(withJSONObject: data))
+        }
+        var feed = TogetherCaptures()
+        feed.load(try Self.decode(TogetherPostPage.self, ["items": [Self.post("0002"), Self.post("0001")], "next": NSNull()]))
+
+        XCTAssertTrue(feed.apply(try event("post.new", Self.post("0003"))))
+        XCTAssertEqual(feed.items.map(\.id), ["0003", "0002", "0001"], "a new post goes on top")
+        XCTAssertTrue(feed.apply(try event("post.new", Self.post("0003", extra: ["caption": "Edited"]))))
+        XCTAssertEqual(feed.items.count, 3, "the same post again takes its own place")
+
+        XCTAssertTrue(feed.apply(try event("post.counts", ["postId": "0002", "likes": 9, "comments": 7])))
+        XCTAssertEqual(feed.items[1].likes, 9)
+        XCTAssertEqual(feed.items[1].comments, 7)
+        XCTAssertFalse(feed.apply(try event("post.counts", ["postId": "nope", "likes": 1, "comments": 1])))
+
+        XCTAssertTrue(feed.apply(try event("post.removed", ["postId": "0002"])))
+        XCTAssertEqual(feed.items.map(\.id), ["0003", "0001"])
+        XCTAssertFalse(feed.apply(try event("post.removed", ["postId": "0002"])), "already gone")
+        XCTAssertFalse(feed.apply(try event("post.unknown", ["postId": "0001"])))
+    }
+
     func testTheCommentThread() throws {
         var thread = TogetherCommentThread(postId: "p1")
         thread.load(try Self.decode(TogetherCommentPage.self, ["items": [

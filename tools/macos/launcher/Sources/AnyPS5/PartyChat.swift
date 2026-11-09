@@ -116,6 +116,19 @@ extension AppModel {
         }
     }
 
+    /// Older messages above the ones shown, a page at a time: ↑ past the oldest one read.
+    func loadOlderPartyChat() {
+        guard persists, togetherUser != nil, let id = partyChat?.id, let before = partyChat?.startOlder() else { return }
+        let client = together
+        Task {
+            let page = try? await client.messages(in: id, before: before, limit: TogetherPartyChat.page)
+            guard partyChat?.id == id else { return }
+            withAnimation(Motion.focus) {
+                if let page { partyChat?.loadedOlder(page.messages, more: page.more) } else { partyChat?.olderFailed() }
+            }
+        }
+    }
+
     /// Read to the newest message, here and on the server.
     func readPartyChat() {
         guard let id = partyChat?.id, let seq = partyChat?.readToEnd(), persists else { return }
@@ -189,7 +202,7 @@ extension AppModel {
         }
         if let picked = messageActions.picked {
             switch command {
-            case .up: pickMessage(-1)
+            case .up: if !pickMessage(-1) { loadOlderPartyChat() }
             case .down: pickMessage(1)
             case .select, .options: openMessageMenu(picked)
             case .back, .left:
@@ -209,7 +222,7 @@ extension AppModel {
         case .select:
             if messageFocus < AppModel.quickReplies.count { sendMessage(AppModel.quickReplies[messageFocus]) } else if !retryNewestUnsent() { composing = true }
         case .up:
-            pickMessage(-1)
+            if !pickMessage(-1) { loadOlderPartyChat() }
         case .back:
             if messageActions.replyTo != nil || messageActions.editing != nil { cancelReplyOrEdit() } else { leavePartyChat() }
         default:
@@ -368,6 +381,8 @@ struct VoiceFaces: View {
                     .scaleEffect(speaking && !Motion.reduced ? 1.08 : 1)
                     .animation(Motion.focus, value: speaking)
                     .help(member.displayName)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(member.displayName)
             }
         }
     }

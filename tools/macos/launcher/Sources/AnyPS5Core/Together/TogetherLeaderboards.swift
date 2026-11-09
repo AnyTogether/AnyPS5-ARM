@@ -19,11 +19,24 @@ public struct TogetherLeaderboard: Decodable, Equatable, Sendable {
         public let user: TogetherPerson
         /// Points, seconds played, or completion percent.
         public let value: Int
+        /// Their trophy level, when the server says it.
+        public let level: TogetherLevelBadge?
 
-        public init(rank: Int, user: TogetherPerson, value: Int) {
+        public init(rank: Int, user: TogetherPerson, value: Int, level: TogetherLevelBadge? = nil) {
             self.rank = rank
             self.user = user
             self.value = value
+            self.level = level
+        }
+
+        enum CodingKeys: String, CodingKey { case rank, user, value, level }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            rank = try container.decode(Int.self, forKey: .rank)
+            user = try container.decode(TogetherPerson.self, forKey: .user)
+            value = try container.decode(Int.self, forKey: .value)
+            level = container.lenient(TogetherLevelBadge.self, .level)
         }
     }
 

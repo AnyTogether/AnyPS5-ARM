@@ -21,6 +21,7 @@ public struct TogetherActivity: Decodable, Equatable, Sendable, Identifiable {
         case trophy, platinum, friendship, milestone
         case firstPlay = "first_play"
         case longSession = "long_session"
+        case levelUp = "level_up"
         /// A kind this launcher does not know yet.
         case other
     }
@@ -118,17 +119,19 @@ public struct TogetherActivity: Decodable, Equatable, Sendable, Identifiable {
     public let seconds: Int?
     public let friend: TogetherPerson?
     public let milestone: Milestone?
+    /// level_up: the level reached.
+    public let level: TogetherLevelBadge?
     public var reactions: Reactions
 
     public var kind: Kind { Kind(rawValue: kindName) ?? .other }
 
     enum CodingKeys: String, CodingKey {
-        case id, createdAt, actor, game, highlight, trophies, trophyCount, seconds, friend, milestone, reactions
+        case id, createdAt, actor, game, highlight, trophies, trophyCount, seconds, friend, milestone, level, reactions
         case kindName = "kind"
     }
 
     public init(id: String, kind: Kind, createdAt: Date, actor: TogetherPerson, game: Game? = nil, highlight: String? = nil, trophies: [Trophy]? = nil,
-                trophyCount: Int? = nil, seconds: Int? = nil, friend: TogetherPerson? = nil, milestone: Milestone? = nil, reactions: Reactions = .init()) {
+                trophyCount: Int? = nil, seconds: Int? = nil, friend: TogetherPerson? = nil, milestone: Milestone? = nil, level: TogetherLevelBadge? = nil, reactions: Reactions = .init()) {
         self.id = id
         self.kindName = kind.rawValue
         self.createdAt = createdAt
@@ -140,6 +143,7 @@ public struct TogetherActivity: Decodable, Equatable, Sendable, Identifiable {
         self.seconds = seconds
         self.friend = friend
         self.milestone = milestone
+        self.level = level
         self.reactions = reactions
     }
 

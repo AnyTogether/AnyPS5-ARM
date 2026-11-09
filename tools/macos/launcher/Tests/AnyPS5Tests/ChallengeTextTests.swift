@@ -28,6 +28,22 @@ final class ChallengeTextTests: XCTestCase {
         XCTAssertEqual(TChal.format(.entrants, 4), "4 kişi katıldı")
     }
 
+    /// Open or closed is the server's word, not this Mac's clock.
+    func testAChallengeIsClosedByTheServersState() {
+        let past = Date().addingTimeInterval(-86400 * 2), future = Date().addingTimeInterval(86400 * 2)
+        func challenge(_ state: TogetherChallenge.State, startsAt: Date = past, endsAt: Date = future, final: Bool = false) -> TogetherChallenge {
+            TogetherChallenge(id: "c", title: "Sprint", game: .init(titleId: "PPSA01234", names: [:]), metric: .points, audience: .friends, startsAt: startsAt, endsAt: endsAt, state: state, final: final)
+        }
+        XCTAssertTrue(challenge(.active, endsAt: past).isOpen, "the window has passed on this clock, but the server still runs it")
+        XCTAssertTrue(challenge(.upcoming, startsAt: future).isOpen)
+        XCTAssertFalse(challenge(.ended, endsAt: future).isOpen, "ended by the server's word, whatever this clock says")
+        XCTAssertFalse(challenge(.cancelled).isOpen)
+        XCTAssertFalse(challenge(.other).isOpen)
+        XCTAssertTrue(challenge(.ended, endsAt: future, final: true).decided)
+        XCTAssertFalse(challenge(.ended).decided, "over, not final yet")
+        XCTAssertFalse(challenge(.active, endsAt: past, final: true).decided)
+    }
+
     /// Joining or leaving refused: the server's reason in words.
     func testRefusalsReadAsTheirReason() throws {
         T.texts = T.load([T.sourceFolder])

@@ -68,6 +68,24 @@ extension AppModel {
         }
     }
 
+    /// The feed follows the server's word: a new post from a friend, counts that changed, one
+    /// gone. The focus stays on the post it was on.
+    func capturesEvent(_ event: TogetherSocket.Event) {
+        guard captures.feed.loaded else { return }
+        let focused = focusedCapture?.id
+        withAnimation(Motion.overlay) {
+            guard captures.feed.apply(event) else { return }
+            if let focused, let index = captures.feed.index(of: focused) {
+                captures.index = index
+            } else {
+                // The focused post is gone: the one that takes its place.
+                captures.index = min(captures.index, max(0, captures.feed.items.count - 1))
+                captures.action = 0
+                captures.armedPost = nil
+            }
+        }
+    }
+
     func closeCaptures() {
         captures.task?.cancel()
         guard let back = captures.back else { return closeOverlay() }
@@ -643,6 +661,19 @@ struct PostCard: View {
         .animation(Motion.focus, value: focused)
         .animation(Motion.focus, value: post.likes)
         .contentShape(Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spokenLabel(kind))
+        .accessibilityAddTraits(.isButton)
+    }
+
+    /// A pill as a screen reader says it, with its count.
+    private func spokenLabel(_ kind: AppModel.CaptureAction) -> String {
+        switch kind {
+        case .like: return "\(TCap.text(post.liked ? .liked : .like)), \(post.likes)"
+        case .comments: return post.commentsOff ? TCap.text(.commentsOff) : "\(TCap.text(.comments)), \(post.comments)"
+        case .view: return TCap.text(.view)
+        case .delete: return TCap.text(armed ? .deleteAgain : .delete)
+        }
     }
 }
 
