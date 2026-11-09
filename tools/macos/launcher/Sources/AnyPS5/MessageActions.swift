@@ -584,6 +584,8 @@ struct MessageMenuSheet: View {
                         .contentShape(Circle())
                         .onTapGesture { model.perform(.reactions, in: menu, reaction: reaction) }
                         .help(TChat.name(reaction))
+                        .accessibilityLabel(TChat.name(reaction))
+                        .accessibilityAddTraits(.isButton)
                 }
             }
             Text(focused ? TChat.name(all[column]) : TChat.text(.react))
@@ -662,6 +664,8 @@ struct ConversationMarks: View {
             if labelled { Text(label).font(.display(13 * scale, .medium)) }
         }
         .help(label)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
     }
 }
 
@@ -689,6 +693,8 @@ struct ReplyBar: View {
                     .opacity(model.composing ? 0 : 1)
                 Image(systemName: "xmark.circle.fill").font(.system(size: 16 * scale)).foregroundStyle(.white.opacity(0.45))
                     .onTapGesture { model.cancelReplyOrEdit() }
+                    .accessibilityLabel(T.text(.cancel))
+                    .accessibilityAddTraits(.isButton)
             }
             .padding(.leading, 14 * scale).padding(.trailing, 10 * scale).padding(.vertical, 9 * scale)
             .background(
@@ -768,6 +774,9 @@ struct ReactionChips: View {
                 .contentShape(Capsule())
                 .onTapGesture { model.toggleReaction(reaction.reaction, on: message) }
                 .help(TChat.format(.reactedBy, TChat.name(reaction.reaction), names(reaction.userIds, me: me)))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(TChat.name(reaction.reaction))
+                .accessibilityAddTraits(.isButton)
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
         }

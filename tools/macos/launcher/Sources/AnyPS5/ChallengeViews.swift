@@ -329,16 +329,11 @@ extension AppModel {
 }
 
 extension TogetherChallenge {
-    /// Still to join or leave: not over, not called off.
-    var isOpen: Bool {
-        switch clock() {
-        case .startsIn, .endsIn: return true
-        case .finishing, .ended, .cancelled: return false
-        }
-    }
+    /// Still to join or leave, by the server's state: not over, not called off.
+    var isOpen: Bool { state == .upcoming || state == .active }
 
     /// The winner's side of things: over, and final.
-    var decided: Bool { clock() == .ended }
+    var decided: Bool { state == .ended && final }
 }
 
 // MARK: - The strip

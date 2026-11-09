@@ -13,7 +13,7 @@ enum TS {
     enum Key: String, CaseIterable {
         // Activity
         case feedTitle = "socialFeedTitle", feedSubtitle = "socialFeedSubtitle", feedRow = "socialFeedRow", feedRowDetail = "socialFeedRowDetail", feedEmpty = "socialFeedEmpty", feedFailed = "socialFeedFailed", feedLoading = "socialFeedLoading", feedMore = "socialFeedMore"
-        case feedTrophy = "socialFeedTrophy", feedTrophies = "socialFeedTrophies", feedPlatinum = "socialFeedPlatinum", feedFirstPlay = "socialFeedFirstPlay", feedLongSession = "socialFeedLongSession", feedFriendship = "socialFeedFriendship", feedOther = "socialFeedOther"
+        case feedTrophy = "socialFeedTrophy", feedTrophies = "socialFeedTrophies", feedPlatinum = "socialFeedPlatinum", feedFirstPlay = "socialFeedFirstPlay", feedLongSession = "socialFeedLongSession", feedFriendship = "socialFeedFriendship", feedOther = "socialFeedOther", feedLevelUp = "socialFeedLevelUp"
         case feedMilestoneTrophies = "socialFeedMilestoneTrophies", feedMilestonePlatinums = "socialFeedMilestonePlatinums", feedMilestoneGames = "socialFeedMilestoneGames", feedMilestoneHours = "socialFeedMilestoneHours"
         case feedAndMore = "socialFeedAndMore", feedRare = "socialFeedRare", hintReact = "socialHintReact", hintProfile = "socialHintProfile"
         case profileActivity = "socialProfileActivity", profileNoActivity = "socialProfileNoActivity"

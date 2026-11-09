@@ -172,11 +172,17 @@ final class TogetherChallengeTests: TogetherSignedInCase {
     func testWhatTheClockSays() throws {
         let challenge = try Self.decode(TogetherChallenge.self, Self.view())
         let start = challenge.startsAt, end = challenge.endsAt
-        XCTAssertEqual(challenge.clock(now: start.addingTimeInterval(-3 * 3600)), .startsIn(3 * 3600))
+        // The server's state decides; the window only says how long is left.
+        let upcoming = try Self.decode(TogetherChallenge.self, Self.view(state: "upcoming"))
+        XCTAssertEqual(upcoming.clock(now: start.addingTimeInterval(-3 * 3600)), .startsIn(3 * 3600))
         XCTAssertEqual(challenge.clock(now: end.addingTimeInterval(-2 * 86400)), .endsIn(2 * 86400))
-        XCTAssertEqual(challenge.clock(now: end.addingTimeInterval(60)), .finishing, "ended, results not final yet")
+        XCTAssertEqual(challenge.clock(now: end.addingTimeInterval(60)), .endsIn(-60), "still active by the server's word: this Mac's clock does not close it")
+        let ended = try Self.decode(TogetherChallenge.self, Self.view(state: "ended"))
+        XCTAssertEqual(ended.clock(now: start), .finishing, "ended by the server's word, results not final yet")
         let final = try Self.decode(TogetherChallenge.self, Self.view(state: "ended", extra: ["final": true]))
-        XCTAssertEqual(final.clock(now: end.addingTimeInterval(7200)), .ended)
+        XCTAssertEqual(final.clock(now: start), .ended)
+        let odd = try Self.decode(TogetherChallenge.self, Self.view(state: "paused"))
+        XCTAssertEqual(odd.clock(now: end.addingTimeInterval(-2 * 86400)), .endsIn(2 * 86400), "a state this launcher does not know is read from its window")
         let cancelled = try Self.decode(TogetherChallenge.self, Self.view(state: "cancelled"))
         XCTAssertEqual(cancelled.clock(now: start), .cancelled)
 

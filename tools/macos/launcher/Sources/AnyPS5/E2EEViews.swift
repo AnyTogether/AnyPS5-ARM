@@ -30,6 +30,9 @@ struct E2EELockPill: View {
         .contentShape(Capsule())
         .onTapGesture { model.openEncryptionSheet(conversation.id) }
         .help(TChat.text(lock == .off ? .e2eeOff : .e2eeOn) + (compared ? " · " + TChat.text(.e2eeCompared) : ""))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(TChat.text(lock == .off ? .e2eeOff : .e2eeOn))
+        .accessibilityAddTraits(.isButton)
         .animation(Motion.focus, value: compared)
         .animation(Motion.focus, value: lock)
     }

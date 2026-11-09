@@ -775,6 +775,9 @@ struct GroupComposer: View {
         .scaleEffect(focused ? 1.015 : 1)
         .animation(Motion.focus, value: focused)
         .animation(Motion.focus, value: picked)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(friend.displayName)
+        .accessibilityAddTraits(picked ? [.isButton, .isSelected] : [.isButton])
     }
 
     private func createButton(focused: Bool) -> some View {
@@ -792,6 +795,7 @@ struct GroupComposer: View {
         }
         .buttonStyle(.plain)
         .animation(Motion.focus, value: focused)
+        .accessibilityLabel(T.text(.messagesGroupCreate))
     }
 }
 

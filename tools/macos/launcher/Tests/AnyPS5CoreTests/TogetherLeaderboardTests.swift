@@ -42,6 +42,17 @@ final class TogetherLeaderboardTests: TogetherSignedInCase {
         XCTAssertEqual(lines[4], .entry(board.around[1], me: true))
     }
 
+    /// The level the server sends with each line; left out or unreadable, the row goes without a badge.
+    func testALinesLevel() throws {
+        var levelled = Self.entry(1, "f1", 50)
+        levelled["level"] = ["level": 310, "tier": "gold", "frame": 4]
+        var broken = Self.entry(2, "f2", 40)
+        broken["level"] = "gold"
+        let json = Self.board(entries: [levelled, broken, Self.entry(3, "f3", 30)], me: ["rank": 1, "value": 50, "listed": true])
+        let board = try JSONDecoder.together.decode(TogetherLeaderboard.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(board.entries.map(\.level), [TogetherLevelBadge(level: 310, tier: .gold, frame: 4), nil, nil])
+    }
+
     /// Not on the board (private, or nothing yet): a line says where they would be.
     func testNotListed() throws {
         let json = Self.board(scope: "global", entries: [Self.entry(1, "f1", 50)], me: ["rank": 3, "value": 20, "listed": false])

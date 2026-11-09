@@ -401,6 +401,7 @@ struct LeaderboardRow: View {
             VStack(alignment: .leading, spacing: 3 * scale) {
                 HStack(spacing: 8 * scale) {
                     Text(entry.user.displayName).font(.display(17 * scale, .semibold)).foregroundStyle(.white).lineLimit(1)
+                    if let level = entry.level { LevelBadgeView(badge: level, size: 22 * scale) }
                     if me {
                         Text(TS.text(.boardYou))
                             .font(.display(11 * scale, .bold))

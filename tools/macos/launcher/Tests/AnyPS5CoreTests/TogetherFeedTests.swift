@@ -51,6 +51,16 @@ final class TogetherFeedTests: TogetherSignedInCase {
         XCTAssertEqual(page.items[5].milestone, .init(kind: "hours", value: 100))
     }
 
+    /// A new trophy level: the item says the level reached (server's feed.ts, payload level).
+    func testALevelUpItem() throws {
+        let json = Self.item("0009", kind: "level_up", extra: ["game": NSNull(), "level": ["level": 142, "tier": "silver", "frame": 2]])
+        let item = try JSONDecoder.together.decode(TogetherActivity.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertEqual(item.kind, .levelUp)
+        XCTAssertEqual(item.level, TogetherLevelBadge(level: 142, tier: .silver, frame: 2))
+        let older = try JSONDecoder.together.decode(TogetherActivity.self, from: JSONSerialization.data(withJSONObject: Self.item("0008")))
+        XCTAssertNil(older.level, "only a level_up has one")
+    }
+
     func testOlderPagesAndSomeonesActivity() async throws {
         FakeTogether.handler = { _, _ in (200, ["items": [Self.item("0001")], "next": NSNull()]) }
         let older = try await client.feed(before: "0002")

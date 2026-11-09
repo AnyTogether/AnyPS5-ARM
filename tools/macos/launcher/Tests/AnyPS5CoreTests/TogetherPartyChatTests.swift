@@ -135,6 +135,23 @@ final class TogetherPartyChatTests: TogetherSignedInCase {
         XCTAssertEqual(chat.messages?.first { $0.seq == 4 }?.reactions.map(\.reaction), [.gg])
     }
 
+    /// Older pages above the newest 40: one at a time, stopping at the first message.
+    func testOlderPages() {
+        var chat = TogetherPartyChat(id: "pc1", partyId: "p1")
+        XCTAssertNil(chat.startOlder(), "nothing read yet")
+        chat.loaded([Self.chatMessage(50), Self.chatMessage(51)], more: true)
+        XCTAssertEqual(chat.startOlder(), 50, "before the oldest one read")
+        XCTAssertNil(chat.startOlder(), "one page at a time")
+        chat.olderFailed()
+        XCTAssertEqual(chat.startOlder(), 50, "a failed read can be tried again")
+        chat.loadedOlder([Self.chatMessage(48), Self.chatMessage(49)], more: true)
+        XCTAssertEqual(chat.messages?.map(\.seq), [48, 49, 50, 51])
+        XCTAssertEqual(chat.startOlder(), 48)
+        chat.loadedOlder([Self.chatMessage(47)], more: false)
+        XCTAssertEqual(chat.messages?.first?.seq, 47)
+        XCTAssertNil(chat.startOlder(), "the start of the chat")
+    }
+
     /// Shown beside the voice, it is read to its end; others' messages that came while it was not
     /// shown are unread until it is again.
     func testReadToTheEndWhileShown() {

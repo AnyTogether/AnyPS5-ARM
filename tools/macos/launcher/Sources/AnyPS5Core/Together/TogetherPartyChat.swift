@@ -16,6 +16,8 @@ public struct TogetherPartyChat: Equatable, Sendable {
     public private(set) var messages: [TogetherMessage]?
     /// Whether there are older messages than the first one here.
     public private(set) var more = false
+    /// An older page is being read.
+    public private(set) var loadingOlder = false
     /// The newest seq told to the server as read.
     public private(set) var readSeq = 0
     /// Others' messages that came while the chat was not on screen.
@@ -53,6 +55,25 @@ public struct TogetherPartyChat: Equatable, Sendable {
             return
         }
         messages = merged(kept, page)
+    }
+
+    /// The seq the next older page ends before; nil with nothing older, or while a page is being
+    /// read. Say `loadedOlder` or `olderFailed` after.
+    public mutating func startOlder() -> Int? {
+        guard more, !loadingOlder, let first = messages?.first?.seq else { return nil }
+        loadingOlder = true
+        return first
+    }
+
+    /// An older page, above what is here.
+    public mutating func loadedOlder(_ page: [TogetherMessage], more: Bool) {
+        loadingOlder = false
+        self.more = more
+        messages = merged(messages ?? [], page.filter { $0.conversationId == id })
+    }
+
+    public mutating func olderFailed() {
+        loadingOlder = false
     }
 
     /// A message made, edited or unsent (the socket's, or the answer to sending or editing). True

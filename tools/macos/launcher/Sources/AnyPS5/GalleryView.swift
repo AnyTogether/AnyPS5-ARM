@@ -112,6 +112,7 @@ struct Gallery: View {
         VStack(spacing: 18 * scale) {
             if Screenshots.isClip(shot) {
                 ClipPlayer(url: shot)
+                    .accessibilityLabel(TCloud.text(.clip))
                     .aspectRatio(16 / 10, contentMode: .fit)
                     .clipShape(RoundedRectangle(cornerRadius: 14 * scale))
                     .shadow(color: .black.opacity(0.5), radius: 30 * scale)

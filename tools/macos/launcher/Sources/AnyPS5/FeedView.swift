@@ -198,6 +198,9 @@ extension AppModel {
             case "hours": return TS.format(.feedMilestoneHours, value)
             default: return TS.format(.feedMilestoneTrophies, value)
             }
+        case .levelUp:
+            guard let level = item.level else { return TS.text(.feedOther) }
+            return TS.format(.feedLevelUp, level.level)
         case .other: return TS.text(.feedOther)
         }
     }
@@ -348,6 +351,12 @@ struct ActivityRow: View {
                     ProfileAvatar(url: item.friend?.avatar, name: item.friend?.displayName ?? "?", size: size, glow: false)
                 case .milestone:
                     symbol(milestoneSymbol, size: size, color: model.accent)
+                case .levelUp:
+                    if let level = item.level {
+                        LevelBadgeView(badge: level, size: size * 0.82)
+                    } else {
+                        symbol("sparkles", size: size, color: model.accent)
+                    }
                 default:
                     if let game = item.game {
                         gameIcon(game, size: size)
