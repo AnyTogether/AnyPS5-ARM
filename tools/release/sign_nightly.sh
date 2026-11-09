@@ -11,7 +11,7 @@
 # (v<next>-arm-nightly.<YYYYMMDD>.<n>) or an upstream nightly (upstream-nightly.<YYYYMMDD>.<upstream
 # commit>, upstream's main built unmodified by engine-nightly.yml), or, with
 # -R AnyTogether/AnyPS5-Desktop, a nightly of AnyPS5 Desktop (v<next>-nightly.<YYYYMMDD>.<n>, its
-# .github/workflows/nightly.yml).
+# .github/workflows/nightly.yml) or its ffmpeg build (ffmpeg-<version>, ffmpeg-release.yml there).
 set -eu
 repo="AnyTogether/AnyPS5-ARM"
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -40,7 +40,8 @@ case "$repo" in
         case "$tag" in
             *-arm-nightly.*) echo "sign_nightly: $tag is an AnyPS5-ARM nightly tag" >&2; exit 1 ;;
             v[0-9]*-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].*) ;;
-            *) echo "sign_nightly: $tag is not an AnyPS5 Desktop nightly tag (v<next>-nightly.<YYYYMMDD>.<n>)" >&2; exit 1 ;;
+            ffmpeg-[0-9]*) ;;
+            *) echo "sign_nightly: $tag is not an AnyPS5 Desktop nightly tag (v<next>-nightly.<YYYYMMDD>.<n>) or ffmpeg tag (ffmpeg-<version>)" >&2; exit 1 ;;
         esac ;;
     *) echo "sign_nightly: $repo is not a repository this script signs for" >&2; exit 1 ;;
 esac
