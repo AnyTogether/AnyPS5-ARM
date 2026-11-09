@@ -2,33 +2,47 @@
 # Signs a nightly that CI published unsigned (.github/workflows/engine-nightly.yml), on the
 # release Mac, where the key is (docs/dev/SIGNED_UPDATES.md):
 #
-#     tools/release/sign_nightly.sh [-k <private key>]... <tag>
+#     tools/release/sign_nightly.sh [-k <private key>]... [-R <repository>] <tag>
 #
-# It downloads every file of the pre-release <tag> from AnyTogether/AnyPS5-ARM, signs them with
-# sign.sh (-k is passed on), checks the result with verify.sh and uploads SHA256SUMS and
-# SHA256SUMS.sig to the release, replacing older ones. The launchers offer the nightly's engine
-# once these are there. <tag> is an AnyPS5-ARM nightly (v<next>-arm-nightly.<YYYYMMDD>.<n>) or an
-# upstream nightly (upstream-nightly.<YYYYMMDD>.<upstream commit>, upstream's main built
-# unmodified by engine-nightly.yml).
+# It downloads every file of the pre-release <tag> from the repository (default
+# AnyTogether/AnyPS5-ARM), signs them with sign.sh (-k is passed on), checks the result with
+# verify.sh and uploads SHA256SUMS and SHA256SUMS.sig to the release, replacing older ones. The
+# launchers offer the nightly once these are there. <tag> is an AnyPS5-ARM nightly
+# (v<next>-arm-nightly.<YYYYMMDD>.<n>) or an upstream nightly (upstream-nightly.<YYYYMMDD>.<upstream
+# commit>, upstream's main built unmodified by engine-nightly.yml), or, with
+# -R AnyTogether/AnyPS5-Desktop, a nightly of AnyPS5 Desktop (v<next>-nightly.<YYYYMMDD>.<n>, its
+# .github/workflows/nightly.yml).
 set -eu
 repo="AnyTogether/AnyPS5-ARM"
 here="$(cd "$(dirname "$0")" && pwd)"
 
-usage() { echo "usage: $0 [-k <private key>]... <tag>" >&2; exit 2; }
+usage() { echo "usage: $0 [-k <private key>]... [-R <repository>] <tag>" >&2; exit 2; }
 keys=""
-while getopts k: option; do
+while getopts k:R: option; do
     case "$option" in
         k) keys="$keys -k $OPTARG" ;;
+        R) repo="$OPTARG" ;;
         *) usage ;;
     esac
 done
 shift $((OPTIND - 1))
 [ $# -eq 1 ] || usage
 tag="$1"
-case "$tag" in
-    v*-arm-nightly.*) ;;
-    upstream-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].*) ;;
-    *) echo "sign_nightly: $tag is not a nightly tag (v<next>-arm-nightly.<YYYYMMDD>.<n> or upstream-nightly.<YYYYMMDD>.<commit>)" >&2; exit 1 ;;
+# Only pre-releases of these two are signed here.
+case "$repo" in
+    AnyTogether/AnyPS5-ARM)
+        case "$tag" in
+            v*-arm-nightly.*) ;;
+            upstream-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].*) ;;
+            *) echo "sign_nightly: $tag is not a nightly tag (v<next>-arm-nightly.<YYYYMMDD>.<n> or upstream-nightly.<YYYYMMDD>.<commit>)" >&2; exit 1 ;;
+        esac ;;
+    AnyTogether/AnyPS5-Desktop)
+        case "$tag" in
+            *-arm-nightly.*) echo "sign_nightly: $tag is an AnyPS5-ARM nightly tag" >&2; exit 1 ;;
+            v[0-9]*-nightly.[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9].*) ;;
+            *) echo "sign_nightly: $tag is not an AnyPS5 Desktop nightly tag (v<next>-nightly.<YYYYMMDD>.<n>)" >&2; exit 1 ;;
+        esac ;;
+    *) echo "sign_nightly: $repo is not a repository this script signs for" >&2; exit 1 ;;
 esac
 
 command -v gh >/dev/null || { echo "sign_nightly: gh is needed" >&2; exit 1; }
