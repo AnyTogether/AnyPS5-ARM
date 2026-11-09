@@ -645,7 +645,9 @@ extension AppModel {
             let title: T.Key
             let detail: T.Key
             switch flag {
-            case .traceImports: (title, detail) = (.relinkerTraceImports, .relinkerTraceImportsDetail)
+            case .traceImports:
+                title = .relinkerTraceImports
+                detail = .relinkerTraceImportsDetail
             }
             if let engine, !engine.supports(flag) {
                 return PanelRow(id: "relinker-" + flag.rawValue, title: T.text(title), detail: T.text(.relinkerFlagUnavailableDetail), symbol: "ladybug", kind: .info(T.text(.relinkerFlagUnavailable)))
