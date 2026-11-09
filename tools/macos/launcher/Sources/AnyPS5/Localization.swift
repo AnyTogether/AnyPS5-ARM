@@ -159,7 +159,7 @@ enum T {
         case messagesTitle, messagesNone, messagesStart, messagesSayHello, messagesYou, messagesDeleted, messagesWrite, messagesFrom, messagesPick, messagesEmptyThread, messagesFailed, messagesEdited, messagesSend, quickHello, quickOnMyWay, quickJoinMe, quickOneSec
         case partyTitle, partyStart, partyStartDetail, partyOpen, partyOpenDetail, partyJoinOf, partySize, partyDecline, partyNone, partyMembers, partyLeader, partyInVoice, partyInviteFriends, partyInvite, partyInvited, partyLeave, partyInvites, partyInvitedYou, partyJoined, partyLeft, partyKicked, partyEnded, partyFull, friendsInParty
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
-        case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
+        case gameJoinable, gameJoin, gameInvitedDetail, gameDecline, gameInviteTitle, gamePlayers, gamePlayersOne, gameInvited, gameInvitedYou, gameNotHere, gameUnlockFirst, gameVersionMismatch, gameEngineMismatch, gameSessionFull, gameCloseFirst, sessionEnded, gameJoined, togetherFriendsJoin, togetherFriendsJoinDetail
         case voiceJoin, voiceJoinDetail, voiceInCall, voiceMic, voicePushToTalk, voicePushToTalkOn, voicePushToTalkOff, voiceTalkKey, voiceTalkKeyDetail, voiceTalkKeySet, voiceLeave, voiceNoMic, voiceJoined
         case voiceMovedPhone, voiceMovedAway, voiceTakeBack, voiceOnPhone, voiceOnOtherDevice
         case togetherLinkBlocked

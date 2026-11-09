@@ -470,7 +470,7 @@ extension AppModel {
         let local = games.first { $0.titleID == titleId }
         var now: [PanelRow] = []
         if let hub = discover.hub {
-            now.append(PanelRow(id: "hub-count", title: FP.format(.playingNow, hub.playing.total), detail: FP.format(.players, hub.players), symbol: "gamecontroller.fill", kind: .info("")))
+            now.append(PanelRow(id: "hub-count", title: FP.format(.playingNow, hub.playing.total), detail: FP.format(hub.players == 1 ? .playersOne : .players, hub.players), symbol: "gamecontroller.fill", kind: .info("")))
             for player in hub.playing.people {
                 let minutes = player.since.map { max(1, Int(Date().timeIntervalSince($0) / 60)) }
                 now.append(PanelRow(id: "hub-playing-\(player.user.userId)", title: player.user.displayName, detail: "@\(player.user.handle)" + (minutes.map { " · " + FP.format(.forMinutes, $0) } ?? ""),
