@@ -840,6 +840,8 @@
   "reactionLaugh": "Haha",
   "reactionWow": "Wow",
   "reactionSad": "Sad",
+  "reactionClap": "Applause",
+  "onboardingStep": "Step %d of %d",
   "reactionFire": "Fire",
   "reactionGg": "GG",
   "chatReactedBy": "%1$@: %2$@",

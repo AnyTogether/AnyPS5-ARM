@@ -236,12 +236,20 @@ struct LeaderboardView: View {
                             model.social.boardKind = kind
                             model.loadLeaderboard()
                         }
+                        .spokenButton(Self.title(kind), selected: social.boardKind == kind) {
+                            model.social.boardKind = kind
+                            model.loadLeaderboard()
+                        }
                 }
                 Rectangle().fill(Color.white.opacity(0.15)).frame(width: 1, height: 26 * scale).padding(.horizontal, 8 * scale)
             }
             ForEach(TogetherBoardScope.allCases, id: \.self) { scope in
                 pill(TS.text(scope == .friends ? .scopeFriends : .scopeGlobal), symbol: scope == .friends ? "person.2.fill" : "globe", on: social.boardScope == scope, quiet: true)
                     .onTapGesture {
+                        model.social.boardScope = scope
+                        model.loadLeaderboard()
+                    }
+                    .spokenButton(TS.text(scope == .friends ? .scopeFriends : .scopeGlobal), selected: social.boardScope == scope) {
                         model.social.boardScope = scope
                         model.loadLeaderboard()
                     }
@@ -294,6 +302,11 @@ struct LeaderboardView: View {
                         lineView(line, board: board, focused: !social.boardOnChallenges && index == social.boardIndex)
                             .id("line-\(index)")
                             .onTapGesture {
+                                model.social.boardOnChallenges = false
+                                model.social.boardIndex = index
+                            }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction(.default) {
                                 model.social.boardOnChallenges = false
                                 model.social.boardIndex = index
                             }
@@ -424,6 +437,7 @@ struct LeaderboardRow: View {
         .background(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(me ? model.accent.opacity(focused ? 0.32 : 0.2) : Color.white.opacity(focused ? 0.13 : 0.05)))
         .focusRing(focused, radius: 16 * scale, width: 2)
         .animation(Motion.focus, value: focused)
+        .spokenStatus([String(entry.rank), entry.user.displayName, me ? TS.text(.boardYou) : nil, AppModel.boardValue(entry.value, board: board)].compactMap { $0 }.joined(separator: ", "))
     }
 
     private var medal: Color? {
@@ -459,5 +473,6 @@ struct LeaderboardChip: View {
         .background(Capsule().fill(Color.white.opacity(0.08)))
         .overlay(Capsule().strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         .onTapGesture { model.openLeaderboard(game) }
+        .spokenButton(TS.text(.boardTitle)) { model.openLeaderboard(game) }
     }
 }

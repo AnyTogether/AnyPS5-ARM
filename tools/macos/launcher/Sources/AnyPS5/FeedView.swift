@@ -228,6 +228,8 @@ struct FeedView: View {
                         ActivityRow(item: item, focused: focused, reactionFocus: focused ? social.feedReaction : nil)
                             .id(item.id)
                             .onTapGesture { model.social.feedIndex = index }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction(.default) { model.social.feedIndex = index }
                     }
                     if social.feed.next != nil {
                         Text(TS.text(.feedMore)).font(.display(14 * scale, .medium)).foregroundStyle(.white.opacity(0.4)).padding(.vertical, 12 * scale)
@@ -410,6 +412,16 @@ struct ActivityRow: View {
 
     // MARK: Trophies and reactions
 
+    /// Read by a screen reader, the name of a reaction shown as an emoji.
+    private func reactionName(_ reaction: TogetherReaction) -> String {
+        switch reaction {
+        case .fire: return TChat.text(.reactionFire)
+        case .clap: return TChat.text(.reactionClap)
+        case .wow: return TChat.text(.reactionWow)
+        case .heart: return TChat.text(.reactionLove)
+        }
+    }
+
     private func trophyLine(_ trophies: [TogetherActivity.Trophy]) -> some View {
         let shown = Array(trophies.prefix(3))
         let rest = max(0, (item.trophyCount ?? trophies.count) - shown.count)
@@ -428,6 +440,8 @@ struct ActivityRow: View {
                 .padding(.horizontal, 10 * scale)
                 .padding(.vertical, 5 * scale)
                 .background(Capsule().fill(grade.color.opacity(0.12)))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel([grade.title, trophy.name(in: T.language.rawValue) ?? T.text(.trophyHidden), trophy.rarityLabel != "common" ? trophy.rarity.map(ProfileTrophyRow.percent) : nil].compactMap { $0 }.joined(separator: ", "))
             }
             if rest > 0 {
                 Text(TS.format(.feedAndMore, rest)).font(.display(13 * scale, .medium)).foregroundStyle(.white.opacity(0.5))
@@ -455,6 +469,9 @@ struct ActivityRow: View {
                     .scaleEffect(reactionFocus == index ? 1.08 : 1)
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
                     .onTapGesture { model.react(to: item, with: reaction) }
+                    .spokenButton(count > 0 ? "\(reactionName(reaction)), \(count)" : reactionName(reaction), selected: mine) {
+                        model.react(to: item, with: reaction)
+                    }
                 }
             }
         }
@@ -479,6 +496,8 @@ struct ProfileActivityColumn: View {
                         ActivityRow(item: item, focused: model.profileColumn == 2 && model.profileIndex == index, compact: true)
                             .id(item.id)
                             .onTapGesture { model.profileColumn = 2; model.profileIndex = index }
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityAction(.default) { model.profileColumn = 2; model.profileIndex = index }
                     }
                 }
             } else if model.social.profileActivityFailed {

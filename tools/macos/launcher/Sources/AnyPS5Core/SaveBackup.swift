@@ -100,9 +100,10 @@ public enum SaveBackup {
     }
 }
 
-/// The F12 screenshots the engine writes, named <title ID>-<yyyyMMdd-HHmmss>[-n].png, the
-/// launcher's clips beside them, named the same way but .mp4, and the pictures of trophies in the
-/// game's own folder (<game name>/<title ID>-trophy<id>-<date>-<time>.png).
+/// The F12 screenshots the engine writes, named <title ID>-<yyyyMMdd-HHmmss>[-n].png, and in the
+/// game's own folder the launcher's: its clips (<game name>/<title ID>-clip-<date>-<time>.mp4),
+/// screenshots (<game name>/<title ID>-<date>-<time>.png) and the pictures of trophies
+/// (<game name>/<title ID>-trophy<id>-<date>-<time>.png).
 public enum Screenshots {
     /// The game's screenshots and clips, newest first. The time in a name goes first, whichever
     /// words come before it (a trophy's picture has "trophy…" there), then the name.
@@ -150,6 +151,18 @@ public enum Screenshots {
     public static func trophyFile(in pictures: URL, gameName: String, titleID: String, trophyID: String, stamp: String) -> URL {
         let id = String(trophyID.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "_" })
         return gameFolder(in: pictures, gameName: gameName, titleID: titleID).appendingPathComponent("\(titleID)-trophy\(id)-\(stamp).png")
+    }
+
+    /// Where a clip saved at `stamp` goes: the game's own folder among the captures, beside its
+    /// pictures, as on Windows and Linux.
+    public static func clipFile(in pictures: URL, gameName: String, titleID: String, stamp: String) -> URL {
+        gameFolder(in: pictures, gameName: gameName, titleID: titleID).appendingPathComponent("\(titleID)-clip-\(stamp).mp4")
+    }
+
+    /// Where a screenshot the launcher takes (Create held) at `stamp` goes: the game's own folder
+    /// too, as on Windows and Linux. The engine's F12 ones stay loose among the captures.
+    public static func shotFile(in pictures: URL, gameName: String, titleID: String, stamp: String) -> URL {
+        gameFolder(in: pictures, gameName: gameName, titleID: titleID).appendingPathComponent("\(titleID)-\(stamp).png")
     }
 
     /// Each picture taken when a trophy was earned, by trophy id: the newest one.

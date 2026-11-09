@@ -22,6 +22,23 @@ final class ScreenshotsTests: XCTestCase {
         XCTAssertEqual(file.deletingLastPathComponent().lastPathComponent, "Stray", "in the game's own folder, as on Windows and Linux")
     }
 
+    func testClipsAndLauncherScreenshotsGoInTheGamesOwnFolderAsOnWindowsAndLinux() throws {
+        let clip = Screenshots.clipFile(in: folder, gameName: "Ratchet: Rift/Apart", titleID: "PPSA01234", stamp: "20261110-120000")
+        XCTAssertEqual(clip.lastPathComponent, "PPSA01234-clip-20261110-120000.mp4")
+        XCTAssertEqual(clip.deletingLastPathComponent().lastPathComponent, "Ratchet Rift Apart")
+        let shot = Screenshots.shotFile(in: folder, gameName: "Ratchet: Rift/Apart", titleID: "PPSA01234", stamp: "20261110-120001")
+        XCTAssertEqual(shot.lastPathComponent, "PPSA01234-20261110-120001.png")
+        XCTAssertEqual(shot.deletingLastPathComponent(), clip.deletingLastPathComponent())
+        try FileManager.default.createDirectory(at: clip.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([1]).write(to: clip)
+        try Data([1]).write(to: shot)
+        // A clip from before the move, loose among the captures, is still listed.
+        try touch("PPSA01234-20261101-120000.mp4")
+        let listed = Screenshots.list(titleID: "PPSA01234", gameName: "Ratchet: Rift/Apart", in: folder)
+        XCTAssertEqual(listed.map(\.lastPathComponent), ["PPSA01234-20261110-120001.png", "PPSA01234-clip-20261110-120000.mp4", "PPSA01234-20261101-120000.mp4"])
+        XCTAssertEqual(listed.map(Screenshots.isClip), [false, true, true])
+    }
+
     func testTheGamesFolderIsFoundByTheGalleryAndOlderPicturesBesideItToo() throws {
         let file = Screenshots.trophyFile(in: folder, gameName: "Stray", titleID: "PPSA01234", trophyID: "0/13", stamp: "20261109-120000")
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
