@@ -383,6 +383,7 @@ struct ProfileView: View {
                     ProfileGameRow(game: game, icon: model.localIcon(game.titleId), focused: model.profileColumn == 0 && model.profileIndex == index)
                         .id(game.id)
                         .onTapGesture { model.profileColumn = 0; model.profileIndex = index }
+                        .spokenRow { model.profileColumn = 0; model.profileIndex = index }
                 }
             case .private:
                 ProfileNotice(symbol: "lock.fill", text: privateText(page.profile))
@@ -403,6 +404,7 @@ struct ProfileView: View {
                     ProfileTrophyRow(trophy: trophy, focused: model.profileColumn == 1 && model.profileIndex == index)
                         .id(trophy.id)
                         .onTapGesture { model.profileColumn = 1; model.profileIndex = index }
+                        .spokenRow { model.profileColumn = 1; model.profileIndex = index }
                 }
             case .private:
                 ProfileNotice(symbol: "lock.fill", text: privateText(page.profile))

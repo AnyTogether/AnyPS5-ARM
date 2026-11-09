@@ -104,6 +104,7 @@ struct CompareView: View {
                             .onTapGesture {
                                 if model.social.compareIndex == index { model.openCompareGame(game.titleId) } else { model.social.compareIndex = index }
                             }
+                            .spokenRow { model.social.compareIndex = index; model.openCompareGame(game.titleId) }
                     }
                 }
             }
@@ -160,6 +161,7 @@ struct CompareView: View {
                             CompareTrophyRow(trophy: trophy, focused: index == social.compareTrophyIndex)
                                 .id("t\(trophy.id)")
                                 .onTapGesture { model.social.compareTrophyIndex = index }
+                                .spokenRow { model.social.compareTrophyIndex = index }
                         }
                     }
                 }

@@ -400,3 +400,27 @@ extension Int64 {
         self < 0 ? "…" : ByteCountFormatter.string(fromByteCount: self, countStyle: .file)
     }
 }
+
+/// Screen reader words for views the pad and the keys drive, as on Windows and Linux.
+extension View {
+    /// A control tapped by the pointer, read as one button with `label`; `action` is what the
+    /// tap does, so VoiceOver can press it too.
+    func spokenButton(_ label: String, selected: Bool = false, action: @escaping () -> Void) -> some View {
+        accessibilityElement(children: .ignore)
+            .accessibilityLabel(label)
+            .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
+            .accessibilityAction(.default, action)
+    }
+
+    /// A row the pointer selects: its text read as one element, a button VoiceOver can press.
+    func spokenRow(action: @escaping () -> Void) -> some View {
+        accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, action)
+    }
+
+    /// Status read as one element with `label`.
+    func spokenStatus(_ label: String) -> some View {
+        accessibilityElement(children: .ignore).accessibilityLabel(label)
+    }
+}
