@@ -66,12 +66,21 @@ To add files to a release that is already signed, sign all of them again and rep
 The Windows and Linux engine archives AnyPS5 Desktop downloads are added this way; how they are
 built is in [WINDOWS_LINUX_ENGINE.md](WINDOWS_LINUX_ENGINE.md).
 
-### Nightly Windows and Linux engines from CI
+### Nightly builds from CI
 
-`.github/workflows/engine-nightly.yml` builds the Windows and Linux engine from main once a day
-when `core/`, `tools/macos/` or `mobile/` changed. It publishes them as a pre-release named like the Mac's nightlies
-(`v<next>-arm-nightly.<YYYYMMDD>.<n>`). CI has no key, so that pre-release comes out unsigned.
-The launchers refuse it until it is signed.
+`.github/workflows/engine-nightly.yml` builds the Windows and Linux engine, `AnyPS5.app`
+(`AnyPS5-macOS.zip`, signed ad hoc as the releases are) and the macOS engine toolkit
+(`AnyPS5-toolkit-macos-<version>.zip`) from main once a day when `core/`, `tools/macos/` or
+`mobile/` changed. The app and the toolkit carry the nightly's version, which the job checks
+against `git describe`. It publishes them as one pre-release, once every build has ended
+(`v<next>-arm-nightly.<YYYYMMDD>.<n>`). CI has no key, so that pre-release comes out unsigned. The
+launchers refuse it until it is signed.
+
+When the macOS job fails, the pre-release goes out with the Windows and Linux engine alone, and
+re-running the failed job adds the Mac files. The next signing run then signs it over every file.
+The phone app is not built by CI: the APK would carry the runner's debug key, not the one the
+release Mac signs it with, and Android refuses it as an update. A nightly's phone app is the last
+release's.
 
 To sign it, run this on the release Mac:
 
@@ -92,45 +101,37 @@ The script downloads the pre-release's files and signs them with `sign.sh`. It c
 `verify.sh` and uploads `SHA256SUMS` and `SHA256SUMS.sig` to the release. `-k` is passed on to
 `sign.sh` during a key rotation.
 
-### Nightly macOS builds on the release Mac
+### Signing the nightlies on the release Mac
 
-`tools/release/nightly_mac.sh` adds the Mac files to CI's nightly and signs it, so the Mac
-launcher's Nightly channel and engine picker offer it (they need `AnyPS5-macOS.zip` and
-`AnyPS5-toolkit-macos-<version>.zip` on the release, and a good signature):
+`tools/release/nightly_mac.sh` signs what CI published, so the launchers offer it. It builds
+nothing:
 
 ```sh
-tools/release/nightly_mac.sh --dry-run    # what it would do: tag, commit, builds, uploads
-tools/release/nightly_mac.sh [<tag>]      # default: the newest nightly of today or yesterday (UTC)
+tools/release/nightly_mac.sh --dry-run    # what it would sign
+tools/release/nightly_mac.sh [<tag>]      # default: today's and yesterday's nightlies (UTC)
 tools/release/nightly_mac.sh --install    # the daily launchd agent
 ```
 
-It checks out the nightly's commit, detached, in a worktree of its own (`AnyPS5-nightly` beside the
-main checkout; the next nightly reuses it and its `build-mac`, so builds are incremental). There it
-builds the engine (`ninja all libs`), `AnyPS5.app` with `build_launcher_app.sh` (zipped as
-`AnyPS5-macOS.zip`) and the engine toolkit with `package_toolkit.sh`, as releases are built. The
-app is signed as `build_launcher_app.sh` signs it: with `ANYPS5_SIGN_IDENTITY` (and
-`ANYPS5_NOTARY_PROFILE` for notarization) when they are set, ad hoc otherwise. Unlocked games are
-never signed. The phone app (`AnyPS5-Remote.apk`, unsigned `AnyPS5-Remote.ipa`) is built only when
-`mobile/` changed since the last release, and a failed phone build leaves it out. The files are
-uploaded to the pre-release, then `sign_nightly.sh` signs every file of it and
-`verify.sh --signature-only` checks the result. Run again, it only signs again when `SHA256SUMS`
-does not list every file.
+It signs the newest AnyPS5-ARM nightly of today or yesterday, and the upstream nightlies and
+AnyPS5 Desktop nightlies of today or yesterday, unless `SHA256SUMS` already lists every file. For
+each it runs `sign_nightly.sh` and then `verify.sh --signature-only`. An AnyPS5-ARM nightly
+without the Mac files is signed as it is, for Windows and Linux. If the files come later, the next
+run signs it again.
+
+The signing scripts come from origin/main of a small clone of its own in
+`~/Library/Application Support/AnyPS5/nightly-mac/repo` (`tools/release` only). It needs no
+checkout: launchd agents are refused access to `~/Desktop`, so nothing it uses may live there.
 
 It does nothing, and tries again the next day, when less than 6 GB of disk is free or a game is
-running. A game started during the build holds back the upload and the signing for up to 4 hours.
-With no nightly of today or yesterday it exits quietly.
-Before that, it signs the upstream nightlies and AnyPS5 Desktop nightlies of today or yesterday
-that are not signed yet, with `sign_nightly.sh` and `verify.sh` as they are on origin/main.
-Nothing is built for them.
+running. With no nightly of today or yesterday it exits quietly.
 
 `--install` copies the script to `~/Library/Application Support/AnyPS5/nightly-mac/` and loads the
 launchd agent `net.anytogether.anyps5.nightly-mac`
 (`~/Library/LaunchAgents/net.anytogether.anyps5.nightly-mac.plist`). It runs daily at 04:45 UTC
-under `taskpolicy -b` and logs to `~/Library/Logs/AnyPS5/nightly-mac.log`; each build's full
-output is in `nightly-mac-build.log` beside it. launchd counts local time, so the hour is converted
-when installing; run `--install` again after a summer-time change. The installed copy is replaced
-by each nightly's own `nightly_mac.sh`, so it follows main. Check the agent with
-`launchctl print gui/$(id -u)/net.anytogether.anyps5.nightly-mac`.
+under `taskpolicy -b` and logs to `~/Library/Logs/AnyPS5/nightly-mac.log`. launchd counts local
+time, so the hour is converted when installing; run `--install` again after a summer-time change.
+Each scheduled run replaces the installed copy with origin/main's `nightly_mac.sh`, so it follows
+main. Check the agent with `launchctl print gui/$(id -u)/net.anytogether.anyps5.nightly-mac`.
 
 CI's scheduled runs have started hours after their 02:23 UTC cron, so the 04:45 run usually
 finds the previous day's nightly; that is why it also takes yesterday's.

@@ -1,7 +1,7 @@
 name: macOS engine
 
 # Builds the engine and the patched libraries on a GitHub macOS arm64 runner, configured as
-# tools/release/nightly_mac.sh does (Release, x86-64 under Rosetta, BUILD_TESTING=ON), for checking a
+# engine-nightly.yml's macos job does (Release, x86-64 under Rosetta, BUILD_TESTING=ON), for checking a
 # branch's macOS build without a Mac: gh workflow run macos-engine.yml --ref <branch>.
 # keep_going (on by default) builds past failed targets (ninja -k 0), so one run lists every error.
 on:

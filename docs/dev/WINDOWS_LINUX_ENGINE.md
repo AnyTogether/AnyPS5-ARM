@@ -36,13 +36,13 @@ release is signed again on the release Mac.
 Nightlies of main get them from the **Engine nightly** workflow
 (`.github/workflows/engine-nightly.yml`). It runs once a day and builds only when `core/`,
 `tools/macos/` or `mobile/` changed since the last nightly that has these archives (or since the
-last release). The release Mac adds the macOS app and engine to that pre-release afterwards
-(`tools/release/nightly_mac.sh`, see [SIGNED_UPDATES.md](SIGNED_UPDATES.md)). It calls the Engine
-toolkits workflow with the nightly's tag, so `relinker --version` names the nightly. Then it
-publishes an unsigned pre-release, `v<next>-arm-nightly.<YYYYMMDD>.<n>`, with
-`AnyPS5-toolkit-windows-<commit>.zip`, `AnyPS5-toolkit-linux-<commit>.zip` and
-`AnyPS5-toolkit-linux-<commit>.tar.gz`. Sign it on the release Mac with
-`tools/release/sign_nightly.sh <tag>` (see [SIGNED_UPDATES.md](SIGNED_UPDATES.md)). A run by hand
+last release). It calls the Engine toolkits workflow with the nightly's tag, so
+`relinker --version` names the nightly, and builds the macOS app and engine on a GitHub Mac (see
+[SIGNED_UPDATES.md](SIGNED_UPDATES.md)). Then it publishes an unsigned pre-release,
+`v<next>-arm-nightly.<YYYYMMDD>.<n>`, with `AnyPS5-toolkit-windows-<commit>.zip`,
+`AnyPS5-toolkit-linux-<commit>.zip`, `AnyPS5-toolkit-linux-<commit>.tar.gz`, `AnyPS5-macOS.zip` and
+`AnyPS5-toolkit-macos-<version>.zip`. The release Mac signs it (`tools/release/nightly_mac.sh`, or
+`tools/release/sign_nightly.sh <tag>` by hand, see [SIGNED_UPDATES.md](SIGNED_UPDATES.md)). A run by hand
 can force a build (`gh workflow run engine-nightly.yml -f force=true -R AnyTogether/AnyPS5-ARM`) or
 build without publishing (`-f dry_run=true`).
 
