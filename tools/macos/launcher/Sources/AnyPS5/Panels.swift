@@ -1250,17 +1250,18 @@ struct RowSpeech: ViewModifier {
     let action: () -> Void
 
     func body(content: Content) -> some View {
-        let label = [row.title, row.detail].compactMap { $0 }.joined(separator: ", ")
+        // The title is the row's name, the detail its hint, as on Windows and Linux.
+        let hint = row.detail ?? ""
         switch row.kind {
         case .action:
-            content.accessibilityElement(children: .ignore).accessibilityLabel(label)
+            content.accessibilityElement(children: .ignore).accessibilityLabel(row.title).accessibilityHint(hint)
                 .accessibilityAddTraits(.isButton).accessibilityAction(.default, action)
         case .toggle(let on, _):
-            content.accessibilityElement(children: .ignore).accessibilityLabel(label)
+            content.accessibilityElement(children: .ignore).accessibilityLabel(row.title).accessibilityHint(hint)
                 .accessibilityValue(T.text(on ? .on : .off))
                 .accessibilityAddTraits(.isButton).accessibilityAction(.default, action)
         case .info:
-            content.accessibilityElement(children: .ignore).accessibilityLabel(label)
+            content.accessibilityElement(children: .ignore).accessibilityLabel(row.title).accessibilityHint(hint)
         default:
             content
         }
