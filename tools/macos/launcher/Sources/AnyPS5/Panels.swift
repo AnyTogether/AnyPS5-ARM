@@ -28,6 +28,8 @@ struct PanelRow: Identifiable {
     let kind: Kind
     /// Someone on AnyTogether: their avatar stands in for the symbol.
     var person: PanelPerson?
+    /// A picture (a game's icon) that stands in for the symbol.
+    var picture: Data?
     /// The detail is advice to read whole (the controller troubleshooter): no line limit.
     var wraps = false
     /// What △ does on this row, with the hint saying so (a Hub theme: Wear on my profile).
@@ -647,6 +649,8 @@ extension AppModel {
         }
         rows.append(PanelRow(id: "addFolder", title: T.text(.addFolder), detail: T.text(.addFolderDetail), symbol: "folder.badge.plus",
                              kind: .action(destructive: false) { [weak self] in self?.pickGamesFolder() }))
+        rows.append(PanelRow(id: "addGameFile", title: TFiles.text(.addGameFile), detail: TFiles.text(.addGameFileDetail), symbol: "doc.badge.plus",
+                             kind: .action(destructive: false) { [weak self] in self?.addGameFile() }))
         return rows
     }
 
@@ -1249,7 +1253,10 @@ struct RowView: View {
     var body: some View {
         let foreground: Color = focused ? .black : .white
         HStack(spacing: 14 * scale) {
-            if let person = row.person {
+            if let picture = row.picture, let image = NSImage(data: picture) {
+                Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
+                    .frame(width: 44 * scale, height: 44 * scale).clipShape(RoundedRectangle(cornerRadius: 8 * scale, style: .continuous))
+            } else if let person = row.person {
                 ProfileAvatar(url: person.avatar, name: person.name, size: 30 * scale, glow: false, picture: person.picture)
                     .overlay(Circle().strokeBorder(model.accent, lineWidth: 2.5 * scale).padding(-3 * scale).opacity(person.speaking ? 1 : 0))
                     .animation(.easeOut(duration: 0.15), value: person.speaking)

@@ -1,6 +1,7 @@
 import AnyPS5Core
 import AppKit
 import Foundation
+import UniformTypeIdentifiers
 
 /// The texts of the files panel: a zip in a games folder to unpack, Game Settings › Add Update.
 /// The same keys and English as AnyLauncher Port's, so its translations fit.
@@ -16,6 +17,8 @@ enum TFiles {
         case addUpdate, addUpdateDetail, addUpdateChoose, addUpdateOtherGame, addUpdateNotNewer, addUpdateHaveNewer, addUpdateHaveOlder, addUpdateNotADump
         case addUpdateTitle, addUpdateVersion, addUpdateAbout, addUpdateGo, addUpdateFailed, addUpdateMoved, addUpdateCopied
         case unpackTitle, unpackUpdateTitle, unpackAbout, unpackUpdateAbout, unpackUnsafe, unpackGo, unpackDone, unpackUpdateDone, unpackFailed
+        case unpackFileTitle, unpackAboutFolder, unpackFileUnsafe, unpackFileDone, ffpfscCompressed, ffpfscUnsupported, ffpfscDamaged
+        case addGameFile, addGameFileDetail, addGameFileChoose, addGameFileNoFolder, addGameFileThere, addGameFileHaveNewer, addGameFileNoGame
     }
 }
 
@@ -93,7 +96,8 @@ extension AppModel {
                 }
                 var plan = try? GameArchives.plan(archive.url)
                 // No list of files: still being copied, or not a zip. Looked into again in a while.
-                if plan?.files == 0 { plan = nil }
+                // A .ffpfsc that says why it will not unpack has its answer already.
+                if plan?.files == 0, plan?.problem == nil { plan = nil }
                 if plan == nil { unread = true }
                 plans[archive.url.path] = (archive.size, Date(), plan)
             }
@@ -107,7 +111,7 @@ extension AppModel {
         work.looking = false
         work.plans = plans
         work.waiting = found.compactMap { archive in
-            guard let plan = plans[archive.url.path]?.plan, plan.looksLikeGame else { return nil }
+            guard let plan = plans[archive.url.path]?.plan, plan.looksLikeGame || plan.problem != nil else { return nil }
             return filesAsk(archive, plan)
         }
         offerNextFile()
@@ -126,8 +130,9 @@ extension AppModel {
     }
 
     /// Where `archive` unpacks: the update folder of a game in the library when it is a newer
-    /// version of it, else the folder beside it. Nil when that folder is there already.
-    func filesAsk(_ archive: GameArchive, _ plan: ArchivePlan) -> FilesAsk? {
+    /// version of it, else `folder` (the one beside it when not given). Nil when that folder is
+    /// there already.
+    func filesAsk(_ archive: GameArchive, _ plan: ArchivePlan, folder: URL? = nil) -> FilesAsk? {
         if let titleID = plan.titleID, let version = plan.version {
             for game in games where game.titleID.uppercased() == titleID.uppercased() {
                 let problem = GameUpdates.problem(with: game, titleID: titleID, version: version)
@@ -136,8 +141,9 @@ extension AppModel {
                 if problem == nil { return .unpack(archive, plan, into: GameUpdates.target(game), updateOf: game) }
             }
         }
-        if FileManager.default.fileExists(atPath: archive.folder.path) { return nil }
-        return .unpack(archive, plan, into: archive.folder, updateOf: nil)
+        let target = folder ?? archive.folder
+        if FileManager.default.fileExists(atPath: target.path) { return nil }
+        return .unpack(archive, plan, into: target, updateOf: nil)
     }
 
     /// The first zip waiting, offered when the home screen shows nothing else.
@@ -166,6 +172,56 @@ extension AppModel {
         addUpdate(game, from: folder)
     }
 
+    /// Settings › Game Library › Add Game File: one .ffpfsc chosen and unpacked into a normal game
+    /// folder, in the first games folder unless it already sits in a games folder.
+    func addGameFile() {
+        if gameFiles.working != nil { return show(TFiles.text(.filesBusy), symbol: "hourglass") }
+        guard let first = libraryRoots.first else { return show(TFiles.text(.addGameFileNoFolder), symbol: "folder") }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if let type = UTType(filenameExtension: "ffpfsc") { panel.allowedContentTypes = [type] }
+        panel.message = TFiles.text(.addGameFileChoose)
+        panel.prompt = TFiles.text(.unpackGo)
+        panel.directoryURL = first
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        addGameFile(url, firstFolder: first)
+    }
+
+    /// The file at `url` looked into away from the interface, then offered or said to be no game.
+    func addGameFile(_ url: URL, firstFolder: URL) {
+        let size = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+        let archive = GameArchive(url: url, size: size)
+        let parent = url.deletingLastPathComponent().standardizedFileURL
+        let inLibrary = libraryRoots.contains {
+            let root = $0.standardizedFileURL
+            return root == parent || root == parent.deletingLastPathComponent()
+        }
+        let target = inLibrary ? archive.folder : firstFolder.appendingPathComponent(archive.folder.lastPathComponent)
+        Task.detached(priority: .utility) {
+            let plan = try? GameArchives.plan(url)
+            await MainActor.run { self.addGameFileLooked(archive, plan, into: target) }
+        }
+    }
+
+    private func addGameFileLooked(_ archive: GameArchive, _ plan: ArchivePlan?, into target: URL) {
+        guard let plan else { return show(TFiles.text(.ffpfscDamaged), symbol: "exclamationmark.triangle.fill") }
+        guard plan.problem != nil || plan.looksLikeGame || !plan.refused.isEmpty else { return show(TFiles.text(.addGameFileNoGame), symbol: "exclamationmark.triangle.fill") }
+        let ask: FilesAsk
+        if plan.problem != nil {
+            ask = .unpack(archive, plan, into: target, updateOf: nil)
+        } else if let found = filesAsk(archive, plan, folder: target) {
+            ask = found
+        } else if FileManager.default.fileExists(atPath: target.path) {
+            return show(TFiles.format(.addGameFileThere, target.lastPathComponent), symbol: "exclamationmark.triangle.fill")
+        } else {
+            return show(TFiles.text(.addGameFileHaveNewer), symbol: "exclamationmark.triangle.fill")
+        }
+        gameFiles.asked = ask
+        open(.gameFiles)
+    }
+
     /// The folder `folder` checked against `game`: why it is no update, or the panel asking.
     func addUpdate(_ game: Game, from folder: URL) {
         let checked = GameUpdates.check(folder, for: game)
@@ -191,7 +247,7 @@ extension AppModel {
     var gameFilesTitle: String {
         switch gameFiles.working ?? gameFiles.asked {
         case .unpack(_, _, _, let game?): return TFiles.format(.unpackUpdateTitle, game.name)
-        case .unpack: return TFiles.text(.unpackTitle)
+        case .unpack(let archive, _, _, _): return TFiles.text(archive.isFfpfsc ? .unpackFileTitle : .unpackTitle)
         case .update(_, let game, _): return TFiles.format(.addUpdateTitle, game.name)
         case nil: return ""
         }
@@ -215,18 +271,27 @@ extension AppModel {
         }
         switch state.asked {
         case .unpack(let archive, let plan, let into, let game):
-            if !plan.refused.isEmpty {
+            if let problem = plan.problem {
                 return [
-                    PanelRow(id: "files-about", title: archive.name, detail: TFiles.text(.unpackUnsafe), symbol: "exclamationmark.shield", kind: .info(""), wraps: true),
+                    PanelRow(id: "files-about", title: archive.name, detail: TFiles.text(problem == .compressed ? .ffpfscCompressed : .ffpfscUnsupported), symbol: "exclamationmark.triangle", kind: .info(""), wraps: true),
                     PanelRow(id: "files-later", title: T.text(.close), kind: .action(destructive: false) { [weak self] in self?.filesLater() }),
                 ]
             }
-            let about = game == nil ? TFiles.format(.unpackAbout, into.lastPathComponent)
-                : TFiles.format(.unpackUpdateAbout, GameAddons.shortVersion(plan.version ?? ""), into.lastPathComponent)
+            if !plan.refused.isEmpty {
+                return [
+                    PanelRow(id: "files-about", title: archive.name, detail: TFiles.text(archive.isFfpfsc ? .unpackFileUnsafe : .unpackUnsafe), symbol: "exclamationmark.shield", kind: .info(""), wraps: true),
+                    PanelRow(id: "files-later", title: T.text(.close), kind: .action(destructive: false) { [weak self] in self?.filesLater() }),
+                ]
+            }
+            let beside = into.standardizedFileURL == archive.folder.standardizedFileURL
+            let about = game != nil ? TFiles.format(.unpackUpdateAbout, GameAddons.shortVersion(plan.version ?? ""), into.lastPathComponent)
+                : TFiles.format(beside ? .unpackAbout : .unpackAboutFolder, into.lastPathComponent)
             let free = FreeSpace.available(at: into.deletingLastPathComponent())
             let short = free.map { $0 < plan.size + GameArchives.spaceMargin } ?? false
             let space = short ? TFiles.format(.filesNoSpace, plan.size.byteText, (free ?? 0).byteText) : TFiles.format(.filesSpace, plan.size.byteText)
-            var rows = [PanelRow(id: "files-about", title: archive.name, detail: about + " " + space, symbol: short ? "externaldrive.badge.exclamationmark" : "archivebox", kind: .info(""), wraps: true)]
+            var head = plan.titleName ?? archive.name
+            if plan.titleName != nil, let titleID = plan.titleID { head += " (\(titleID))" }
+            var rows = [PanelRow(id: "files-about", title: head, detail: about + " " + space, symbol: short ? "externaldrive.badge.exclamationmark" : "archivebox", kind: .info(""), picture: plan.icon, wraps: true)]
             if !short {
                 rows.append(PanelRow(id: "files-go", title: TFiles.text(.unpackGo), symbol: "arrow.down.doc", kind: .action(destructive: false) { [weak self] in self?.startFiles() }))
             }
@@ -336,7 +401,7 @@ extension AppModel {
         } else {
             switch job {
             case .unpack(_, _, _, let game?): text = TFiles.format(.unpackUpdateDone, game.name)
-            case .unpack(let archive, _, _, _): text = TFiles.format(.unpackDone, archive.name)
+            case .unpack(let archive, _, _, _): text = TFiles.format(archive.isFfpfsc ? .unpackFileDone : .unpackDone, archive.name)
             case .update(_, let game, _): text = TFiles.format(moved ? .addUpdateMoved : .addUpdateCopied, game.name)
             }
             if preferences.sounds { Sounds.shared.play(.unlocked) }

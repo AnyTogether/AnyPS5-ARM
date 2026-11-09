@@ -22,6 +22,9 @@ public struct GameArchive: Hashable, Sendable {
     /// Where it unpacks first: a hidden folder the library does not read, renamed to `folder` once
     /// every file is in it, so no half-unpacked dump shows as a game.
     public var partial: URL { GameArchives.partial(for: folder) }
+
+    /// A game packed in one .ffpfsc file rather than a zip.
+    public var isFfpfsc: Bool { Ffpfsc.matches(url) }
 }
 
 /// What a zip holds, read from its list of files (not their contents, but a param.json).
@@ -42,8 +45,13 @@ public struct ArchivePlan: Equatable, Sendable {
     /// reads: what tells an update for a game in the library from a game of its own.
     public var titleID: String?
     public var version: String?
+    /// A .ffpfsc that reads but will not be unpacked, and why (the panel says so). Nil for a zip.
+    public var problem: ArchiveProblem?
+    /// A .ffpfsc's game name and icon0.png from its files, nil when they cannot be read.
+    public var titleName: String?
+    public var icon: Data?
 
-    public init(files: Int, size: Int64, strip: String, looksLikeGame: Bool, refused: [String], titleID: String? = nil, version: String? = nil) {
+    public init(files: Int, size: Int64, strip: String, looksLikeGame: Bool, refused: [String], titleID: String? = nil, version: String? = nil, problem: ArchiveProblem? = nil, titleName: String? = nil, icon: Data? = nil) {
         self.files = files
         self.size = size
         self.strip = strip
@@ -51,6 +59,9 @@ public struct ArchivePlan: Equatable, Sendable {
         self.refused = refused
         self.titleID = titleID
         self.version = version
+        self.problem = problem
+        self.titleName = titleName
+        self.icon = icon
     }
 }
 
@@ -86,7 +97,7 @@ public final class UnpackCancel: @unchecked Sendable {
 }
 
 public enum GameArchives {
-    public static let extensions: Set<String> = ["zip"]
+    public static let extensions: Set<String> = ["zip", "ffpfsc"]
     /// How far below a games folder an archive is looked for: in it, and in its folders.
     public static let depth = 1
     /// Room kept free beyond what the files take, for the file system's own use.
@@ -193,6 +204,7 @@ public enum GameArchives {
 
     /// What the zip at `url` holds. Throws when it is not a zip (or not a whole one yet).
     public static func plan(_ url: URL) throws -> ArchivePlan {
+        if Ffpfsc.matches(url) { return try Ffpfsc.plan(url) }
         let entries = try ZipReader.list(url)
         let strip = commonFolder(entries.map(\.name))
         var plan = ArchivePlan(files: 0, size: 0, strip: strip, looksLikeGame: false, refused: [])
@@ -239,6 +251,7 @@ public enum GameArchives {
     /// archive with a name that would land outside `into` is refused before anything is written.
     /// On any failure or a stop, `into` is removed again.
     public static func unpackSync(_ url: URL, into: URL, progress: ((Int64, Int64) -> Void)? = nil, cancelled: (() -> Bool)? = nil) throws {
+        if Ffpfsc.matches(url) { return try Ffpfsc.unpackSync(url, into: into, progress: progress, cancelled: cancelled) }
         let plan = try plan(url)
         if plan.files == 0 { throw ArchiveError("The archive has no files") }
         if let first = plan.refused.first { throw ArchiveError("\(plan.refused.count) names would land outside the folder: \(first)") }
