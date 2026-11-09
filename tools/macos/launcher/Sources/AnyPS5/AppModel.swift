@@ -2154,9 +2154,8 @@ final class AppModel: ObservableObject {
         guard familyAllows(.mediaSharing) else { return TrophyBanner.shared.notice(FS.refusal(.mediaSharing), detail: "", symbol: "hand.raised.fill", sounds: preferences.sounds) }
         // With the replay buffer off there is nothing kept: Create takes a screenshot instead.
         guard preferences.clips == true else { return takeScreenshot() }
-        let folder = screenshotsFolder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let file = folder.appendingPathComponent("\(game.titleID)-\(Self.captureStamp()).mp4")
+        let file = Screenshots.clipFile(in: screenshotsFolder, gameName: game.name, titleID: game.titleID, stamp: Self.captureStamp())
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         Task { @MainActor in
             do {
                 try await self.clipRecorder.save(to: file)
