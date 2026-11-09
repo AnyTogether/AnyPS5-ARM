@@ -68,8 +68,7 @@ public enum GameLog {
 
 /// Detailed logging: the engine's most talkative switches that are safe to leave on for a whole
 /// session. The engine has no single log level (its debug lines are compiled out unless built
-/// with APS5_DEBUG_LOG, and APS5_TRACE_CALLS works only on Windows and Linux), so these are the
-/// runtime switches it does have.
+/// with APS5_DEBUG_LOG), so these are the runtime switches it does have.
 public enum TraceMode {
     public static let environment: [String: String] = [
         // Every line written as it comes, none coalesced and none lost in the queue at a crash.
@@ -81,6 +80,9 @@ public enum TraceMode {
         "APS5_TRACE_UNREADABLE": "1",
         // The game's memory maps, unmaps and protections.
         "APS5_TRACE_MEMORY": "1",
+        // The last system library calls in an abort's report; recorded only by an executable
+        // relinked with --trace-imports (RelinkerFlag), ignored by the others.
+        "APS5_TRACE_CALLS": "all",
         // Every save data call instead of the first three.
         "APS5_SAVEDATA_TRACE": "1",
         // Presented frames every ten seconds.

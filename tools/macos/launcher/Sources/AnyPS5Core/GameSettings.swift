@@ -140,6 +140,9 @@ public struct GameSettings: Codable, Equatable, Sendable {
     public var engine: String?
     /// Detailed logging (TraceMode) on every start; nil is off.
     public var trace: Bool?
+    /// Relinker options for this game's next rebuild (RelinkerFlag), as the relinker spells them;
+    /// nil is none. Read through chosenRelinkerFlags: only those the launcher knows are used.
+    public var relinkerFlags: [String]?
     /// Gyro aiming (Controls → Gyro Aiming, ANYPS5_GYRO_AIM); nil is off.
     public var gyro: GyroAiming?
 
@@ -148,7 +151,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case settingsVersion, ownDisplay
         case resolution, ownFullscreen = "fullscreen", ownWindowSize = "windowSize", ownVsync = "vsync"
-        case overlay, overlayStyle, frameGeneration, upscaler, fsrSharpness, language, controls, tuning, shaderCache, phoneLayout, engine, trace, gyro
+        case overlay, overlayStyle, frameGeneration, upscaler, fsrSharpness, language, controls, tuning, shaderCache, phoneLayout, engine, trace, gyro, relinkerFlags
     }
 
     /// The JSONEncoder of the launcher's own preferences sets this: there every display key is
@@ -192,6 +195,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         engine = try container.decodeIfPresent(String.self, forKey: .engine)
         trace = try container.decodeIfPresent(Bool.self, forKey: .trace)
         gyro = try container.decodeIfPresent(GyroAiming.self, forKey: .gyro)
+        relinkerFlags = (try? container.decodeIfPresent([String].self, forKey: .relinkerFlags)) ?? nil
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -222,6 +226,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         try container.encodeIfPresent(engine, forKey: .engine)
         try container.encodeIfPresent(trace, forKey: .trace)
         try container.encodeIfPresent(gyro, forKey: .gyro)
+        try container.encodeIfPresent(relinkerFlags, forKey: .relinkerFlags)
     }
 
     /// The game reads the controllers (through SDL2) only while its window is in front: with the

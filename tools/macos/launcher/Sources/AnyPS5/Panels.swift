@@ -600,7 +600,7 @@ extension AppModel {
         let times: (Int) -> String = { String(format: "%.1f×", Double($0) / 10) }
         let tenths: (Int) -> String = { String(format: "%.1f", Double($0) / 10) }
         let milliseconds: (Int) -> String = { $0 == 0 ? T.text(.off) : "\($0) ms" }
-        return [
+        let tuned: [PanelRow] = [
             PanelRow(id: "sticksSection", title: T.text(.sectionSticks), kind: .info("")),
             tune("leftDeadzone", .leftDeadzone, .deadzoneDetail, "l.joystick", tuning.leftDeadzone, 0...90, 2, percent) { $0.leftDeadzone = $1 },
             tune("rightDeadzone", .rightDeadzone, .deadzoneDetail, "r.joystick", tuning.rightDeadzone, 0...90, 2, percent) { $0.rightDeadzone = $1 },
@@ -620,6 +620,8 @@ extension AppModel {
             PanelRow(id: "shaderCache", title: T.text(.shaderCache), detail: T.text(.shaderCacheDetail), symbol: "square.stack.3d.up", kind: .toggle(settings.shaderCache ?? true) { [weak self] value in
                 self?.update(game) { $0.shaderCache = value ? nil : false }
             }),
+        ]
+        let shared: [PanelRow] = [
             PanelRow(id: "shareSection", title: T.text(.sectionShare), kind: .info("")),
             PanelRow(id: "export", title: T.text(.exportSettings), detail: T.text(.exportSettingsDetail), symbol: "square.and.arrow.up", kind: .action(destructive: false) { [weak self] in self?.exportSettings(game) }),
             PanelRow(id: "import", title: T.text(.importSettings), detail: T.text(.importSettingsDetail), symbol: "square.and.arrow.down", kind: .action(destructive: false) { [weak self] in self?.importSettings(game) }),
@@ -627,9 +629,32 @@ extension AppModel {
                 self?.update(game) { settings in
                     settings.tuning = nil
                     settings.shaderCache = nil
+                    settings.relinkerFlags = nil
                 }
             }),
         ]
+        return tuned + relinkerRows(game, settings) + shared
+    }
+
+    /// The relinker options a player can choose for this game, used by its next rebuild. An
+    /// engine that lacks one shows why instead of the switch; the rebuild leaves it out either
+    /// way (Installer).
+    private func relinkerRows(_ game: Game, _ settings: GameSettings) -> [PanelRow] {
+        let engine = toolkit(for: game)
+        let rows = RelinkerFlag.allCases.map { flag -> PanelRow in
+            let title: T.Key
+            let detail: T.Key
+            switch flag {
+            case .traceImports: (title, detail) = (.relinkerTraceImports, .relinkerTraceImportsDetail)
+            }
+            if let engine, !engine.supports(flag) {
+                return PanelRow(id: "relinker-" + flag.rawValue, title: T.text(title), detail: T.text(.relinkerFlagUnavailableDetail), symbol: "ladybug", kind: .info(T.text(.relinkerFlagUnavailable)))
+            }
+            return PanelRow(id: "relinker-" + flag.rawValue, title: T.text(title), detail: T.text(detail), symbol: "ladybug", kind: .toggle(settings.chosenRelinkerFlags.contains(flag)) { [weak self] value in
+                self?.update(game) { $0.setRelinkerFlag(flag, value) }
+            })
+        }
+        return [PanelRow(id: "relinkerSection", title: T.text(.sectionRelinker), kind: .info(""))] + rows
     }
 
     /// Settings → Game Library's folders: one row each (where, and how many games or not
