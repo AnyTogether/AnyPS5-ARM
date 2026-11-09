@@ -100,15 +100,19 @@ public enum SaveBackup {
     }
 }
 
-/// The F12 screenshots the engine writes, named <title ID>-<yyyyMMdd-HHmmss>[-n].png, and the
-/// launcher's clips beside them, named the same way but .mp4.
+/// The F12 screenshots the engine writes, named <title ID>-<yyyyMMdd-HHmmss>[-n].png, the
+/// launcher's clips beside them, named the same way but .mp4, and the pictures of trophies in the
+/// game's own folder (<game name>/<title ID>-trophy<id>-<date>-<time>.png).
 public enum Screenshots {
     /// The game's screenshots and clips, newest first. The time in a name goes first, whichever
     /// words come before it (a trophy's picture has "trophy…" there), then the name.
-    public static func list(titleID: String, in folder: URL) -> [URL] {
-        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
-        return files
-            .filter { ["png", "mp4"].contains($0.pathExtension.lowercased()) && $0.lastPathComponent.hasPrefix(titleID + "-") }
+    public static func list(titleID: String, gameName: String? = nil, in folder: URL) -> [URL] {
+        let contents = { (place: URL) in (try? FileManager.default.contentsOfDirectory(at: place, includingPropertiesForKeys: nil)) ?? [] }
+        let loose = contents(folder).filter { $0.lastPathComponent.hasPrefix(titleID + "-") }
+        // The game's own folder: everything in it is the game's.
+        let own = gameName.map { contents(gameFolder(in: folder, gameName: $0, titleID: titleID)) } ?? []
+        return (loose + own)
+            .filter { ["png", "mp4"].contains($0.pathExtension.lowercased()) }
             .sorted {
                 let first = (stamp(of: $0), $0.deletingPathExtension().lastPathComponent)
                 let second = (stamp(of: $1), $1.deletingPathExtension().lastPathComponent)
@@ -123,12 +127,29 @@ public enum Screenshots {
         return String(name[range])
     }
 
-    /// Where the picture taken when a trophy was earned goes: beside the game's other captures, as
-    /// on Windows and Linux. A trophy id is <service label>/<number>: its slash becomes an
-    /// underscore.
-    public static func trophyFile(in folder: URL, titleID: String, trophyID: String, stamp: String) -> URL {
+    /// The game's own folder among the captures: its name made safe, as on Windows and Linux.
+    public static func gameFolder(in pictures: URL, gameName: String, titleID: String) -> URL {
+        pictures.appendingPathComponent(safeName(gameName, fallback: titleID), isDirectory: true)
+    }
+
+    /// A name with the characters Windows and Linux refuse in file names replaced, without
+    /// trailing dots or spaces: the same folder name there and here.
+    public static func safeName(_ name: String, fallback: String = "Game") -> String {
+        var safe = name.replacingOccurrences(of: #"[<>:"/\\|?*\x00-\x1F]"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: #"[. ]+$"#, with: "", options: .regularExpression)
+        if safe.isEmpty || safe.range(of: #"^(con|prn|aux|nul|com\d|lpt\d)$"#, options: [.regularExpression, .caseInsensitive]) != nil { return fallback }
+        if safe.count > 80 { safe = String(safe.prefix(80)).trimmingCharacters(in: .whitespaces) }
+        return safe
+    }
+
+    /// Where the picture taken when a trophy was earned goes: the game's own folder among the
+    /// captures, as on Windows and Linux. A trophy id is <service label>/<number>: its slash
+    /// becomes an underscore.
+    public static func trophyFile(in pictures: URL, gameName: String, titleID: String, trophyID: String, stamp: String) -> URL {
         let id = String(trophyID.map { $0.isASCII && ($0.isLetter || $0.isNumber) ? $0 : "_" })
-        return folder.appendingPathComponent("\(titleID)-trophy\(id)-\(stamp).png")
+        return gameFolder(in: pictures, gameName: gameName, titleID: titleID).appendingPathComponent("\(titleID)-trophy\(id)-\(stamp).png")
     }
 
     /// Each picture taken when a trophy was earned, by trophy id: the newest one.

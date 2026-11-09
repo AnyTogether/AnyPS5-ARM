@@ -316,7 +316,10 @@ extension AppModel {
         let replyTo = messageActions.replyTo
         withAnimation(Motion.focus) { messageActions.replyTo = nil }
         Sounds.shared.play(.select)
-        deliver(UnsentMessage(id: UUID(), conversationId: conversation.id, text: text, replyTo: replyTo), in: conversation, raw: raw)
+        // It shows at once, dimmed, and settles when the server has it.
+        let message = UnsentMessage(id: UUID(), conversationId: conversation.id, text: text, replyTo: replyTo, sending: true)
+        withAnimation(Motion.focus) { unsentMessages.append(message) }
+        deliver(message, in: conversation, raw: raw)
     }
 
     /// Why a message was not sent: the family's rules, a muted account, too many at once, else
@@ -900,7 +903,7 @@ struct MessageList: View {
         }
     }
 
-    /// What the user wrote that did not get there, under the thread.
+    /// What the user wrote that is on its way or did not get there, under the thread.
     private var unsent: [UnsentMessage] { model.unsent(in: conversation.id) }
 
     @ViewBuilder private var unsentRows: some View {

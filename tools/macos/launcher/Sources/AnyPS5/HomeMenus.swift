@@ -130,10 +130,42 @@ extension AppModel {
         var destructive = false
         /// What choosing it does; nil for a row that only says something (a broadcast's state).
         var run: (() -> Void)?
+        /// A setting of the share play: left and right change it, `value` says what it is.
+        var control: PanelRow?
+        var value: String?
+        /// The share play row it shows (focus follows it when a row asks first).
+        var key: String?
+        var person: PanelPerson?
+    }
+
+    /// A share play's row as the quick menu shows it: what the Friends panel has, every control.
+    private func quickMenuRow(_ row: PanelRow, id: Int) -> QuickMenuRow? {
+        var item = QuickMenuRow(id: id, title: row.title, detail: row.detail, symbol: row.symbol ?? "shareplay", key: row.id, person: row.person)
+        switch row.kind {
+        case .action(let destructive, _):
+            item.destructive = destructive
+            item.run = { [weak self] in self?.activate(row) }
+        case .info(let value):
+            if !value.isEmpty { item.value = value }
+        case .toggle(let on, _):
+            item.value = T.text(on ? .on : .off)
+        case .stepper(let value, _, _, let format, _):
+            item.value = format(value)
+        case .choice(let options, let selected, _):
+            item.value = options.indices.contains(selected) ? options[selected] : nil
+        default:
+            return nil
+        }
+        if row.valueKind != .other {
+            item.control = row
+            item.run = { [weak self] in self?.activate(row) }
+        }
+        return item
     }
 
     /// The quick menu, as on Windows and Linux: Resume, Game Settings, the battery and heat
-    /// profile's Undo while there is one, Broadcast and Share play for the game playing, Close.
+    /// profile's Undo while there is one, Broadcast and Share play for the game playing (while it
+    /// is shared, every one of its controls), Close.
     func quickMenuRows() -> [QuickMenuRow] {
         var rows: [QuickMenuRow] = []
         func add(_ title: String, detail: String? = nil, symbol: String, destructive: Bool = false, run: (() -> Void)?) {
@@ -159,9 +191,9 @@ extension AppModel {
             }
             if togetherUser != nil, familyAllows(.sharePlay) {
                 if let hosting = share.hosting {
-                    // The viewers, requests and Stop are the Friends panel's.
-                    add(SP.format(.sharing, hosting.title ?? gameName(hosting.titleId)), detail: SP.format(.watching, hosting.viewers.count, hosting.maxViewers),
-                        symbol: "shareplay", run: { [weak self] in self?.open(.friends) })
+                    for row in shareHostRows(hosting) {
+                        if let item = quickMenuRow(row, id: rows.count) { rows.append(item) }
+                    }
                 } else {
                     add(share.starting ? SP.text(.starting) : SP.format(.start, game.name), detail: SP.text(.startDetail), symbol: "shareplay",
                         run: { [weak self] in self?.startSharePlay() })
@@ -187,13 +219,29 @@ extension AppModel {
         switch overlay {
         case .quickMenu:
             let rows = quickMenuRows()
+            if menuIndex >= rows.count, !rows.isEmpty { menuIndex = rows.count - 1 }
+            // A row that asks first: focus goes to Cancel, and back to the row after.
+            let asking = askingRow
+            func followAsking() {
+                guard askingRow != asking, let id = panelFocusID, let index = quickMenuRows().firstIndex(where: { $0.key == id }) else { return }
+                withAnimation(Motion.focus) { menuIndex = index }
+            }
             switch command {
-            case .up, .left: move(-1, count: rows.count)
-            case .down, .right: move(1, count: rows.count)
-            case .back: resumeGame()
+            case .up: move(-1, count: rows.count)
+            case .down: move(1, count: rows.count)
+            case .left, .right:
+                let delta = command == .left ? -1 : 1
+                if rows.indices.contains(menuIndex), let control = rows[menuIndex].control {
+                    change(control, by: delta)
+                } else {
+                    move(delta, count: rows.count)
+                }
+            case .back:
+                if cancelAsk() { followAsking() } else { resumeGame() }
             case .select:
                 guard rows.indices.contains(menuIndex) else { return true }
                 rows[menuIndex].run?()
+                followAsking()
             default: break
             }
         case .closeGame:
@@ -333,9 +381,8 @@ extension AppModel {
     /// system prompt asking for one in the middle of a game.
     func takeTrophyShot(of game: Game, trophy: TrophySet.Trophy) {
         guard running?.game.id == game.id, let pid = running?.app.processIdentifier, familyAllows(.mediaSharing), CGPreflightScreenCaptureAccess() else { return }
-        let folder = screenshotsFolder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let file = Screenshots.trophyFile(in: folder, titleID: game.titleID, trophyID: trophy.id, stamp: Self.captureStamp())
+        let file = Screenshots.trophyFile(in: screenshotsFolder, gameName: game.name, titleID: game.titleID, trophyID: trophy.id, stamp: Self.captureStamp())
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         Task { @MainActor in
             do { try await Self.screenshot(pid: pid, to: file) } catch { return }
             guard self.selectedGame?.id == game.id else { return }
@@ -539,6 +586,8 @@ struct GameMenuCard: View {
         let symbol: String
         var destructive = false
         var disabled = false
+        var value: String?
+        var person: PanelPerson?
     }
 
     var body: some View {
@@ -566,9 +615,28 @@ struct GameMenuCard: View {
                         }
                     }
                 } else {
-                    VStack(spacing: 10 * scale) {
-                        ForEach(items(game)) { item in
-                            row(item)
+                    // Short, the rows as they are; while a share play lists its controls, a list
+                    // that scrolls and keeps the focused row in view.
+                    ViewThatFits(in: .vertical) {
+                        VStack(spacing: 10 * scale) {
+                            ForEach(items(game)) { item in
+                                row(item)
+                            }
+                        }
+                        ScrollViewReader { proxy in
+                            ScrollView(.vertical, showsIndicators: false) {
+                                VStack(spacing: 10 * scale) {
+                                    ForEach(items(game)) { item in
+                                        row(item).id(item.id)
+                                    }
+                                }
+                                .padding(.vertical, 8 * scale)
+                                .padding(.horizontal, 6 * scale)
+                            }
+                            .padding(.horizontal, -6 * scale)
+                            .onChange(of: model.menuIndex) { _, index in
+                                withAnimation(Motion.focus) { proxy.scrollTo(index, anchor: .center) }
+                            }
                         }
                     }
                 }
@@ -741,7 +809,7 @@ struct GameMenuCard: View {
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         default:
-            return model.quickMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil) }
+            return model.quickMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value, person: $0.person) }
         }
     }
 
@@ -755,7 +823,11 @@ struct GameMenuCard: View {
             _ = model.gameMenuCommand(.select)
         } label: {
             HStack(spacing: 14 * scale) {
-                Image(systemName: item.symbol).font(.system(size: 17 * scale, weight: .semibold)).frame(width: 24 * scale)
+                if let person = item.person {
+                    ProfileAvatar(url: person.avatar, name: person.name, size: 26 * scale, glow: false, picture: person.picture)
+                } else {
+                    Image(systemName: item.symbol).font(.system(size: 17 * scale, weight: .semibold)).frame(width: 24 * scale)
+                }
                 VStack(alignment: .leading, spacing: 2 * scale) {
                     Text(item.title).font(.display(18 * scale, .semibold))
                     if let detail = item.detail {
@@ -763,6 +835,11 @@ struct GameMenuCard: View {
                     }
                 }
                 Spacer(minLength: 0)
+                if let value = item.value {
+                    Text(value).font(.display(15 * scale, .semibold)).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                        .frame(maxWidth: 170 * scale, alignment: .trailing)
+                }
                 if focused && !item.disabled {
                     Image(systemName: "chevron.right").font(.system(size: 13 * scale, weight: .bold)).opacity(0.5)
                 }

@@ -13,6 +13,9 @@ enum TChat {
 
     enum Key: String, CaseIterable {
         case retry = "messagesRetry"
+        // Noise suppression beside the microphone, and the public profile switch (the website's words).
+        case noiseSuppression, noiseSuppressionOnHint, noiseSuppressionOffHint
+        case publicProfile, publicProfileHint, publicProfileOffNote, publicProfileFamily
         case react = "messagesReact", reactionLike, reactionLove, reactionLaugh, reactionWow, reactionSad, reactionFire, reactionGg, reactedBy = "chatReactedBy"
         case reply = "messagesReply", replyingTo = "messagesReplyingTo", earlierMessage = "messagesEarlier", edit = "messagesEdit", editing = "chatEditing", editLimit = "messagesEditLimit", unsend = "messagesUnsend", unsendConfirm = "messagesUnsendConfirm"
         case receiptSent, receiptDelivered, receiptRead, seenBy = "chatSeenBy", seenByEveryone = "receiptSeenByEveryone"
