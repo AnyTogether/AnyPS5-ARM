@@ -359,9 +359,8 @@ extension AppModel {
     func takeScreenshot() {
         guard let game = running?.game, let pid = running?.app.processIdentifier else { return }
         guard familyAllows(.mediaSharing) else { return TrophyBanner.shared.notice(FS.refusal(.mediaSharing), detail: "", symbol: "hand.raised.fill", sounds: preferences.sounds) }
-        let folder = screenshotsFolder
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let file = folder.appendingPathComponent("\(game.titleID)-\(Self.captureStamp()).png")
+        let file = Screenshots.shotFile(in: screenshotsFolder, gameName: game.name, titleID: game.titleID, stamp: Self.captureStamp())
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         Task { @MainActor in
             do {
                 try await Self.screenshot(pid: pid, to: file)

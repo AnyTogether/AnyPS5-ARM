@@ -192,7 +192,7 @@ extension AppModel {
         for friend in togetherFriends {
             guard let game = friend.presence?.game, game.joinable, game.sessionId != gameSession?.id, !gameInvites.contains(where: { $0.sessionId == game.sessionId }) else { continue }
             rows.append(PanelRow(id: "game-join-\(game.sessionId)", title: T.format(.gameJoin, friend.displayName, gameName(game.titleId)),
-                                 detail: T.format(.gamePlayers, game.players, game.capacity), symbol: "gamecontroller.fill",
+                                 detail: T.format(game.capacity == 1 ? .gamePlayersOne : .gamePlayers, game.players, game.capacity), symbol: "gamecontroller.fill",
                                  kind: .action(destructive: false) { [weak self] in self?.joinFriendGame(game.sessionId, titleId: game.titleId, host: friend.displayName) },
                                  person: PanelPerson(name: friend.displayName, avatar: friend.avatar, status: .playing)))
         }
@@ -200,7 +200,7 @@ extension AppModel {
             let inside = Set(session.players.map(\.userId))
             let invitable = togetherFriends.filter { $0.presence?.online == true && !inside.contains($0.userId) }
             if !invitable.isEmpty {
-                rows.append(PanelRow(id: "game-invite-title", title: T.format(.gameInviteTitle, gameName(session.titleId)), detail: T.format(.gamePlayers, session.players.count, session.capacity),
+                rows.append(PanelRow(id: "game-invite-title", title: T.format(.gameInviteTitle, gameName(session.titleId)), detail: T.format(session.capacity == 1 ? .gamePlayersOne : .gamePlayers, session.players.count, session.capacity),
                                      symbol: "person.badge.plus", kind: .info("")))
                 for friend in invitable {
                     rows.append(PanelRow(id: "game-invite-\(friend.userId)", title: T.format(.partyInvite, friend.displayName), detail: presenceText(friend.presence), symbol: "paperplane",
