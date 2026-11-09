@@ -36,7 +36,7 @@ final class PartyVoice: NSObject {
     private let send: (_ to: String, _ device: String, _ kind: TogetherSignalKind, _ data: Any?) -> Void
     private let changed: () -> Void
     private var peers: [String: Peer] = [:]
-    private let track: RTCAudioTrack
+    private var track: RTCAudioTrack
     private var localRing = TogetherVoice.Speaking()
     private var timer: Timer?
 
@@ -48,6 +48,32 @@ final class PartyVoice: NSObject {
     /// Whether the microphone sends: muted, or push-to-talk not held, is false.
     var talking = false {
         didSet { track.isEnabled = talking }
+    }
+
+    /// WebRTC's noise suppression on the microphone. Changing it in a call makes a source with
+    /// the other processing and puts its track on every connection's sender: the others hear the
+    /// difference at once, with no new offer and nothing reconnecting.
+    var noiseSuppression: Bool {
+        didSet {
+            guard noiseSuppression != oldValue else { return }
+            let old = track
+            track = PartyVoice.microphoneTrack(noiseSuppression: noiseSuppression)
+            track.isEnabled = talking
+            for peer in peers.values {
+                for sender in peer.connection.senders where sender.track?.trackId == old.trackId { sender.track = track }
+            }
+            old.isEnabled = false
+        }
+    }
+
+    private static var tracksMade = 0
+
+    /// The microphone's track, its source processing as `noiseSuppression` says.
+    private static func microphoneTrack(noiseSuppression: Bool) -> RTCAudioTrack {
+        let constraints = RTCMediaConstraints(mandatoryConstraints: TogetherVoice.audioConstraints(noiseSuppression: noiseSuppression), optionalConstraints: nil)
+        let source = factory.audioSource(with: constraints)
+        tracksMade += 1
+        return factory.audioTrack(with: source, trackId: "voice-\(tracksMade)")
     }
 
     /// Deafened: no member is heard. Every remote audio track is turned off (and its volume to
@@ -69,7 +95,7 @@ final class PartyVoice: NSObject {
         }
     }
 
-    init(me: String, call: String, iceServers: [TogetherIceServer],
+    init(me: String, call: String, iceServers: [TogetherIceServer], noiseSuppression: Bool = true,
          send: @escaping (_ to: String, _ device: String, _ kind: TogetherSignalKind, _ data: Any?) -> Void, changed: @escaping () -> Void) {
         self.me = me
         self.call = call
@@ -79,8 +105,8 @@ final class PartyVoice: NSObject {
         configuration.iceServers = iceServers.map { RTCIceServer(urlStrings: $0.urls, username: $0.username, credential: $0.credential) }
         configuration.sdpSemantics = .unifiedPlan
         configuration.continualGatheringPolicy = .gatherContinually
-        let source = PartyVoice.factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
-        track = PartyVoice.factory.audioTrack(with: source, trackId: "voice")
+        self.noiseSuppression = noiseSuppression
+        track = PartyVoice.microphoneTrack(noiseSuppression: noiseSuppression)
         super.init()
         track.isEnabled = false
         timer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in

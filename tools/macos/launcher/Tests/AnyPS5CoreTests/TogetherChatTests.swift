@@ -149,6 +149,35 @@ final class TogetherChatTests: TogetherSignedInCase {
         XCTAssertFalse(kept)
     }
 
+    func testThePublicProfileSwitch() async throws {
+        var own = TogetherAccountTests.own()
+        FakeTogether.handler = { [own] _, _ in (200, ["account": ["id": "u1", "email": "u@example.com", "createdAt": "2026-10-01T10:00:00.000Z"], "profile": own]) }
+        let standard = try await client.myProfile()
+        XCTAssertFalse(standard.publicProfile, "off for a new account (and from an older server)")
+        own["publicProfile"] = true
+        FakeTogether.handler = { [own] _, _ in (200, ["account": ["id": "u1", "email": "u@example.com", "createdAt": "2026-10-01T10:00:00.000Z"], "profile": own]) }
+        let on = try await client.myProfile()
+        XCTAssertTrue(on.publicProfile)
+
+        FakeTogether.handler = { _, _ in (200, ["publicProfile": true]) }
+        let kept = try await client.setPublicProfile(true)
+        XCTAssertEqual(last(), "PATCH /api/v1/me/public-profile")
+        XCTAssertEqual(body()?["publicProfile"] as? Bool, true)
+        XCTAssertTrue(kept)
+    }
+
+    func testNoiseSuppressionIsTheOnlyProcessingTheSwitchChanges() {
+        let on = TogetherVoice.audioConstraints(noiseSuppression: true)
+        let off = TogetherVoice.audioConstraints(noiseSuppression: false)
+        XCTAssertEqual(on["googNoiseSuppression"], "true")
+        XCTAssertEqual(off["googNoiseSuppression"], "false")
+        for key in ["googEchoCancellation", "googAutoGainControl", "googHighpassFilter"] {
+            XCTAssertEqual(on[key], "true", key)
+            XCTAssertEqual(off[key], "true", key)
+        }
+        XCTAssertEqual(Set(on.keys), Set(off.keys))
+    }
+
     // MARK: The inbox
 
     func testReactionsReachTheThreadAndTheList() {

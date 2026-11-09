@@ -36,17 +36,37 @@ final class UnsentMessageTests: XCTestCase {
     func testAMessageThatDoesNotGoStaysAsABubble() async throws {
         let model = try model()
         model.sendMessage("are you there?")
-        await settle(model) { !model.unsentMessages.isEmpty }
+        await settle(model) { model.unsentMessages.first?.sending == false }
         XCTAssertEqual(model.unsentMessages.map(\.text), ["are you there?"])
         XCTAssertEqual(model.messageDraft, "", "no longer in the field: the bubble keeps it")
         XCTAssertNotNil(model.toast, "said once as before")
+    }
+
+    func testAMessageShowsDimmedWhileOnItsWayAndLeavesOnceThere() async throws {
+        let model = try model()
+        answers = [.success(message(1, text: "hello"))]
+        model.sendMessage("hello")
+        XCTAssertEqual(model.unsentMessages.map(\.text), ["hello"], "shown at once")
+        XCTAssertEqual(model.unsentMessages.first?.sending, true)
+        XCTAssertEqual(model.unsent(in: "c1").count, 1)
+        await settle(model) { model.unsentMessages.isEmpty }
+        XCTAssertTrue(model.unsentMessages.isEmpty, "it is in the thread now")
+    }
+
+    func testABubbleTheSocketAlreadyBroughtIsNotShownTwice() async throws {
+        let model = try model()
+        let id = UUID()
+        model.unsentMessages = [UnsentMessage(id: id, conversationId: "c1", text: "hi", replyTo: nil, sending: true)]
+        XCTAssertEqual(model.unsent(in: "c1").count, 1)
+        model.inbox?.threads["c1"] = [TogetherMessage(id: id.uuidString.lowercased(), conversationId: "c1", seq: 1, authorId: "u1", text: "hi", createdAt: Date())]
+        XCTAssertTrue(model.unsent(in: "c1").isEmpty)
     }
 
     func testTryingAgainUsesItsOwnIdAndTheBubbleLeaves() async throws {
         let model = try model()
         answers = [.failure(URLError(.timedOut))]
         model.sendMessage("hello")
-        await settle(model) { !model.unsentMessages.isEmpty }
+        await settle(model) { model.unsentMessages.first?.sending == false }
         let id = try XCTUnwrap(model.unsentMessages.first?.id)
         answers = [.success(message(1, text: "hello"))]
         // Enter on the empty field: the newest one goes again.
@@ -61,7 +81,7 @@ final class UnsentMessageTests: XCTestCase {
         let model = try model()
         answers = [.failure(URLError(.timedOut))]
         model.sendMessage("hello")
-        await settle(model) { !model.unsentMessages.isEmpty }
+        await settle(model) { model.unsentMessages.first?.sending == false }
         answers = [.failure(URLError(.timedOut))]
         model.retryMessage(try XCTUnwrap(model.unsentMessages.first))
         await settle(model) { model.unsentMessages.first?.sending == false && self.sent.count == 2 }
@@ -72,7 +92,7 @@ final class UnsentMessageTests: XCTestCase {
     func testPickingABubbleWithTheControllerSendsItAgain() async throws {
         let model = try model()
         model.sendMessage("hello")
-        await settle(model) { !model.unsentMessages.isEmpty }
+        await settle(model) { model.unsentMessages.first?.sending == false }
         XCTAssertTrue(model.pickMessage(-1))
         XCTAssertEqual(model.messageActions.picked, AppModel.unsentSeq(at: 0))
         answers = [.success(message(1, text: "hello"))]
@@ -85,7 +105,7 @@ final class UnsentMessageTests: XCTestCase {
     func testAWordsFieldThatIsNotEmptySendsThemNotTheBubble() async throws {
         let model = try model()
         model.sendMessage("first")
-        await settle(model) { !model.unsentMessages.isEmpty }
+        await settle(model) { model.unsentMessages.first?.sending == false }
         model.messageDraft = "something else"
         XCTAssertFalse(model.retryNewestUnsent())
         XCTAssertEqual(sent.count, 1)
@@ -94,7 +114,7 @@ final class UnsentMessageTests: XCTestCase {
     func testSigningOutForgetsThem() async throws {
         let model = try model()
         model.sendMessage("hello")
-        await settle(model) { !model.unsentMessages.isEmpty }
+        await settle(model) { model.unsentMessages.first?.sending == false }
         model.disconnectTogether()
         XCTAssertTrue(model.unsentMessages.isEmpty)
     }

@@ -388,6 +388,13 @@ extension AppModel {
             }
             return rows
         }
+        return rows + shareHostRows(hosting)
+    }
+
+    /// While sharing: the state, who asks and watches, the settings, friends to invite, Stop. The
+    /// same rows in the Friends panel and the quick menu, as on Windows and Linux.
+    func shareHostRows(_ hosting: TogetherSharePlay) -> [PanelRow] {
+        var rows: [PanelRow] = []
         rows.append(PanelRow(id: "share-on", title: SP.format(.sharing, hosting.title ?? gameName(hosting.titleId)), detail: SP.format(.watching, hosting.viewers.count, hosting.maxViewers),
                              symbol: "shareplay", kind: .info("")))
         rows += shareRequestRows(hosting)

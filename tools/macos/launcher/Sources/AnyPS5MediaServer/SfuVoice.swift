@@ -14,6 +14,7 @@ public final class SfuVoice: NSObject {
     private let changed: () -> Void
     private var microphone: LocalAudioTrack?
     private var audioClaimed = false
+    private let noiseSuppression: Bool
 
     /// Who is speaking now, by user ID (the user too, while their microphone sends).
     public private(set) var speaking: Set<String> = []
@@ -36,9 +37,10 @@ public final class SfuVoice: NSObject {
         }
     }
 
-    public init(me: String, call: String, changed: @escaping () -> Void) {
+    public init(me: String, call: String, noiseSuppression: Bool = true, changed: @escaping () -> Void) {
         self.me = me
         self.call = call
+        self.noiseSuppression = noiseSuppression
         self.changed = changed
         super.init()
         room.add(delegate: self)
@@ -49,7 +51,7 @@ public final class SfuVoice: NSObject {
         audioClaimed = true
         await SfuAudio.shared.voice(true)
         try await room.connect(url: access.url, token: access.token)
-        let track = await LocalAudioTrack.createTrack(name: "voice", options: AudioCaptureOptions())
+        let track = await LocalAudioTrack.createTrack(name: "voice", options: AudioCaptureOptions(noiseSuppression: noiseSuppression))
         microphone = track
         _ = try await room.localParticipant.publish(audioTrack: track, options: AudioPublishOptions(name: "voice", encoding: AudioEncoding(maxBitrate: 32000)))
         applyTalking()

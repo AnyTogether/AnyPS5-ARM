@@ -17,8 +17,32 @@ final class ScreenshotsTests: XCTestCase {
     func touch(_ name: String) throws { try Data([1]).write(to: folder.appendingPathComponent(name)) }
 
     func testATrophysPictureHasTheTrophyInItsName() {
-        let file = Screenshots.trophyFile(in: folder, titleID: "PPSA01234", trophyID: "0/13", stamp: "20261108-120000")
+        let file = Screenshots.trophyFile(in: folder, gameName: "Stray", titleID: "PPSA01234", trophyID: "0/13", stamp: "20261108-120000")
         XCTAssertEqual(file.lastPathComponent, "PPSA01234-trophy0_13-20261108-120000.png")
+        XCTAssertEqual(file.deletingLastPathComponent().lastPathComponent, "Stray", "in the game's own folder, as on Windows and Linux")
+    }
+
+    func testTheGamesFolderIsFoundByTheGalleryAndOlderPicturesBesideItToo() throws {
+        let file = Screenshots.trophyFile(in: folder, gameName: "Stray", titleID: "PPSA01234", trophyID: "0/13", stamp: "20261109-120000")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data([1]).write(to: file)
+        // A picture from before the move, loose among the captures, and an F12 screenshot.
+        try touch("PPSA01234-trophy0_2-20261101-120000.png")
+        try touch("PPSA01234-20261105-120000.png")
+        let shots = Screenshots.list(titleID: "PPSA01234", gameName: "Stray", in: folder)
+        XCTAssertEqual(shots.map(\.lastPathComponent), ["PPSA01234-trophy0_13-20261109-120000.png", "PPSA01234-20261105-120000.png", "PPSA01234-trophy0_2-20261101-120000.png"])
+        let byTrophy = Screenshots.trophyShots(shots)
+        XCTAssertEqual(byTrophy["0/13"]?.deletingLastPathComponent().lastPathComponent, "Stray")
+        XCTAssertNotNil(byTrophy["0/2"], "the old one still opens from its trophy")
+        XCTAssertEqual(Screenshots.list(titleID: "PPSA01234", in: folder).count, 2, "without the name only the loose ones")
+    }
+
+    func testAGameNameIsMadeSafeForAFolderAsOnWindowsAndLinux() {
+        XCTAssertEqual(Screenshots.safeName("Ratchet: Rift/Apart? ", fallback: "T"), "Ratchet Rift Apart")
+        XCTAssertEqual(Screenshots.safeName("Game...  ", fallback: "T"), "Game")
+        XCTAssertEqual(Screenshots.safeName("  ", fallback: "PPSA1"), "PPSA1")
+        XCTAssertEqual(Screenshots.safeName("con", fallback: "PPSA1"), "PPSA1")
+        XCTAssertEqual(Screenshots.safeName(String(repeating: "a", count: 100)).count, 80)
     }
 
     func testPicturesAreFoundAgainByTheirTrophyTheNewestWhenSeveral() throws {

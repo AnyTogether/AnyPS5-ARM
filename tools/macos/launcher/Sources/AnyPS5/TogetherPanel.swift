@@ -201,7 +201,27 @@ extension AppModel {
                                 self?.setPrivacy(section, TogetherVisibility.allCases[index])
                             })
         }
-        return [PanelRow(id: "together-privacy", title: T.text(.togetherPrivacyTitle), symbol: "lock", kind: .info(""))] + choices + [readReceiptsRow()].compactMap { $0 }
+        guard let profile = togetherProfile else { return [] }
+        let open = PanelRow(id: "privacy-public-profile", title: TChat.text(.publicProfile),
+                            detail: profile.publicProfile ? TChat.text(.publicProfileHint) : TChat.text(.publicProfileHint) + " " + TChat.text(.publicProfileOffNote),
+                            symbol: profile.publicProfile ? "person.crop.circle.badge.checkmark" : "person.crop.circle.badge.minus",
+                            kind: .toggle(profile.publicProfile) { [weak self] on in self?.setPublicProfile(on) }, wraps: true)
+        return [PanelRow(id: "together-privacy", title: T.text(.togetherPrivacyTitle), symbol: "lock", kind: .info("")), open] + choices + [readReceiptsRow()].compactMap { $0 }
+    }
+
+    /// Shown changed at once, saved as soon as it moves; put back if the server says no (a child
+    /// in a family stays off).
+    func setPublicProfile(_ on: Bool) {
+        guard let before = togetherProfile?.publicProfile, before != on else { return }
+        togetherProfile?.publicProfile = on
+        Task {
+            do {
+                togetherProfile?.publicProfile = try await together.setPublicProfile(on)
+            } catch {
+                togetherProfile?.publicProfile = before
+                show((error as? TogetherProblem)?.code == "restricted_by_family" ? TChat.text(.publicProfileFamily) : togetherMessage(error), symbol: "exclamationmark.triangle.fill")
+            }
+        }
     }
 
     func previewOwnProfile(_ profile: TogetherOwnProfile) {

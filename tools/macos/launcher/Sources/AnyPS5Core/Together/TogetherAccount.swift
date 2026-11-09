@@ -68,6 +68,9 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
     /// Others see when the user has read their messages, and the user sees theirs. True from an
     /// older server.
     public var readReceipts: Bool
+    /// The public profile switch: off, people who are not friends see only the name, handle and
+    /// picture, and Everyone works like Friends. False for a new account (and an older server).
+    public var publicProfile: Bool
     /// The name and picture only accepted friends see; nil when not set (or an older server).
     public var privateName: String?
     public var privateAvatar: String?
@@ -75,7 +78,7 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
     public var look: TogetherProfileLook
 
     public init(handle: String, displayName: String, bio: String?, avatar: String?, country: String?, handleChangeAt: Date?, privacy: TogetherPrivacy,
-                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, presence: TogetherPresenceStatus? = nil, readReceipts: Bool = true,
+                trophyLevel: TogetherTrophyLevel? = nil, appearOffline: Bool = false, presence: TogetherPresenceStatus? = nil, readReceipts: Bool = true, publicProfile: Bool = false,
                 privateName: String? = nil, privateAvatar: String? = nil, look: TogetherProfileLook = .plain) {
         self.handle = handle
         self.displayName = displayName
@@ -87,12 +90,13 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         self.trophyLevel = trophyLevel
         self.presence = presence ?? (appearOffline ? .invisible : .online)
         self.readReceipts = readReceipts
+        self.publicProfile = publicProfile
         self.privateName = privateName
         self.privateAvatar = privateAvatar
         self.look = look
     }
 
-    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, status, readReceipts, privateName, privateAvatar }
+    enum CodingKeys: String, CodingKey { case handle, displayName, bio, avatar, country, handleChangeAt, privacy, trophyLevel, appearOffline, status, readReceipts, publicProfile, privateName, privateAvatar }
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -107,6 +111,7 @@ public struct TogetherOwnProfile: Decodable, Equatable, Sendable {
         presence = TogetherPresenceStatus.from(container.lenient(String.self, .status),
                                                appearOffline: container.lenient(Bool.self, .appearOffline) ?? false) ?? .online
         readReceipts = container.lenient(Bool.self, .readReceipts) ?? true
+        publicProfile = container.lenient(Bool.self, .publicProfile) ?? false
         privateName = container.lenient(String.self, .privateName)
         privateAvatar = container.lenient(String.self, .privateAvatar)
         look = (try? TogetherProfileLook(from: decoder)) ?? .plain
@@ -133,6 +138,13 @@ extension TogetherClient {
     public func changeHandle(_ handle: String) async throws -> TogetherOwnProfile {
         let cleaned = handle.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "@")).lowercased()
         return try kept(JSONDecoder.together.decode(TogetherOwnProfile.self, from: try await authorized("PATCH", "me/handle", ["handle": cleaned])))
+    }
+
+    /// The public profile switch on or off (PATCH /me/public-profile); a child in a family is
+    /// refused ("restricted_by_family").
+    public func setPublicProfile(_ on: Bool) async throws -> Bool {
+        struct Setting: Decodable { let publicProfile: Bool }
+        return try JSONDecoder.together.decode(Setting.self, from: try await authorized("PATCH", "me/public-profile", ["publicProfile": on])).publicProfile
     }
 
     public func updatePrivacy(_ section: TogetherPrivacy.Section, to visibility: TogetherVisibility) async throws -> TogetherPrivacy {

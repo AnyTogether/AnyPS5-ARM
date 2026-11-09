@@ -1,9 +1,10 @@
 import AnyPS5Core
 import SwiftUI
 
-/// A message that did not get there, as on Windows and Linux: it stays in its thread with a red
-/// edge, and Enter on the empty field or a click on it tries again with the same id (the server
-/// keeps one message per id, so a try that did get there is not sent twice).
+/// A message on its way or that did not get there, as on Windows and Linux: it shows dimmed as soon
+/// as it is sent; if it does not get there it stays in its thread with a red edge, and Enter on the
+/// empty field or a click on it tries again with the same id (the server keeps one message per id,
+/// so a try that did get there is not sent twice).
 struct UnsentMessage: Identifiable, Equatable {
     let id: UUID
     let conversationId: String
@@ -13,9 +14,13 @@ struct UnsentMessage: Identifiable, Equatable {
 }
 
 extension AppModel {
-    /// The messages of a conversation that did not get there, oldest first.
+    /// The messages of a conversation on their way or that did not get there, oldest first. One
+    /// the thread already has (the socket can bring it back before the answer) is not shown twice.
     func unsent(in conversationId: String) -> [UnsentMessage] {
-        unsentMessages.filter { $0.conversationId == conversationId }
+        let bubbles = unsentMessages.filter { $0.conversationId == conversationId }
+        guard bubbles.contains(where: \.sending), let thread = thread(of: conversationId) else { return bubbles }
+        let arrived = Set(thread.suffix(100).map(\.id))
+        return bubbles.filter { !$0.sending || !arrived.contains($0.id.uuidString.lowercased()) }
     }
 
     /// Those of the open conversation.
@@ -84,6 +89,7 @@ extension AppModel {
     /// typed, nothing is kept to resend. Anything else: the toast and a bubble to try again.
     private func undelivered(_ message: UnsentMessage, _ error: Error, in conversation: TogetherConversation, raw: String?) {
         if case E2EERefusal.noDevice = error, let raw {
+            withAnimation(Motion.focus) { unsentMessages.removeAll { $0.id == message.id } }
             showSealedFailure(error, in: conversation)
             if messageActions.replyTo == nil, chatConversation?.id == conversation.id {
                 messageActions.replyTo = message.replyTo
@@ -106,8 +112,8 @@ extension AppModel {
     }
 }
 
-/// The bubble of a message that did not get there: the user's words on a red edge and how to send
-/// it again; dimmed while a try is on its way.
+/// The bubble of a message on its way, dimmed, or one that did not get there: the user's words on
+/// a red edge and how to send it again.
 struct UnsentBubble: View {
     let message: UnsentMessage
     let focused: Bool
