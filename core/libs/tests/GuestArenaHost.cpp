@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -125,6 +126,78 @@ void CheckGapBesideHostRegion() {
         }
     }
     std::puts("no free range shares a 1 GiB reservation chunk with a host region on this host; nothing to check");
+}
+
+std::pair<std::uintptr_t, std::uintptr_t> LargestFreeBlock() {
+    std::uintptr_t base = 0;
+    std::size_t bytes = 0;
+    GuestArenaRange_nid_postfix(&base, &bytes);
+    std::uintptr_t cursor = base;
+    std::uintptr_t largest = 0;
+    std::uintptr_t largestStart = 0;
+    std::uintptr_t start = 0;
+    std::uintptr_t end = 0;
+    for (auto address = base; address < base + bytes && GuestArenaNextUsed_nid_no_patch(address, &start, &end) && end > address; address = end) {
+        if (start >= base + bytes) break;
+        if (start > cursor && start - cursor > largest) {
+            largest = start - cursor;
+            largestStart = cursor;
+        }
+        cursor = std::max(cursor, end);
+    }
+    if (base + bytes > cursor && base + bytes - cursor > largest) {
+        largest = base + bytes - cursor;
+        largestStart = cursor;
+    }
+    return {largestStart, largest};
+}
+
+using Allocator = void* (*)(std::uintptr_t, std::size_t, std::size_t);
+
+void* AllocateWithoutHint(std::uintptr_t, std::size_t bytes, std::size_t alignment) {
+    return GuestArenaAllocate_nid_postfix(bytes, alignment);
+}
+
+std::string ExhaustedMessage(Allocator allocate, std::uintptr_t hint, std::size_t bytes, std::size_t alignment) {
+    try {
+        void* placed = allocate(hint, bytes, alignment);
+        GuestArenaRelease_nid_postfix(placed, bytes);
+    } catch (const std::runtime_error& error) {
+        return error.what();
+    }
+    return {};
+}
+
+bool Contains(const std::string& text, const char* format, unsigned long long first, unsigned long long second) {
+    char expected[160];
+    std::snprintf(expected, sizeof(expected), format, first, second);
+    return text.find(expected) != std::string::npos;
+}
+
+void CheckExhaustedReport() {
+    std::uintptr_t base = 0;
+    std::size_t bytes = 0;
+    GuestArenaRange_nid_postfix(&base, &bytes);
+    const auto [start, largest] = LargestFreeBlock();
+    Require(largest >= 0x20000, "the guest arena has no free block to measure");
+    const std::tuple<Allocator, std::uintptr_t, const char*> requests[] = {
+        {AllocateWithoutHint, 0, "no room for an allocation of"},
+        {GuestArenaAllocateAtOrAbove_nid_postfix, base + 0x10000, "no room for an allocation at or above the hint of"},
+        {GuestArenaAllocateFromHint_nid_postfix, base + 0x10000, "no room for an allocation from the hint of"}};
+    for (const auto& [allocate, hint, kind] : requests) {
+        const auto message = ExhaustedMessage(allocate, hint, largest + 0x10000, 0x10000);
+        std::printf("%s\n", message.c_str());
+        Require(message.starts_with("guest address space arena exhausted: "), "a request above the largest free block did not exhaust the arena");
+        Require(message.find(kind) != std::string::npos, "the exhausted arena does not name the request");
+        Require(Contains(message, " 0x%llx bytes aligned 0x%llx ", largest + 0x10000, 0x10000), "the exhausted arena does not give the request size and alignment");
+        Require(Contains(message, "largest free block 0x%llx at 0x%llx;", largest, start), "the exhausted arena reports the wrong largest free block");
+        Require(Contains(message, "arena 0x%llx-0x%llx holds ", base, base + bytes), "the exhausted arena does not give its range");
+        Require(message.find(" host or unmappable, 0x") != std::string::npos && message.find(" guest in ") != std::string::npos,
+            "the exhausted arena does not split its used space into host and guest ranges");
+    }
+    void* placed = GuestArenaAllocate_nid_postfix(largest, 1);
+    Require(reinterpret_cast<std::uintptr_t>(placed) == start, "the reported largest free block is not where the arena places a request of its size");
+    GuestArenaRelease_nid_postfix(placed, largest);
 }
 
 void CheckCommitAndProtect() {
@@ -248,6 +321,7 @@ int main(int argc, char** argv) {
         else if (mode == "host") CheckHostRegionsKept();
         else if (mode == "gap") CheckGapBesideHostRegion();
         else if (mode == "commit") CheckCommitAndProtect();
+        else if (mode == "exhausted") CheckExhaustedReport();
         else if (mode == "watch-protection") CheckWatchedProtection();
         else if (mode == "watch-faults") CheckWatchedProtectionFaults();
         else if (mode == "watch-failure") CheckFailedWatchedProtection();

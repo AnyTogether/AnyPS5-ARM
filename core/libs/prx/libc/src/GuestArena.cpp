@@ -92,7 +92,7 @@ public:
         RequireAllocatable(alignment);
         std::lock_guard lock(_lock);
         if (hint >= _end) throw std::runtime_error("mapping address hint is above the guest address space arena");
-        return Claim(FindAtOrAbove(hint, bytes, alignment), bytes);
+        return Claim(FindAtOrAbove(hint, bytes, alignment), bytes, hint == 0 ? "an allocation" : "an allocation at or above the hint", hint, alignment);
     }
 
     void* AllocateFromHint(std::uintptr_t hint, std::size_t bytes, std::size_t alignment) {
@@ -100,7 +100,7 @@ public:
         std::lock_guard lock(_lock);
         auto candidate = hint < _end ? FindAtOrAbove(hint, bytes, alignment) : 0;
         if (candidate == 0 && hint > _base) candidate = FindAtOrAbove(hint < DefaultAllocationStart ? _base : DefaultAllocationStart, bytes, alignment);
-        return Claim(candidate, bytes);
+        return Claim(candidate, bytes, hint == 0 ? "an allocation" : "an allocation from the hint", hint, alignment);
     }
 
     std::uintptr_t HighestFree(std::size_t bytes, std::size_t alignment) {
@@ -391,10 +391,68 @@ private:
         return candidate;
     }
 
-    void* Claim(std::uintptr_t candidate, std::size_t bytes) {
-        if (candidate == 0) throw std::runtime_error("guest address space arena exhausted");
+    void* Claim(std::uintptr_t candidate, std::size_t bytes, const char* request, std::uintptr_t hint, std::size_t alignment) {
+        if (candidate == 0) ThrowExhausted(request, hint, bytes, alignment);
         _used.emplace(candidate, candidate + bytes);
         return reinterpret_cast<void*>(candidate);
+    }
+
+    static std::uintptr_t MergedBytes(std::vector<std::pair<std::uintptr_t, std::uintptr_t>> ranges, std::uintptr_t base, std::uintptr_t end) {
+        std::sort(ranges.begin(), ranges.end());
+        std::uintptr_t total = 0;
+        std::uintptr_t cursor = base;
+        for (const auto& [rangeStart, rangeEnd] : ranges) {
+            const auto first = std::max(std::clamp(rangeStart, base, end), cursor);
+            const auto last = std::clamp(rangeEnd, base, end);
+            if (last <= first) continue;
+            total += last - first;
+            cursor = last;
+        }
+        return total;
+    }
+
+    [[noreturn]] void ThrowExhausted(const char* request, std::uintptr_t hint, std::size_t bytes, std::size_t alignment) const {
+        std::uintptr_t cursor = _base;
+        std::uintptr_t covered = 0;
+        std::uintptr_t largestFree = 0;
+        std::uintptr_t largestFreeStart = 0;
+        std::uintptr_t largestGuest = 0;
+        std::uintptr_t largestGuestStart = 0;
+        std::size_t guestRanges = 0;
+        const auto noteFree = [&](std::uintptr_t start, std::uintptr_t end) {
+            if (end > start && end - start > largestFree) {
+                largestFree = end - start;
+                largestFreeStart = start;
+            }
+        };
+        for (const auto& [rangeStart, rangeEnd] : _used) {
+            const auto first = std::clamp(rangeStart, _base, _end);
+            const auto last = std::clamp(rangeEnd, _base, _end);
+            if (first > cursor) noteFree(cursor, first);
+            if (last > std::max(first, cursor)) covered += last - std::max(first, cursor);
+            cursor = std::max(cursor, last);
+            if (last > first && !OverlapsHostRegion(first, last - first)) {
+                ++guestRanges;
+                if (last - first > largestGuest) {
+                    largestGuest = last - first;
+                    largestGuestStart = first;
+                }
+            }
+        }
+        if (_end > cursor) noteFree(cursor, _end);
+        const auto host = std::min(covered, MergedBytes(_hostRegions, _base, _end));
+        char message[512];
+        std::snprintf(message, sizeof(message),
+            "guest address space arena exhausted: no room for %s of 0x%zx bytes aligned 0x%zx (hint 0x%llx); largest free block 0x%llx at 0x%llx; "
+            "arena 0x%llx-0x%llx holds 0x%llx free, 0x%llx host or unmappable, 0x%llx guest in %zu ranges (largest 0x%llx at 0x%llx)",
+            request, bytes, alignment, static_cast<unsigned long long>(hint),
+            static_cast<unsigned long long>(largestFree), static_cast<unsigned long long>(largestFreeStart),
+            static_cast<unsigned long long>(_base), static_cast<unsigned long long>(_end),
+            static_cast<unsigned long long>((_end - _base) - covered), static_cast<unsigned long long>(host),
+            static_cast<unsigned long long>(covered - host), guestRanges,
+            static_cast<unsigned long long>(largestGuest), static_cast<unsigned long long>(largestGuestStart));
+        std::fprintf(stderr, "[memory] %s\n", message);
+        throw std::runtime_error(message);
     }
 
     std::uintptr_t _base = 0;
