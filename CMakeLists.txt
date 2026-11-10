@@ -1,4 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
+# The oldest macOS the engine, the relinker and the libraries of the toolkit run on: the launcher's
+# (tools/macos/launcher/Package.swift). Left empty, the SDK's own version is the floor, and the
+# libraries then link against what older systems lack and fail to load there ("Symbol not found").
+# tools/macos/minimum_macos.py checks the toolkit.
+set(ANYPS5_MACOS_MINIMUM 14.0)
+if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET AND "$ENV{MACOSX_DEPLOYMENT_TARGET}" STREQUAL "")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET ${ANYPS5_MACOS_MINIMUM} CACHE STRING "Oldest macOS the build runs on" FORCE)
+endif()
 if(CMAKE_HOST_APPLE AND NOT ANYPS5_RELINKER_ONLY)
     set(CMAKE_APPLE_SILICON_PROCESSOR x86_64 CACHE STRING "Host processor CMake reports on Apple silicon")
     set(CMAKE_OSX_ARCHITECTURES x86_64 CACHE STRING "Architectures built on macOS")
@@ -501,6 +509,9 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_game_patches.py)
         add_test(NAME moltenvk_patches COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_moltenvk_patches.py)
+        add_test(NAME minimum_macos COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_minimum_macos.py)
+        set_tests_properties(minimum_macos PROPERTIES TIMEOUT 30)
         add_test(NAME web_release COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_web_release.py)
         set_tests_properties(web_release PROPERTIES TIMEOUT 120)
@@ -653,7 +664,16 @@ if(BUILD_TESTING)
     endif()
 endif()
 
+# An API newer than the deployment target is used only behind an availability check (@available,
+# __builtin_available), so the engine still loads on the oldest macOS it is built for.
+if(APPLE)
+    set(ANYPS5_AVAILABILITY_ERRORS $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=unguarded-availability-new>)
+endif()
+
 if(ANYPS5_RELINKER_ONLY)
+    if(APPLE)
+        add_compile_options(${ANYPS5_AVAILABILITY_ERRORS})
+    endif()
     add_subdirectory(core/relinker)
     return()
 endif()
@@ -760,6 +780,9 @@ if(WIN32 OR APPLE OR (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ANYPS5_ENABLE_A
     endif()
 endif()
 
+if(APPLE)
+    add_compile_options(${ANYPS5_AVAILABILITY_ERRORS})
+endif()
 add_subdirectory(core/shader/recompiler)
 add_subdirectory(core/Decoder/Jpeg)
 add_subdirectory(core/Decoder/Png)

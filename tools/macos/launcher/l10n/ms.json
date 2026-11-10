@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake tidak dapat menyediakan folder binaan",
   "engineGitGuideMac": "Buka panduan binaan Mac",
   "reportPlayGoInstalledMac": "Main semula dengan bahagian yang hilang dikira sebagai dipasang",
-  "reportPlayGoInstalledDetailMac": "Untuk permulaan ini sahaja. Dump tiada jadual bahagian PlayGo, dan bahagian permainan yang tiada mungkin gagal dimuatkan."
+  "reportPlayGoInstalledDetailMac": "Untuk permulaan ini sahaja. Dump tiada jadual bahagian PlayGo, dan bahagian permainan yang tiada mungkin gagal dimuatkan.",
+  "engineNeedsNewerMac": "Enjin ini memerlukan macOS %1$@ atau lebih baharu dan Mac ini mempunyai macOS %2$@. Pilih enjin lain dalam Tetapan › Enjin atau kemas kini macOS.",
+  "engineGameNeedsNewerMac": "%1$@ dibuka kunci dengan enjin yang memerlukan macOS %2$@ atau lebih baharu dan Mac ini mempunyai macOS %3$@. Pilih enjin lain untuknya dalam Tetapan › Enjin dan buka kuncinya semula."
 }

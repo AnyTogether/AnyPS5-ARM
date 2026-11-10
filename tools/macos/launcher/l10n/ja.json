@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake がビルドフォルダーを設定できませんでした",
   "engineGitGuideMac": "Mac のビルドガイドを開く",
   "reportPlayGoInstalledMac": "不足しているチャンクをインストール済みとして数えて再プレイ",
-  "reportPlayGoInstalledDetailMac": "今回の起動のみ有効です。このダンプには PlayGo のチャンクテーブルがなく、不足している部分は読み込みに失敗する場合があります。"
+  "reportPlayGoInstalledDetailMac": "今回の起動のみ有効です。このダンプには PlayGo のチャンクテーブルがなく、不足している部分は読み込みに失敗する場合があります。",
+  "engineNeedsNewerMac": "このエンジンには macOS %1$@ 以降が必要ですが、この Mac は macOS %2$@ です。[設定] › [エンジン] で別のエンジンを選ぶか、macOS をアップデートしてください。",
+  "engineGameNeedsNewerMac": "%1$@ は macOS %2$@ 以降が必要なエンジンでロック解除されましたが、この Mac は macOS %3$@ です。[設定] › [エンジン] で別のエンジンを選び、もう一度ロック解除してください。"
 }

@@ -1,4 +1,5 @@
 #include "prx/libSceVideoOut/include/GyroAim.hpp"
+#include "FloatChars.hpp"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -27,7 +28,7 @@ std::string_view trim(std::string_view text) {
 double number(std::string_view key, std::string_view value, double least, double most) {
     double parsed = 0.0;
     const auto end = value.data() + value.size();
-    const auto result = std::from_chars(value.data(), end, parsed);
+    const auto result = Aps5::FloatFromChars(value.data(), end, parsed);
     if (value.empty() || result.ec != std::errc{} || result.ptr != end || !std::isfinite(parsed) || parsed < least || parsed > most) {
         throw bad(std::string(key) + " must be a number from " + std::to_string(least).substr(0, 4) + " to " + std::to_string(most).substr(0, 4) +
                   ", not \"" + std::string(value) + "\"");

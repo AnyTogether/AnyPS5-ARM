@@ -555,6 +555,8 @@ final class AppModel: ObservableObject {
     /// The game waiting for those fonts before it starts.
     @Published var fontWait: Game?
     var cjkWaiters: [@MainActor (Bool) -> Void] = []
+    /// The oldest macOS each unlocked game's libraries need, by bundle and engine (requiredSystem(of:bundle:)).
+    private var bundleSystems: [String: SystemMinimum.Version?] = [:]
     /// Where each start's lines begin in the game's log, until the fonts it opened are known.
     var fontLogOffsets: [String: UInt64] = [:]
     var fontWatch: Task<Void, Never>?
@@ -1654,6 +1656,8 @@ final class AppModel: ObservableObject {
             let result: Result<URL, Error> = Result {
                 if let downloaded { _ = try store.verifiedToolkit(version: downloaded) }
                 if custom, let problem = Toolkit.layoutProblem(at: toolkit.root) { throw InstallError("the engine folder is incomplete: \(problem)") }
+                // An engine built for a newer macOS than this Mac's: said now, not by a game that stops while it loads.
+                if let needed = SystemMinimum.unmet(SystemMinimum.required(by: toolkit)) { throw InstallError(AppModel.newerMacText(needed)) }
                 return try installer.run(root: root)
             }
             await MainActor.run {
@@ -1676,6 +1680,25 @@ final class AppModel: ObservableObject {
             }
         }
         return installer
+    }
+
+    /// What unlocking with an engine built for a newer macOS than this Mac's says.
+    nonisolated static func newerMacText(_ needed: SystemMinimum.Version, running: SystemMinimum.Version = SystemMinimum.running) -> String {
+        TE.format(.engineNeedsNewerMac, needed.description, running.description)
+    }
+
+    /// What starting a game unlocked with such an engine says instead.
+    nonisolated static func gameNewerMacText(_ name: String, _ needed: SystemMinimum.Version, running: SystemMinimum.Version = SystemMinimum.running) -> String {
+        TE.format(.engineGameNeedsNewerMac, name, needed.description, running.description)
+    }
+
+    /// The oldest macOS an unlocked game's libraries need, read once per bundle and engine.
+    private func requiredSystem(of game: Game, bundle: URL) -> SystemMinimum.Version? {
+        let key = bundle.path + "|" + (installedRecords[game.id]?.toolkit ?? "")
+        if let known = bundleSystems[key] { return known }
+        let found = SystemMinimum.required(byBundle: bundle)
+        bundleSystems[key] = found
+        return found
     }
 
     /// What an unlock that left modules of the dump out says once the game is ready: one short
@@ -1886,6 +1909,9 @@ final class AppModel: ObservableObject {
     private func start(_ game: Game, trace: Bool = false, once: [String: String] = [:]) {
         guard let root = root(of: game), starting == nil, running == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
+        if let needed = SystemMinimum.unmet(requiredSystem(of: game, bundle: bundle)) {
+            return show(AppModel.gameNewerMacText(game.name, needed), symbol: "exclamationmark.triangle.fill")
+        }
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.activates = true
         configuration.createsNewApplicationInstance = false

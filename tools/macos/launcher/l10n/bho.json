@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake बिल्ड फ़ोल्डर तइयार ना कर सकल",
   "engineGitGuideMac": "Mac बिल्ड गाइड खोलीं",
   "reportPlayGoInstalledMac": "छूटल हिस्सा के इंस्टॉल मानके फेर खेलीं",
-  "reportPlayGoInstalledDetailMac": "खाली एही बेर शुरू खातिर। डंप में PlayGo chunk टेबल नइखे, आ गेम के जे हिस्सा नइखे ऊ लोड ना हो सकेला।"
+  "reportPlayGoInstalledDetailMac": "खाली एही बेर शुरू खातिर। डंप में PlayGo chunk टेबल नइखे, आ गेम के जे हिस्सा नइखे ऊ लोड ना हो सकेला।",
+  "engineNeedsNewerMac": "ए इंजन के macOS %1$@ भा ओसे नया चाहीं आ ए Mac पर macOS %2$@ बा। सेटिंग्स › इंजन में दोसर इंजन चुनीं भा macOS अपडेट करीं।",
+  "engineGameNeedsNewerMac": "%1$@ के अइसन इंजन से अनलॉक कइल गइल रहे जेकरा macOS %2$@ भा ओसे नया चाहीं आ ए Mac पर macOS %3$@ बा। सेटिंग्स › इंजन में एकरा खातिर दोसर इंजन चुनीं आ फेर से अनलॉक करीं।"
 }

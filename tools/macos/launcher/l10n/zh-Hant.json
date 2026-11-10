@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake 無法設定建置資料夾",
   "engineGitGuideMac": "開啟 Mac 建置指南",
   "reportPlayGoInstalledMac": "將缺少的區塊視為已安裝並再次遊玩",
-  "reportPlayGoInstalledDetailMac": "僅限這次啟動。此轉儲沒有 PlayGo 區塊表，缺少的遊戲部分可能無法載入。"
+  "reportPlayGoInstalledDetailMac": "僅限這次啟動。此轉儲沒有 PlayGo 區塊表，缺少的遊戲部分可能無法載入。",
+  "engineNeedsNewerMac": "此引擎需要 macOS %1$@ 或以上版本，而這台 Mac 是 macOS %2$@。請在「設定 › 引擎」中選擇其他引擎，或更新 macOS。",
+  "engineGameNeedsNewerMac": "%1$@ 是用需要 macOS %2$@ 或以上版本的引擎解鎖的，而這台 Mac 是 macOS %3$@。請在「設定 › 引擎」中為它選擇其他引擎並重新解鎖。"
 }

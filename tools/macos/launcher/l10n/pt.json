@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "O CMake não conseguiu configurar a pasta de compilação",
   "engineGitGuideMac": "Abrir o guia de compilação para Mac",
   "reportPlayGoInstalledMac": "Jogar de novo contando partes ausentes como instaladas",
-  "reportPlayGoInstalledDetailMac": "Somente para esta inicialização. O dump não tem tabela de partes do PlayGo, e partes do jogo que faltam podem não carregar."
+  "reportPlayGoInstalledDetailMac": "Somente para esta inicialização. O dump não tem tabela de partes do PlayGo, e partes do jogo que faltam podem não carregar.",
+  "engineNeedsNewerMac": "Este mecanismo precisa do macOS %1$@ ou posterior e este Mac tem o macOS %2$@. Escolha outro mecanismo em Configurações › Mecanismo ou atualize o macOS.",
+  "engineGameNeedsNewerMac": "%1$@ foi desbloqueado com um mecanismo que precisa do macOS %2$@ ou posterior e este Mac tem o macOS %3$@. Escolha outro mecanismo para ele em Configurações › Mecanismo e desbloqueie-o de novo."
 }

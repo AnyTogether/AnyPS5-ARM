@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake tidak dapat menyiapkan folder build",
   "engineGitGuideMac": "Buka panduan build Mac",
   "reportPlayGoInstalledMac": "Mainkan lagi dengan chunk yang hilang dianggap terpasang",
-  "reportPlayGoInstalledDetailMac": "Hanya untuk permulaan ini. Dump tidak memiliki tabel chunk PlayGo, dan bagian game yang tidak ada mungkin gagal dimuat."
+  "reportPlayGoInstalledDetailMac": "Hanya untuk permulaan ini. Dump tidak memiliki tabel chunk PlayGo, dan bagian game yang tidak ada mungkin gagal dimuat.",
+  "engineNeedsNewerMac": "Mesin ini memerlukan macOS %1$@ atau yang lebih baru dan Mac ini memiliki macOS %2$@. Pilih mesin lain di Pengaturan › Mesin atau perbarui macOS.",
+  "engineGameNeedsNewerMac": "%1$@ dibuka dengan mesin yang memerlukan macOS %2$@ atau yang lebih baru dan Mac ini memiliki macOS %3$@. Pilih mesin lain untuknya di Pengaturan › Mesin lalu buka kuncinya lagi."
 }

@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "تعذر على CMake إعداد مجلد البناء",
   "engineGitGuideMac": "افتح دليل البناء لنظام Mac",
   "reportPlayGoInstalledMac": "اللعب مجددًا مع اعتبار الأجزاء المفقودة مثبّتة",
-  "reportPlayGoInstalledDetailMac": "لهذا التشغيل فقط. نسخة اللعبة لا تحتوي على جدول أجزاء PlayGo، وقد يفشل تحميل الأجزاء الناقصة من اللعبة."
+  "reportPlayGoInstalledDetailMac": "لهذا التشغيل فقط. نسخة اللعبة لا تحتوي على جدول أجزاء PlayGo، وقد يفشل تحميل الأجزاء الناقصة من اللعبة.",
+  "engineNeedsNewerMac": "يحتاج هذا المحرك إلى macOS %1$@ أو أحدث، وهذا الـ Mac عليه macOS %2$@. اختر محركًا آخر من الإعدادات › المحرك أو حدّث macOS.",
+  "engineGameNeedsNewerMac": "فُتح قفل %1$@ بمحرك يحتاج إلى macOS %2$@ أو أحدث، وهذا الـ Mac عليه macOS %3$@. اختر له محركًا آخر من الإعدادات › المحرك وافتح قفله من جديد."
 }

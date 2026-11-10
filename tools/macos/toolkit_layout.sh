@@ -21,7 +21,8 @@ toolkit_release_version() {
 # make_toolkit <repository root> <build dir> <Vulkan SDK macOS dir> <toolkit dir> <release version>
 #
 # Fills <toolkit dir> from a finished `ninja all libs` build and the Vulkan SDK; MoltenVK is
-# patched here (tools/macos/moltenvk_patches.py). Prints nothing; the version is in version.txt.
+# patched here (tools/macos/moltenvk_patches.py). Prints only the oldest macOS its files need
+# (tools/macos/minimum_macos.py); the version is in version.txt.
 make_toolkit() {
     _tk_root="$1"
     _tk_build="$2"
@@ -36,6 +37,14 @@ make_toolkit() {
     python3 "$_tk_root/tools/macos/moltenvk_patches.py" "$_tk_out/vulkan/libMoltenVK.dylib"
     sed 's#"library_path": "[^"]*"#"library_path": "../../../MacOS/libs/libMoltenVK.dylib"#' "$_tk_vulkan/share/vulkan/icd.d/MoltenVK_icd.json" > "$_tk_out/vulkan/MoltenVK_icd.json"
     cp "$_tk_root"/tools/macos/patches/*.json "$_tk_out/patches/"
+    # Every library and tool must load on the oldest macOS the launcher runs on (CMakeLists.txt's
+    # ANYPS5_MACOS_MINIMUM); a build configured for a newer one stops here. ANYPS5_ALLOW_NEWER_MACOS=1
+    # only names the files, for a toolkit kept to the Mac that built it.
+    if [ "${ANYPS5_ALLOW_NEWER_MACOS:-0}" = 1 ]; then
+        python3 "$_tk_root/tools/macos/minimum_macos.py" --report "$_tk_out"
+    else
+        python3 "$_tk_root/tools/macos/minimum_macos.py" "$_tk_out"
+    fi
     # An installed game made by another toolkit can be installed again (the launcher offers it).
     _tk_fingerprint="$(cat "$_tk_out/relinker" "$_tk_out"/libs/*.prx "$_tk_out"/patches/*.json | shasum -a 256 | cut -c1-12)"
     echo "$_tk_version-$_tk_fingerprint" > "$_tk_out/version.txt"
