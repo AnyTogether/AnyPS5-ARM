@@ -16,7 +16,15 @@
 curl -fsSL https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/install.sh | sh
 ```
 
-One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning. [⬇ Or download the zip](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
+One line installs it into Applications (and Rosetta 2 if it is missing). A download through `curl` carries no quarantine flag, so macOS opens the app without any "cannot be opened" warning.
+
+With [Homebrew](https://brew.sh) instead (the cask removes the quarantine flag the same way, and the launcher keeps updating itself):
+
+```sh
+brew install --cask anytogether/tap/anyps5
+```
+
+[⬇ Or download the zip](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/AnyPS5-macOS.zip) · [How to use it](docs/user/GUIDE.md#the-anyps5-app)
 
 **On Windows or Linux?** Use [**AnyPS5 Desktop**](https://github.com/AnyTogether/AnyPS5-Desktop/releases/latest): this launcher for those systems, with AnyTogether built in (early preview).
 
