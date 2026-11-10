@@ -310,6 +310,7 @@ extension AppModel {
         }
         let text = PT.format(.offer, offer.hostName, gameName(offer.titleId))
         show(text, symbol: "person.2.wave.2.fill")
+        inviteRing()
         if !NSApp.isActive, !doNotDisturb { TrophyBanner.shared.notice(text, detail: PT.text(.offerDetail), symbol: "person.2.wave.2.fill", sounds: preferences.sounds) }
         loadParty()
     }
