@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake n’a pas pu préparer le dossier de compilation",
   "engineGitGuideMac": "Ouvrir le guide de compilation pour Mac",
   "reportPlayGoInstalledMac": "Rejouer en comptant les chunks manquants comme installés",
-  "reportPlayGoInstalledDetailMac": "Pour ce lancement seulement. Le dump n’a pas de table de chunks PlayGo, et les parties du jeu qui manquent peuvent ne pas se charger."
+  "reportPlayGoInstalledDetailMac": "Pour ce lancement seulement. Le dump n’a pas de table de chunks PlayGo, et les parties du jeu qui manquent peuvent ne pas se charger.",
+  "engineNeedsNewerMac": "Ce moteur nécessite macOS %1$@ ou une version ultérieure et ce Mac a macOS %2$@. Choisissez un autre moteur dans Réglages › Moteur ou mettez à jour macOS.",
+  "engineGameNeedsNewerMac": "%1$@ a été déverrouillé avec un moteur qui nécessite macOS %2$@ ou une version ultérieure et ce Mac a macOS %3$@. Choisissez-lui un autre moteur dans Réglages › Moteur et déverrouillez-le à nouveau."
 }

@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "Hindi naihanda ng CMake ang build folder",
   "engineGitGuideMac": "Buksan ang gabay sa pag-build para sa Mac",
   "reportPlayGoInstalledMac": "Maglaro Ulit na Binibilang na Naka-install ang mga Nawawalang Chunk",
-  "reportPlayGoInstalledDetailMac": "Para sa pagsisimulang ito lang. Walang PlayGo chunk table ang dump, at maaaring hindi ma-load ang mga bahagi ng laro na wala rito."
+  "reportPlayGoInstalledDetailMac": "Para sa pagsisimulang ito lang. Walang PlayGo chunk table ang dump, at maaaring hindi ma-load ang mga bahagi ng laro na wala rito.",
+  "engineNeedsNewerMac": "Kailangan ng engine na ito ang macOS %1$@ o mas bago at macOS %2$@ ang nasa Mac na ito. Pumili ng ibang engine sa Mga Setting › Engine o i-update ang macOS.",
+  "engineGameNeedsNewerMac": "Na-unlock ang %1$@ gamit ang engine na nangangailangan ng macOS %2$@ o mas bago at macOS %3$@ ang nasa Mac na ito. Pumili ng ibang engine para dito sa Mga Setting › Engine at i-unlock itong muli."
 }

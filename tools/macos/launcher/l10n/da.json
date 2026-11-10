@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake kunne ikke opsætte build-mappen",
   "engineGitGuideMac": "Åbn guiden til Mac-build",
   "reportPlayGoInstalledMac": "Spil igen med manglende bidder talt som installeret",
-  "reportPlayGoInstalledDetailMac": "Kun for denne start. Dumpet har ingen PlayGo-chunktabel, og dele af spillet, der mangler, kan fejle ved indlæsning."
+  "reportPlayGoInstalledDetailMac": "Kun for denne start. Dumpet har ingen PlayGo-chunktabel, og dele af spillet, der mangler, kan fejle ved indlæsning.",
+  "engineNeedsNewerMac": "Denne motor kræver macOS %1$@ eller nyere, og denne Mac har macOS %2$@. Vælg en anden motor under Indstillinger › Motor, eller opdater macOS.",
+  "engineGameNeedsNewerMac": "%1$@ blev låst op med en motor, der kræver macOS %2$@ eller nyere, og denne Mac har macOS %3$@. Vælg en anden motor til det under Indstillinger › Motor, og lås det op igen."
 }

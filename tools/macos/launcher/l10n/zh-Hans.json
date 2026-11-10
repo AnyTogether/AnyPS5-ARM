@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake 无法设置构建文件夹",
   "engineGitGuideMac": "打开 Mac 构建指南",
   "reportPlayGoInstalledMac": "将缺失的分块视为已安装并重新游玩",
-  "reportPlayGoInstalledDetailMac": "仅限本次启动。此转储文件没有 PlayGo 分块表，缺失的游戏部分可能无法加载。"
+  "reportPlayGoInstalledDetailMac": "仅限本次启动。此转储文件没有 PlayGo 分块表，缺失的游戏部分可能无法加载。",
+  "engineNeedsNewerMac": "此引擎需要 macOS %1$@ 或更高版本，而这台 Mac 是 macOS %2$@。请在“设置 › 引擎”中选择其他引擎，或更新 macOS。",
+  "engineGameNeedsNewerMac": "%1$@ 是用需要 macOS %2$@ 或更高版本的引擎解锁的，而这台 Mac 是 macOS %3$@。请在“设置 › 引擎”中为它选择其他引擎并重新解锁。"
 }

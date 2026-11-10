@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake derleme klasörünü kuramadı",
   "engineGitGuideMac": "Mac derleme kılavuzunu aç",
   "reportPlayGoInstalledMac": "Eksik parçaları kurulu sayarak yeniden oyna",
-  "reportPlayGoInstalledDetailMac": "Yalnızca bu açılış için. Dump'ta PlayGo parça tablosu yok ve oyunun eksik bölümleri yüklenemeyebilir."
+  "reportPlayGoInstalledDetailMac": "Yalnızca bu açılış için. Dump'ta PlayGo parça tablosu yok ve oyunun eksik bölümleri yüklenemeyebilir.",
+  "engineNeedsNewerMac": "Bu motor macOS %1$@ ya da daha yenisini istiyor ama bu Mac'te macOS %2$@ var. Ayarlar › Motor'dan başka bir motor seçin ya da macOS'i güncelleyin.",
+  "engineGameNeedsNewerMac": "%1$@, macOS %2$@ ya da daha yenisini isteyen bir motorla açıldı ama bu Mac'te macOS %3$@ var. Ayarlar › Motor'dan ona başka bir motor seçip kilidini yeniden açın."
 }

@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake couldn't set up the build folder",
   "engineGitGuideMac": "Open the Mac build guide",
   "reportPlayGoInstalledMac": "Play Again with Missing Chunks Counted as Installed",
-  "reportPlayGoInstalledDetailMac": "For this start only. The dump has no PlayGo chunk table, and parts of the game it lacks may fail to load."
+  "reportPlayGoInstalledDetailMac": "For this start only. The dump has no PlayGo chunk table, and parts of the game it lacks may fail to load.",
+  "engineNeedsNewerMac": "This engine needs macOS %1$@ or newer and this Mac has macOS %2$@. Choose another engine in Settings › Engine or update macOS.",
+  "engineGameNeedsNewerMac": "%1$@ was unlocked with an engine that needs macOS %2$@ or newer and this Mac has macOS %3$@. Choose another engine for it in Settings › Engine and unlock it again."
 }

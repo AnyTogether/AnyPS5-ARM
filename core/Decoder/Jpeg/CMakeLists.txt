@@ -20,6 +20,7 @@ function(add_jpeg_decoder target runtimeTarget)
         if(APPLE)
             list(APPEND jpeg_turbo_platform_args
                 -DCMAKE_OSX_ARCHITECTURES=${CMAKE_OSX_ARCHITECTURES}
+                -DCMAKE_OSX_DEPLOYMENT_TARGET=${CMAKE_OSX_DEPLOYMENT_TARGET}
                 -DCMAKE_APPLE_SILICON_PROCESSOR=${CMAKE_APPLE_SILICON_PROCESSOR})
         endif()
         ExternalProject_Add(jpeg_turbo_external

@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake बिल्ड फ़ोल्डर तैयार नहीं कर सका",
   "engineGitGuideMac": "Mac बिल्ड गाइड खोलें",
   "reportPlayGoInstalledMac": "छूटे हुए चंक्स को इंस्टॉल मानकर फिर खेलें",
-  "reportPlayGoInstalledDetailMac": "केवल इस बार के लिए। डंप में PlayGo चंक तालिका नहीं है, और गेम के जो हिस्से उसमें नहीं हैं वे लोड न हो पाएँ।"
+  "reportPlayGoInstalledDetailMac": "केवल इस बार के लिए। डंप में PlayGo चंक तालिका नहीं है, और गेम के जो हिस्से उसमें नहीं हैं वे लोड न हो पाएँ।",
+  "engineNeedsNewerMac": "इस इंजन को macOS %1$@ या नया चाहिए और इस Mac पर macOS %2$@ है। सेटिंग्स › इंजन में कोई दूसरा इंजन चुनें या macOS अपडेट करें।",
+  "engineGameNeedsNewerMac": "%1$@ को ऐसे इंजन से अनलॉक किया गया था जिसे macOS %2$@ या नया चाहिए और इस Mac पर macOS %3$@ है। सेटिंग्स › इंजन में इसके लिए दूसरा इंजन चुनें और इसे फिर से अनलॉक करें।"
 }

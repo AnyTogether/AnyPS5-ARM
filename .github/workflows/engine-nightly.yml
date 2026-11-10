@@ -242,6 +242,16 @@ jobs:
           tools/macos/package_toolkit.sh build-mac "$vulkan" "$out"
           [ -s "$out/AnyPS5-toolkit-macos-$version.zip" ] || { echo "::error::package_toolkit.sh made no AnyPS5-toolkit-macos-$version.zip"; exit 1; }
           ls -l "$out"
+      # package_toolkit.sh refuses a toolkit built for a newer macOS than the launcher's oldest; the
+      # download is checked again as it is published, and the app's own files are listed.
+      - name: Check the oldest macOS the downloads run on
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          python3 tools/macos/minimum_macos.py "dist/AnyPS5-toolkit-macos-${TAG#v}.zip" ||
+            { echo "::error::the macOS toolkit has files built for a macOS newer than the launcher's oldest"; exit 1; }
+          python3 tools/macos/minimum_macos.py --report dist/AnyPS5-macOS.zip
       - uses: actions/upload-artifact@v7
         with:
           name: engine-toolkit-macos

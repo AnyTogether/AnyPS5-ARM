@@ -20,6 +20,8 @@ Requirements:
 - the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home#mac) (universal loader and MoltenVK)
 - for the guest fixtures only: `brew install llvm lld`
 
+The build is for macOS 14 and later, the launcher's oldest (`ANYPS5_MACOS_MINIMUM` in `CMakeLists.txt`): it sets `CMAKE_OSX_DEPLOYMENT_TARGET` to 14.0 unless one is given. Without it the SDK's own version is the floor, and a toolkit built with the macOS 26 SDK imports what only macOS 26's libc++ has (`std::__from_chars_floating_point`), so dyld stops every game on macOS 14 and 15 with `Symbol not found ... (built for macOS 26.0 which is newer than running OS)`. An API newer than the target outside an availability check (`@available`, `__builtin_available`) is a build error (`-Werror=unguarded-availability-new`), and floating-point `std::from_chars` goes through `Aps5::FloatFromChars` (`core/libs/FloatChars.hpp`). `python3 tools/macos/minimum_macos.py <toolkit folder, file or .zip>` prints the `minos` of every Mach-O in it and fails above 14.0; `make_toolkit` (`tools/macos/toolkit_layout.sh`) runs it for the app and the download (`ANYPS5_ALLOW_NEWER_MACOS=1` only lists the files, for a toolkit kept to the Mac that built it).
+
 ## Run
 
 ```sh

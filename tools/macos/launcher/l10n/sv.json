@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake kunde inte konfigurera byggmappen",
   "engineGitGuideMac": "Öppna guiden för Mac-bygget",
   "reportPlayGoInstalledMac": "Spela igen med saknade delar räknade som installerade",
-  "reportPlayGoInstalledDetailMac": "Bara för den här starten. Dumpen saknar PlayGo-delstabell, och delar av spelet som saknas kan misslyckas med att laddas."
+  "reportPlayGoInstalledDetailMac": "Bara för den här starten. Dumpen saknar PlayGo-delstabell, och delar av spelet som saknas kan misslyckas med att laddas.",
+  "engineNeedsNewerMac": "Den här motorn kräver macOS %1$@ eller senare och den här Macen har macOS %2$@. Välj en annan motor under Inställningar › Motor eller uppdatera macOS.",
+  "engineGameNeedsNewerMac": "%1$@ låstes upp med en motor som kräver macOS %2$@ eller senare och den här Macen har macOS %3$@. Välj en annan motor för det under Inställningar › Motor och lås upp det igen."
 }

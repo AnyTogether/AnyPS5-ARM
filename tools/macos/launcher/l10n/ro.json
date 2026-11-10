@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake nu a putut configura folderul de build",
   "engineGitGuideMac": "Deschide ghidul de build pentru Mac",
   "reportPlayGoInstalledMac": "Joacă din nou cu fragmentele lipsă considerate instalate",
-  "reportPlayGoInstalledDetailMac": "Doar pentru această pornire. Dump-ul nu are tabel de fragmente PlayGo, iar părțile jocului care lipsesc pot să nu se încarce."
+  "reportPlayGoInstalledDetailMac": "Doar pentru această pornire. Dump-ul nu are tabel de fragmente PlayGo, iar părțile jocului care lipsesc pot să nu se încarce.",
+  "engineNeedsNewerMac": "Acest motor necesită macOS %1$@ sau mai nou, iar acest Mac are macOS %2$@. Alege alt motor în Setări › Motor sau actualizează macOS.",
+  "engineGameNeedsNewerMac": "%1$@ a fost deblocat cu un motor care necesită macOS %2$@ sau mai nou, iar acest Mac are macOS %3$@. Alege alt motor pentru el în Setări › Motor și deblochează-l din nou."
 }

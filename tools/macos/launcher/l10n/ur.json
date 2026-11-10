@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake بلڈ فولڈر تیار نہیں کر سکا",
   "engineGitGuideMac": "Mac بلڈ گائیڈ کھولیں",
   "reportPlayGoInstalledMac": "گم شدہ حصوں کو انسٹال شدہ مان کر دوبارہ کھیلیں",
-  "reportPlayGoInstalledDetailMac": "صرف اس بار کے لیے۔ ڈمپ میں PlayGo چنک ٹیبل نہیں ہے، اور گیم کے جو حصے اس میں نہیں ہیں وہ لوڈ نہ ہو سکیں۔"
+  "reportPlayGoInstalledDetailMac": "صرف اس بار کے لیے۔ ڈمپ میں PlayGo چنک ٹیبل نہیں ہے، اور گیم کے جو حصے اس میں نہیں ہیں وہ لوڈ نہ ہو سکیں۔",
+  "engineNeedsNewerMac": "اس انجن کو macOS %1$@ یا نیا درکار ہے اور اس Mac پر macOS %2$@ ہے۔ ترتیبات › انجن میں کوئی اور انجن منتخب کریں یا macOS اپ ڈیٹ کریں۔",
+  "engineGameNeedsNewerMac": "%1$@ کو ایسے انجن سے ان لاک کیا گیا تھا جسے macOS %2$@ یا نیا درکار ہے اور اس Mac پر macOS %3$@ ہے۔ ترتیبات › انجن میں اس کے لیے کوئی اور انجن منتخب کریں اور اسے دوبارہ ان لاک کریں۔"
 }

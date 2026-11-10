@@ -47,6 +47,7 @@
 /* Derived from Source/WTF/wtf/dtoa/double-conversion.cc and Source/WTF/wtf/text/WTFString.cpp (WebKit c55364d53f97) */
 
 #include "prx/libSceNKWebKit/include/InventoryExports.hpp"
+#include "FloatChars.hpp"
 
 #include <array>
 #include <charconv>
@@ -101,7 +102,7 @@ TFloat Convert(std::string digits, std::int64_t exponent) {
     digits += 'e';
     digits += std::to_string(exponent);
     TFloat value = 0;
-    const auto result = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+    const auto result = Aps5::FloatFromChars(digits.data(), digits.data() + digits.size(), value);
     if (result.ec == std::errc::result_out_of_range) return exponent + count > 0 ? std::numeric_limits<TFloat>::infinity() : 0;
     if (result.ec != std::errc() || result.ptr != digits.data() + digits.size()) throw std::logic_error("WTF::parseDouble: decimal conversion rejected its digits");
     return value;

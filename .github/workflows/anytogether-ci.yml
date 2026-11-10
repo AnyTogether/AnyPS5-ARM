@@ -307,6 +307,9 @@ jobs:
         run: cmake --build build
       - name: Build the patched libraries
         run: cmake --build build --target libs
+      # What the toolkit takes from the build must load on the launcher's oldest macOS (CMakeLists.txt).
+      - name: Check the oldest macOS the relinker and the libraries load on
+        run: python3 tools/macos/minimum_macos.py build/core/relinker/relinker build/core/libs/libs
       - name: Leave out the known failures
         run: |
           pattern=$(awk -v p=macos '!/^#/ && NF >= 2 && ($1 == "all" || index("," $1 ",", "," p ",")) { printf "%s%s", sep, $2; sep = "|" }' "$KNOWN_FAILURES")

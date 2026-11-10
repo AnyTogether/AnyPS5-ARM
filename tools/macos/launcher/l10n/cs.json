@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake nedokázal nastavit složku sestavení",
   "engineGitGuideMac": "Otevřít návod k sestavení pro Mac",
   "reportPlayGoInstalledMac": "Hrát znovu s chybějícími částmi považovanými za nainstalované",
-  "reportPlayGoInstalledDetailMac": "Jen pro toto spuštění. Dump nemá tabulku částí PlayGo a části hry, které chybí, se nemusí načíst."
+  "reportPlayGoInstalledDetailMac": "Jen pro toto spuštění. Dump nemá tabulku částí PlayGo a části hry, které chybí, se nemusí načíst.",
+  "engineNeedsNewerMac": "Tento motor potřebuje macOS %1$@ nebo novější a tento Mac má macOS %2$@. Vyberte jiný motor v Nastavení › Motor nebo aktualizujte macOS.",
+  "engineGameNeedsNewerMac": "%1$@ byla odemčena motorem, který potřebuje macOS %2$@ nebo novější, a tento Mac má macOS %3$@. Vyberte pro ni jiný motor v Nastavení › Motor a odemkněte ji znovu."
 }

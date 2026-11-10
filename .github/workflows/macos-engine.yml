@@ -54,6 +54,8 @@ jobs:
           -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
       - name: Build the engine and the patched libraries
         run: ninja -C build-mac ${{ inputs.keep_going && '-k 0' || '' }} all libs
+      - name: Check the oldest macOS the relinker and the libraries load on
+        run: python3 tools/macos/minimum_macos.py build-mac/core/relinker/relinker build-mac/core/libs/libs
       - name: Upload the relinker and the patched libraries
         uses: actions/upload-artifact@v7
         with:

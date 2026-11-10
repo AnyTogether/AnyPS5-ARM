@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake የግንባታ አቃፊውን ማዘጋጀት አልቻለም",
   "engineGitGuideMac": "የMac የግንባታ መመሪያን ክፈት",
   "reportPlayGoInstalledMac": "የጎደሉ ቁርጥራጮችን እንደተጫኑ በመቁጠር እንደገና ተጫወት",
-  "reportPlayGoInstalledDetailMac": "ለዚህ ጅምር ብቻ። ዱምፑ የPlayGo ቁርጥራጭ ሠንጠረዥ የለውም፣ የሌሉት የጨዋታው ክፍሎች ላይጫኑ ይችላሉ።"
+  "reportPlayGoInstalledDetailMac": "ለዚህ ጅምር ብቻ። ዱምፑ የPlayGo ቁርጥራጭ ሠንጠረዥ የለውም፣ የሌሉት የጨዋታው ክፍሎች ላይጫኑ ይችላሉ።",
+  "engineNeedsNewerMac": "ይህ ሞተር macOS %1$@ ወይም ከዚያ በላይ ያስፈልገዋል፣ ይህ Mac ግን macOS %2$@ አለው። ከቅንብሮች › ሞተር ሌላ ሞተር ይምረጡ ወይም macOSን ያዘምኑ።",
+  "engineGameNeedsNewerMac": "%1$@ macOS %2$@ ወይም ከዚያ በላይ በሚያስፈልገው ሞተር ተከፍቷል፣ ይህ Mac ግን macOS %3$@ አለው። ከቅንብሮች › ሞተር ሌላ ሞተር ይምረጡለትና እንደገና ይክፈቱት።"
 }

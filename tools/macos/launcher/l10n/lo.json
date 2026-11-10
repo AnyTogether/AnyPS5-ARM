@@ -2114,5 +2114,7 @@
   "engineGitConfigureFailed": "CMake ຕັ້ງຄ່າໂຟນເດີສຳລັບບິວບໍ່ໄດ້",
   "engineGitGuideMac": "ເປີດຄູ່ມືການບິວສຳລັບ Mac",
   "reportPlayGoInstalledMac": "ຫຼິ້ນອີກຄັ້ງໂດຍນັບ chunk ທີ່ຂາດວ່າຕິດຕັ້ງແລ້ວ",
-  "reportPlayGoInstalledDetailMac": "ສຳລັບການເລີ່ມຄັ້ງນີ້ເທົ່ານັ້ນ. dump ບໍ່ມີຕາຕະລາງ PlayGo chunk, ແລະ ສ່ວນຂອງເກມທີ່ຂາດອາດໂຫຼດບໍ່ໄດ້."
+  "reportPlayGoInstalledDetailMac": "ສຳລັບການເລີ່ມຄັ້ງນີ້ເທົ່ານັ້ນ. dump ບໍ່ມີຕາຕະລາງ PlayGo chunk, ແລະ ສ່ວນຂອງເກມທີ່ຂາດອາດໂຫຼດບໍ່ໄດ້.",
+  "engineNeedsNewerMac": "ໂປຣແກຣມຫຼັກນີ້ຕ້ອງການ macOS %1$@ ຫຼື ໃໝ່ກວ່າ ແລະ Mac ນີ້ມີ macOS %2$@. ເລືອກໂປຣແກຣມຫຼັກອື່ນໃນ ການຕັ້ງຄ່າ › ໂປຣແກຣມຫຼັກ ຫຼື ອັບເດດ macOS.",
+  "engineGameNeedsNewerMac": "%1$@ ຖືກປົດລັອກດ້ວຍໂປຣແກຣມຫຼັກທີ່ຕ້ອງການ macOS %2$@ ຫຼື ໃໝ່ກວ່າ ແລະ Mac ນີ້ມີ macOS %3$@. ເລືອກໂປຣແກຣມຫຼັກອື່ນໃຫ້ມັນໃນ ການຕັ້ງຄ່າ › ໂປຣແກຣມຫຼັກ ແລ້ວປົດລັອກມັນອີກຄັ້ງ."
 }
