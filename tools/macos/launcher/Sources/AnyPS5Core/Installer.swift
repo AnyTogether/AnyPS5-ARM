@@ -212,6 +212,44 @@ public final class Installer: @unchecked Sendable {
             .appendingPathComponent(bundle(for: game, root: root).deletingPathExtension().lastPathComponent)
     }
 
+    /// Where an uninstall puts what it removes until it is gone, in the store of the games folder
+    /// `root`.
+    public static func removingFolder(root: URL) -> URL {
+        root.appendingPathComponent(GameLibrary.storeName).appendingPathComponent("Removing")
+    }
+
+    /// The first half of an uninstall, at once: the game's bundle, its files and what it wrote (the
+    /// data folder) and the relinker's kept output are moved into the store's Removing folder, so
+    /// the game is no longer installed when this returns. Gives what `remove(_:)` takes away after,
+    /// off the main thread: a game of tens of thousands of files removed on the main thread kept
+    /// the launcher from answering until it was gone. What an earlier uninstall left there (the
+    /// launcher quit before it was done) is in it too. Something that cannot be moved is given
+    /// where it is.
+    public static func setAside(_ game: Game, root: URL) -> [URL] {
+        let fileManager = FileManager.default
+        let removing = removingFolder(root: root)
+        let left = (try? fileManager.contentsOfDirectory(at: removing, includingPropertiesForKeys: nil)) ?? []
+        var going: [URL] = []
+        for (item, label) in [(bundle(for: game, root: root), "bundle"), (dataFolder(for: game, root: root), "data"), (keptRelink(for: game, root: root), "relinked")] {
+            guard (try? item.checkResourceIsReachable()) == true || (try? fileManager.destinationOfSymbolicLink(atPath: item.path)) != nil else { continue }
+            let aside = removing.appendingPathComponent("\(item.deletingPathExtension().lastPathComponent)-\(label)-\(UUID().uuidString)")
+            do {
+                try fileManager.createDirectory(at: removing, withIntermediateDirectories: true)
+                try fileManager.moveItem(at: item, to: aside)
+                going.append(aside)
+            } catch {
+                going.append(item)
+            }
+        }
+        return going + left.filter { !going.contains($0) }
+    }
+
+    /// The second half of an uninstall: removes what `setAside(_:root:)` gave. Slow for a big
+    /// game; never on the main thread.
+    public static func remove(_ items: [URL]) {
+        for item in items { try? FileManager.default.removeItem(at: item) }
+    }
+
     /// Removes the marks macOS leaves on files that came from a download (quarantine) or were
     /// written by an app that did (provenance) from `url` and everything in it. With them, macOS
     /// verifies a game's whole bundle before its code first runs, a window that takes minutes
