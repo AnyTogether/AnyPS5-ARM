@@ -1,20 +1,24 @@
-# A nightly Windows and Linux engine for AnyPS5 Desktop, built from main once a day when core/,
-# tools/macos/ or mobile/ changed, and published as a GitHub pre-release for the launchers' Nightly
-# update channel. The release Mac adds the macOS app and engine to it later
-# (tools/release/nightly_mac.sh), so a change to the Mac launcher or the phone app alone gets a
-# nightly too.
+# A nightly of the Windows and Linux engine for AnyPS5 Desktop and of the macOS app and engine,
+# built from main once a day when core/, tools/macos/ or mobile/ changed, and published as a GitHub
+# pre-release for the launchers' Nightly update channel.
 #
 # The tag is named as tools/macos/publish_nightly.sh names the Mac's nightlies:
 # v<next>-arm-nightly.<YYYYMMDD>.<n>, <next> being the last release with its last number raised
 # and <n> counting that day's nightlies from 1 (UTC), Mac and CI alike. The launchers sort these
 # after the release before them and before the release they lead to.
 #
-# The build is engine-toolkits.yml's, called with the commit and the tag. The pre-release carries
-# AnyPS5-toolkit-windows-<commit>.zip, AnyPS5-toolkit-linux-<commit>.zip and .tar.gz.
+# The Windows and Linux build is engine-toolkits.yml's, called with the commit and the tag. The
+# macos job builds AnyPS5.app and the engine toolkit on a GitHub Mac (Release, x86-64 under Rosetta,
+# BUILD_TESTING=ON, as macos-engine.yml). The pre-release carries AnyPS5-toolkit-windows-<commit>.zip,
+# AnyPS5-toolkit-linux-<commit>.zip and .tar.gz, AnyPS5-macOS.zip and
+# AnyPS5-toolkit-macos-<version>.zip. It is published only when every build has ended, so it never
+# stands half built. When the macOS job fails it goes out without the Mac files; re-running the
+# failed job adds them. The phone app is not built here (see the macos job).
 #
 # CI has no signing key (docs/dev/SIGNED_UPDATES.md), so the pre-release comes out unsigned, and
 # the launchers refuse it until tools/release/sign_nightly.sh <tag> has added SHA256SUMS and
-# SHA256SUMS.sig on the release Mac.
+# SHA256SUMS.sig on the release Mac (tools/release/nightly_mac.sh does it daily). With dry_run
+# everything runs but the step that makes the tag and the release.
 #
 # The tag and the release are made with GITHUB_TOKEN. Events made with GITHUB_TOKEN start no other
 # workflow, so this tag does not start release.yml (`v*`, disabled in this repository anyway) or
@@ -143,10 +147,116 @@ jobs:
       ref: ${{ needs.plan.outputs.sha }}
       tag: ${{ needs.plan.outputs.tag }}
 
+  macos:
+    name: macOS app and engine
+    needs: plan
+    if: needs.plan.outputs.build == 'true'
+    # The launcher's Liquid Glass needs the macOS 26 SDK.
+    runs-on: macos-26
+    timeout-minutes: 240
+    env:
+      CCACHE_MAXSIZE: 3G
+      CCACHE_COMPILERCHECK: content
+      VULKAN_SDK_VERSION: 1.4.363.0
+    # No phone app: flutter builds it on the runner (AnyTogether CI does), but the APK is signed with
+    # the machine's debug key, which a runner makes anew each time, so Android would refuse it over
+    # the APK the release Mac signed. It needs that key as a secret first.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0
+          submodules: recursive
+          persist-credentials: false
+      # In this checkout only, as engine-toolkits.yml does: the release tag is made when publishing.
+      - name: Name the build after the nightly tag
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || git tag "$TAG"
+          actual="$(git describe --tags --dirty)"
+          echo "git describe: $actual"
+          [ "$actual" = "$TAG" ] || { echo "::error::git describe gives $actual, not $TAG (another tag on this commit?)"; exit 1; }
+      - name: Install Rosetta and Ninja
+        run: |
+          sudo softwareupdate --install-rosetta --agree-to-license
+          brew install ninja
+      - id: vulkan
+        uses: actions/cache@v6
+        with:
+          path: ~/VulkanSDK/${{ env.VULKAN_SDK_VERSION }}
+          key: vulkan-sdk-macos-${{ env.VULKAN_SDK_VERSION }}
+      - name: Install the Vulkan SDK
+        if: steps.vulkan.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          curl -sSfL --retry 3 -o "$RUNNER_TEMP/vulkan.zip" "https://sdk.lunarg.com/sdk/download/$VULKAN_SDK_VERSION/mac/vulkansdk-macos-$VULKAN_SDK_VERSION.zip"
+          unzip -q "$RUNNER_TEMP/vulkan.zip" -d "$RUNNER_TEMP/vulkan"
+          ls "$RUNNER_TEMP/vulkan"
+          installer="$(find "$RUNNER_TEMP/vulkan" -type f -perm -u+x -path '*.app/Contents/MacOS/*' | head -n 1)"
+          echo "installer: $installer"
+          "$installer" --root "$HOME/VulkanSDK/$VULKAN_SDK_VERSION" --accept-licenses --default-answer --confirm-command install
+      - name: Check the Vulkan SDK
+        run: |
+          set -euo pipefail
+          sdk="$HOME/VulkanSDK/$VULKAN_SDK_VERSION/macOS"
+          ls -l "$sdk/lib/libvulkan.1.dylib" "$sdk/lib/libMoltenVK.dylib" "$sdk/share/vulkan/icd.d/MoltenVK_icd.json" "$sdk/../Licenses/LICENSE.txt"
+      - uses: hendrikmuhs/ccache-action@v1.2.24
+        with:
+          key: engine-nightly-macos
+          max-size: 3G
+          evict-old-files: job
+      - id: ffmpeg
+        run: echo "commit=$(git rev-parse HEAD:3rdparty/ffmpeg-core)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: build-mac/externals
+          key: ffmpeg-macos-${{ steps.ffmpeg.outputs.commit }}
+      - name: Configure
+        run: >-
+          cmake -S . -B build-mac -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=x86_64 -DBUILD_TESTING=ON
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+      - name: Build the engine and the patched libraries
+        run: ninja -C build-mac all libs
+      # The launcher must build with the newest Xcode's Swift, as in AnyTogether CI.
+      - name: Select the newest Xcode
+        run: |
+          xcode=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$xcode"
+          swift --version
+      - name: Build AnyPS5.app and the engine toolkit
+        env:
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          vulkan="$HOME/VulkanSDK/$VULKAN_SDK_VERSION/macOS"
+          out="$GITHUB_WORKSPACE/dist"
+          tools/macos/build_launcher_app.sh build-mac "$vulkan" "$out"
+          built="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$out/AnyPS5.app/Contents/Info.plist")"
+          [ "$built" = "$version" ] || { echo "::error::the app says $built, not $version"; exit 1; }
+          ditto -c -k --keepParent "$out/AnyPS5.app" "$out/AnyPS5-macOS.zip"
+          rm -rf "$out/AnyPS5.app"
+          tools/macos/package_toolkit.sh build-mac "$vulkan" "$out"
+          [ -s "$out/AnyPS5-toolkit-macos-$version.zip" ] || { echo "::error::package_toolkit.sh made no AnyPS5-toolkit-macos-$version.zip"; exit 1; }
+          ls -l "$out"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: engine-toolkit-macos
+          path: |
+            dist/AnyPS5-macOS.zip
+            dist/AnyPS5-toolkit-macos-*.zip
+          if-no-files-found: error
+          retention-days: 14
+
   publish:
     name: Publish the pre-release
-    needs: [plan, build]
-    if: needs.plan.outputs.build == 'true' && !inputs.dry_run
+    needs: [plan, build, macos]
+    # Also when the macOS job failed: Windows and Linux do not wait for a Mac. With dry_run it runs
+    # up to the last step.
+    if: ${{ !cancelled() && needs.plan.outputs.build == 'true' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -172,7 +282,11 @@ jobs:
           {
             echo "Nightly build of main, $(date -u +%Y-%m-%d), $(git rev-parse --short=12 HEAD). It may have new bugs: the launchers offer it only on their Nightly update channel."
             echo
-            echo "Windows and Linux: the engine for AnyPS5 Desktop. macOS: AnyPS5-macOS.zip and the Mac engine are added by the release Mac (tools/release/nightly_mac.sh), usually within a day; the Mac launcher offers this nightly once they are here."
+            if [ -f dist/AnyPS5-macOS.zip ]; then
+              echo "Windows and Linux: the engine for AnyPS5 Desktop. macOS: AnyPS5-macOS.zip and the Mac engine."
+            else
+              echo "Windows and Linux: the engine for AnyPS5 Desktop. macOS: no files in this nightly, its build failed; the Mac launcher does not offer it."
+            fi
             echo
             echo "It is unsigned until it is signed on the release Mac (tools/release/sign_nightly.sh). The launchers refuse it until then."
             echo
@@ -185,7 +299,21 @@ jobs:
           } > "$RUNNER_TEMP/notes.md"
           cat "$RUNNER_TEMP/notes.md"
           ls -l dist
+      - name: Check the files
+        env:
+          MACOS: ${{ needs.macos.result }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          ls dist/AnyPS5-toolkit-windows-*.zip dist/AnyPS5-toolkit-linux-*.zip dist/AnyPS5-toolkit-linux-*.tar.gz
+          if [ "$MACOS" = success ]; then
+            ls -l dist/AnyPS5-macOS.zip "dist/AnyPS5-toolkit-macos-$version.zip"
+          else
+            echo "::warning::The macOS job ended with $MACOS: this nightly goes out without the Mac files. Re-run the failed job to add them."
+          fi
       - name: Tag and publish
+        if: ${{ !inputs.dry_run }}
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -194,12 +322,24 @@ jobs:
         run: |
           set -euo pipefail
           version="${TAG#v}"
-          # A Mac nightly may have taken the name meanwhile: then nothing is published.
           if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
-            echo "::error::$TAG exists already"; exit 1
+            # A re-run of the failed macOS job: its pre-release is out already, at this commit, and only
+            # gets the files it lacks. Any other tag of this name stops here.
+            [ "$(gh api "repos/$REPO/commits/$TAG" --jq .sha)" = "$SHA" ] &&
+              [ "$(gh release view "$TAG" --repo "$REPO" --json isPrerelease --jq .isPrerelease)" = true ] ||
+              { echo "::error::$TAG exists already, at another commit or not as a pre-release"; exit 1; }
+            have="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
+            missing=()
+            for file in dist/*; do
+              printf '%s\n' "$have" | grep -qx "$(basename "$file")" || missing+=("$file")
+            done
+            if [ "${#missing[@]}" -eq 0 ]; then echo "$TAG has every file"; exit 0; fi
+            gh release upload "$TAG" "${missing[@]}" --repo "$REPO"
+            echo "added to https://github.com/$REPO/releases/tag/$TAG: ${missing[*]}"
+            exit 0
           fi
           # The tag is made on GitHub at the built commit.
-          gh release create "$TAG" dist/AnyPS5-toolkit-* --repo "$REPO" --target "$SHA" --prerelease --latest=false \
+          gh release create "$TAG" dist/* --repo "$REPO" --target "$SHA" --prerelease --latest=false \
             --title "AnyPS5-ARM $version (nightly)" --notes-file "$RUNNER_TEMP/notes.md"
           echo "published https://github.com/$REPO/releases/tag/$TAG"
 

@@ -1,56 +1,46 @@
 #!/bin/sh
-# Adds the macOS app and engine to a nightly that CI published (.github/workflows/engine-nightly.yml)
-# and signs it, on the release Mac, where the signing key is (docs/dev/SIGNED_UPDATES.md):
+# Signs the nightlies CI published, on the release Mac, where the signing key is
+# (docs/dev/SIGNED_UPDATES.md). CI builds everything (.github/workflows/engine-nightly.yml, the
+# macOS app and engine included); nothing is built here.
 #
 #     tools/release/nightly_mac.sh [--dry-run] [<tag>]
 #     tools/release/nightly_mac.sh --install
 #
-# Without <tag> it takes the newest nightly pre-release of today or yesterday (UTC); with none it
-# exits quietly. It checks out the nightly's commit in a worktree of its own (detached, reused
-# from day to day so the builds are incremental), builds the engine (ninja all libs), AnyPS5.app
-# (build_launcher_app.sh) zipped as AnyPS5-macOS.zip and the engine toolkit (package_toolkit.sh),
-# as tools/macos/publish_nightly.sh and the releases do, and uploads them to the pre-release. The
-# phone app (AnyPS5-Remote.apk, unsigned AnyPS5-Remote.ipa) is built only when mobile/ changed
-# since the last release; otherwise the release's phone app is the current one. Then
-# sign_nightly.sh signs every file of the pre-release, and verify.sh checks the signature.
+# Without <tag> it signs what is not signed yet of:
+#   - the upstream nightlies of today or yesterday (UTC): upstream-nightly.<YYYYMMDD>.<commit>
+#   - AnyPS5 Desktop's of today or yesterday (AnyTogether/AnyPS5-Desktop,
+#     v<next>-nightly.<YYYYMMDD>.<n>)
+#   - the newest AnyPS5-ARM nightly of today or yesterday (v<next>-arm-nightly.<YYYYMMDD>.<n>)
+# With a <tag> of any of these it signs only that one. A nightly is signed when SHA256SUMS lists
+# every file of it; otherwise sign_nightly.sh signs it and verify.sh checks the signature. An
+# AnyPS5-ARM nightly without the Mac files (CI's macOS job failed) is signed as it is, for Windows
+# and Linux; when the files are added later, the next run signs it again.
 #
-# Run again, it does only what is missing: with the Mac files there it only signs again, when
-# SHA256SUMS does not list every file.
-#
-# First it signs the upstream nightlies of today or yesterday (UTC) that are not signed yet
-# (upstream-nightly.<YYYYMMDD>.<commit>: upstream's main, built unmodified by engine-nightly.yml)
-# and AnyPS5 Desktop's (AnyTogether/AnyPS5-Desktop, v<next>-nightly.<YYYYMMDD>.<n>, built by CI in
-# that repository), with sign_nightly.sh and verify.sh as they are on origin/main; nothing is
-# built for them, and they get no Mac files. With such a <tag> it signs only that one.
+# It needs nothing of a checkout, and nothing under ~/Desktop (launchd agents are refused access
+# there): sign_nightly.sh, sign.sh and verify.sh come from origin/main of a small clone of its own
+# in ~/Library/Application Support/AnyPS5/nightly-mac/repo (tools/release only), brought up to
+# date at each run.
 #
 # It does nothing (and exits 0, so the next day tries again) when less than 6 GB of disk is free
-# or a game is running (an eboot under <games>/.AnyPS5/Games). A game started during the build
-# holds back the upload and the signing, up to 4 hours.
+# or a game is running (an eboot under <games>/.AnyPS5/Games). A game started during a run stops
+# the signing of the nightlies after it.
 #
-# --dry-run prints the tag, the commit and what it would build and upload; it builds, uploads
-# and changes nothing.
+# --dry-run brings the clone up to date and prints what it would sign, and changes nothing on
+# GitHub.
 # --install installs the daily launchd agent net.anytogether.anyps5.nightly-mac: a copy of this
-# script in ~/Library/Application Support/AnyPS5/nightly-mac (refreshed from each nightly's
-# commit), run at 04:45 UTC (the hour is converted to the Mac's time zone when installing) under
-# `taskpolicy -b`, logging to ~/Library/Logs/AnyPS5/nightly-mac.log.
-#
-# Environment:
-#   ANYPS5_NIGHTLY_REPO      the repository the worktree belongs to (default: the main checkout
-#                            of the repository this script is in)
-#   ANYPS5_NIGHTLY_WORKTREE  the worktree (default: AnyPS5-nightly beside the repository)
-#   ANYPS5_VULKAN_SDK        the Vulkan SDK's macOS folder (default: ~/VulkanSDK/1.4.363.0/macOS)
-#   ANYPS5_NIGHTLY_PHONE     1: always build the phone app, 0: never (default: when mobile/ changed)
-#   ANYPS5_SIGN_IDENTITY, ANYPS5_NOTARY_PROFILE  as for build_launcher_app.sh (without them the app
-#                            is signed ad hoc, as the releases are now)
+# script in ~/Library/Application Support/AnyPS5/nightly-mac (replaced by origin/main's at each
+# scheduled run), run at 04:45 UTC (the hour is converted to the Mac's time zone when installing)
+# under `taskpolicy -b`, logging to ~/Library/Logs/AnyPS5/nightly-mac.log.
 set -eu
 slug="AnyTogether/AnyPS5-ARM"
 desktop_slug="AnyTogether/AnyPS5-Desktop"
 label="net.anytogether.anyps5.nightly-mac"
 min_free_kb=$((6 * 1024 * 1024))
 self="$0"
-here="$(cd "$(dirname "$0")" && pwd)"
 support="$HOME/Library/Application Support/AnyPS5/nightly-mac"
 logs="$HOME/Library/Logs/AnyPS5"
+clone="$support/repo"
+tools="$clone/tools/release"
 
 log() { echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] nightly_mac: $*"; }
 die() { log "error: $*" >&2; exit 1; }
@@ -67,18 +57,7 @@ for argument in "$@"; do
     esac
 done
 
-if [ -n "${ANYPS5_NIGHTLY_REPO:-}" ]; then
-    repo="$ANYPS5_NIGHTLY_REPO"
-else
-    # The repository's main checkout, also when this script runs from another worktree of it.
-    repo="$(git -C "$here" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p')"
-    [ -n "$repo" ] || die "not in a checkout: set ANYPS5_NIGHTLY_REPO"
-fi
-repo="$(cd "$repo" && pwd)"
-wt="${ANYPS5_NIGHTLY_WORKTREE:-$(dirname "$repo")/AnyPS5-nightly}"
-vulkan="${ANYPS5_VULKAN_SDK:-$HOME/VulkanSDK/1.4.363.0/macOS}"
-
-# --install: the launchd agent, from this checkout.
+# --install: the launchd agent.
 if [ "$install" = 1 ]; then
     [ "$dry" = 0 ] && [ -z "$tag" ] || { echo "usage: $0 --install" >&2; exit 2; }
     mkdir -p "$support" "$logs" "$HOME/Library/LaunchAgents"
@@ -92,12 +71,9 @@ if [ "$install" = 1 ]; then
     offset_minutes="$(echo "$offset" | cut -c4-5 | sed 's/^0//')"
     minutes=$(( (4 * 60 + 45 + sign * (${offset_hours:-0} * 60 + ${offset_minutes:-0}) + 24 * 60) % (24 * 60) ))
     hour=$((minutes / 60)); minute=$((minutes % 60))
-    path="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-    flutter="$(command -v flutter 2>/dev/null || true)"
-    [ -z "$flutter" ] || path="$(dirname "$flutter"):$path"
+    agent_path="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
     plist="$HOME/Library/LaunchAgents/$label.plist"
-    {
-        cat <<EOF
+    cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -110,27 +86,18 @@ if [ "$install" = 1 ]; then
         <string>/bin/sh</string>
         <string>$support/nightly_mac.sh</string>
     </array>
+    <key>WorkingDirectory</key><string>$support</string>
     <key>StartCalendarInterval</key>
     <dict><key>Hour</key><integer>$hour</integer><key>Minute</key><integer>$minute</integer></dict>
     <key>StandardOutPath</key><string>$logs/nightly-mac.log</string>
     <key>StandardErrorPath</key><string>$logs/nightly-mac.log</string>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>PATH</key><string>$path</string>
-        <key>ANYPS5_NIGHTLY_REPO</key><string>$repo</string>
-        <key>ANYPS5_NIGHTLY_WORKTREE</key><string>$wt</string>
-EOF
-        for name in ANYPS5_VULKAN_SDK ANYPS5_NIGHTLY_PHONE ANYPS5_SIGN_IDENTITY ANYPS5_NOTARY_PROFILE; do
-            eval "value=\${$name:-}"
-            # shellcheck disable=SC2154
-            [ -z "$value" ] || echo "        <key>$name</key><string>$value</string>"
-        done
-        cat <<EOF
+        <key>PATH</key><string>$agent_path</string>
     </dict>
 </dict>
 </plist>
 EOF
-    } > "$plist"
     plutil -lint "$plist" >/dev/null
     domain="gui/$(id -u)"
     launchctl bootout "$domain/$label" 2>/dev/null || true
@@ -147,7 +114,7 @@ game_running() {
     # shellcheck disable=SC2009
     ps -axww -o stat= -o args= | grep -v '^Z' | grep -q '/\.AnyPS5/Games/[^ ]*/eboot'
 }
-free_kb="$(df -k "$(dirname "$wt")" | awk 'NR == 2 { print $4 }')"
+free_kb="$(df -k "$HOME" | awk 'NR == 2 { print $4 }')"
 [ "$free_kb" -ge "$min_free_kb" ] || skip "only $((free_kb / 1024 / 1024)) GB of disk free, 6 GB needed"
 ! game_running || skip "a game is running"
 
@@ -165,9 +132,32 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"; [ "$dry" = 1 ] || rm -rf "$lock"' EXIT
 
 command -v gh >/dev/null || die "gh is needed"
+command -v git >/dev/null || die "git is needed"
 gh auth status >/dev/null 2>&1 || die "gh is not signed in"
 
-# The repository assets and signed read: this one, or AnyPS5 Desktop's while its nightlies are signed.
+# The signing scripts, as they are on origin/main.
+mkdir -p "$support"
+if [ -d "$clone/.git" ]; then
+    git -C "$clone" fetch -q --depth 1 origin main || die "cannot fetch origin/main for the signing scripts"
+    git -C "$clone" checkout -q --force --detach FETCH_HEAD || die "cannot check out origin/main for the signing scripts"
+else
+    rm -rf "$clone"
+    git clone -q --depth 1 --filter=blob:none --sparse --branch main "https://github.com/$slug.git" "$clone" ||
+        die "cannot clone $slug for the signing scripts"
+    git -C "$clone" sparse-checkout set tools/release || die "cannot check out the signing scripts"
+fi
+[ -x "$tools/sign_nightly.sh" ] && [ -x "$tools/verify.sh" ] || die "no signing scripts in $tools"
+log "signing scripts: origin/main at $(git -C "$clone" rev-parse --short=12 HEAD)"
+
+# The installed copy follows main: origin/main's script replaces it for the next run.
+if [ "$dry" = 0 ] && [ -z "$tag" ] && [ "$self" = "$support/nightly_mac.sh" ] && [ -f "$tools/nightly_mac.sh" ] &&
+    ! cmp -s "$tools/nightly_mac.sh" "$self"; then
+    cp "$tools/nightly_mac.sh" "$support/nightly_mac.sh.new" && chmod 755 "$support/nightly_mac.sh.new"
+    mv -f "$support/nightly_mac.sh.new" "$support/nightly_mac.sh"
+    log "updated the installed script from origin/main for the next run"
+fi
+
+# The repository assets and signed read.
 release_repo="$slug"
 assets() { gh release view "$tag" --repo "$release_repo" --json assets --jq '.assets[].name' > "$scratch/assets"; }
 
@@ -181,45 +171,43 @@ signed() {
     cmp -s "$scratch/sums/listed" "$scratch/sums/wanted"
 }
 
-# Upstream nightlies and AnyPS5 Desktop's: signed only. This script's own folder may be the
-# installed copy, with no signing scripts beside it, and these tags are in none of main's
-# history: the scripts come from origin/main, unpacked into the scratch folder.
-upstream_tools="$scratch/main/tools/release"
-sign_only() {  # <tag> <repository>
+sign_only() {  # <tag> <repository> <what it is>
     tag="$1"
     release_repo="$2"
-    what="upstream nightly"
-    [ "$release_repo" != "$desktop_slug" ] || what="AnyPS5 Desktop nightly"
+    what="$3"
     state="$(gh release view "$tag" --repo "$release_repo" --json isPrerelease,isDraft --jq '.isPrerelease and (.isDraft | not)')" ||
         { log "error: $tag has no release"; return 1; }
     [ "$state" = true ] || { log "error: $tag is not a published pre-release"; return 1; }
     assets || return 1
-    if signed; then log "$what $tag is signed over every file"; return 0; fi
+    if [ "$what" = nightly ] && ! grep -qx AnyPS5-macOS.zip "$scratch/assets"; then
+        log "$tag has no Mac files (CI's macOS job did not add them); it is signed as it is"
+    fi
+    if signed; then
+        log "$what $tag is signed over every file"
+        "$tools/verify.sh" --signature-only "$scratch/sums" || { log "error: the signature of $tag does not verify"; return 1; }
+        return 0
+    fi
     if [ "$dry" = 1 ]; then
-        echo "$what $tag: unsigned; would sign it with sign_nightly.sh from origin/main, then verify.sh --signature-only"
+        echo "$what $tag: not signed over every file; would sign it with sign_nightly.sh from origin/main, then verify.sh --signature-only"
+        sed 's/^/  /' "$scratch/assets"
         return 0
     fi
     if game_running; then log "skipped signing $tag: a game is running (the next run tries again)"; return 0; fi
-    if [ ! -x "$upstream_tools/sign_nightly.sh" ]; then
-        git -C "$repo" fetch -q origin main || { log "error: cannot fetch origin/main for the signing scripts"; return 1; }
-        mkdir -p "$scratch/main"
-        git -C "$repo" archive origin/main tools/release | tar -x -C "$scratch/main" || return 1
-    fi
-    log "signing $what $tag (no Mac build for it)"
-    "$upstream_tools/sign_nightly.sh" -R "$release_repo" "$tag" || { log "error: sign_nightly.sh $tag failed"; return 1; }
+    log "signing $what $tag"
+    "$tools/sign_nightly.sh" -R "$release_repo" "$tag" || { log "error: sign_nightly.sh $tag failed"; return 1; }
     assets || return 1
     signed || { log "error: SHA256SUMS of $tag does not list every file after signing"; return 1; }
-    "$upstream_tools/verify.sh" --signature-only "$scratch/sums" || { log "error: the signature of $tag does not verify"; return 1; }
+    "$tools/verify.sh" --signature-only "$scratch/sums" || { log "error: the signature of $tag does not verify"; return 1; }
     log "signed $what: https://github.com/$release_repo/releases/tag/$tag"
 }
+
 case "$tag" in
     upstream-nightly.*)
-        sign_only "$tag" "$slug" || exit 1
-        exit 0 ;;
-    v*-arm-nightly.*) ;;
+        sign_only "$tag" "$slug" "upstream nightly" || exit 1 ;;
+    v*-arm-nightly.*)
+        sign_only "$tag" "$slug" nightly || exit 1 ;;
     v*-nightly.*)
-        sign_only "$tag" "$desktop_slug" || exit 1
-        exit 0 ;;
+        sign_only "$tag" "$desktop_slug" "AnyPS5 Desktop nightly" || exit 1 ;;
     '')
         today="$(date -u +%Y%m%d)"
         yesterday="$(date -u -v-1d +%Y%m%d)"
@@ -229,7 +217,7 @@ case "$tag" in
             | sort_by(.created_at) | .[].tag_name")" || upstream_tags=""
         [ -n "$upstream_tags" ] || log "no upstream nightly of $today or $yesterday (UTC) to sign"
         for upstream_tag in $upstream_tags; do
-            sign_only "$upstream_tag" "$slug" || log "upstream nightly $upstream_tag is left unsigned; the next run tries again"
+            sign_only "$upstream_tag" "$slug" "upstream nightly" || log "upstream nightly $upstream_tag is left unsigned; the next run tries again"
         done
         desktop_tags="$(gh api "repos/$desktop_slug/releases?per_page=40" --jq "
             [.[] | select(.draft | not) | select(.prerelease)
@@ -237,174 +225,15 @@ case "$tag" in
             | sort_by(.created_at) | .[].tag_name")" || desktop_tags=""
         [ -n "$desktop_tags" ] || log "no AnyPS5 Desktop nightly of $today or $yesterday (UTC) to sign"
         for desktop_tag in $desktop_tags; do
-            sign_only "$desktop_tag" "$desktop_slug" || log "AnyPS5 Desktop nightly $desktop_tag is left unsigned; the next run tries again"
+            sign_only "$desktop_tag" "$desktop_slug" "AnyPS5 Desktop nightly" || log "AnyPS5 Desktop nightly $desktop_tag is left unsigned; the next run tries again"
         done
-        release_repo="$slug"
-        tag="" ;;
-esac
-
-# The nightly.
-if [ -z "$tag" ]; then
-    today="$(date -u +%Y%m%d)"
-    yesterday="$(date -u -v-1d +%Y%m%d)"
-    tag="$(gh api "repos/$slug/releases?per_page=40" --jq "
-        [.[] | select(.draft | not) | select(.prerelease)
-             | select(.tag_name | test(\"^v[0-9.]+-arm-nightly\\\\.($today|$yesterday)\\\\.[0-9]+\$\"))]
-        | sort_by(.created_at) | last | .tag_name // empty")"
-    [ -n "$tag" ] || { log "no nightly of $today or $yesterday (UTC): nothing to do"; exit 0; }
-    scheduled=1
-else
-    scheduled=0
-fi
-case "$tag" in
-    v*-arm-nightly.*) ;;
+        nightly_tag="$(gh api "repos/$slug/releases?per_page=40" --jq "
+            [.[] | select(.draft | not) | select(.prerelease)
+                 | select(.tag_name | test(\"^v[0-9.]+-arm-nightly\\\\.($today|$yesterday)\\\\.[0-9]+\$\"))]
+            | sort_by(.created_at) | last | .tag_name // empty")"
+        [ -n "$nightly_tag" ] || { log "no nightly of $today or $yesterday (UTC): nothing to do"; exit 0; }
+        sign_only "$nightly_tag" "$slug" nightly || exit 1 ;;
     *) die "$tag is not a nightly tag (v<next>-arm-nightly.<YYYYMMDD>.<n>, upstream-nightly.<YYYYMMDD>.<commit> or AnyPS5 Desktop's v<next>-nightly.<YYYYMMDD>.<n>)" ;;
 esac
-version="${tag#v}"
-state="$(gh release view "$tag" --repo "$slug" --json isPrerelease,isDraft --jq '.isPrerelease and (.isDraft | not)')" ||
-    die "$tag has no release"
-[ "$state" = true ] || die "$tag is not a published pre-release"
-assets
-
-git -C "$repo" fetch -q --tags origin
-sha="$(git -C "$repo" rev-parse -q --verify "refs/tags/$tag^{commit}")" || die "no tag $tag in $repo"
-release="$(git -C "$repo" describe --tags --abbrev=0 --match 'v*-arm' "$sha" 2>/dev/null || true)"
-
-app_zip="AnyPS5-macOS.zip"
-toolkit_zip="AnyPS5-toolkit-macos-$version.zip"
-have_mac=0
-grep -qx "$app_zip" "$scratch/assets" && grep -qx "$toolkit_zip" "$scratch/assets" && have_mac=1
-
-phone=0
-case "${ANYPS5_NIGHTLY_PHONE:-}" in
-    1) phone=1; phone_why="ANYPS5_NIGHTLY_PHONE=1" ;;
-    0) phone_why="ANYPS5_NIGHTLY_PHONE=0" ;;
-    *) if [ -z "$release" ]; then phone=1; phone_why="no release before it"
-       elif git -C "$repo" diff --quiet "$release" "$sha" -- mobile/; then phone_why="mobile/ is as in $release"
-       else phone=1; phone_why="mobile/ changed since $release"
-       fi ;;
-esac
-
-log "nightly $tag, commit $sha (release before it: ${release:-none})"
-log "worktree $wt, build $wt/build-mac"
-if [ "$dry" = 1 ]; then
-    echo "release files now:"; sed 's/^/  /' "$scratch/assets"
-    if signed; then echo "SHA256SUMS lists every file"; else echo "SHA256SUMS missing or does not list every file"; fi
-    if [ "$have_mac" = 1 ]; then
-        echo "the Mac files are there: no build, no upload; sign_nightly.sh only if SHA256SUMS is not up to date"
-    else
-        if [ -d "$wt" ]; then echo "would check out $sha in $wt (detached) and update its submodules"
-        else echo "would make $wt: git -C $repo worktree add --detach $wt $sha, and its submodules"; fi
-        [ -f "$wt/build-mac/CMakeCache.txt" ] || echo "would configure $wt/build-mac (Release, x86_64, BUILD_TESTING=ON, as docs/dev/MACOS_PORT.md)"
-        echo "would build: ninja -C $wt/build-mac all libs"
-        echo "would build: AnyPS5.app (build_launcher_app.sh, ${ANYPS5_SIGN_IDENTITY:+signed by $ANYPS5_SIGN_IDENTITY}${ANYPS5_SIGN_IDENTITY:-signed ad hoc}${ANYPS5_NOTARY_PROFILE:+, notarized}) -> $app_zip, version $version"
-        echo "would build: $toolkit_zip (package_toolkit.sh)"
-        if [ "$phone" = 1 ]; then echo "would build: AnyPS5-Remote.apk and AnyPS5-Remote.ipa ($phone_why)"
-        else echo "no phone app: $phone_why"; fi
-        echo "would upload to $tag: $app_zip $toolkit_zip$( [ "$phone" = 0 ] || echo ' AnyPS5-Remote.apk AnyPS5-Remote.ipa')"
-        echo "would run: tools/release/sign_nightly.sh $tag (SHA256SUMS over every file), then verify.sh --signature-only"
-    fi
-    echo "vulkan SDK: $vulkan $( [ -d "$vulkan" ] && echo '(found)' || echo '(MISSING)')"
-    echo "dry run: nothing built, uploaded or changed"
-    exit 0
-fi
-
-# The worktree at the nightly's commit (also for signing alone: its tools match the nightly).
-common() { (cd "$1" && cd "$(git rev-parse --git-common-dir)" && pwd); }
-if [ -e "$wt" ]; then
-    [ "$(common "$wt" 2>/dev/null || true)" = "$(common "$repo")" ] || die "$wt is not a worktree of $repo"
-    git -C "$wt" checkout -q --force --detach "$sha"
-else
-    git -C "$repo" worktree add -q --detach "$wt" "$sha"
-fi
-tools="$wt/tools/release"
-# The installed copy (--install) follows main: the newest nightly's script replaces it for the next run.
-if [ "$scheduled" = 1 ] && [ "$self" = "$support/nightly_mac.sh" ] && [ -f "$tools/nightly_mac.sh" ] &&
-    ! cmp -s "$tools/nightly_mac.sh" "$self"; then
-    cp "$tools/nightly_mac.sh" "$support/nightly_mac.sh.new" && mv -f "$support/nightly_mac.sh.new" "$support/nightly_mac.sh"
-    log "updated the installed script from $tag for the next run"
-fi
-
-upload=""
-if [ "$have_mac" = 0 ]; then
-    for need in cmake ninja swift python3; do command -v "$need" >/dev/null || die "$need is needed"; done
-    [ -d "$vulkan" ] || die "no Vulkan SDK at $vulkan (ANYPS5_VULKAN_SDK)"
-    build="$wt/build-mac"
-    out="$wt/build-nightly/$tag"
-    steps="$logs/nightly-mac-build.log"
-    mkdir -p "$logs"
-    : > "$steps"
-    step() {
-        log "$1"; shift
-        if ! "$@" >> "$steps" 2>&1; then tail -n 40 "$steps"; die "failed: $* (whole output: $steps)"; fi
-    }
-    if [ -f "$out/.built" ] && [ "$(cat "$out/.built")" = "$sha" ]; then
-        log "already built in $out"
-    else
-        # Only the newest nightly's files are kept.
-        rm -rf "$wt/build-nightly"
-        mkdir -p "$out"
-        # The main checkout's submodule URLs can be its own .git/modules folders (a local clone);
-        # git refuses the file transport for submodules unless it is allowed for this command.
-        # --force puts back tracked files that went missing inside a submodule (an interrupted
-        # clone, a cleanup tool); without it the -dirty check below stops the run.
-        step "submodules" git -c protocol.file.allow=always -C "$wt" submodule update --init --recursive --force --jobs 4
-        actual="$(git -C "$wt" describe --tags --dirty)"
-        [ "$actual" = "$tag" ] || die "git describe in $wt gives $actual, not $tag (another tag on $sha?)"
-        [ -f "$build/CMakeCache.txt" ] ||
-            step "configuring $build" cmake -S "$wt" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_OSX_ARCHITECTURES=x86_64 -DBUILD_TESTING=ON
-        step "engine (ninja all libs)" ninja -C "$build" all libs
-        step "AnyPS5.app" "$wt/tools/macos/build_launcher_app.sh" "$build" "$vulkan" "$out"
-        built="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$out/AnyPS5.app/Contents/Info.plist")"
-        [ "$built" = "$version" ] || die "the app says $built, not $version"
-        step "$app_zip" ditto -c -k --keepParent "$out/AnyPS5.app" "$out/$app_zip"
-        rm -rf "$out/AnyPS5.app"
-        step "$toolkit_zip" "$wt/tools/macos/package_toolkit.sh" "$build" "$vulkan" "$out"
-        [ -s "$out/$toolkit_zip" ] || die "package_toolkit.sh made no $toolkit_zip"
-        if [ "$phone" = 1 ]; then
-            # The phone app is extra: when it cannot be built the nightly goes out without it.
-            log "phone app ($phone_why)"
-            if (cd "$wt/mobile" && flutter build apk --release && flutter build ios --release --no-codesign) >> "$steps" 2>&1; then
-                cp "$wt/mobile/build/app/outputs/flutter-apk/app-release.apk" "$out/AnyPS5-Remote.apk"
-                mkdir "$scratch/Payload"
-                ditto "$wt/mobile/build/ios/iphoneos/Runner.app" "$scratch/Payload/Runner.app"
-                (cd "$scratch" && zip -qry "$out/AnyPS5-Remote.ipa" Payload)
-            else
-                tail -n 20 "$steps"
-                log "the phone app did not build; the nightly goes out without it"
-                rm -f "$out/AnyPS5-Remote.apk" "$out/AnyPS5-Remote.ipa"
-            fi
-        else
-            log "no phone app: $phone_why"
-        fi
-        echo "$sha" > "$out/.built"
-    fi
-    upload="$out/$app_zip $out/$toolkit_zip"
-    for file in AnyPS5-Remote.apk AnyPS5-Remote.ipa; do [ ! -f "$out/$file" ] || upload="$upload $out/$file"; done
-fi
-sign=1
-[ -n "$upload" ] || ! signed || { sign=0; log "$tag already has the Mac files and is signed over every file"; }
-
-if [ "$sign" = 1 ]; then
-    # No uploads or downloads while a game runs.
-    waited=0
-    while game_running; do
-        [ "$waited" -lt 240 ] || { log "skipped: a game has been running for 4 hours; the files stay in $wt/build-nightly"; exit 0; }
-        [ "$waited" -gt 0 ] || log "a game is running: waiting to upload and sign"
-        sleep 600
-        waited=$((waited + 10))
-    done
-    if [ -n "$upload" ]; then
-        log "uploading to $tag:$(for file in $upload; do printf ' %s' "$(basename "$file")"; done)"
-        # shellcheck disable=SC2086
-        gh release upload "$tag" $upload --repo "$slug" --clobber
-        assets
-    fi
-    log "signing $tag"
-    "$tools/sign_nightly.sh" "$tag"
-    assets
-    signed || die "SHA256SUMS of $tag does not list every file after signing"
-fi
-"$tools/verify.sh" --signature-only "$scratch/sums"
-log "done: https://github.com/$slug/releases/tag/$tag"
+[ "$dry" = 0 ] || echo "dry run: nothing signed or uploaded"
+log "done"
