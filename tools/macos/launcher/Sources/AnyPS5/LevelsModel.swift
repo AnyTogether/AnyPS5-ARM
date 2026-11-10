@@ -16,6 +16,14 @@ extension AppModel {
     /// banner over a game or another app.
     var doNotDisturb: Bool { presenceStatus == .dnd }
 
+    /// A game invite, a party invite or a Play Together offer: the ring on the controller, as on
+    /// Windows and Linux, none on Do Not Disturb. Asked whether or not the launcher is in front:
+    /// the pulse itself stays still behind a game or another app, and with Controller Vibration
+    /// off (HapticFeedback), as every pulse does.
+    func inviteRing() {
+        if !doNotDisturb { Feel.shared.vibrate(.ring) }
+    }
+
     /// The choices of Settings → AnyTogether → Show me as, in order.
     static let presenceChoices: [TogetherPresenceStatus] = [.online, .idle, .dnd, .invisible]
 

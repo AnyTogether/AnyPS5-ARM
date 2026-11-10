@@ -287,6 +287,7 @@ extension AppModel {
         case "party.invite":
             let name = event.decode(InviteData.self)?.from.displayName ?? ""
             show(T.format(.partyInvitedYou, name), symbol: "person.3.fill")
+            inviteRing()
             if !NSApp.isActive, !doNotDisturb { TrophyBanner.shared.notice(T.format(.partyInvitedYou, name), detail: T.text(.partyTitle), symbol: "person.3.fill", sounds: preferences.sounds) }
             loadParty()
         case "party.updated":

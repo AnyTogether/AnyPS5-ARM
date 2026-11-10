@@ -153,6 +153,7 @@ extension AppModel {
             withAnimation(Motion.overlay) { gameInvites.append(invite) }
             let text = T.format(.gameInvitedYou, invite.from?.displayName ?? "", gameName(invite.titleId))
             show(text, symbol: "gamecontroller.fill")
+            inviteRing()
             if !NSApp.isActive, !doNotDisturb { TrophyBanner.shared.notice(text, detail: T.text(.friendsTitle), symbol: "gamecontroller.fill", sounds: preferences.sounds) }
         case "game_session.updated":
             guard let session = event.decode(TogetherGameSession.self), session.id == gameSession?.id, let me = togetherUser?.id else { return }

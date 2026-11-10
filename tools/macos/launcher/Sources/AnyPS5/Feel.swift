@@ -11,7 +11,8 @@ final class Feel {
     static let shared = Feel()
 
     let pad = PadHaptics()
-    let haptics: HapticFeedback
+    /// The gate every pulse goes through; a test puts one over a fake pad in its place.
+    var haptics: HapticFeedback
     private var hover = HoverGate()
 
     private init() {
