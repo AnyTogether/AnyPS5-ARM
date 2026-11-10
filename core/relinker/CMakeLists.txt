@@ -1175,6 +1175,9 @@ if(BUILD_TESTING AND Python3_Interpreter_FOUND)
     add_test(NAME macos_guest_weak_imports COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_guest_weak_imports.py $<TARGET_FILE:relinker>)
     set_property(TEST macos_guest_weak_imports APPEND PROPERTY LABELS relinker)
+    add_test(NAME macos_unresolved_imports COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/relinker/tests/test_macos_unresolved_imports.py $<TARGET_FILE:relinker>)
+    set_tests_properties(macos_unresolved_imports PROPERTIES TIMEOUT 60 LABELS relinker)
 endif()
 
 if(BUILD_TESTING)

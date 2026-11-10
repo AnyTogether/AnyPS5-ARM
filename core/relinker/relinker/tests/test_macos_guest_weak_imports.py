@@ -71,7 +71,13 @@ def macos_native_probe(work):
         return None
     assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
     kernel_source, kernel = work / 'kernel.c', work / 'libkernel.prx'
-    kernel_source.write_text('int Anyps5TestKernel(void) { return 0; }\n')
+    kernel_source.write_text('#include <stdio.h>\n'
+                             '#include <unistd.h>\n'
+                             'int Anyps5TestKernel(void) { return 0; }\n'
+                             'void UnresolvedImport_nid_no_patch(const char *name, const char *library) {\n'
+                             '    fprintf(stderr, "unresolved %s from %s\\n", name, library);\n'
+                             '    _exit(3);\n'
+                             '}\n')
     result = subprocess.run(['xcrun', 'clang', '-arch', 'x86_64', '-dynamiclib', str(kernel_source),
                              '-Wl,-install_name,@rpath/libkernel.prx', '-o', str(kernel)],
                             capture_output=True, text=True, timeout=20)
@@ -84,8 +90,9 @@ def check_macos_guest_weak_imports(relinker, work):
     for name, binding, optional, required, expected, missing in (
             ('weak-missing', STB_WEAK, False, True, 42, None),
             ('weak-present', STB_WEAK, True, True, 77, None),
-            ('required-missing', STB_WEAK, True, False, None, REQUIRED),
-            ('global-missing', STB_GLOBAL, False, True, None, OPTIONAL)):
+            ('required-missing', STB_WEAK, True, False, 77, None),
+            ('both-missing', STB_WEAK, False, False, None, 'unresolved ' + REQUIRED),
+            ('global-missing', STB_GLOBAL, False, True, None, 'unresolved ' + OPTIONAL)):
         case = work / ('macos-guest-' + name)
         modules, libraries = case / 'sce_module', case / 'libs'
         modules.mkdir(parents=True)
@@ -101,7 +108,7 @@ def check_macos_guest_weak_imports(relinker, work):
         macho = MachO(image)
         offset, size = macho.dyld_info[2:4]
         stream = image[offset:offset + size]
-        for symbol, opcode in ((OPTIONAL, 0x41 if binding == STB_WEAK else 0x40), (REQUIRED, 0x40)):
+        for symbol, opcode in ((OPTIONAL, 0x41), (REQUIRED, 0x41), ('UnresolvedImport_nid_no_patch', 0x41)):
             at = stream.find(('_' + symbol).encode() + b'\0')
             assert at > 0 and stream[at - 1] == opcode, (name, symbol, stream)
         assert '@rpath/' + HOST in macho.dylibs, (name, macho.dylibs)
@@ -118,7 +125,7 @@ def check_macos_guest_weak_imports(relinker, work):
             run = subprocess.run([*command, str(converted), ENTRY + '#guest'],
                                  capture_output=True, text=True, timeout=10)
             if expected is None:
-                assert run.returncode != 0 and missing in run.stderr, (name, run.returncode, run.stdout, run.stderr)
+                assert run.returncode == 3 and missing in run.stderr, (name, run.returncode, run.stdout, run.stderr)
             else:
                 assert run.returncode == 0 and run.stdout.strip() == str(expected), (name, run.returncode, run.stdout, run.stderr)
             if name == 'weak-missing':
@@ -127,7 +134,7 @@ def check_macos_guest_weak_imports(relinker, work):
                                      capture_output=True, text=True, timeout=10)
                 assert run.returncode != 0 and HOST in run.stderr, (run.returncode, run.stdout, run.stderr)
     if native:
-        print('macOS guest weak imports: five native x86_64 loader controls passed')
+        print('macOS guest weak imports: six native x86_64 loader controls passed')
 
 
 def main():

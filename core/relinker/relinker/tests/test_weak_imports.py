@@ -1,4 +1,4 @@
-"""Check that weak undefined imports stay weak on Linux and macOS and bind to null on Windows when no module exports them."""
+"""Check that weak undefined imports stay weak on Linux and macOS and bind to null on Windows when no module exports them; macOS function imports bind weakly to reach their fallback."""
 
 import os
 import struct
@@ -219,8 +219,16 @@ def main():
 
         weak_puts = macos_fixture()
         weak_puts[0x5B00 + 24 + 4] = (STB_WEAK << 4) | 2
-        for name, image, expected in (('macos-weak', weak_puts, {'puts': 0x41, 'exit': 0x40}),
-                                      ('macos-global', macos_fixture(), {'puts': 0x40, 'exit': 0x40})):
+        weak_data = macos_fixture()
+        weak_data[0x5B00 + 24 + 4] = (STB_WEAK << 4) | 1
+        weak_data[0x5B00 + 48 + 4] = (STB_GLOBAL << 4) | 1
+        global_data = macos_fixture()
+        global_data[0x5B00 + 24 + 4] = (STB_GLOBAL << 4) | 1
+        global_data[0x5B00 + 48 + 4] = (STB_GLOBAL << 4) | 1
+        for name, image, expected in (('macos-weak', weak_puts, {'puts': 0x41, 'exit': 0x41}),
+                                      ('macos-global', macos_fixture(), {'puts': 0x41, 'exit': 0x41}),
+                                      ('macos-weak-data', weak_data, {'puts': 0x41, 'exit': 0x40}),
+                                      ('macos-global-data', global_data, {'puts': 0x40, 'exit': 0x40})):
             source = work / (name + '.elf')
             source.write_bytes(bytes(image))
             output = work / name

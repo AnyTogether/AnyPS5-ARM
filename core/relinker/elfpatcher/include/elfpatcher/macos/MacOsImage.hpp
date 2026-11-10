@@ -52,6 +52,12 @@ struct MacOsTraceImport {
     std::string Library;
 };
 
+struct MacOsFallbackImport {
+    std::uint32_t Rva;
+    std::string Name;
+    std::string Library;
+};
+
 // A guest image laid out by WindowsLoadImage (ImageBase + RVA, relocations already written) and what
 // the Mach-O writer adds around it. dyld rebases the Rebases slots, binds the Binds slots and loads the
 // Dylibs in order; flat-namespace lookups then search the images in that load order.
@@ -81,6 +87,7 @@ struct MacOsImageInput {
     const std::vector<Codegen::TrampolineSite>* Trampolines = nullptr;
     bool TraceImports = false;
     std::vector<MacOsTraceImport> Traced;
+    std::vector<MacOsFallbackImport> Fallbacks;
     std::function<void(std::string_view)> Message;
 };
 
