@@ -117,15 +117,15 @@ extension AppModel {
         let display = NSScreen.main?.maximumFramesPerSecond
         let health = LauncherWatch.shared.health
         Task.detached(priority: .utility) {
-            var problem = problem
+            var told = problem
             // macOS writes its crash report some seconds after the crash: a start right after it
             // waits for it a little before the report says there is none.
-            if let health, LauncherHealth.needsMacOSReport(problem) {
-                let wait = problem.at.addingTimeInterval(LauncherHealth.reportGrace).timeIntervalSinceNow
+            if let health, LauncherHealth.needsMacOSReport(told) {
+                let wait = told.at.addingTimeInterval(LauncherHealth.reportGrace).timeIntervalSinceNow
                 if wait > 0 { try? await Task.sleep(for: .seconds(min(wait, LauncherHealth.reportGrace))) }
-                problem = health.lookAgain(problem)
+                told = health.lookAgain(told)
             }
-            let issue = IssueDraft.launcherProblem(problem, system: .current(displayHz: display), privacy: .current(names: names, secrets: secrets))
+            let issue = IssueDraft.launcherProblem(told, system: .current(displayHz: display), privacy: .current(names: names, secrets: secrets))
             await MainActor.run {
                 self.launcherReport?.issue = issue
                 self.offerLauncherReport()

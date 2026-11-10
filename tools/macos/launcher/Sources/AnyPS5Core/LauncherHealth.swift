@@ -237,8 +237,8 @@ public final class LauncherHealth: @unchecked Sendable {
     public static func macOSReport(since: Date, pid: Int32, bundleIdentifier: String, process: String = "AnyPS5",
                                    folders: [URL] = Diagnosis.reportFolders, memoryFolder: URL = Diagnosis.systemReportsFolder) -> String? {
         for folder in folders {
-            if let (report, file) = Diagnosis.crashReportFile(since: since, bundleIdentifier: bundleIdentifier, pid: pid, folder: folder, process: process) {
-                return summary(ofCrashReport: report, file: file)
+            if let found = Diagnosis.crashReportFile(since: since, bundleIdentifier: bundleIdentifier, pid: pid, folder: folder, process: process) {
+                return summary(ofCrashReport: found.text, file: found.file)
             }
         }
         return Diagnosis.memoryKill(since: since, pid: pid, folder: memoryFolder).map { "\(macOSHeading): none. " + $0 }

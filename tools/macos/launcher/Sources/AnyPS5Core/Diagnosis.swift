@@ -137,7 +137,7 @@ public enum Diagnosis: Equatable, Sendable {
         for file in reports(in: folder, since: start, named: { $0.hasPrefix("JetsamEvent") }) {
             guard let text = try? String(contentsOf: file, encoding: .utf8), let body = crashBody(text),
                   let processes = body["processes"] as? [[String: Any]],
-                  let process = processes.first(where: { ($0["pid"] as? Int).map(Int32.init) == pid }), let reason = process["reason"] as? String else { continue }
+                  let process = processes.first(where: { ($0["pid"] as? Int) == Int(pid) }), let reason = process["reason"] as? String else { continue }
             let page = ((body["memoryStatus"] as? [String: Any])?["pageSize"] as? Int) ?? 16384
             let footprint = (process["rpages"] as? Int).map { ", \($0 * page / 1_048_576) MB in use" } ?? ""
             let when = (body["date"] as? String).map { " at \($0)" } ?? ""
