@@ -70,6 +70,12 @@ Measured with Vulkan SDK 1.4.363.0. The 7 failing tests hit Apple GPU or Metal l
 curl -fsSL https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/install.sh | sh
 ```
 
+With [Homebrew](https://brew.sh), the cask from the [AnyTogether tap](https://github.com/AnyTogether/homebrew-tap) installs the latest release and removes the quarantine flag the same way. The launcher keeps updating itself, and `brew uninstall --zap --cask anyps5` also removes its settings, logs and caches:
+
+```sh
+brew install --cask anytogether/tap/anyps5
+```
+
 With the zip from the [latest release](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest) instead, the app is not notarized, so macOS blocks it the first time: open **System Settings → Privacy & Security** and click **Open Anyway**. If it then runs from the read-only copy macOS makes of downloaded apps, the launcher offers to move itself to Applications and reopen from there.
 
 **First start.** Pick the language, one of four animated themes (Cosmic, Aurora, Sunset, Glass) and the folder that holds your PS5 dumps. Subfolders are scanned, and games added later show up on their own.
@@ -342,6 +348,12 @@ Artık varsayılan ayarlarla çalışıyor. Yazı tipinin bazı harfleri eksik (
 
 ```sh
 curl -fsSL https://github.com/AnyTogether/AnyPS5-ARM/releases/latest/download/install.sh | sh
+```
+
+[Homebrew](https://brew.sh) ile de kurabilirsin. [AnyTogether tap](https://github.com/AnyTogether/homebrew-tap)'indeki cask son sürümü kurar ve karantina işaretini aynı şekilde kaldırır. Launcher kendini güncellemeye devam eder, `brew uninstall --zap --cask anyps5` ayarlarını, kayıtlarını ve önbelleklerini de siler:
+
+```sh
+brew install --cask anytogether/tap/anyps5
 ```
 
 [Son sürümdeki](https://github.com/AnyTogether/AnyPS5-ARM/releases/latest) zip'i kullanırsan uygulama notarize edilmediği için macOS ilk seferde engeller: **Sistem Ayarları → Gizlilik ve Güvenlik**'te **Yine de Aç**'a tıkla. macOS indirilen uygulamayı salt okunur bir kopyadan açarsa launcher kendini Uygulamalar'a taşıyıp oradan yeniden açmayı önerir.
