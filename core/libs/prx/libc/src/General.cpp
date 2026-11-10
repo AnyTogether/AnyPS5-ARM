@@ -1088,6 +1088,16 @@ extern "C" [[noreturn]] void NotImplementedAt_nid_no_patch(const char* funcName,
     throw std::runtime_error(std::string(funcName) + " not implemented");
 }
 
+extern "C" [[noreturn]] void APS5_VABI UnresolvedImport_nid_no_patch(const char* name, const char* library) {
+    std::string function = "unresolved import ";
+    function += name != nullptr && *name != '\0' ? name : "(unnamed)";
+    if (library != nullptr && *library != '\0') {
+        function += " from ";
+        function += library;
+    }
+    NotImplementedAt_nid_no_patch(function.c_str(), "", 0);
+}
+
 extern "C" std::uint64_t NotImplementedCalls_nid_no_patch() {
     return notImplementedCalls.load(std::memory_order_relaxed);
 }

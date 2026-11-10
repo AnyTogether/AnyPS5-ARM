@@ -851,6 +851,8 @@ void CheckSceV2LocaleName(const char* localeName) {
 
 std::uint64_t _ZNSt8__sce_v25ctypeIcE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v25ctypeIwE2idE_nid_postfix = 0;
+std::uint64_t _ZNSt8__sce_v27collateIcE2idE_nid_postfix = 0;
+std::uint64_t _ZNSt8__sce_v27collateIwE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v28numpunctIcE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v27num_putIcNS_19ostreambuf_iteratorIcNS_11char_traitsIcEEEEE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v27codecvtIwc9_MbstatetE2idE_nid_postfix = 0;

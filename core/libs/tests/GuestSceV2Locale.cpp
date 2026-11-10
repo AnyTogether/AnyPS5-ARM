@@ -10,6 +10,8 @@ extern "C" {
 extern std::uint64_t _ZNSt8__sce_v25ctypeIcE2idE_nid_postfix;
 extern std::uint64_t _ZNSt8__sce_v25ctypeIwE2idE_nid_postfix;
 extern std::uint64_t _ZNSt8__sce_v28numpunctIcE2idE_nid_postfix;
+extern std::uint64_t _ZNSt8__sce_v27collateIcE2idE_nid_postfix;
+extern std::uint64_t _ZNSt8__sce_v27collateIwE2idE_nid_postfix;
 extern std::uint64_t _ZNSt8__sce_v27num_putIcNS_19ostreambuf_iteratorIcNS_11char_traitsIcEEEEE2idE_nid_postfix;
 extern std::uint64_t _ZNSt8__sce_v27codecvtIwc9_MbstatetE2idE_nid_postfix;
 extern std::int32_t _ZNSt8__sce_v26locale2id7_Id_cntE_nid_postfix;
@@ -76,6 +78,9 @@ int main() {
     Require(_ZNSt8__sce_v25ctypeIcE2idE_nid_postfix == 0);
     Require(_ZNSt8__sce_v25ctypeIwE2idE_nid_postfix == 0);
     Require(_ZNSt8__sce_v28numpunctIcE2idE_nid_postfix == 0);
+    Require(_ZNSt8__sce_v27collateIcE2idE_nid_postfix == 0);
+    Require(_ZNSt8__sce_v27collateIwE2idE_nid_postfix == 0);
+    Require(&_ZNSt8__sce_v27collateIcE2idE_nid_postfix != &_ZNSt8__sce_v27collateIwE2idE_nid_postfix);
     Require(_ZNSt8__sce_v27num_putIcNS_19ostreambuf_iteratorIcNS_11char_traitsIcEEEEE2idE_nid_postfix == 0);
     Require(_ZNSt8__sce_v27codecvtIwc9_MbstatetE2idE_nid_postfix == 0);
     Require(_ZNSt8__sce_v26locale2id7_Id_cntE_nid_postfix == 0);

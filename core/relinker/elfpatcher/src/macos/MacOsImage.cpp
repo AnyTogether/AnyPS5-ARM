@@ -639,6 +639,12 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         input.Binds.push_back({"___aps5_get_pending_module_args_nid_no_patch", metaRva + static_cast<std::uint32_t>(moduleArgsSlot)});
         input.Binds.push_back({"___aps5_set_module_init_result_nid_no_patch", metaRva + static_cast<std::uint32_t>(moduleResultSlot)});
     }
+    std::uint64_t fallbackSlot = 0;
+    if (!input.Fallbacks.empty()) {
+        fallbackSlot = metaEnd;
+        metaEnd += 8;
+        input.Binds.push_back({"_UnresolvedImport_nid_no_patch", metaRva + static_cast<std::uint32_t>(fallbackSlot), 0, true});
+    }
     meta.resize(metaEnd, 0);
     for (std::size_t index = 0; index < input.TlsExports.size(); ++index) {
         const auto& variable = input.TlsExports[index];
@@ -759,13 +765,47 @@ std::vector<std::uint8_t> WriteMacOsImage(MacOsImageInput& input) {
         input.Binds.push_back({"___cxa_atexit", metaRva + static_cast<std::uint32_t>(MetaCxaAtexitSlot)});
     }
 
+    std::vector<std::uint32_t> fallbackStubs;
+    if (!input.Fallbacks.empty()) {
+        std::map<std::string, std::uint32_t> strings;
+        const auto intern = [&](const std::string& text) {
+            if (const auto found = strings.find(text); found != strings.end()) return found->second;
+            const auto rva = code.GetRva();
+            for (const auto character : text) code.Emit({static_cast<std::uint8_t>(character)});
+            code.Emit({0});
+            strings.emplace(text, rva);
+            return rva;
+        };
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> names;
+        for (const auto& import : input.Fallbacks) {
+            if (import.Name.empty()) throw Domain::RelinkerException("Unnamed macOS fallback import", import.Rva);
+            const auto name = intern(import.Name);
+            names.emplace_back(name, intern(import.Library));
+        }
+        while (code.GetRva() % 16 != 0) code.Emit({0xcc});
+        for (const auto& [name, library] : names) {
+            fallbackStubs.push_back(code.GetRva());
+            code.Rip({0x48, 0x8d, 0x3d}, name);
+            code.Rip({0x48, 0x8d, 0x35}, library);
+            code.Rip({0x48, 0x8b, 0x05}, metaRva + static_cast<std::uint32_t>(fallbackSlot));
+            code.Emit({0x48, 0x85, 0xc0, 0x74, 0x02, 0xff, 0xe0, 0x0f, 0x0b});
+        }
+    }
+
     // The image initializer: register the TLS descriptor, fill the imported TLS slots, run the guest
     // initializers, then hand the finalizers to __cxa_atexit.
-    const bool hasInit = hasTls || !input.TlsImports.empty() || input.InitRva != 0 || !input.InitArrayRvas.empty() || hasFini;
+    const bool hasInit = hasTls || !input.TlsImports.empty() || input.InitRva != 0 || !input.InitArrayRvas.empty() || hasFini || !input.Fallbacks.empty();
     std::vector<Section> dataSections{{"__meta", 0, metaSize, 0, 3}};
     if (hasInit) {
         const auto initStub = code.GetRva();
         code.Emit({0x55, 0x48, 0x89, 0xe5});                                 // push rbp / mov rbp, rsp
+        for (std::size_t index = 0; index < input.Fallbacks.size(); ++index) {
+            const auto slot = input.Fallbacks[index].Rva;
+            code.Rip({0x48, 0x8b, 0x05}, slot);
+            code.Emit({0x48, 0x85, 0xc0, 0x75, 0x0e});
+            code.Rip({0x48, 0x8d, 0x05}, fallbackStubs[index]);
+            code.Rip({0x48, 0x89, 0x05}, slot);
+        }
         if (hasTls) {
             code.Rip({0x48, 0x8d, 0x3d}, descriptor);                        // lea rdi, [rip + descriptor]
             code.Rip({0xff, 0x15}, metaRva + static_cast<std::uint32_t>(MetaRegisterSlot)); // call [rip + register]
