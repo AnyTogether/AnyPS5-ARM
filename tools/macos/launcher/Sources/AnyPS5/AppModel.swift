@@ -1311,7 +1311,8 @@ final class AppModel: ObservableObject {
         scanning = false
         gameRoots = update.roots
         if libraryFolders != update.folders { libraryFolders = update.folders }
-        let records = generation == recordsGeneration ? scanned : AppModel.records(of: update.games, roots: update.roots)
+        // A game being uninstalled is not installed, whatever is left of it on the disk.
+        let records = (generation == recordsGeneration ? scanned : AppModel.records(of: update.games, roots: update.roots)).filter { removals[$0.key] == nil }
         let listingChanged = !GameLibrary.sameListing(games, update.games)
         if records.mapValues(\.toolkit) != installedRecords.mapValues(\.toolkit) || records.mapValues(\.date) != installedRecords.mapValues(\.date) {
             installedRecords = records
@@ -1645,7 +1646,11 @@ final class AppModel: ObservableObject {
         })
         installer.background = background
         installer.relinkerFlags = settings(for: game).chosenRelinkerFlags
+        // Uninstalled a moment ago: its old files go first (what could not be set aside is still
+        // being removed where the new bundle goes).
+        let removal = removals[id]
         Task.detached(priority: background ? .utility : .userInitiated) {
+            await removal?.value
             let result: Result<URL, Error> = Result {
                 if let downloaded { _ = try store.verifiedToolkit(version: downloaded) }
                 if custom, let problem = Toolkit.layoutProblem(at: toolkit.root) { throw InstallError("the engine folder is incomplete: \(problem)") }
@@ -1822,14 +1827,24 @@ final class AppModel: ObservableObject {
         return (prepare.active == first, prepare.pending.contains(first), nil)
     }
 
+    /// The games whose files are being removed (Uninstall), by id, until they are gone.
+    private(set) var removals: [String: Task<Void, Never>] = [:]
+
+    /// Uninstalls `game` at once: its bundle and files are set aside in the store and removed
+    /// after, off the main thread, so the launcher keeps answering while a big game goes. A second
+    /// Uninstall meanwhile does nothing, and an unlock of the game waits until its old files are
+    /// gone.
     func uninstall(_ game: Game) {
-        guard let root = root(of: game) else { return }
-        try? FileManager.default.removeItem(at: Installer.bundle(for: game, root: root))
-        try? FileManager.default.removeItem(at: Installer.dataFolder(for: game, root: root))
-        try? FileManager.default.removeItem(at: Installer.keptRelink(for: game, root: root))
+        guard let root = root(of: game), removals[game.id] == nil else { return }
+        let going = Installer.setAside(game, root: root)
         installedRecords[game.id] = nil
         recordsGeneration += 1
         show(T.text(.uninstallDone), symbol: "trash")
+        let id = game.id
+        removals[id] = Task.detached(priority: .utility) {
+            Installer.remove(going)
+            await MainActor.run { self.removals[id] = nil }
+        }
     }
 
     func clearShaderCache(_ game: Game) {
