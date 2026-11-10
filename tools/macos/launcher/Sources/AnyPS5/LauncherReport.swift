@@ -12,9 +12,7 @@ final class LauncherWatch {
     private var watch: StallWatch?
     private var pinger: Timer?
     private var lines: [String] = []
-    private var second = ProcessInfo.processInfo.systemUptime
-    private var lastPing = ProcessInfo.processInfo.systemUptime
-    private var worstGap: TimeInterval = 0
+    private var heartbeat = Heartbeat(now: ProcessInfo.processInfo.systemUptime)
     /// What is on screen, for the line a second the report keeps.
     var describe: (() -> String)?
     private static let clock: DateFormatter = {
@@ -28,8 +26,8 @@ final class LauncherWatch {
     func start(version: String, found: @escaping @MainActor (LauncherProblem) -> Void) {
         guard health == nil, !LauncherHealth.debuggerAttached else { return }
         let bundle = Bundle.main.bundleIdentifier ?? "org.anyps5.launcher"
-        let health = LauncherHealth(version: version, crashReport: { since, pid in
-            Diagnosis.crashReport(since: since, bundleIdentifier: bundle, pid: pid, process: "AnyPS5")
+        let health = LauncherHealth(version: version, macOSReport: { since, pid in
+            LauncherHealth.macOSReport(since: since, pid: pid, bundleIdentifier: bundle)
         })
         self.health = health
         let started = Date()
@@ -46,8 +44,9 @@ final class LauncherWatch {
     }
 
     private func startPinging() {
-        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.ping() } }
-        timer.tolerance = 0.05
+        let timer = Timer(timeInterval: Heartbeat.beat, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.ping() } }
+        timer.tolerance = Heartbeat.leeway
+        heartbeat = Heartbeat(now: ProcessInfo.processInfo.systemUptime)
         RunLoop.main.add(timer, forMode: .common)
         pinger = timer
     }
@@ -55,14 +54,10 @@ final class LauncherWatch {
     private func ping() {
         let now = ProcessInfo.processInfo.systemUptime
         let front = NSApp?.isActive == true
-        worstGap = max(worstGap, now - lastPing)
-        lastPing = now
         var changed: [String]?
-        if now - second >= 1 {
-            lines.append("\(Self.clock.string(from: Date())) \(describe?() ?? "") · longest main-thread gap \(Int(worstGap * 1000)) ms" + (front ? "" : " · behind"))
+        if let stall = heartbeat.ping(now) {
+            lines.append(Heartbeat.line(time: Self.clock.string(from: Date()), onScreen: describe?() ?? "", stallMs: stall, footprintMB: LauncherHealth.footprintMB, front: front))
             if lines.count > LauncherHealth.keptLines { lines.removeFirst(lines.count - LauncherHealth.keptLines) }
-            second = now
-            worstGap = 0
             changed = lines
         }
         watch?.ping(watching: front, lines: changed, error: nil)
@@ -120,8 +115,17 @@ extension AppModel {
         let names = [SCDynamicStoreCopyComputerName(nil, nil) as String?, togetherUser?.handle, togetherUser?.displayName].compactMap { $0 }
         let secrets = allSecrets
         let display = NSScreen.main?.maximumFramesPerSecond
+        let health = LauncherWatch.shared.health
         Task.detached(priority: .utility) {
-            let issue = IssueDraft.launcherProblem(problem, system: .current(displayHz: display), privacy: .current(names: names, secrets: secrets))
+            var told = problem
+            // macOS writes its crash report some seconds after the crash: a start right after it
+            // waits for it a little before the report says there is none.
+            if let health, LauncherHealth.needsMacOSReport(told) {
+                let wait = told.at.addingTimeInterval(LauncherHealth.reportGrace).timeIntervalSinceNow
+                if wait > 0 { try? await Task.sleep(for: .seconds(min(wait, LauncherHealth.reportGrace))) }
+                told = health.lookAgain(told)
+            }
+            let issue = IssueDraft.launcherProblem(told, system: .current(displayHz: display), privacy: .current(names: names, secrets: secrets))
             await MainActor.run {
                 self.launcherReport?.issue = issue
                 self.offerLauncherReport()

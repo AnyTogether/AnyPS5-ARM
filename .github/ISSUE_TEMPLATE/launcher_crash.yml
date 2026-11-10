@@ -34,11 +34,11 @@ body:
     id: error
     attributes:
       label: Uncaught error
-      description: The uncaught exception or fatal signal of that run with its stack, and the start of macOS's crash report.
+      description: What macOS's crash report says (exception, termination and the crashed thread) or that it wrote none, then the uncaught exception or fatal signal of that run with its stack.
       render: text
   - type: textarea
     id: log
     attributes:
       label: Last seconds
-      description: A line a second before it happened - what was on screen, and the longest gap between two answers of the interface in that second.
+      description: A line a second before it happened - what was on screen, how long the interface was held up in that second beyond its 250 ms beat (0 ms when it answers at once) and the launcher's memory.
       render: text

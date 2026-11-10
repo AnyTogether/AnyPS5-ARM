@@ -149,6 +149,117 @@ final class LauncherHealthTests: XCTestCase {
         XCTAssertEqual(Dictionary(uniqueKeysWithValues: crash.fields.map { ($0.id, $0.value) })["error"], "None caught.")
     }
 
+    func testTheHeartbeatCountsOnlyTheTimeBeyondItsOwnBeat() {
+        // Issues 91 and 93: an idle launcher read "longest main-thread gap 253-298 ms" every
+        // second, which was the 250 ms timer and its 50 ms leeway, not the main thread.
+        var heartbeat = Heartbeat(now: 0)
+        var said: [Int] = []
+        var time: TimeInterval = 0
+        for late in [0.003, 0.016, 0.048, 0.016, 0.03, 0.0, 0.016, 0.048] {
+            time += Heartbeat.beat + late
+            if let stall = heartbeat.ping(time) { said.append(stall) }
+        }
+        XCTAssertEqual(said, [0, 0], "an idle launcher says 0 ms")
+        time += 0.829
+        let held = heartbeat.ping(time)
+        XCTAssertNil(held, "not a second yet since the last line")
+        time += Heartbeat.beat
+        XCTAssertEqual(heartbeat.ping(time), 529, "a ping 829 ms after the last: the main thread was held 529 ms beyond the beat and its leeway")
+        let line = Heartbeat.line(time: "09:41:15", onScreen: "Home (tiles) · 0 games, #0", stallMs: 529, footprintMB: 412, front: false)
+        XCTAssertEqual(line, "09:41:15 Home (tiles) · 0 games, #0 · longest main-thread stall 529 ms · 412 MB · behind")
+        XCTAssertGreaterThan(LauncherHealth.footprintMB ?? 0, 0, "this process's own footprint")
+    }
+
+    /// An .ips crash report of the launcher as macOS writes it: a JSON header line, then the report.
+    func launcherIPS(pid: Int32) -> String {
+        let header = #"{"app_name":"AnyPS5","timestamp":"2026-11-09 09:41:30.00 +0530","bundleID":"org.anyps5.launcher","name":"AnyPS5"}"#
+        let body: [String: Any] = [
+            "pid": pid,
+            "procPath": "/Applications/AnyPS5.app/Contents/MacOS/AnyPS5",
+            "exception": ["type": "EXC_BREAKPOINT", "signal": "SIGTRAP", "codes": "0x0000000000000001, 0x00000001a2b3c4d5"],
+            "termination": ["namespace": "SIGNAL", "code": 5, "indicator": "Trace/BPT trap: 5", "byProc": "exc handler"],
+            "asi": ["libswiftCore.dylib": ["Fatal error: Index out of range"]],
+            "faultingThread": 0,
+            "threads": [["frames": [["imageOffset": 4096, "imageIndex": 0, "symbol": "AppModel.select(_:)", "symbolLocation": 40]]]],
+            "usedImages": [["name": "AnyPS5"]],
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+        return header + "\n" + String(decoding: data, as: UTF8.self)
+    }
+
+    /// A low-memory event in which macOS ended `pid`.
+    func jetsamIPS(pid: Int32) -> String {
+        let header = #"{"bug_type":"298","timestamp":"2026-11-09 09:41:30.00 +0530"}"#
+        let body: [String: Any] = [
+            "date": "2026-11-09 09:41:30.12 +0530",
+            "memoryStatus": ["pageSize": 16384],
+            "processes": [["pid": 77, "name": "Other", "rpages": 100], ["pid": pid, "name": "AnyPS5", "rpages": 204_800, "reason": "per-process-limit"]],
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+        return header + "\n" + String(decoding: data, as: UTF8.self)
+    }
+
+    func testMacOSsReportOfTheRunIsFoundByItsProcess() throws {
+        let reports = folder.appendingPathComponent("DiagnosticReports"), system = folder.appendingPathComponent("System")
+        try FileManager.default.createDirectory(at: reports.appendingPathComponent("Retired"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: system, withIntermediateDirectories: true)
+        let since = Date().addingTimeInterval(-60)
+        let folders = [reports, reports.appendingPathComponent("Retired")]
+        func look(_ pid: Int32) -> String? {
+            LauncherHealth.macOSReport(since: since, pid: pid, bundleIdentifier: "org.anyps5.launcher", folders: folders, memoryFolder: system)
+        }
+        XCTAssertNil(look(4242), "nothing written: nothing to say")
+        try launcherIPS(pid: 4242).write(to: reports.appendingPathComponent("Retired/AnyPS5-2026-11-09-094130.ips"), atomically: true, encoding: .utf8)
+        let crash = try XCTUnwrap(look(4242), "moved aside to Retired, still found")
+        XCTAssertTrue(crash.hasPrefix("macOS crash report ("), crash)
+        XCTAssertTrue(crash.components(separatedBy: "\n")[0].hasSuffix("/Retired/AnyPS5-2026-11-09-094130.ips, attach it to the issue):"), crash)
+        XCTAssertTrue(crash.contains("Exception: EXC_BREAKPOINT (SIGTRAP), codes 0x0000000000000001, 0x00000001a2b3c4d5"), crash)
+        XCTAssertTrue(crash.contains("Termination: SIGNAL 5 Trace/BPT trap: 5 by exc handler"), crash)
+        XCTAssertTrue(crash.contains("libswiftCore.dylib: Fatal error: Index out of range"), crash)
+        XCTAssertTrue(crash.contains("0  AnyPS5  AppModel.select(_:) + 40"), crash)
+        XCTAssertNil(look(5151), "another process's report is not this run's")
+        try jetsamIPS(pid: 5151).write(to: system.appendingPathComponent("JetsamEvent-2026-11-09-094130.ips"), atomically: true, encoding: .utf8)
+        let memory = try XCTUnwrap(look(5151))
+        XCTAssertTrue(memory.contains("macOS ended it for memory at 2026-11-09 09:41:30.12 +0530 (per-process-limit, 3200 MB in use)"), memory)
+        XCTAssertNil(look(6161), "a low-memory event that did not end this run says nothing of it")
+    }
+
+    func testACrashWithoutMacOSsReportAtStartLooksAgainThenSaysThereIsNone() throws {
+        let first = health(pid: 100)
+        _ = first.start(now: Date(timeIntervalSince1970: 1_000))
+        first.writeMarker(started: Date(timeIntervalSince1970: 1_000), alive: Date(timeIntervalSince1970: 1_050), lines: [], error: nil)
+        let problem = try XCTUnwrap(health(pid: 200).start())
+        XCTAssertEqual(problem.pid, 100)
+        XCTAssertEqual(problem.started, Date(timeIntervalSince1970: 1_000))
+        XCTAssertNil(problem.error)
+        XCTAssertTrue(LauncherHealth.needsMacOSReport(problem))
+        // Written late, after this start: found the second time.
+        let late = LauncherHealth(folder: folder, version: "0.2.26", pid: 300, alive: { _ in false }, macOSReport: { since, pid in
+            since == Date(timeIntervalSince1970: 1_000) && pid == 100 ? "macOS crash report:\n  Exception: EXC_BAD_ACCESS (SIGSEGV)" : nil
+        })
+        let found = late.lookAgain(problem)
+        XCTAssertTrue(found.error?.hasPrefix("macOS crash report:\n  Exception: EXC_BAD_ACCESS") == true)
+        XCTAssertFalse(LauncherHealth.needsMacOSReport(found))
+        XCTAssertEqual(late.lookAgain(found), found, "looked for once")
+        XCTAssertEqual(health(pid: 301).start(), found, "kept for the next start")
+        // Nothing ever written: the report says so.
+        let none = health(pid: 400).lookAgain(problem)
+        XCTAssertTrue(none.error?.contains("none for this run") == true)
+        XCTAssertTrue(none.error?.contains("Force Quit or a kill signal leave none") == true)
+        let recovered = LauncherProblem(kind: .hang, at: Date(), version: "0.2.26", platform: "macOS", stalledMs: 6_000, recovered: true, pid: 100, started: Date())
+        XCTAssertEqual(health(pid: 401).lookAgain(recovered), recovered, "a stall it came out of ended no run")
+    }
+
+    func testAStallTheRunNeverCameOutOfKeepsItsProcess() throws {
+        let first = health(pid: 100)
+        _ = first.start(now: Date(timeIntervalSince1970: 1_000))
+        first.writeStall(since: Date(timeIntervalSince1970: 1_040), length: 8, recovered: false, error: nil, lines: [])
+        let problem = try XCTUnwrap(health(pid: 200).start())
+        XCTAssertEqual(problem.kind, .hang)
+        XCTAssertEqual(problem.pid, 100, "for macOS's report of how it ended (Force Quit leaves none)")
+        XCTAssertTrue(LauncherHealth.needsMacOSReport(problem))
+    }
+
     func testTheIssueTemplateHasEveryFieldTheLinkFills() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
