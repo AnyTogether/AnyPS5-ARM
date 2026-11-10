@@ -1,8 +1,4 @@
 cmake_minimum_required(VERSION 3.20)
-# The oldest macOS the engine, the relinker and the libraries of the toolkit run on: the launcher's
-# (tools/macos/launcher/Package.swift). Left empty, the SDK's own version is the floor, and the
-# libraries then link against what older systems lack and fail to load there ("Symbol not found").
-# tools/macos/minimum_macos.py checks the toolkit.
 set(ANYPS5_MACOS_MINIMUM 14.0)
 if(CMAKE_HOST_APPLE AND NOT CMAKE_OSX_DEPLOYMENT_TARGET AND "$ENV{MACOSX_DEPLOYMENT_TARGET}" STREQUAL "")
     set(CMAKE_OSX_DEPLOYMENT_TARGET ${ANYPS5_MACOS_MINIMUM} CACHE STRING "Oldest macOS the build runs on" FORCE)
@@ -664,8 +660,6 @@ if(BUILD_TESTING)
     endif()
 endif()
 
-# An API newer than the deployment target is used only behind an availability check (@available,
-# __builtin_available), so the engine still loads on the oldest macOS it is built for.
 if(APPLE)
     set(ANYPS5_AVAILABILITY_ERRORS $<$<COMPILE_LANGUAGE:C,CXX,OBJC,OBJCXX>:-Werror=unguarded-availability-new>)
 endif()
