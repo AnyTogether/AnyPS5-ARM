@@ -973,7 +973,7 @@ void Unmap(void* addr, size_t len) {
 #endif
 }
 
-void* MapPlaced(void* addr, size_t len, int prot, int flags, size_t alignment) {
+void* PlaceMapping(void* addr, size_t len, int prot, int flags, size_t alignment) {
     ValidateLength(len);
     alignment = ValidateAlignment(alignment);
     constexpr int GuestMapFixed = 0x10;
@@ -1146,8 +1146,18 @@ void RecordProtection(const void* addr, size_t len, int prot) {
     if (prot >= 0) g_protections.emplace(start, ProtectedRange{start + len, ReportedProtection(prot)});
 }
 
-void* MapAligned(void* addr, size_t len, int prot, int flags, size_t alignment) {
-    void* mapped = MapPlaced(addr, len, prot, flags, alignment);
+void* MapPlaced(const char* kind, void* addr, size_t len, int prot, int flags, size_t alignment) {
+    try {
+        return PlaceMapping(addr, len, prot, flags, alignment);
+    } catch (const std::exception& error) {
+        std::fprintf(stderr, "[memory] %s of 0x%zx bytes at 0x%llx (flags 0x%x, alignment 0x%zx) failed: %s\n", kind, len,
+            static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(addr)), flags, alignment, error.what());
+        throw;
+    }
+}
+
+void* MapAligned(const char* kind, void* addr, size_t len, int prot, int flags, size_t alignment) {
+    void* mapped = MapPlaced(kind, addr, len, prot, flags, alignment);
 #if defined(__linux__) || defined(__APPLE__)
     GuestWriteWatch::GuestWriteWatchRegister_nid_postfix(mapped, len);
 #endif
@@ -1236,7 +1246,7 @@ int DoMapDirect(void** addr, size_t len, int prot, int flags, int64_t physStart,
     RequireAliasesUnpinned(mutation, static_cast<std::uint64_t>(physStart), len);
     std::lock_guard lock(g_directLock);
     ValidatePhysicalRange(static_cast<std::uint64_t>(physStart), len);
-    void* mapped = MapAligned(*addr, len, PROT_NONE, flags, alignment);
+    void* mapped = MapAligned("direct memory map", *addr, len, PROT_NONE, flags, alignment);
     try {
         AddMapping(reinterpret_cast<std::uintptr_t>(mapped), len, static_cast<std::uint64_t>(physStart), LinuxProtFromSce(prot));
         mutation.Add(mapped, len, (prot & 3) != 0, (prot & 2) != 0, (prot & GuestProtGpuReadWrite) != 0);
@@ -1264,7 +1274,7 @@ static int MapAnonymous(void** addr, size_t len, int prot, int flags, size_t ali
         return 0;
     }
     ReplaceFixedOverlap(mutation, *addr, len, flags);
-    void* mapped = MapAligned(*addr, len, zero ? PROT_NONE : LinuxProtFromSce(prot), flags, alignment);
+    void* mapped = MapAligned("anonymous map", *addr, len, zero ? PROT_NONE : LinuxProtFromSce(prot), flags, alignment);
     try {
 #ifdef _WIN32
         if (zero) GuestArena::GuestArenaMapZero_nid_postfix(mapped, len);
@@ -1356,7 +1366,7 @@ int DoMapFileBacked_nid_no_patch(void** addr, size_t len, int prot, int flags, i
     flags = PlaceHintInReservation(*addr, len, placementFlags);
     if (FixedNoOverwriteConflict(mutation, *addr, len, flags)) return SCE_KERNEL_ERROR_ENOMEM;
     ReplaceFixedOverlap(mutation, *addr, len, flags);
-    void* mapped = MapPlaced(*addr, len, PROT_NONE, flags, alignment);
+    void* mapped = MapPlaced("file map", *addr, len, PROT_NONE, flags, alignment);
     GuestWriteWatch::GuestWriteWatchUnregister_nid_postfix(mapped, len);
     const int nativeProtection = LinuxProtFromSce(prot);
     const int nativeFlags = (shared ? MAP_SHARED : MAP_PRIVATE) | MAP_FIXED;
@@ -1424,7 +1434,7 @@ int DoMapFileBacked_nid_no_patch(void** addr, size_t len, int prot, int flags, i
             return SCE_KERNEL_ERROR_ENOMEM;
         }
         ReplaceFixedOverlap(mutation, *addr, len, flags);
-        mapped = MapPlaced(*addr, len, PROT_NONE, flags, alignment);
+        mapped = MapPlaced("file map", *addr, len, PROT_NONE, flags, alignment);
         GuestArena::GuestArenaMapFile_nid_postfix(mapped, len, section, offset, WinProtFromPosix(LinuxProtFromSce(prot)), viewProtection, static_cast<std::size_t>(std::min<std::uint64_t>(len, fileEnd - offset)));
         mutation.Add(mapped, len, (prot & 3) != 0, (prot & 2) != 0, false);
     } catch (...) {
@@ -1454,7 +1464,7 @@ int DoMapShared(void** addr, size_t len, int prot, HostSharedMemory object) {
     if (len == 0 || (len & (PS5_PAGE_SIZE - 1)) != 0) return SCE_KERNEL_ERROR_EINVAL;
     const auto nativeProtection = LinuxProtFromSce(prot);
     GuestAllocations::Mutation mutation;
-    void* mapped = MapPlaced(*addr, len, PROT_NONE, 0, PS5_PAGE_SIZE);
+    void* mapped = MapPlaced("shared memory map", *addr, len, PROT_NONE, 0, PS5_PAGE_SIZE);
     try {
 #if defined(_WIN32)
         GuestArena::GuestArenaMap_nid_postfix(mapped, len, object, 0, WinProtFromPosix(nativeProtection));
@@ -1697,7 +1707,7 @@ int DoReserveVirtual(void** addr, size_t len, int flags, size_t alignment) {
     }
     if (fixed) mutation.RequireAvailable(*addr, len);
     constexpr int GuestMapNoCoalesce = 0x400000;
-    void* mapped = MapAligned(*addr, len, PROT_NONE, fixed ? GuestMapFixedFlag | (flags & GuestMapNoCoalesce) : 0, alignment);
+    void* mapped = MapAligned("virtual range reservation", *addr, len, PROT_NONE, fixed ? GuestMapFixedFlag | (flags & GuestMapNoCoalesce) : 0, alignment);
     try {
         mutation.Add(mapped, len, false, false, false);
     } catch (...) {

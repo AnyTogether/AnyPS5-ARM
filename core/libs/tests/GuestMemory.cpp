@@ -3915,6 +3915,51 @@ static void CheckVirtualQueryPartialMunmap() {
     Require(munmap_nid_postfix(memory + page * 2, page) == 0);
 }
 
+template <typename Body>
+static std::string StandardErrorOf(Body body) {
+#if !defined(__linux__) && !defined(__APPLE__)
+    body();
+    return {};
+#else
+    std::fflush(stderr);
+    std::FILE* capture = std::tmpfile();
+    Require(capture != nullptr);
+    const int saved = ::dup(::fileno(stderr));
+    Require(saved >= 0 && ::dup2(::fileno(capture), ::fileno(stderr)) >= 0);
+    body();
+    std::fflush(stderr);
+    Require(::dup2(saved, ::fileno(stderr)) >= 0 && ::close(saved) == 0);
+    std::rewind(capture);
+    std::string text;
+    char buffer[512];
+    for (std::size_t read = 0; (read = std::fread(buffer, 1, sizeof(buffer), capture)) != 0;) text.append(buffer, read);
+    std::fclose(capture);
+    return text;
+#endif
+}
+
+static void CheckArenaExhaustionNamesTheRequest() {
+    constexpr std::size_t tooLarge = std::size_t{1} << 40;
+    void* reserved = nullptr;
+    std::string message;
+    const auto log = StandardErrorOf([&] {
+        try {
+            static_cast<void>(sceKernelReserveVirtualRange(&reserved, tooLarge, 0, 0x10000));
+        } catch (const std::runtime_error& error) {
+            message = error.what();
+        }
+    });
+    Require(reserved == nullptr);
+    Require(message.starts_with("guest address space arena exhausted: no room for an allocation of 0x10000000000 bytes aligned 0x10000 (hint 0x0); largest free block 0x"));
+    Require(message.find(" host or unmappable, 0x") != std::string::npos && message.find(" guest in ") != std::string::npos);
+#if defined(__linux__) || defined(__APPLE__)
+    Require(log.find("[memory] " + message + "\n") != std::string::npos);
+    Require(log.find("[memory] virtual range reservation of 0x10000000000 bytes at 0x0 (flags 0x0, alignment 0x10000) failed: " + message + "\n") != std::string::npos);
+#else
+    static_cast<void>(log);
+#endif
+}
+
 static void CheckAvailableDirectMemoryIsLargestFreeBlock() {
     constexpr std::int64_t window = 0x4000000;
     const std::int64_t top = static_cast<std::int64_t>(sceKernelGetDirectMemorySize()) - window;
@@ -4169,6 +4214,7 @@ int main(int argc, char** argv) {
     CheckArenaFirstFitAfterPartialRelease();
     CheckArenaFirstFitAgainstPageModel();
     CheckAvailableDirectMemoryIsLargestFreeBlock();
+    CheckArenaExhaustionNamesTheRequest();
     CheckOverlapQueriesSeeRangesStartingBelowTheAddress();
     CheckMappedLeasesPreserveReadableRuns();
     CheckVirtualQuerySplitFlexibleRanges();
