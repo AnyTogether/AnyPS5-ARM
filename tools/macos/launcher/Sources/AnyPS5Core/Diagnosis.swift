@@ -108,22 +108,52 @@ public enum Diagnosis: Equatable, Sendable {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DiagnosticReports")
     }
 
+    /// The user's crash reports, then the ones macOS has moved aside (Retired).
+    public static var reportFolders: [URL] { [reportsFolder, reportsFolder.appendingPathComponent("Retired")] }
+
+    /// Where macOS writes the reports of the whole system, its low-memory events among them.
+    public static var systemReportsFolder: URL { URL(fileURLWithPath: "/Library/Logs/DiagnosticReports") }
+
     /// The newest crash report macOS wrote for the game's executable since `start`; with `pid`,
     /// only the report of that process.
     public static func crashReport(since start: Date, bundleIdentifier: String, pid: Int32? = nil, folder: URL = reportsFolder, process: String = "eboot") -> String? {
-        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return nil }
-        let reports = files.compactMap { file -> (URL, Date)? in
-            guard file.lastPathComponent.hasPrefix(process), file.pathExtension == "ips",
-                  let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, date >= start else { return nil }
-            return (file, date)
-        }
-        for (file, _) in reports.sorted(by: { $0.1 > $1.1 }) {
+        crashReportFile(since: start, bundleIdentifier: bundleIdentifier, pid: pid, folder: folder, process: process)?.text
+    }
+
+    /// The same, with the file it is in.
+    public static func crashReportFile(since start: Date, bundleIdentifier: String, pid: Int32? = nil, folder: URL = reportsFolder, process: String = "eboot") -> (text: String, file: URL)? {
+        for file in reports(in: folder, since: start, named: { $0.hasPrefix(process) }) {
             guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
             guard text.prefix(4096).contains(bundleIdentifier) else { continue }
             if let pid, firstMatch(#"^\s*"pid"\s*:\s*(\d+)"#, in: text).flatMap(Int32.init) != pid { continue }
-            return text
+            return (text, file)
         }
         return nil
+    }
+
+    /// A low-memory event since `start` in which macOS ended the process `pid`: "macOS ended it
+    /// for memory at …" with the reason, its footprint then and the file; nil for none.
+    public static func memoryKill(since start: Date, pid: Int32, folder: URL = systemReportsFolder) -> String? {
+        for file in reports(in: folder, since: start, named: { $0.hasPrefix("JetsamEvent") }) {
+            guard let text = try? String(contentsOf: file, encoding: .utf8), let body = crashBody(text),
+                  let processes = body["processes"] as? [[String: Any]],
+                  let process = processes.first(where: { ($0["pid"] as? Int).map(Int32.init) == pid }), let reason = process["reason"] as? String else { continue }
+            let page = ((body["memoryStatus"] as? [String: Any])?["pageSize"] as? Int) ?? 16384
+            let footprint = (process["rpages"] as? Int).map { ", \($0 * page / 1_048_576) MB in use" } ?? ""
+            let when = (body["date"] as? String).map { " at \($0)" } ?? ""
+            return "macOS ended it for memory\(when) (\(reason)\(footprint)), \(file.path)."
+        }
+        return nil
+    }
+
+    /// The .ips files in `folder` written since `start` whose name `named` takes, the newest first.
+    static func reports(in folder: URL, since start: Date, named: (String) -> Bool) -> [URL] {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
+        return files.compactMap { file -> (URL, Date)? in
+            guard named(file.lastPathComponent), file.pathExtension == "ips",
+                  let date = try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, date >= start else { return nil }
+            return (file, date)
+        }.sorted(by: { $0.1 > $1.1 }).map(\.0)
     }
 
     static func lastMatch(_ pattern: String, in text: String) -> String? {

@@ -24,8 +24,12 @@ public struct LauncherProblem: Codable, Equatable, Sendable {
     public var error: String?
     /// What the launcher was doing in its last seconds: a line a second.
     public var lines: [String]
+    /// The process of the run that ended, and when it started: what macOS's report of it is found by.
+    public var pid: Int32?
+    public var started: Date?
 
-    public init(kind: Kind, at: Date, version: String, platform: String, stalledMs: Int? = nil, recovered: Bool? = nil, error: String? = nil, lines: [String] = []) {
+    public init(kind: Kind, at: Date, version: String, platform: String, stalledMs: Int? = nil, recovered: Bool? = nil, error: String? = nil, lines: [String] = [],
+                pid: Int32? = nil, started: Date? = nil) {
         self.kind = kind
         self.at = at
         self.version = version
@@ -34,7 +38,13 @@ public struct LauncherProblem: Codable, Equatable, Sendable {
         self.recovered = recovered
         self.error = error
         self.lines = lines
+        self.pid = pid
+        self.started = started
     }
+
+    /// A run that ended without quitting (a crash, or a stall it never came out of): macOS may
+    /// have a report of how it ended.
+    public var endedUnquit: Bool { kind == .crash || recovered != true }
 
     public var stalledFor: TimeInterval? { stalledMs.map { Double($0) / 1000 } }
 }
@@ -71,23 +81,28 @@ public final class LauncherHealth: @unchecked Sendable {
     public let platform = "macOS"
     public let pid: Int32
     private let alive: @Sendable (Int32) -> Bool
-    /// macOS's own crash report of the launcher, found by its process (Diagnosis.crashReport).
-    private let crashReport: @Sendable (_ since: Date, _ pid: Int32) -> String?
+    /// What macOS wrote of how the run `pid` ended (LauncherHealth.macOSReport), nil for nothing.
+    private let macOSReport: @Sendable (_ since: Date, _ pid: Int32) -> String?
 
     /// A stall this long is a problem worth a report.
     public static let stall: TimeInterval = 5
     /// The lines of recent activity a marker and a report keep.
     public static let keptLines = 30
+    /// How long after the run was last seen alive macOS has to write its crash report before the
+    /// report says there is none.
+    public static let reportGrace: TimeInterval = 15
+    /// The start of the part of a report that tells what macOS wrote of the run.
+    static let macOSHeading = "macOS crash report"
 
     public static var defaultFolder: URL { GameLog.folder.appendingPathComponent("Launcher") }
 
     public init(folder: URL = LauncherHealth.defaultFolder, version: String, pid: Int32 = getpid(), alive: @escaping @Sendable (Int32) -> Bool = LauncherHealth.processAlive,
-                crashReport: @escaping @Sendable (Date, Int32) -> String? = { _, _ in nil }) {
+                macOSReport: @escaping @Sendable (Date, Int32) -> String? = { _, _ in nil }) {
         self.folder = folder
         self.version = version
         self.pid = pid
         self.alive = alive
-        self.crashReport = crashReport
+        self.macOSReport = macOSReport
     }
 
     var marker: URL { folder.appendingPathComponent("running-\(pid).json") }
@@ -122,12 +137,19 @@ public final class LauncherHealth: @unchecked Sendable {
                 let caught = (try? String(contentsOf: fatal, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
                 try? FileManager.default.removeItem(at: file)
                 try? FileManager.default.removeItem(at: fatal)
-                // A stall the watchdog wrote is the same run, told better.
+                // A stall the watchdog wrote is the same run, told better; one it never came out
+                // of keeps the process, for macOS's report of how it ended.
+                if var stall = found, let marker, stall.pid == nil, stall.endedUnquit, stall.at >= marker.started {
+                    stall.pid = other
+                    stall.started = marker.started
+                    found = stall
+                    write(found, to: problemFile)
+                }
                 guard found == nil, let marker else { continue }
-                var error = [marker.error, caught].compactMap { $0 }.filter { !$0.isEmpty }
-                if let report = crashReport(marker.started, other) { error.append(Self.summary(ofCrashReport: report)) }
+                // macOS's report first: the issue keeps the start of a long error.
+                let error = [macOSReport(marker.started, other), marker.error, caught].compactMap { $0 }.filter { !$0.isEmpty }
                 found = LauncherProblem(kind: .crash, at: marker.alive, version: marker.version, platform: marker.platform,
-                                        error: error.isEmpty ? nil : error.joined(separator: "\n\n"), lines: marker.lines)
+                                        error: error.isEmpty ? nil : error.joined(separator: "\n\n"), lines: marker.lines, pid: other, started: marker.started)
                 write(found, to: problemFile)
             }
             writeMarker(started: now, alive: now, lines: [], error: nil)
@@ -136,6 +158,25 @@ public final class LauncherHealth: @unchecked Sendable {
         }
         return found
     }
+
+    /// Whether `problem` still waits for what macOS wrote of the run (none was there at start).
+    public static func needsMacOSReport(_ problem: LauncherProblem) -> Bool {
+        problem.endedUnquit && problem.pid != nil && problem.started != nil && !(problem.error ?? "").contains(macOSHeading)
+    }
+
+    /// `problem` with what macOS wrote of the run, looked for again (a crash report can come some
+    /// seconds after the crash), or a line saying there is none; kept in problem.json.
+    public func lookAgain(_ problem: LauncherProblem) -> LauncherProblem {
+        guard Self.needsMacOSReport(problem), let pid = problem.pid, let started = problem.started else { return problem }
+        var told = problem
+        let report = macOSReport(started, pid) ?? Self.noMacOSReport
+        told.error = [report, problem.error].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+        if read(problemFile) == problem { write(told, to: problemFile) }
+        return told
+    }
+
+    static let noMacOSReport = "\(macOSHeading): none for this run in ~/Library/Logs/DiagnosticReports, and no low-memory event named it. "
+        + "A crash leaves a report there; Force Quit or a kill signal leave none."
 
     /// The launcher is quitting as it should: no crash to find next time.
     public func closed() {
@@ -166,12 +207,52 @@ public final class LauncherHealth: @unchecked Sendable {
         try? data.write(to: file, options: .atomic)
     }
 
-    /// The exception and the crashed thread's first frames of a macOS crash report (.ips).
-    static func summary(ofCrashReport report: String) -> String {
-        var lines = ["macOS crash report:"]
-        if let exception = Diagnosis.crashException(report) { lines.append("  " + exception) }
-        lines += Diagnosis.crashFrames(report, limit: 16).map { "  " + $0 }
+    /// The exception and its codes, the termination reason, what the crashing library said and
+    /// the crashed thread's first frames of a macOS crash report (.ips), with its file.
+    static func summary(ofCrashReport report: String, file: URL? = nil) -> String {
+        var lines = ["\(macOSHeading)" + (file.map { " (\($0.path), attach it to the issue)" } ?? "") + ":"]
+        let body = Diagnosis.crashBody(report)
+        if let exception = Diagnosis.crashException(report) {
+            let details = body?["exception"] as? [String: Any]
+            let more = [details?["subtype"] as? String, (details?["codes"] as? String).map { "codes " + $0 }].compactMap { $0 }
+            lines.append("  Exception: " + ([exception] + more).joined(separator: ", "))
+        }
+        if let termination = body?["termination"] as? [String: Any] {
+            let reason = [termination["namespace"] as? String, (termination["code"] as? Int).map(String.init), termination["indicator"] as? String].compactMap { $0 }
+            let by = (termination["byProc"] as? String).map { " by \($0)" } ?? ""
+            if !reason.isEmpty { lines.append("  Termination: " + reason.joined(separator: " ") + by) }
+            for detail in (termination["details"] as? [String] ?? []).prefix(3) { lines.append("  " + detail) }
+        }
+        if let asi = body?["asi"] as? [String: [String]] {
+            for (library, said) in asi.sorted(by: { $0.key < $1.key }) { lines += said.prefix(3).map { "  \(library): \($0)" } }
+        }
+        if let region = (body?["vmRegionInfo"] as? String)?.components(separatedBy: "\n").first(where: { !$0.isEmpty }) { lines.append("  Region: " + region) }
+        lines += Diagnosis.crashFrames(report, limit: 14).map { "  " + $0 }
         return lines.joined(separator: "\n")
+    }
+
+    /// What macOS wrote of how the launcher's run `pid` (started at `since`) ended: its crash
+    /// report (in `folders`, the newest of that process), else the low-memory event (JetsamEvent,
+    /// in `memoryFolder`) that ended it; nil when it wrote neither.
+    public static func macOSReport(since: Date, pid: Int32, bundleIdentifier: String, process: String = "AnyPS5",
+                                   folders: [URL] = Diagnosis.reportFolders, memoryFolder: URL = Diagnosis.systemReportsFolder) -> String? {
+        for folder in folders {
+            if let (report, file) = Diagnosis.crashReportFile(since: since, bundleIdentifier: bundleIdentifier, pid: pid, folder: folder, process: process) {
+                return summary(ofCrashReport: report, file: file)
+            }
+        }
+        return Diagnosis.memoryKill(since: since, pid: pid, folder: memoryFolder).map { "\(macOSHeading): none. " + $0 }
+    }
+
+    /// The launcher's memory footprint (what Activity Monitor's Memory column shows) in MB.
+    public static var footprintMB: Int? {
+        var info = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return Int(info.phys_footprint / 1_048_576)
     }
 
     /// Whether a process with `pid` runs.
@@ -228,6 +309,39 @@ public struct StallDetector: Sendable {
         guard let ping = lastPing, stalledSince == nil, now - ping >= limit else { return false }
         stalledSince = ping
         return true
+    }
+}
+
+/// The main thread's beat, a timer every `beat` seconds that may fire up to `leeway` late: how
+/// much later than that a ping came is how long the main thread was held, and once a second the
+/// longest of that second goes into the report's line. An idle launcher says 0 ms.
+public struct Heartbeat: Sendable {
+    public static let beat: TimeInterval = 0.25
+    public static let leeway: TimeInterval = 0.05
+    private var second: TimeInterval
+    private var last: TimeInterval
+    private var worst: TimeInterval = 0
+
+    public init(now: TimeInterval) {
+        second = now
+        last = now
+    }
+
+    /// A ping at `now`: once a second has passed, the longest stall of it in ms.
+    public mutating func ping(_ now: TimeInterval) -> Int? {
+        worst = max(worst, now - last - Self.beat - Self.leeway)
+        last = now
+        guard now - second >= 1 else { return nil }
+        defer {
+            second = now
+            worst = 0
+        }
+        return Int((max(0, worst) * 1000).rounded())
+    }
+
+    /// "09:41:15 Home (tiles) · 0 games, #0 · longest main-thread stall 529 ms · 412 MB · behind".
+    public static func line(time: String, onScreen: String, stallMs: Int, footprintMB: Int?, front: Bool) -> String {
+        "\(time) \(onScreen) · longest main-thread stall \(stallMs) ms" + (footprintMB.map { " · \($0) MB" } ?? "") + (front ? "" : " · behind")
     }
 }
 
