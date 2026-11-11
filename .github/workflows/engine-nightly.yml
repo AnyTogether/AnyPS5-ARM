@@ -24,6 +24,13 @@
 # workflow, so this tag does not start release.yml (`v*`, disabled in this repository anyway) or
 # anything else. engine-toolkits.yml's own tag trigger (`v*-arm`) does not match a nightly tag.
 #
+# GITHUB_TOKEN can make no tag at a commit whose .github/workflows/ has a file main lacks or has
+# otherwise (GitHub answers 403 Resource not accessible by integration; that needs the Workflows
+# permission, which GITHUB_TOKEN cannot be given). The built commit is main as it was when the run
+# began, so that happens when main gets a workflow change while the build runs. The publish job
+# then publishes nothing and starts this workflow again on main, which builds main as it is by
+# then; it ends green with a warning.
+#
 # Release: by hand with `release` (a pushed vX.Y.Z-arm tag), only the macos job runs, at that tag,
 # so AnyPS5.app and AnyPS5-toolkit-macos-X.Y.Z-arm.zip carry the release's version; they stay an
 # artifact (engine-toolkit-macos) for the release Mac to sign and publish with the rest of the
@@ -292,6 +299,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
+      # To start the workflow again when the built commit cannot be tagged (see the top).
+      actions: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -350,6 +359,7 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ needs.plan.outputs.tag }}
           SHA: ${{ needs.plan.outputs.sha }}
+          FORCE: ${{ inputs.force || false }}
         run: |
           set -euo pipefail
           version="${TAG#v}"
@@ -369,9 +379,21 @@ jobs:
             echo "added to https://github.com/$REPO/releases/tag/$TAG: ${missing[*]}"
             exit 0
           fi
+          # GITHUB_TOKEN cannot tag the built commit once main has other workflows than it (see the
+          # top): main's nightly is then left to a new run of this workflow.
+          start_over() {
+            local changed
+            git fetch -q origin main
+            changed="$(git diff --name-only --no-renames --diff-filter=d FETCH_HEAD "$SHA" -- .github/workflows)"
+            [ -n "$changed" ] || return 1
+            echo "::warning::$TAG is not published: main ($(git rev-parse --short=10 FETCH_HEAD)) changed workflows while ${SHA:0:10} was built (${changed//$'\n'/ }), and GITHUB_TOKEN cannot tag such a commit. Starting the nightly again on main."
+            gh workflow run engine-nightly.yml --repo "$REPO" --ref main -f force="$FORCE"
+          }
+          if start_over; then exit 0; fi
           # The tag is made on GitHub at the built commit.
           gh release create "$TAG" dist/* --repo "$REPO" --target "$SHA" --prerelease --latest=false \
-            --title "AnyPS5-ARM $version (nightly)" --notes-file "$RUNNER_TEMP/notes.md"
+            --title "AnyPS5-ARM $version (nightly)" --notes-file "$RUNNER_TEMP/notes.md" ||
+            { if start_over; then exit 0; fi; exit 1; }
           echo "published https://github.com/$REPO/releases/tag/$TAG"
 
   # ------------------------------------------------------------------ upstream nightly
