@@ -55,4 +55,66 @@ final class SettingsSidebarTests: XCTestCase {
                           "going up, category \(index) is at \(wanted) but the list shows \(visible)")
         }
     }
+
+    /// Where category `index` is in the list at this window size, and whether the list shows it whole.
+    func whole(_ index: Int, in list: NSScrollView, scale: CGFloat) -> (Bool, String) {
+        let top = (4 + CGFloat(index) * 58) * scale
+        let wanted = top...(top + 52 * scale)
+        let visible = shown(list)
+        return (visible.lowerBound <= wanted.lowerBound + 1 && wanted.upperBound <= visible.upperBound + 1, "category \(index) is at \(wanted) but the list shows \(visible)")
+    }
+
+    /// An arrow held down (or a stick): a move every few hundredths of a second.
+    func testTheCategoriesFollowAHeldArrow() throws {
+        let model = try LauncherFixture.model()
+        model.open(.settings)
+        let screen = try LauncherWindow(model, width: 1100, height: 700)
+        defer { screen.close() }
+        let count = model.panelCategories().count
+        let list = try sidebar(screen)
+        let scale = min(1.45, max(0.68, min(1100.0 / 1600, 700.0 / 900)))
+        for stop in [count - 1, count / 2, count - 1, 0] {
+            while model.panelCategory != stop {
+                XCTAssertTrue(model.panelCommand(model.panelCategory < stop ? .down : .up))
+                screen.wait(0.04)
+            }
+            screen.wait(1)
+            let (seen, where_) = whole(stop, in: list, scale: scale)
+            XCTAssertTrue(seen, "after a held arrow, " + where_)
+        }
+    }
+
+    /// Settings opened on a category far down (a link to it from elsewhere, or the one it was
+    /// left on): it is on the screen when Settings comes up.
+    func testACategoryFarDownIsInViewWhenSettingsOpens() throws {
+        let model = try LauncherFixture.model()
+        model.open(.settings)
+        let count = model.panelCategories().count
+        model.panelCategory = count - 1
+        let screen = try LauncherWindow(model, width: 1100, height: 700)
+        defer { screen.close() }
+        screen.wait(1)
+        let list = try sidebar(screen)
+        let scale = min(1.45, max(0.68, min(1100.0 / 1600, 700.0 / 900)))
+        let (seen, where_) = whole(count - 1, in: list, scale: scale)
+        XCTAssertTrue(seen, "as Settings opens, " + where_)
+    }
+
+    /// A larger window, as on a MacBook's whole screen, with the keys at a person's pace.
+    func testTheCategoriesFollowInALargeWindow() throws {
+        let model = try LauncherFixture.model()
+        model.open(.settings)
+        let screen = try LauncherWindow(model, width: 1728, height: 1000)
+        defer { screen.close() }
+        let count = model.panelCategories().count
+        let list = try sidebar(screen)
+        let scale = min(1.45, max(0.68, min(1728.0 / 1600, 1000.0 / 900)))
+        guard (list.documentView?.bounds.height ?? 0) > list.documentVisibleRect.height + 30 else { throw XCTSkip("every category fits this window") }
+        for index in 1..<count {
+            XCTAssertTrue(model.panelCommand(.down))
+            screen.wait(0.25)
+            let (seen, where_) = whole(index, in: list, scale: scale)
+            XCTAssertTrue(seen, "going down, " + where_)
+        }
+    }
 }
