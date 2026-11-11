@@ -18,7 +18,9 @@ final class RelinkInputsTests: XCTestCase {
 
     /// A dump with an ELF executable and an ELF module; a relinker that lists its input files run
     /// by run, writes an executable and a guest module, and fails as the real one fails a
-    /// conversion (exit 2, FAIL: and Input:) while `failOn` is in its input.
+    /// conversion (exit 2, FAIL: and Input:) while `failOn` is in its input. Like the real one it
+    /// stops when two modules in its working directory share a file name, naming the later of the
+    /// two by path, and its last run's arguments are in arguments.txt, one on a line.
     func fixture(failOn: String? = nil, folder: String = "dump") throws -> (game: Game, toolkit: Toolkit, root: URL, inputs: URL) {
         let dump = scratch.appendingPathComponent(folder)
         try fm.createDirectory(at: dump.appendingPathComponent("sce_sys"), withIntermediateDirectories: true)
@@ -33,8 +35,15 @@ final class RelinkInputsTests: XCTestCase {
         let script = """
         #!/bin/sh
         for argument; do last="$argument"; done
+        printf '%s\\n' "$@" > "\(scratch.appendingPathComponent("arguments.txt").path)"
         echo run >> "\(inputs.path)"
         find . -type f | sed 's|^\\./||' | sort >> "\(inputs.path)"
+        conflict=$(find . -type f ! -name eboot.bin | sed 's|^\\./||' | LC_ALL=C sort | awk -F/ '{ if ($NF in seen) { print; exit } seen[$NF] = 1 }')
+        if [ -n "$conflict" ]; then
+          echo "FAIL: Conflicting guest output filename: ${conflict##*/}.guest.prx" >&2
+          echo "Input: $PWD/$conflict" >&2
+          exit 2
+        fi
         fail_on="\(failOn ?? "")"
         if [ -n "$fail_on" ] && [ -f "$fail_on" ]; then
           echo "FAIL: Unsupported relocation type 0x25 (offset 0x1234)" >&2
@@ -56,6 +65,25 @@ final class RelinkInputsTests: XCTestCase {
             if line == "run" { runs.append([]) } else { runs[runs.count - 1].append(String(line)) }
         }
         return runs
+    }
+
+    /// The folders the last relink was given with --module-dir, in their order.
+    func moduleDirectories() -> [String] {
+        let arguments = ((try? String(contentsOf: scratch.appendingPathComponent("arguments.txt"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+        return arguments.indices.filter { arguments[$0] == "--module-dir" && $0 + 1 < arguments.count }.map { arguments[$0 + 1] }
+    }
+
+    /// Adds ELF modules to the dump, each at its path.
+    func add(_ modules: [String], to dump: URL) throws {
+        for module in modules {
+            let file = dump.appendingPathComponent(module)
+            try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("\u{7F}ELF module".utf8).write(to: file)
+        }
+    }
+
+    func duplicates(_ modules: [String]) -> [String: String] {
+        Installer.duplicateModules(modules.map { URL(fileURLWithPath: $0) })
     }
 
     func installer(_ game: Game, _ toolkit: Toolkit, lines: Locked<[String]>? = nil) -> Installer {
@@ -154,6 +182,97 @@ final class RelinkInputsTests: XCTestCase {
             XCTAssertEqual(again.leftOut, unlocking.leftOut)
             XCTAssertEqual(runs(inputs).count, 2)
         }
+    }
+
+    /// Slick Daddy's Lost in Play (Desktop #144): the dump holds libc.prx and
+    /// libSceNpCppWebApi.prx in sce_module and again in decrypted/sce_module. The relinker
+    /// stopped twice with "Conflicting guest output filename", each time naming sce_module's
+    /// copy, which was left out, and the game was unlocked with the copies from
+    /// decrypted/sce_module.
+    func testLostInPlayOfTheCopiesInDecryptedAndSceModuleSceModulesAreRelinked() throws {
+        let (game, toolkit, root, inputs) = try fixture()
+        let media = [
+            "Media/Modules/Il2cppUserAssemblies.prx", "Media/Modules/PS5Util.prx", "Media/Plugins/CommonDialog.prx", "Media/Plugins/PSN.prx",
+            "Media/Plugins/SaveData.prx", "Media/Plugins/Share.prx", "Media/Plugins/lib_burst_generated.prx", "Media/Plugins/libfmod.prx",
+            "Media/Plugins/libfmodstudio.prx", "Media/Plugins/libresonanceaudio.prx",
+        ]
+        let standard = ["sce_module/libSceNpCppWebApi.prx", "sce_module/libc.prx"]
+        try add(media + standard + ["decrypted/sce_module/libSceNpCppWebApi.prx", "decrypted/sce_module/libc.prx"], to: game.folder)
+        let lines = Locked<[String]>([])
+        let unlocking = installer(game, toolkit, lines: lines)
+        let bundle = try unlocking.run(root: root)
+        // One run, without a conflict: nothing is left out, and nothing came from decrypted.
+        XCTAssertEqual(runs(inputs).map { $0.sorted() }, [(media + standard + ["eboot.bin", "sce_module/libgame.prx"]).sorted()])
+        XCTAssertEqual(unlocking.leftOut, [])
+        // What upstream's guide passes for a Unity game, and the folder of eboot.bin as ever.
+        XCTAssertEqual(moduleDirectories(), [".", "Media/Modules", "Media/Plugins"])
+        let logged = lines.withLock { $0 }
+        XCTAssertFalse(logged.contains { $0.contains("Conflicting") })
+        XCTAssertTrue(logged.contains("decrypted/sce_module/libSceNpCppWebApi.prx: the dump has this module as sce_module/libSceNpCppWebApi.prx too, the game is unlocked with that one"))
+        XCTAssertTrue(logged.contains("decrypted/sce_module/libc.prx: the dump has this module as sce_module/libc.prx too, the game is unlocked with that one"))
+        // The game's files are all there, the copies too.
+        let app0 = bundle.appendingPathComponent("Contents/Resources/game/app0").resolvingSymlinksInPath()
+        XCTAssertTrue(fm.fileExists(atPath: app0.appendingPathComponent("decrypted/sce_module/libc.prx").path))
+        XCTAssertTrue(fm.fileExists(atPath: game.folder.appendingPathComponent("decrypted/sce_module/libc.prx").path), "the dump stays as it is")
+    }
+
+    /// Lenny4250gh's report (Desktop #145): Minecraft and other dumps with modules next to
+    /// eboot.bin that sce_module holds too.
+    func testModulesNextToTheExecutableAndAgainInSceModuleSceModulesAreRelinked() throws {
+        let (game, toolkit, root, inputs) = try fixture()
+        try add(["libSceFace.prx", "libc.prx", "libcohtml.Prospero.prx", "sce_module/libSceFace.prx", "sce_module/libc.prx"], to: game.folder)
+        let lines = Locked<[String]>([])
+        let unlocking = installer(game, toolkit, lines: lines)
+        _ = try unlocking.run(root: root)
+        // The one next to eboot.bin alone is still relinked where it is.
+        XCTAssertEqual(runs(inputs).map { $0.sorted() }, [["eboot.bin", "libcohtml.Prospero.prx", "sce_module/libSceFace.prx", "sce_module/libc.prx", "sce_module/libgame.prx"]])
+        XCTAssertEqual(unlocking.leftOut, [])
+        XCTAssertEqual(moduleDirectories(), ["."])
+        XCTAssertTrue(lines.withLock { $0 }.contains("libc.prx: the dump has this module as sce_module/libc.prx too, the game is unlocked with that one"))
+    }
+
+    func testAUnityGameOnePluginSceModuleHoldsTooCostsTheFolderNoneOfItsOthers() throws {
+        let (game, toolkit, root, inputs) = try fixture()
+        try add(["Media/Modules/PS5Util.prx", "Media/Plugins/PSN.prx", "Media/Plugins/libfmod.prx", "sce_module/libfmod.prx"], to: game.folder)
+        let unlocking = installer(game, toolkit)
+        _ = try unlocking.run(root: root)
+        XCTAssertEqual(runs(inputs).map { $0.sorted() }, [["Media/Modules/PS5Util.prx", "Media/Plugins/PSN.prx", "eboot.bin", "sce_module/libfmod.prx", "sce_module/libgame.prx"]])
+        XCTAssertEqual(moduleDirectories(), [".", "Media/Modules", "Media/Plugins"])
+        XCTAssertEqual(unlocking.leftOut, [])
+    }
+
+    func testADumpWithoutAModuleInTwoPlacesIsRelinkedAsBeforeEachModuleWhereItIs() throws {
+        let (game, toolkit, root, inputs) = try fixture()
+        try add(["Media/Modules/Il2cppUserAssemblies.prx", "Media/Plugins/PSN.prx", "decrypted/extra.prx", "top.prx"], to: game.folder)
+        XCTAssertEqual(Installer.modules(of: game).map(\.relativePath), Installer.modules(in: game.folder).map(\.relativePath))
+        let lines = Locked<[String]>([])
+        _ = try installer(game, toolkit, lines: lines).run(root: root)
+        XCTAssertEqual(runs(inputs).map { $0.sorted() }, [["Media/Modules/Il2cppUserAssemblies.prx", "Media/Plugins/PSN.prx", "decrypted/extra.prx", "eboot.bin", "sce_module/libgame.prx", "top.prx"]])
+        XCTAssertEqual(moduleDirectories(), [".", "Media/Modules", "Media/Plugins", "decrypted"])
+        XCTAssertFalse(lines.withLock { $0 }.contains { $0.contains("the dump has this module") })
+    }
+
+    func testAModuleInSeveralFoldersTheStandardFoldersCopyElseTheOneNextToTheExecutableElseTheNearest() {
+        // A dumper's folder beside sce_module, a backup folder, a copy next to eboot.bin.
+        XCTAssertEqual(duplicates(["backup/libc.prx", "decrypted/sce_module/libc.prx", "libc.prx", "sce_module/libc.prx", "sce_module/libSceFios2.sprx"]),
+                       ["backup/libc.prx": "sce_module/libc.prx", "decrypted/sce_module/libc.prx": "sce_module/libc.prx", "libc.prx": "sce_module/libc.prx"])
+        // sce_module before prx, any standard folder before the rest.
+        XCTAssertEqual(duplicates(["Media/Plugins/a.prx", "prx/a.prx", "sce_module/a.prx"]), ["Media/Plugins/a.prx": "sce_module/a.prx", "prx/a.prx": "sce_module/a.prx"])
+        XCTAssertEqual(duplicates(["Media/Plugins/a.prx", "prx/a.prx"]), ["Media/Plugins/a.prx": "prx/a.prx"])
+        // In no standard folder: next to eboot.bin, then the nearest folder, then the first by name.
+        XCTAssertEqual(duplicates(["Media/Plugins/a.prx", "a.prx", "old/a.prx"]), ["Media/Plugins/a.prx": "a.prx", "old/a.prx": "a.prx"])
+        XCTAssertEqual(duplicates(["Media/Plugins/a.prx", "old/a.prx"]), ["Media/Plugins/a.prx": "old/a.prx"])
+        XCTAssertEqual(duplicates(["Media/Modules/a.prx", "Media/Plugins/a.prx", "Media/Plugins/b.prx"]), ["Media/Plugins/a.prx": "Media/Modules/a.prx"])
+        // A module in one place alone stays, wherever it is, and a name is a whole file name.
+        XCTAssertEqual(duplicates(["Media/Modules/x.prx", "Media/Plugins/y.prx", "decrypted/sce_module/only.prx", "sce_module/x.sprx", "top.prx"]), [:])
+        // Folders the relinker never reads are no one's copy: fakelib, one below sce_module, one
+        // with no .prx in it.
+        XCTAssertEqual(duplicates(["Media/Other/libc.sprx", "fakelib/libc.prx", "sce_module/libc.prx", "sce_module/old/libc.prx"]), [:])
+        // The relinker for the Mac tells names apart with their case.
+        XCTAssertEqual(duplicates(["Media/Plugins/LibFmod.prx", "sce_module/libfmod.prx"]), [:])
+        // The folders that go to the relinker are those of what is left.
+        XCTAssertEqual(Installer.moduleDirectories([URL(fileURLWithPath: "Media/Plugins/a.prx"), URL(fileURLWithPath: "sce_module/libc.prx")]), [".", "Media/Plugins"])
+        XCTAssertEqual(Installer.moduleDirectories([URL(fileURLWithPath: "sce_module/libc.prx")]), ["."])
     }
 
     func testAFailedExecutableStopsWithTheRelinkersWholeReason() throws {
