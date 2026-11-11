@@ -447,8 +447,59 @@ public final class Installer: @unchecked Sendable {
     }
 
     /// The game's modules and its update's, each once: the relinker converts the update's copy
-    /// of one both have (source), and the engine loads the relinked ones from app0.
+    /// of one both have (source), and the engine loads the relinked ones from app0. A module the
+    /// dump holds in several folders is in it once (duplicateModules).
     static func modules(of game: Game) -> [URL] {
+        let all = allModules(of: game)
+        let duplicates = duplicateModules(all)
+        return all.filter { duplicates[$0.relativePath] == nil }
+    }
+
+    /// The folders next to eboot.bin the relinker reads by itself, in the order a copy is taken.
+    static let standardModuleFolders = ["sce_module", "sce_modules", "prx"]
+
+    /// The copies of a module the relink leaves out, each with the copy used in its place.
+    ///
+    /// The relinker names a converted module after its file alone (libc.prx becomes
+    /// libc.prx.guest.prx) and stops when two of its inputs share that name, whatever their
+    /// folders ("Conflicting guest output filename"). A dump can hold a module twice: a dumper's
+    /// folder of decrypted copies (decrypted/sce_module) beside sce_module, or a module next to
+    /// eboot.bin and again in sce_module. One copy goes in, by the first of these that has it:
+    ///
+    /// 1. a standard folder (standardModuleFolders): a module the executable needs starts with
+    ///    the game from there. From any other folder the Windows relinker has it wait until the
+    ///    game loads it from that folder, and a libc.prx taken from decrypted/sce_module never
+    ///    started (Lost in Play on Windows). The Mac takes the same copy;
+    /// 2. next to eboot.bin;
+    /// 3. the folder nearest to eboot.bin, the first by name among equals.
+    ///
+    /// Only the folders the relinker reads count (moduleDirectories): a module in one place
+    /// alone is never here, wherever it is.
+    static func duplicateModules(_ modules: [URL]) -> [String: String] {
+        let read = moduleDirectories(modules)
+        var ranked: [(rank: Int, path: String)] = []
+        for module in modules {
+            let path = module.relativePath
+            let slash = path.lastIndex(of: "/")
+            let directory = slash.map { String(path[..<$0]) } ?? "."
+            if let standard = standardModuleFolders.firstIndex(of: directory.lowercased()) {
+                ranked.append((standard, path))
+            } else if read.contains(directory) {
+                ranked.append((standardModuleFolders.count + (slash == nil ? 0 : directory.split(separator: "/").count), path))
+            }
+        }
+        ranked.sort { ($0.rank, $0.path) < ($1.rank, $1.path) }
+        var used: [String: String] = [:]
+        var duplicates: [String: String] = [:]
+        for (_, path) in ranked {
+            let name = (path as NSString).lastPathComponent
+            if let first = used[name] { duplicates[path] = first } else { used[name] = path }
+        }
+        return duplicates
+    }
+
+    /// Every module of the game and its update, the copies of one in several folders among them.
+    static func allModules(of game: Game) -> [URL] {
         var found = modules(in: game.folder)
         if let update = game.update {
             for module in modules(in: update.folder) where !found.contains(where: { $0.relativePath == module.relativePath }) { found.append(module) }
@@ -531,6 +582,9 @@ public final class Installer: @unchecked Sendable {
             let source = work.appendingPathComponent("source")
             try fileManager.createDirectory(at: source, withIntermediateDirectories: true)
             // Only what the dump holds goes in: a fresh folder each time, the output beside it.
+            for (copy, used) in Installer.duplicateModules(Installer.allModules(of: game)).sorted(by: { $0.key < $1.key }) {
+                log("\(copy): the dump has this module as \(used) too, the game is unlocked with that one")
+            }
             let inputs = [URL(fileURLWithPath: "eboot.bin")] + modules
             var placed: [String] = []
             for (index, relative) in inputs.enumerated() {
