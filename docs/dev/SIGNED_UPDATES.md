@@ -50,6 +50,13 @@ tools/release/verify.sh out                                          # what the 
 gh release create <tag> out/* ...                                    # SHA256SUMS + SHA256SUMS.sig included
 ```
 
+A release's files come from CI: pushing its `vX.Y.Z-arm` tag builds the Windows and Linux engine
+(`engine-toolkits.yml`, artifacts), and
+`gh workflow run engine-nightly.yml -R AnyTogether/AnyPS5-ARM -f release=vX.Y.Z-arm` builds
+`AnyPS5-macOS.zip` and `AnyPS5-toolkit-macos-X.Y.Z-arm.zip` at that tag (artifact
+`engine-toolkit-macos`), named and versioned after the tag. Download the artifacts into one folder
+with the phone app and the Desktop files, then sign as above.
+
 `sign.sh` refuses a key that other users can read, a key that is not listed in
 `release-signing.pub` (no launcher would trust it), and two files with the same name. It checks
 its own result with `verify.sh` before it writes anything. `tools/macos/publish_nightly.sh` (the older,

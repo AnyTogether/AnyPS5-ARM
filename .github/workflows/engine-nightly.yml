@@ -24,6 +24,12 @@
 # workflow, so this tag does not start release.yml (`v*`, disabled in this repository anyway) or
 # anything else. engine-toolkits.yml's own tag trigger (`v*-arm`) does not match a nightly tag.
 #
+# Release: by hand with `release` (a pushed vX.Y.Z-arm tag), only the macos job runs, at that tag,
+# so AnyPS5.app and AnyPS5-toolkit-macos-X.Y.Z-arm.zip carry the release's version; they stay an
+# artifact (engine-toolkit-macos) for the release Mac to sign and publish with the rest of the
+# release. The tag's own push builds the Windows and Linux engine (engine-toolkits.yml). No nightly
+# tag and no pre-release are made.
+#
 # Upstream nightly: on its own schedule (or by hand with `upstream`), upstream AnyPS5's main
 # (boykopovar/AnyPS5) is built as it is, for AnyPS5 Desktop users who want upstream's newest engine
 # rather than AnyPS5-ARM's. It is skipped when upstream's main has not moved since the last
@@ -59,12 +65,16 @@ on:
         description: Build upstream's main (boykopovar/AnyPS5, unmodified) instead of AnyPS5-ARM's.
         type: boolean
         default: false
+      release:
+        description: A release tag (vX.Y.Z-arm) to build only the Mac app and engine of, as an artifact; no nightly is published.
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 concurrency:
-  group: engine-nightly${{ (github.event.schedule == '47 0 * * *' || inputs.upstream) && '-upstream' || '' }}
+  group: engine-nightly${{ (github.event.schedule == '47 0 * * *' || inputs.upstream) && '-upstream' || '' }}${{ inputs.release && format('-{0}', inputs.release) || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -77,6 +87,7 @@ jobs:
       build: ${{ steps.plan.outputs.build }}
       tag: ${{ steps.plan.outputs.tag }}
       sha: ${{ steps.plan.outputs.sha }}
+      release: ${{ steps.plan.outputs.release }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -88,11 +99,21 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           FORCE: ${{ inputs.force || false }}
+          RELEASE: ${{ inputs.release }}
         run: |
           set -euo pipefail
           git fetch -q --tags --force origin
           sha="$(git rev-parse HEAD)"
           skip() { echo "::notice::No nightly: $1"; echo "build=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          # A release: the Mac app and engine of that tag only.
+          if [ -n "$RELEASE" ]; then
+            [[ "$RELEASE" =~ ^v[0-9]+(\.[0-9]+)*-arm$ ]] || { echo "::error::$RELEASE is not a vX.Y.Z-arm tag"; exit 1; }
+            sha="$(git rev-list -n 1 "refs/tags/$RELEASE" 2>/dev/null)" || { echo "::error::No tag $RELEASE"; exit 1; }
+            echo "release $RELEASE at $sha: the macOS job only"
+            printf 'build=true\ntag=%s\nsha=%s\nrelease=true\n' "$RELEASE" "$sha" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # The last release: the highest vX.Y.Z-arm tag (nightly tags have more after -arm).
           last="$(git tag -l 'v*-arm' | grep -E '^v[0-9]+(\.[0-9]+)*-arm$' | sed 's/^v//; s/-arm$//' | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)"
@@ -141,7 +162,7 @@ jobs:
   build:
     name: Build
     needs: plan
-    if: needs.plan.outputs.build == 'true'
+    if: needs.plan.outputs.build == 'true' && needs.plan.outputs.release != 'true'
     uses: ./.github/workflows/engine-toolkits.yml
     with:
       ref: ${{ needs.plan.outputs.sha }}
@@ -266,7 +287,7 @@ jobs:
     needs: [plan, build, macos]
     # Also when the macOS job failed: Windows and Linux do not wait for a Mac. With dry_run it runs
     # up to the last step.
-    if: ${{ !cancelled() && needs.plan.outputs.build == 'true' && needs.build.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.build == 'true' && needs.plan.outputs.release != 'true' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
