@@ -143,6 +143,12 @@ public struct GameSettings: Codable, Equatable, Sendable {
     /// Relinker options for this game's next rebuild (RelinkerFlag), as the relinker spells them;
     /// nil is none. Read through chosenRelinkerFlags: only those the launcher knows are used.
     public var relinkerFlags: [String]?
+    /// The player's own relinker options for the next rebuild, as typed (CustomRelinkerOptions);
+    /// nil is none. Read through chosenRelinkerOptions.
+    public var customRelinkerOptions: String?
+    /// Variables and arguments the game starts with, as typed (LaunchOptions); nil is none. Read
+    /// through chosenLaunchOptions.
+    public var launchOptions: String?
     /// Gyro aiming (Controls → Gyro Aiming, ANYPS5_GYRO_AIM); nil is off.
     public var gyro: GyroAiming?
 
@@ -151,7 +157,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case settingsVersion, ownDisplay
         case resolution, ownFullscreen = "fullscreen", ownWindowSize = "windowSize", ownVsync = "vsync"
-        case overlay, overlayStyle, frameGeneration, upscaler, fsrSharpness, language, controls, tuning, shaderCache, phoneLayout, engine, trace, gyro, relinkerFlags
+        case overlay, overlayStyle, frameGeneration, upscaler, fsrSharpness, language, controls, tuning, shaderCache, phoneLayout, engine, trace, gyro, relinkerFlags, customRelinkerOptions, launchOptions
     }
 
     /// The JSONEncoder of the launcher's own preferences sets this: there every display key is
@@ -196,6 +202,10 @@ public struct GameSettings: Codable, Equatable, Sendable {
         trace = try container.decodeIfPresent(Bool.self, forKey: .trace)
         gyro = try container.decodeIfPresent(GyroAiming.self, forKey: .gyro)
         relinkerFlags = (try? container.decodeIfPresent([String].self, forKey: .relinkerFlags)) ?? nil
+        // A text that does not pass its check (a file edited by hand) is none: only checked
+        // options ever reach the relinker or the game.
+        if let text = (try? container.decodeIfPresent(String.self, forKey: .customRelinkerOptions)) ?? nil { setCustomRelinkerOptions(text) }
+        if let text = (try? container.decodeIfPresent(String.self, forKey: .launchOptions)) ?? nil { setLaunchOptions(text) }
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -227,6 +237,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
         try container.encodeIfPresent(trace, forKey: .trace)
         try container.encodeIfPresent(gyro, forKey: .gyro)
         try container.encodeIfPresent(relinkerFlags, forKey: .relinkerFlags)
+        try container.encodeIfPresent(customRelinkerOptions, forKey: .customRelinkerOptions)
+        try container.encodeIfPresent(launchOptions, forKey: .launchOptions)
     }
 
     /// The game reads the controllers (through SDL2) only while its window is in front: with the

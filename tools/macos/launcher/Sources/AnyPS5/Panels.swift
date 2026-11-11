@@ -630,10 +630,56 @@ extension AppModel {
                     settings.tuning = nil
                     settings.shaderCache = nil
                     settings.relinkerFlags = nil
+                    settings.customRelinkerOptions = nil
+                    settings.launchOptions = nil
                 }
+                self?.optionDrafts = self?.optionDrafts.filter { !$0.key.hasSuffix(" " + game.id) } ?? [:]
             }),
         ]
-        return tuned + relinkerRows(game, settings) + shared
+        return tuned + relinkerRows(game, settings) + launchRows(game, settings) + shared
+    }
+
+    /// What a problem with typed options says, in the launcher's language.
+    static func optionsProblemText(_ problem: OptionsProblem) -> String {
+        switch problem {
+        case .openQuote: return T.text(.optionsQuoteOpen)
+        case .launcherOption(let word): return T.format(.relinkerOptionLauncher, word)
+        case .breaksGame(let word): return T.format(.relinkerOptionBreaks, word)
+        case .hasSwitch(let word): return T.format(.relinkerOptionSwitch, word)
+        case .unknown(let word): return T.format(.relinkerOptionUnknown, word)
+        case .needsValue(let word): return T.format(.relinkerOptionValue, word)
+        case .positional(let word): return T.format(.relinkerOptionPositional, word)
+        }
+    }
+
+    /// A field of typed options: each change is checked by `set`, saved when it passes, and kept
+    /// as a draft, unsaved, with the reason under the row when it does not.
+    private func optionsRow(_ id: String, _ game: Game, title: T.Key, detail: T.Key, symbol: String, saved: String?,
+                            check: @escaping (String) -> OptionsProblem?, save: @escaping (inout GameSettings, String) -> Void) -> PanelRow {
+        let draftKey = id + " " + game.id
+        let shown = optionDrafts[draftKey] ?? saved ?? ""
+        let problem = optionDrafts[draftKey].flatMap(check)
+        let text = problem.map { T.format(.optionsNotSaved, AppModel.optionsProblemText($0)) } ?? T.text(detail) + "\n" + T.text(.customOptionsWarning)
+        var row = PanelRow(id: id, title: T.text(title), detail: text, symbol: symbol, kind: .text(shown) { [weak self] typed in
+            guard let self else { return }
+            if check(typed) != nil {
+                self.optionDrafts[draftKey] = typed
+            } else {
+                if self.optionDrafts[draftKey] != nil { self.optionDrafts[draftKey] = nil }
+                self.update(game) { save(&$0, typed) }
+            }
+        })
+        row.wraps = true
+        return row
+    }
+
+    /// Advanced → Launch: the variables and arguments the game starts with.
+    private func launchRows(_ game: Game, _ settings: GameSettings) -> [PanelRow] {
+        [
+            PanelRow(id: "launchSection", title: T.text(.sectionLaunch), kind: .info("")),
+            optionsRow("launchOptions", game, title: .launchOptions, detail: .launchOptionsDetail, symbol: "terminal", saved: settings.launchOptions,
+                       check: { var probe = GameSettings(); return probe.setLaunchOptions($0) }, save: { _ = $0.setLaunchOptions($1) }),
+        ]
     }
 
     /// The relinker options a player can choose for this game, used by its next rebuild. An
@@ -656,7 +702,10 @@ extension AppModel {
                 self?.update(game) { $0.setRelinkerFlag(flag, value) }
             })
         }
-        return [PanelRow(id: "relinkerSection", title: T.text(.sectionRelinker), kind: .info(""))] + rows
+        let custom = optionsRow("relinkerCustomOptions", game, title: .relinkerCustomOptions, detail: .relinkerCustomOptionsDetail, symbol: "hammer",
+                                saved: settings.customRelinkerOptions,
+                                check: { var probe = GameSettings(); return probe.setCustomRelinkerOptions($0) }, save: { _ = $0.setCustomRelinkerOptions($1) })
+        return [PanelRow(id: "relinkerSection", title: T.text(.sectionRelinker), kind: .info(""))] + rows + [custom]
     }
 
     /// Settings → Game Library's folders: one row each (where, and how many games or not

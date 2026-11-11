@@ -47,6 +47,9 @@ public struct InstallRecord: Codable, Sendable {
     public var update: String? = nil
     /// The relinker options the bundle was made with (RelinkerFlag), nil without any.
     public var relinkerFlags: [String]? = nil
+    /// The player's own relinker options the bundle was made with (CustomRelinkerOptions), nil
+    /// without any.
+    public var customRelinkerOptions: [String]? = nil
 }
 
 public struct InstallError: LocalizedError {
@@ -172,6 +175,9 @@ public final class Installer: @unchecked Sendable {
     public var freeSpace: @Sendable (URL) -> Int64? = { FreeSpace.available(at: $0) }
     /// The relinker options asked for this game; set before `run`.
     public var relinkerFlags: [RelinkerFlag] = []
+    /// The player's own relinker options for this game (GameSettings.chosenRelinkerOptions), passed
+    /// after the launcher's; set before `run`.
+    public var customRelinkerOptions: [String] = []
 
     /// A background unlock (a new game prepared on its own): the tools it runs go in the
     /// system's background band, as `taskpolicy -b` puts them, so a game or anything the user
@@ -351,8 +357,10 @@ public final class Installer: @unchecked Sendable {
     /// What the relinker's output depends on: the toolkit, how it is called, and the dump's
     /// executable and modules (path, size and change date of each). Unlocking again with the
     /// same key reuses the kept output.
-    static func relinkKey(game: Game, toolkit: Toolkit, modules: [URL], flags: [RelinkerFlag] = []) -> String {
+    static func relinkKey(game: Game, toolkit: Toolkit, modules: [URL], flags: [RelinkerFlag] = [], custom: [String] = []) -> String {
         var lines = ["toolkit \(toolkit.version)", "arguments --macos --to-rosetta " + (flags.map(\.rawValue) + moduleDirectories(modules)).joined(separator: " ")]
+        // Each of the player's own options on a line of its own: a word can hold spaces.
+        lines += custom.map { "custom \($0)" }
         for relative in [URL(fileURLWithPath: "eboot.bin")] + modules {
             let file = Installer.source(relative, of: game)
             var info = stat()
@@ -401,7 +409,7 @@ public final class Installer: @unchecked Sendable {
     }
 
     /// What unlocking `game` into the games folder `root` will write (see UnlockSpace).
-    public static func plan(game: Game, toolkit: Toolkit, root: URL, relinkerFlags: [RelinkerFlag] = []) -> UnlockSpace {
+    public static func plan(game: Game, toolkit: Toolkit, root: URL, relinkerFlags: [RelinkerFlag] = [], customRelinkerOptions: [String] = []) -> UnlockSpace {
         let fileManager = FileManager.default
         func size(_ url: URL) -> Int64 { ((try? fileManager.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0 }
         let modules = Installer.modules(of: game)
@@ -415,7 +423,7 @@ public final class Installer: @unchecked Sendable {
             for name in ["libvulkan.1.dylib", "libMoltenVK.dylib", "MoltenVK_icd.json"] { libraries += size(toolkit.vulkan.appendingPathComponent(name)) }
         }
         var kept: Int64?
-        if clones, let reusable = reusableRelink(for: game, root: root, key: relinkKey(game: game, toolkit: toolkit, modules: modules, flags: relinkerFlags.filter(toolkit.supports))) {
+        if clones, let reusable = reusableRelink(for: game, root: root, key: relinkKey(game: game, toolkit: toolkit, modules: modules, flags: relinkerFlags.filter(toolkit.supports), custom: customRelinkerOptions)) {
             kept = GameLibrary.size(of: reusable)
         }
         // The game's own files are cloned, or linked where they cannot be: never copied.
@@ -433,7 +441,7 @@ public final class Installer: @unchecked Sendable {
 
         // 0. The room it takes, before anything is written.
         try checkCancelled()
-        let space = Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: relinkerFlags)
+        let space = Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: relinkerFlags, customRelinkerOptions: customRelinkerOptions)
         if let shortage = space.shortage(free: freeSpace(root), volume: FreeSpace.volumeName(at: root)) { throw shortage }
 
         lock.withLock { leftOutModules = [] }
@@ -443,7 +451,8 @@ public final class Installer: @unchecked Sendable {
         for flag in relinkerFlags where !flags.contains(flag) {
             log("\(game.titleID): this engine does not support \(flag.rawValue), the game is rebuilt without it")
         }
-        var key = Installer.relinkKey(game: game, toolkit: toolkit, modules: modules, flags: flags)
+        var custom = customRelinkerOptions
+        var key = Installer.relinkKey(game: game, toolkit: toolkit, modules: modules, flags: flags, custom: custom)
         let keeps = Installer.keepsRelinks(root: root)
         let relinked: URL
         if keeps, let reusable = Installer.reusableRelink(for: game, root: root, key: key) {
@@ -479,7 +488,8 @@ public final class Installer: @unchecked Sendable {
             // game starts without it, as without an encrypted one. A failure in the executable stops.
             while true {
                 do {
-                    try runTool(toolkit.relinker, ["--macos", "--to-rosetta"] + flags.map(\.rawValue) + moduleDirectories + ["eboot.bin", output.appendingPathComponent("eboot").path], in: source) { segment in
+                    // The player's own options come after the launcher's, before the two files.
+                    try runTool(toolkit.relinker, ["--macos", "--to-rosetta"] + flags.map(\.rawValue) + moduleDirectories + custom + ["eboot.bin", output.appendingPathComponent("eboot").path], in: source) { segment in
                         if let fraction = estimate.read(segment) { self.progress(.relink, fraction) }
                     }
                     break
@@ -492,11 +502,12 @@ public final class Installer: @unchecked Sendable {
                         log("\(module): the relinker could not convert it (\(failure.reason ?? "")); it is left out and the relink runs again without it")
                         continue
                     }
-                    guard !flags.isEmpty else { throw failure }
+                    guard !flags.isEmpty || !custom.isEmpty else { throw failure }
                     // A saved option never costs the game its unlock: it runs again without them,
                     // and the kept output is filed under what it was really made with.
-                    log("\(game.titleID): the relinker stopped with \(flags.map(\.rawValue).joined(separator: " ")) (\(failure.reason ?? "")); the game is rebuilt without it")
+                    log("\(game.titleID): the relinker stopped with \((flags.map(\.rawValue) + custom).joined(separator: " ")) (\(failure.reason ?? "")); the game is rebuilt without it")
                     flags = []
+                    custom = []
                     key = Installer.relinkKey(game: game, toolkit: toolkit, modules: modules)
                     try? fileManager.removeItem(at: output)
                 }
@@ -572,7 +583,7 @@ public final class Installer: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(InstallRecord(source: game.folder.path, titleID: game.titleID, toolkit: toolkit.version, date: Date(), update: game.update?.version, relinkerFlags: flags.isEmpty ? nil : flags.map(\.rawValue))).write(to: resources.appendingPathComponent("anyps5-install.json"))
+        try encoder.encode(InstallRecord(source: game.folder.path, titleID: game.titleID, toolkit: toolkit.version, date: Date(), update: game.update?.version, relinkerFlags: flags.isEmpty ? nil : flags.map(\.rawValue), customRelinkerOptions: custom.isEmpty ? nil : custom)).write(to: resources.appendingPathComponent("anyps5-install.json"))
 
         // 5. Nothing in the bundle keeps a download's marks, then it takes the old one's place.
         progress(.finish, 0)
@@ -923,6 +934,10 @@ public final class Installer: @unchecked Sendable {
             throw ToolFailed(tool: tool.lastPathComponent, code: process.terminationStatus, lines: collected.lines, directory: directory)
         }
     }
+
+    /// What a game's launch script sets itself when it is not in the environment: a launch
+    /// option cannot change these, as it cannot change what the launcher passes.
+    public static let launchScriptVariables: Set<String> = ["VK_DRIVER_FILES", "ANYPS5_SHADER_CACHE_DIR", "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS"]
 
     static func launchHead(identifier: String) -> String {
         """

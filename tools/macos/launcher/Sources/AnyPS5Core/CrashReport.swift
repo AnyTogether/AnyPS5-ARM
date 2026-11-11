@@ -114,6 +114,8 @@ extension GameSettings {
         if tuning != nil { parts.append("Stick and mouse tuning changed") }
         parts.append("Detailed logging " + (trace == true ? "on" : "off"))
         if !chosenRelinkerFlags.isEmpty { parts.append("Relinker flags " + chosenRelinkerFlags.map(\.rawValue).joined(separator: " ")) }
+        if let customRelinkerOptions { parts.append("Custom relinker options " + customRelinkerOptions) }
+        if let launchOptions { parts.append("Launch options " + launchOptions) }
         return parts.joined(separator: " · ")
     }
 }
@@ -134,6 +136,8 @@ public struct SessionReport: Sendable {
     public var engineNow: String?
     /// The relinker options the game's bundle was made with (RelinkerFlag).
     public var relinkerFlags: [String] = []
+    /// The player's own relinker options the game's bundle was made with (CustomRelinkerOptions).
+    public var customRelinkerOptions: [String] = []
     public var diagnosis: Diagnosis?
     public var startedWithoutWindow = false
     /// The session ran with detailed logging (TraceMode).
@@ -282,6 +286,7 @@ public struct SessionReport: Sendable {
             "Engine chosen for it now: \(engineNow ?? "unknown")",
         ]
         if !relinkerFlags.isEmpty { lines.append("Relinker flags the game was unlocked with: \(relinkerFlags.joined(separator: " "))") }
+        if !customRelinkerOptions.isEmpty { lines.append("Custom relinker options the game was unlocked with: \(customRelinkerOptions.joined(separator: " "))") }
         lines += ["", "Settings: \(settings.reportSummary)"]
         if !controllers.isEmpty { lines += ["", "Controllers:"] + controllers.map { "  " + $0 } }
         let crash = crashSummary(frames: 24)
