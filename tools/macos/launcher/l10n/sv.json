@@ -128,6 +128,8 @@
   "clearShaderCache": "Rensa shader-cache",
   "uninstallConfirm": "Ta bort installationen? Dina spelfiler finns kvar, men spelet visas som låst igen.",
   "uninstallDone": "Installation borttagen",
+  "uninstallKeeps": "Dina sparfiler och troféer finns kvar och kommer tillbaka när du låser upp spelet igen.",
+  "uninstallFailed": "Installationen kunde inte tas bort: %@",
   "deleteGame": "Radera spel",
   "deleteGameDetail": "Tar bort spelets egna filer från disken.",
   "deleteGameTitle": "Radera %@?",

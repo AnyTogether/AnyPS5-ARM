@@ -128,6 +128,8 @@
   "clearShaderCache": "Limpar cache de shaders",
   "uninstallConfirm": "Remover a instalação? Os arquivos do jogo serão mantidos; ele voltará a aparecer como bloqueado.",
   "uninstallDone": "Instalação removida",
+  "uninstallKeeps": "Os teus dados guardados e troféus são mantidos e voltam quando desbloqueares o jogo novamente.",
+  "uninstallFailed": "Não foi possível remover a instalação: %@",
   "deleteGame": "Apagar jogo",
   "deleteGameDetail": "Tira do disco os ficheiros do próprio jogo.",
   "deleteGameTitle": "Apagar %@?",

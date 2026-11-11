@@ -128,6 +128,8 @@
   "clearShaderCache": "Ryd shader-cache",
   "uninstallConfirm": "Vil ​​du fjerne installationen? Dine spilfiler bevares, men spillet vil igen fremstå som låst.",
   "uninstallDone": "Installation fjernet",
+  "uninstallKeeps": "Dine gemte spil og trofæer bevares og kommer tilbage, når du låser spillet op igen.",
+  "uninstallFailed": "Installationen kunne ikke fjernes: %@",
   "deleteGame": "Slet spil",
   "deleteGameDetail": "Fjerner spillets egne filer fra disken.",
   "deleteGameTitle": "Slet %@?",
