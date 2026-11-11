@@ -128,6 +128,8 @@
   "clearShaderCache": "清除着色器缓存",
   "uninstallConfirm": "要移除此安装吗？游戏文件会保留；此游戏将再次显示为已锁定。",
   "uninstallDone": "已移除安装",
+  "uninstallKeeps": "你的存档和奖杯会保留，重新解锁游戏后就会恢复。",
+  "uninstallFailed": "无法移除安装:%@",
   "deleteGame": "删除游戏",
   "deleteGameDetail": "从磁盘上移除游戏自身的文件。",
   "deleteGameTitle": "删除 %@？",

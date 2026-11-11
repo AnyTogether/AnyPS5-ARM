@@ -128,6 +128,8 @@
   "clearShaderCache": "Shader önbelleğini temizle",
   "uninstallConfirm": "Kurulum kaldırılsın mı? Oyun dosyaların silinmez, oyun tekrar kilitli görünür.",
   "uninstallDone": "Kurulum kaldırıldı",
+  "uninstallKeeps": "Kayıtların ve kupaların saklanır, oyunun kilidini yeniden açtığında geri gelir.",
+  "uninstallFailed": "Kurulum kaldırılamadı: %@",
   "deleteGame": "Oyunu sil",
   "deleteGameDetail": "Oyunun kendi dosyalarını diskten kaldırır.",
   "deleteGameTitle": "%@ silinsin mi?",

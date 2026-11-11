@@ -128,6 +128,8 @@
   "clearShaderCache": "Clear Shader Cache",
   "uninstallConfirm": "Remove the installation? Your game files stay; the game shows as locked again.",
   "uninstallDone": "Installation removed",
+  "uninstallKeeps": "Your saves and trophies are kept and come back when you unlock the game again.",
+  "uninstallFailed": "The installation could not be removed: %@",
   "deleteGame": "Delete game",
   "deleteGameDetail": "Takes the game's own files off the disk.",
   "deleteGameTitle": "Delete %@?",

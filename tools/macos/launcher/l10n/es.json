@@ -128,6 +128,8 @@
   "clearShaderCache": "Borrar caché de sombreadores",
   "uninstallConfirm": "¿Eliminar la instalación? Los archivos del juego se conservan; volverá a aparecer como bloqueado.",
   "uninstallDone": "Instalación eliminada",
+  "uninstallKeeps": "Tus partidas guardadas y trofeos se conservan y vuelven cuando desbloquees el juego otra vez.",
+  "uninstallFailed": "No se pudo eliminar la instalación: %@",
   "deleteGame": "Eliminar juego",
   "deleteGameDetail": "Quita del disco los archivos propios del juego.",
   "deleteGameTitle": "¿Eliminar %@?",

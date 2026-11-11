@@ -128,6 +128,8 @@
   "clearShaderCache": "Vider le cache des shaders",
   "uninstallConfirm": "Supprimer l’installation ? Les fichiers du jeu sont conservés ; le jeu apparaîtra à nouveau comme verrouillé.",
   "uninstallDone": "Installation supprimée",
+  "uninstallKeeps": "Tes sauvegardes et tes trophées sont conservés et reviennent quand tu déverrouilles à nouveau le jeu.",
+  "uninstallFailed": "Impossible de supprimer l’installation : %@",
   "deleteGame": "Supprimer le jeu",
   "deleteGameDetail": "Retire du disque les fichiers du jeu lui-même.",
   "deleteGameTitle": "Supprimer %@ ?",

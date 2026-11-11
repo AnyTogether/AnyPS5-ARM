@@ -128,6 +128,8 @@
   "clearShaderCache": "I-clear ang Shader Cache",
   "uninstallConfirm": "Alisin ang pag-install? Nanatili ang iyong mga file ng laro; Ang laro ay lumalabas na naka-lock muli.",
   "uninstallDone": "Tinanggal ang instalasyon",
+  "uninstallKeeps": "Mananatili ang iyong mga save at tropeo at babalik ang mga ito kapag in-unlock mo ulit ang laro.",
+  "uninstallFailed": "Hindi maalis ang instalasyon: %@",
   "deleteGame": "Burahin ang laro",
   "deleteGameDetail": "Inaalis sa disk ang sariling mga file ng laro.",
   "deleteGameTitle": "Burahin ang %@?",

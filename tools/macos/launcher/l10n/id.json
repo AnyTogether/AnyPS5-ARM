@@ -128,6 +128,8 @@
   "clearShaderCache": "Hapus Cache Shader",
   "uninstallConfirm": "Hapus instalasi? File game Anda tetap ada; permainan ditampilkan terkunci lagi.",
   "uninstallDone": "Instalasi dihapus",
+  "uninstallKeeps": "Save dan trofi kamu tetap disimpan dan kembali saat kamu membuka kunci game lagi.",
+  "uninstallFailed": "Instalasi tidak bisa dihapus: %@",
   "deleteGame": "Hapus game",
   "deleteGameDetail": "Menghapus file milik game itu sendiri dari disk.",
   "deleteGameTitle": "Hapus %@?",

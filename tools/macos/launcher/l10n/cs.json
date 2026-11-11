@@ -128,6 +128,8 @@
   "clearShaderCache": "Vymazat mezipaměť shaderů",
   "uninstallConfirm": "Odstranit instalaci? Soubory hry zůstanou zachovány, ale hra bude opět označena jako uzamčená.",
   "uninstallDone": "Instalace odstraněna",
+  "uninstallKeeps": "Tvoje uložené pozice a trofeje zůstanou a vrátí se, až hru znovu odemkneš.",
+  "uninstallFailed": "Instalaci se nepodařilo odstranit: %@",
   "deleteGame": "Smazat hru",
   "deleteGameDetail": "Odstraní z disku vlastní soubory hry.",
   "deleteGameTitle": "Smazat %@?",

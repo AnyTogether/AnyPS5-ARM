@@ -128,6 +128,8 @@
   "clearShaderCache": "셰이더 캐시 삭제",
   "uninstallConfirm": "설치를 제거하시겠습니까? 게임 파일은 그대로 유지되지만, 게임은 다시 잠긴 상태로 표시됩니다.",
   "uninstallDone": "설치 제거됨",
+  "uninstallKeeps": "저장 데이터와 트로피는 그대로 남아 있으며, 게임을 다시 잠금 해제하면 돌아옵니다.",
+  "uninstallFailed": "설치를 제거할 수 없습니다: %@",
   "deleteGame": "게임 삭제",
   "deleteGameDetail": "게임 자체의 파일을 디스크에서 제거합니다.",
   "deleteGameTitle": "%@ 게임을 삭제할까요?",

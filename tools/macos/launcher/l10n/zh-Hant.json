@@ -128,6 +128,8 @@
   "clearShaderCache": "清除著色器快取",
   "uninstallConfirm": "要移除此安裝嗎？遊戲檔案會保留；此遊戲會再次顯示為已鎖定。",
   "uninstallDone": "已移除安裝",
+  "uninstallKeeps": "你的存檔和獎盃會保留，重新解鎖遊戲後就會回來。",
+  "uninstallFailed": "無法移除安裝:%@",
   "deleteGame": "刪除遊戲",
   "deleteGameDetail": "從磁碟上移除遊戲本身的檔案。",
   "deleteGameTitle": "刪除 %@？",

@@ -204,13 +204,13 @@ struct RootView: View {
         }
     }
 
-    private var subtitleKey: T.Key {
+    private var subtitleText: String {
         switch model.overlay {
-        case .confirmUninstall: return .uninstallConfirm
-        case .controls: return .controls
-        case .advanced: return .advancedTitle
-        case .updateChoice: return .updateChoiceText
-        default: return .gameSettings
+        case .confirmUninstall: return AppModel.uninstallAsks
+        case .controls: return T.text(.controls)
+        case .advanced: return T.text(.advancedTitle)
+        case .updateChoice: return T.text(.updateChoiceText)
+        default: return T.text(.gameSettings)
         }
     }
 
@@ -237,7 +237,7 @@ struct RootView: View {
             }
         case .gameSettings, .confirmUninstall, .controls, .advanced, .updateChoice:
             if let game = model.selectedGame {
-                SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: T.text(subtitleKey))
+                SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: subtitleText)
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         case .gameFiles:

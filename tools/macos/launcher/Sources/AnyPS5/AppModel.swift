@@ -1929,11 +1929,21 @@ final class AppModel: ObservableObject {
     /// after, off the main thread, so the launcher keeps answering while a big game goes. A second
     /// Uninstall meanwhile does nothing, and an unlock of the game waits until its old files are
     /// gone.
+    /// The saves and trophies in it are kept in the store first and come back with the next unlock
+    /// (`Installer.keepSaves`); when they cannot be moved the installation stays as it is and the
+    /// notice says so.
     /// Delete game uninstalls too, from the games folder it knew (`given`), the places it read
-    /// while the dump was still there (`places`) and without the notice (`quiet`): it has its own.
+    /// while the dump was still there (`places`) and without the notices (`quiet`): it has its own.
     func uninstall(_ game: Game, root given: URL? = nil, places: Installer.Places? = nil, quiet: Bool = false) {
         guard let root = given ?? root(of: game), removals[game.id] == nil else { return }
-        let going = Installer.setAside(places ?? Installer.places(for: game, root: root), root: root)
+        let going: [URL]
+        do {
+            going = try Installer.uninstall(places ?? Installer.places(for: game, root: root), root: root)
+        } catch {
+            // Nothing of the player's is lost: the installation stays where it is.
+            if !quiet { show(T.format(.uninstallFailed, error.localizedDescription), symbol: "exclamationmark.triangle.fill") }
+            return
+        }
         installedRecords[game.id] = nil
         recordsGeneration += 1
         if !quiet { show(T.text(.uninstallDone), symbol: "trash") }
@@ -1943,6 +1953,9 @@ final class AppModel: ObservableObject {
             await MainActor.run { self.removals[id] = nil }
         }
     }
+
+    /// What Remove installation asks: what goes, then that the saves and trophies are kept.
+    static var uninstallAsks: String { T.text(.uninstallConfirm) + " " + T.text(.uninstallKeeps) }
 
     // MARK: Delete game
 
@@ -2046,10 +2059,9 @@ final class AppModel: ObservableObject {
         deletions[game.id] = nil
         switch outcome {
         case .deleted(let left):
-            // The saves and trophies stay in the store; the rest of the installation goes as
-            // Uninstall takes it. Saves that cannot be moved keep the whole installation in
-            // place: nothing of the player's is lost.
-            if (try? Installer.keepSaves(places)) != nil { uninstall(game, root: plan.root, places: places, quiet: true) }
+            // The installation goes as Uninstall takes it: the saves and trophies stay in the
+            // store, and saves that cannot be moved keep the whole installation in place.
+            uninstall(game, root: plan.root, places: places, quiet: true)
             sizes[game.id] = nil
             failures[game.id] = nil
             trophies[game.id] = nil
