@@ -797,6 +797,7 @@ extension AppModel {
     }
 
     func panelCommand(_ command: Command) -> Bool {
+        if backEndsTyping(command) { return true }
         if overlay == .settings, let used = settingsSearchCommand(command) { return used }
         let categories = panelCategories()
         guard !categories.isEmpty else { return false }
@@ -1026,9 +1027,40 @@ extension AppModel {
             run()
         case .keys(_, _, let capture):
             capture()
-        case .info, .text:
+        case .text:
+            // Select on a text row (and a click anywhere on it) puts the cursor in its field.
+            startTyping(row.id)
+            Sounds.shared.play(.select)
+        case .info:
             break
         }
+    }
+
+    /// The cursor goes into text row `id`'s field, and the focus to that row (a click on the
+    /// field itself comes here too).
+    func startTyping(_ id: String) {
+        guard typingRow != id else { return }
+        let categories = panelCategories()
+        if categories.indices.contains(panelCategory), let index = categories[panelCategory].rows.firstIndex(where: { $0.id == id }) {
+            if overlayHasCategories, !panelInRows { panelInRows = true }
+            if settingsSearchFocused { settingsSearchFocused = false }
+            if settingsTyping { settingsTyping = false }
+            focusRow(index, in: categories[panelCategory].rows)
+        }
+        typingRow = id
+    }
+
+    /// The cursor leaves row `id`'s field: the keys are the launcher's again.
+    func stopTyping(_ id: String) {
+        if typingRow == id { typingRow = nil }
+    }
+
+    /// Back while a row's field is typed in gives the keys back first, as Esc does there.
+    func backEndsTyping(_ command: Command) -> Bool {
+        guard command == .back, typingRow != nil else { return false }
+        typingRow = nil
+        Sounds.shared.play(.back)
+        return true
     }
 }
 
@@ -1090,9 +1122,17 @@ struct SettingsPanel: View {
                             VStack(alignment: .leading, spacing: 6 * scale) { categoryRows(categories) }
                                 .padding(.vertical, 4 * scale)
                         }
-                        .onChange(of: model.panelCategory) { _, index in
-                            guard categories.indices.contains(index) else { return }
-                            withAnimation(Motion.focus) { proxy.scrollTo("category-" + categories[index].id) }
+                        // By the category, not its place: a search that leaves other categories
+                        // moves the list too. To the middle, as every other list does (the ends
+                        // stay at the ends), so the selected one is whole with room around it.
+                        .onChange(of: current?.id, initial: true) { old, id in
+                            guard let id else { return }
+                            if old == id {
+                                // As Settings comes up: once the list has its rows.
+                                DispatchQueue.main.async { proxy.scrollTo("category-" + id, anchor: .center) }
+                            } else {
+                                withAnimation(Motion.focus) { proxy.scrollTo("category-" + id, anchor: .center) }
+                            }
                         }
                     }
                 }
@@ -1141,6 +1181,7 @@ struct SettingsPanel: View {
             .onTapGesture {
                 model.settingsSearchFocused = false
                 model.settingsTyping = false
+                model.typingRow = nil
                 model.panelCategory = index
                 model.panelRow = 0
                 model.panelInRows = false
@@ -1354,7 +1395,6 @@ struct RowView: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject private var inputMode = InputModeState.shared
     @Environment(\.scale) private var scale
-    @State private var text = ""
     @Environment(\.previewRender) private var previewRender
 
     var body: some View {
@@ -1452,14 +1492,7 @@ struct RowView: View {
                 // A text field does not draw offscreen.
                 Text(value).font(.display(16 * scale, .semibold)).frame(width: 200 * scale, alignment: .trailing)
             } else {
-                TextField("", text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.display(16 * scale, .semibold))
-                    .multilineTextAlignment(.trailing)
-                    .frame(width: 200 * scale)
-                    .onAppear { text = value }
-                    .onSubmit { set(text) }
-                    .onChange(of: text) { _, new in set(new) }
+                RowTextField(row: row, value: value, set: set, focused: focused)
             }
         }
     }
@@ -1541,6 +1574,54 @@ final class HoldRepeater {
             }
         }
     }
+}
+
+/// A text row's field: a box that shows where to type. Select on its row or a click anywhere on
+/// the row puts the cursor in; Return keeps what was typed and Esc gives the keys back to the
+/// launcher, as on Windows and Linux. The model says where the cursor is (AppModel.typingRow).
+struct RowTextField: View {
+    let row: PanelRow
+    let value: String
+    let set: (String) -> Void
+    let focused: Bool
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.scale) private var scale
+    @State private var text = ""
+    @FocusState private var cursor: Bool
+
+    var body: some View {
+        let typing = model.typingRow == row.id
+        let ink: Color = focused ? .black : .white
+        let box = RoundedRectangle(cornerRadius: 10 * scale, style: .continuous)
+        TextField("", text: $text)
+            .textFieldStyle(.plain)
+            .font(.display(16 * scale, .medium))
+            .foregroundStyle(ink)
+            .focused($cursor)
+            .onAppear { text = value }
+            // Changed from outside (a code cleared, a name the server tidied): shown, unless it
+            // is being typed in.
+            .onChange(of: value) { _, new in if !cursor, new != text { text = new } }
+            .onChange(of: text) { _, new in if new != value { set(new) } }
+            .onSubmit {
+                set(text)
+                model.stopTyping(row.id)
+            }
+            .onExitCommand { model.stopTyping(row.id) }
+            .onChange(of: typing, initial: true) { _, on in if cursor != on { cursor = on } }
+            .onChange(of: cursor) { _, on in
+                if on { model.startTyping(row.id) } else { model.stopTyping(row.id) }
+            }
+            .padding(.horizontal, 14 * scale)
+            .padding(.vertical, 8 * scale)
+            .background(box.fill(ink.opacity(typing ? 0.12 : 0.07)))
+            .overlay(box.strokeBorder(typing ? model.accent : ink.opacity(0.14), lineWidth: 1.5 * scale))
+            .frame(width: RowTextField.width * scale)
+            .animation(Motion.focus, value: typing)
+    }
+
+    /// Wide enough for an email address, and the row's name still fits in a side panel.
+    static let width: CGFloat = 300
 }
 
 /// A stepper's number being typed: the number and its unit, Return keeps it, Esc leaves it as

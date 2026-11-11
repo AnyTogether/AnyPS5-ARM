@@ -273,6 +273,7 @@ struct AddProfileView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
     @Environment(\.previewRender) private var previewRender
+    @FocusState private var cursor: Bool
 
     var body: some View {
         ZStack {
@@ -288,15 +289,32 @@ struct AddProfileView: View {
                         Text(model.profileFlow.name).font(.display(20 * scale, .medium)).foregroundStyle(.white)
                         Spacer(minLength: 0)
                     } else {
+                        // Up from the cards (or a click) puts the cursor in; Return, Esc and down give
+                        // the keys back to the cards.
                         TextField(TPro.text(.profileNamePlaceholder), text: $model.profileFlow.name)
                             .textFieldStyle(.plain)
                             .font(.display(20 * scale, .medium))
                             .foregroundStyle(.white)
+                            .focused($cursor)
+                            .onSubmit { model.stopTyping(AppModel.profileNameField) }
+                            .onExitCommand { model.stopTyping(AppModel.profileNameField) }
+                            .onKeyPress(.downArrow) {
+                                model.stopTyping(AppModel.profileNameField)
+                                return .handled
+                            }
+                            .onChange(of: model.typingRow == AppModel.profileNameField, initial: true) { _, on in if cursor != on { cursor = on } }
+                            .onChange(of: cursor) { _, on in
+                                if on { model.typingRow = AppModel.profileNameField } else { model.stopTyping(AppModel.profileNameField) }
+                            }
                     }
                 }
                 .padding(.horizontal, 20 * scale)
                 .frame(width: 430 * scale, height: 56 * scale)
                 .glass(16 * scale)
+                .overlay(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous)
+                    .strokeBorder(model.accent, lineWidth: 1.5 * scale).opacity(model.typingRow == AppModel.profileNameField ? 1 : 0))
+                .contentShape(Rectangle())
+                .onTapGesture { model.typingRow = AppModel.profileNameField }
                 .padding(.top, 34 * scale)
                 .opacity(model.profileFlow.modeChoice == 0 ? 1 : 0.45)
                 ProfileModeCards().padding(.top, 26 * scale)

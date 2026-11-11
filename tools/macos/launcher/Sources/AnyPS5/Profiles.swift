@@ -337,9 +337,19 @@ extension AppModel {
         if profileFlow.modeChoice == 0 { createOfflineProfile() } else { beginOnlineProfile() }
     }
 
+    /// Add Profile's name field, as the row being typed in (AppModel.typingRow).
+    static let profileNameField = "profile-add-name"
+
     /// The add-profile screen and the first start's last step: left and right pick the card.
     func modeChoiceCommand(_ command: Command) -> Bool {
+        if backEndsTyping(command) { return true }
         switch command {
+        // Add Profile: the name is over the cards.
+        case .up where overlay == .addProfile:
+            typingRow = AppModel.profileNameField
+            Sounds.shared.play(.move)
+        case .down where overlay == .addProfile:
+            if typingRow != nil { typingRow = nil; Sounds.shared.play(.move) }
         case .left, .right:
             let next = command == .left ? 0 : 1
             guard next != profileFlow.modeChoice else { Sounds.shared.play(.bump); return true }
@@ -631,6 +641,7 @@ extension AppModel {
 
     /// ○ backs out of the sign-in (a question asked in place answers Cancel first); ← stays.
     func signInCommand(_ command: Command) -> Bool {
+        if backEndsTyping(command) { return true }
         switch command {
         case .back:
             if !cancelAsk() { cancelSignIn() }

@@ -86,4 +86,46 @@ final class TypingTests: XCTestCase {
         screen.type("b")
         XCTAssertEqual(model.togetherEmail, "ab")
     }
+
+    func testUpFromAddProfilesCardsTypesTheNameAndBackGivesTheKeysBack() throws {
+        let model = try LauncherFixture.model()
+        model.openAddProfile()
+        XCTAssertEqual(model.overlay, .addProfile)
+        XCTAssertNil(model.typingRow)
+        XCTAssertTrue(model.modeChoiceCommand(.up))
+        XCTAssertEqual(model.typingRow, AppModel.profileNameField, "up from the cards puts the cursor in the name")
+        XCTAssertTrue(model.modeChoiceCommand(.back))
+        XCTAssertNil(model.typingRow, "back gives the keys back first")
+        XCTAssertEqual(model.overlay, .addProfile, "and does not leave Add Profile")
+        XCTAssertTrue(model.modeChoiceCommand(.up))
+        XCTAssertTrue(model.modeChoiceCommand(.down))
+        XCTAssertNil(model.typingRow, "down goes back to the cards")
+    }
+
+    func testAddProfilesNameTakesTheCursorAndWhatIsTyped() throws {
+        let model = try LauncherFixture.model()
+        model.openAddProfile()
+        let screen = try LauncherWindow(model)
+        defer { screen.close() }
+        XCTAssertFalse(screen.typing)
+        XCTAssertTrue(model.modeChoiceCommand(.up))
+        screen.wait(0.5)
+        XCTAssertTrue(screen.typing, "up from the cards did not put the cursor in the name")
+        screen.type("!")
+        XCTAssertTrue(model.profileFlow.name.contains("!"), "what is typed goes into the name: \(model.profileFlow.name)")
+        XCTAssertTrue(model.modeChoiceCommand(.back))
+        screen.wait(0.5)
+        XCTAssertFalse(screen.typing, "back took the cursor out")
+        XCTAssertEqual(model.overlay, .addProfile)
+    }
+
+    /// A stepper's number being typed is a field too: back leaves it without leaving the screen.
+    func testBackEndsANumberBeingTyped() throws {
+        let model = try LauncherFixture.model()
+        model.open(.settings)
+        model.typingRow = "launcherVolume"
+        XCTAssertTrue(model.panelCommand(.back))
+        XCTAssertNil(model.typingRow)
+        XCTAssertEqual(model.overlay, .settings)
+    }
 }
