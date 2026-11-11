@@ -117,4 +117,40 @@ final class SettingsSidebarTests: XCTestCase {
             XCTAssertTrue(seen, "going down, " + where_)
         }
     }
+
+    /// The list scrolled by hand (the wheel, the trackpad) away from the selection: the next
+    /// arrow brings the selection back onto the screen.
+    func testTheCategoriesComeBackAfterTheListWasScrolledByHand() throws {
+        let model = try LauncherFixture.model()
+        model.open(.settings)
+        let screen = try LauncherWindow(model, width: 1100, height: 700)
+        defer { screen.close() }
+        let count = model.panelCategories().count
+        let list = try sidebar(screen)
+        let scale = min(1.45, max(0.68, min(1100.0 / 1600, 700.0 / 900)))
+        // The wheel takes the list to its end while the first category is the selected one.
+        let end = (list.documentView?.bounds.height ?? 0) - list.documentVisibleRect.height
+        list.contentView.scroll(to: NSPoint(x: 0, y: list.documentView?.isFlipped == false ? 0 : end))
+        list.reflectScrolledClipView(list.contentView)
+        screen.wait(0.5)
+        XCTAssertGreaterThan(shown(list).lowerBound, 60, "the list did not scroll by hand")
+        XCTAssertTrue(model.panelCommand(.down))
+        screen.wait(0.8)
+        var (seen, where_) = whole(1, in: list, scale: scale)
+        XCTAssertTrue(seen, "after the wheel went down and the arrow moved, " + where_)
+        // And the other way: the selection far down, the wheel back at the top.
+        while model.panelCategory != count - 2 {
+            XCTAssertTrue(model.panelCommand(.down))
+            screen.wait(0.1)
+        }
+        screen.wait(0.8)
+        list.contentView.scroll(to: NSPoint(x: 0, y: list.documentView?.isFlipped == false ? end : 0))
+        list.reflectScrolledClipView(list.contentView)
+        screen.wait(0.5)
+        XCTAssertLessThan(shown(list).lowerBound, 5, "the list did not scroll back by hand")
+        XCTAssertTrue(model.panelCommand(.down))
+        screen.wait(0.8)
+        (seen, where_) = whole(count - 1, in: list, scale: scale)
+        XCTAssertTrue(seen, "after the wheel went up and the arrow moved, " + where_)
+    }
 }
