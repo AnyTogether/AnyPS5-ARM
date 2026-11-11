@@ -56,6 +56,11 @@ final class FirstStartTests: XCTestCase {
         XCTAssertEqual(LanguageGrid.move(.right, from: 6, count: 28), 7, "right at a row's end goes on to the next row")
     }
 
+    func testTheLanguageHeadingIsInTurkishCapitals() throws {
+        _ = try fresh(.turkish)
+        XCTAssertEqual(T.text(.chooseLanguage).uppercased(with: T.locale), "DİL")
+    }
+
     func testTheThemeStepFitsTheWindow() throws {
         let model = try fresh()
         model.onboardingStep = 1

@@ -115,7 +115,8 @@ private struct LanguageStep: View {
         VStack(alignment: .leading, spacing: 46 * scale) {
             StepTitle(title: T.text(.welcome), subtitle: T.text(.welcomeSubtitle))
             VStack(alignment: .leading, spacing: 16 * scale) {
-                Text(T.text(.chooseLanguage)).font(.display(14 * scale, .semibold)).textCase(.uppercase).tracking(0.8).foregroundStyle(.white.opacity(0.55))
+                // In the language's own capitals (Turkish DİL, not DIL).
+                Text(T.text(.chooseLanguage).uppercased(with: T.locale)).font(.display(14 * scale, .semibold)).tracking(0.8).foregroundStyle(.white.opacity(0.55))
                 // The cards share the space the step has: every language is on the screen at once.
                 GeometryReader { proxy in
                     let grid = LanguageGrid(count: languages.count, size: proxy.size, scale: scale)
