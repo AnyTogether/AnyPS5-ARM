@@ -225,6 +225,12 @@ enum Overlay: Equatable {
     case updateRequired
     /// An unlock that did not start for want of room (spaceShortage): how much, and what to do.
     case noSpace
+    /// A join held back by a different game version or engine build (joinBlock): what differs,
+    /// both builds whole, and what gets past it.
+    case joinBlocked
+    /// Play on a game someone the user knows already plays (joinChoice): join theirs, or start
+    /// one's own.
+    case joinOrHost
     case controls
     case trophies
     case advanced
@@ -1198,6 +1204,13 @@ final class AppModel: ObservableObject {
     @Published var playTogetherOffers: [PlayTogetherOffer] = []
     @Published var peerLinks: [String: OnlinePeerLinkInfo] = [:]
     var togetherAfterUnlock: (String, PlayTogetherOffer)?
+    /// What goes on once a copy made by another engine is rebuilt (rebuildFirst): the game's
+    /// start, hosting Play Together, a friend's game joined.
+    var afterRebuild: (id: String, go: () -> Void)?
+    /// What holds a join back, for the panel that says it whole (JoinChoice.swift).
+    @Published var joinBlock: JoinBlock?
+    /// The game being started while someone the user knows plays it, and whose game that is.
+    @Published var joinChoice: JoinChoice?
     /// Play Together games the user chose to join with a game version that does not fit (Try
     /// anyway), and games the server refused for the version though the check here let them by.
     @Published var togetherTryAnyway: Set<String> = []
@@ -1599,6 +1612,7 @@ final class AppModel: ObservableObject {
     /// free, and what to do.
     private func tellShortage(_ shortage: SpaceShortage, for game: Game) {
         if playAfterUnlock == game.id { playAfterUnlock = nil }
+        if afterRebuild?.id == game.id { afterRebuild = nil }
         spaceShortage = (game, shortage)
         Sounds.shared.play(.back)
         Feel.shared.vibrate(.error)
@@ -1623,13 +1637,16 @@ final class AppModel: ObservableObject {
                     self.play(game)
                 }
                 self.togetherUnlockDone(id, succeeded: true)
+                self.rebuildDone(id, succeeded: true)
             case .failure(let error) where error is CancellationError:
                 self.togetherUnlockDone(id, succeeded: false)
+                self.rebuildDone(id, succeeded: false)
             case .failure(let shortage as SpaceShortage):
                 self.tellShortage(shortage, for: game)
             case .failure(let error):
                 self.failures[id] = error.localizedDescription
                 self.togetherUnlockDone(id, succeeded: false)
+                self.rebuildDone(id, succeeded: false)
                 self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
             }
             self.startNext()
@@ -1732,8 +1749,42 @@ final class AppModel: ObservableObject {
         unlock(game)
     }
 
+    /// A copy made by another engine than the one it starts with now (the launcher was updated,
+    /// another engine was chosen) is rebuilt first, with the unlock's usual progress, and `go`
+    /// runs once it is ready; a copy that is current goes on at once. Nothing goes on after a
+    /// rebuild that failed or was cancelled.
+    func rebuildFirst(_ game: Game, then go: @escaping () -> Void) {
+        guard needsRebuild(game) else { return go() }
+        afterRebuild = (game.id, go)
+        show(PT.format(.rebuildingFirst, game.name), symbol: "arrow.triangle.2.circlepath", icon: game.icon)
+        unlock(game)
+        // The unlock did not begin (no engine at hand): nothing waits on it.
+        if afterRebuild?.id == game.id, !queue.contains(game.id), progress[game.id] == nil { afterRebuild = nil }
+    }
+
+    /// Whether the game's copy was made by another engine than the one it would be unlocked with now.
+    func needsRebuild(_ game: Game) -> Bool {
+        guard case .installed(outdated: true) = state(of: game) else { return false }
+        return true
+    }
+
+    /// Play Now on the update prompt: the copy as it is, whatever engine made it (also after a
+    /// rebuild that failed and left the copy in place).
+    func playAsItIs(_ game: Game) {
+        failures[game.id] = nil
+        play(game, asItIs: true)
+    }
+
+    /// An unlock ended: what waited on the copy's rebuild goes on, or is dropped when it failed.
+    func rebuildDone(_ id: String, succeeded: Bool) {
+        guard let waiting = afterRebuild, waiting.id == id else { return }
+        afterRebuild = nil
+        if succeeded { waiting.go() }
+    }
+
     func cancelUnlock(_ game: Game) {
         if playAfterUnlock == game.id { playAfterUnlock = nil }
+        if afterRebuild?.id == game.id { afterRebuild = nil }
         if prepare.contains(game.id) {
             if prepare.cancel(game.id) { preparer?.cancel() }
             Sounds.shared.play(.back)
@@ -2054,12 +2105,14 @@ final class AppModel: ObservableObject {
     func primaryAction(_ game: Game) {
         if familyPrimaryAction(game) { return }
         switch state(of: game) {
-        case .installed(let outdated):
-            let go: () -> Void = { [weak self] in
-                if outdated { self?.open(.updateChoice) } else { self?.play(game) }
-            }
+        case .installed:
+            // A copy made by another engine is rebuilt on the way (play); a game someone the
+            // user knows already plays asks first whether to join theirs.
+            let go: () -> Void = { [weak self] in self?.playOrJoin(game) }
             // Settings › Engine › Update from Git Before Playing: the checkout's remote first.
             updatesBeforePlay ? playAfterGitCheck(game, play: go) : go()
+        // The rebuild of a copy that is still there failed: try again, or play it as it is.
+        case .failed where installedRecords[game.id] != nil: open(.updateChoice)
         case .locked, .failed: unlock(game)
         case .installing where isPreparing(game): promotePreparation(game)
         case .installing, .queued: cancelUnlock(game)
@@ -2072,8 +2125,15 @@ final class AppModel: ObservableObject {
     /// Plays the game, its saves brought in step first where save sync is on; `trace` turns
     /// detailed logging on for this start only, and `once` adds to the engine's environment for
     /// this start only (the crash report's PlayGo answer).
-    func play(_ game: Game, trace: Bool = false, once: [String: String] = [:]) {
+    ///
+    /// A copy made by another engine than the one it starts with now is rebuilt first, so two
+    /// launchers on the same release always play the same build; `asItIs` starts the copy as it
+    /// is (it was just rebuilt, it joins a host on that very engine, or the user chose to).
+    func play(_ game: Game, trace: Bool = false, once: [String: String] = [:], asItIs: Bool = false) {
         guard root(of: game) != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
+        if !asItIs, needsRebuild(game) {
+            return rebuildFirst(game) { [weak self] in self?.play(game, trace: trace, once: once, asItIs: true) }
+        }
         // The profile's own saves and trophies in the game folder before anything reads them.
         activateProfileSaves(game)
         familyGate(game) { self.syncSaves(game) { self.ensureFonts(game) { self.start(game, trace: trace, once: once) } } }
@@ -3316,6 +3376,7 @@ final class AppModel: ObservableObject {
         panelCategory = 0
         panelRow = 0
         panelInRows = next == .gameSettings || next == .confirmUninstall || next == .controls || next == .updateChoice || next == .crashReport || next == .noSpace
+            || next == .joinBlocked || next == .joinOrHost
             || next == .updateRequired || next == .gameFiles
         // The controls panel opens on its first key, below the hint.
         if next == .controls {

@@ -225,6 +225,16 @@ struct RootView: View {
                 SidePanel(title: TPrep.text(.noSpaceTitle), subtitle: game.name + " · " + TPrep.text(.noSpaceSubtitle))
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
+        case .joinBlocked:
+            if let block = model.joinBlock {
+                SidePanel(title: PT.text(.blockedTitle), subtitle: block.hostName + " · " + block.gameName)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        case .joinOrHost:
+            if let choice = model.joinChoice {
+                SidePanel(title: choice.game.name, subtitle: PT.format(.askJoin, choice.name))
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
         case .gameSettings, .confirmUninstall, .controls, .advanced, .updateChoice:
             if let game = model.selectedGame {
                 SidePanel(title: model.overlay == .confirmUninstall ? T.text(.uninstall) : game.name, subtitle: T.text(subtitleKey))

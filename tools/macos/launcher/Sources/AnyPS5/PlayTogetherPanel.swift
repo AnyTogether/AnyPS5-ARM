@@ -33,10 +33,17 @@ extension AppModel {
     // MARK: Hosting
 
     /// The host's Play Together: a LAN session in the party, then the game with online play on.
+    /// A copy made by another engine than the one at hand is rebuilt first, so the session
+    /// carries the build the party's up-to-date launchers have.
     func startPlayTogether(_ game: Game) {
         guard togetherUser != nil, party != nil else { return }
         if let running { return show(PT.format(.closeFirst, running.game.name), symbol: "xmark.app") }
         guard case .installed = state(of: game) else { return show(T.format(.gameUnlockFirst, game.name), symbol: "lock.fill") }
+        rebuildFirst(game) { [weak self] in self?.hostPlayTogether(game) }
+    }
+
+    private func hostPlayTogether(_ game: Game) {
+        guard togetherUser != nil, party != nil, running == nil else { return }
         show(PT.format(.starting, game.name), symbol: "person.2.wave.2.fill")
         Task {
             do {
@@ -61,7 +68,8 @@ extension AppModel {
         playTogetherOffers.removeAll { $0.sessionId == session.id }
         if overlay != nil { closeOverlay() }
         selected = games.firstIndex(of: game) ?? selected
-        play(game)
+        // The session carries this copy's engine build: it starts as it is.
+        play(game, asItIs: true)
         pollTogetherLinks()
         Task {
             try? await Task.sleep(for: .seconds(120))
@@ -89,6 +97,12 @@ extension AppModel {
             togetherAfterUnlock = (id, offer)
             if case .unlockAndPlay = verdict { show(PT.format(.unlockingFirst, game.name), symbol: "lock.open") } else { show(PT.format(.updatingFirst, game.name), symbol: "arrow.triangle.2.circlepath") }
             unlock(game)
+        case .gameVersion(let have, let need, let youUpdate):
+            let anyway = canTryAnyway(offer)
+            tell(JoinBlock(kind: .gameVersion(youUpdate: youUpdate), hostName: offer.hostName, gameName: gameName(offer.titleId), host: need, yours: have,
+                           tryAnyway: anyway ? { [weak self] in self?.tryAnywayPlayTogether(offer) } : nil))
+        case .engine(let have, let need, _):
+            tell(engineBlock(hostName: offer.hostName, titleId: offer.titleId, host: need, yours: have))
         default:
             show(verdictText(verdict, offer: offer) ?? "", symbol: "exclamationmark.triangle.fill")
         }
@@ -143,10 +157,10 @@ extension AppModel {
                 if let refusal = problem.joinRefusal {
                     // The party panel offers Try Anyway for a version the server would let by on request.
                     if refusal.overridable, !anyway { togetherVersionRefused.insert(offer.sessionId) }
-                    let verdict: PlayTogetherVerdict = refusal.reason == .engine
-                        ? .engine(have: refusal.actual, need: refusal.expected, youUpdate: refusal.youUpdate)
-                        : .gameVersion(have: refusal.actual, need: refusal.expected, youUpdate: refusal.youUpdate)
-                    show(verdictText(verdict, offer: offer) ?? problem.title, symbol: "exclamationmark.triangle.fill")
+                    // The host's build changed since the check here: this copy rebuilt may fit it now.
+                    tell(refusalBlock(refusal, hostName: offer.hostName, titleId: offer.titleId,
+                                      rebuild: { [weak self] in self?.rebuildFirst(game) { self?.joinPlayTogether(offer, afterUnlock: true) } },
+                                      tryAnyway: anyway ? nil : { [weak self] in self?.tryAnywayPlayTogether(offer) }))
                 } else if problem.code == "full" {
                     show(PT.text(.full), symbol: "person.3.fill")
                 } else {
@@ -158,7 +172,8 @@ extension AppModel {
         }
     }
 
-    /// What blocks a join, in words; nil for a way in.
+    /// What blocks a join, in words; nil for a way in. A different engine build says what
+    /// differs and what gets past it; Join opens the panel with both builds whole.
     func verdictText(_ verdict: PlayTogetherVerdict, offer: PlayTogetherOffer) -> String? {
         let name = gameName(offer.titleId)
         switch verdict {
@@ -167,9 +182,9 @@ extension AppModel {
         case .missing: return PT.format(.missing, name)
         case .gameVersion(let have, let need, let you):
             return you ? PT.format(.versionYou, name, need, have) : PT.format(.versionHost, offer.hostName, need, have)
-        case .engine(let have, let need, let you):
-            return you ? PT.format(.engineYou, offer.hostName, AppModel.release(need), AppModel.release(have))
-                : PT.format(.engineHost, offer.hostName, AppModel.release(need), AppModel.release(have))
+        case .engine(let have, let need, _):
+            let texts = AppModel.joinBlockTexts(engineBlock(hostName: offer.hostName, titleId: offer.titleId, host: need, yours: have))
+            return texts.title + "\n" + texts.advice
         case .closeFirst(let running): return PT.format(.closeFirst, running)
         case .full: return PT.text(.full)
         }
@@ -240,18 +255,20 @@ extension AppModel {
     /// The party panel's Play Together: the game running (who plays, how each is reached, Join,
     /// Leave or End, the host's code), or Play Together for the game selected on Home.
     func togetherRows(_ party: TogetherParty, me: String) -> [PanelRow] {
+        // A party is not a game session: said once, over whatever Play Together shows.
+        let about = PanelRow(id: "together-about", title: PT.text(.pickGame), detail: PT.text(.about), symbol: "info.circle", kind: .info(""), wraps: true)
         guard let together = party.together else {
             guard let game = selectedGame, running == nil else {
-                return [PanelRow(id: "together-pick", title: PT.text(.pickGame), detail: PT.text(.pickGameDetail), symbol: "person.2.wave.2", kind: .info(""))]
+                return [PanelRow(id: "together-pick", title: PT.text(.pickGame), detail: PT.text(.about) + "\n" + PT.text(.pickGameDetail), symbol: "person.2.wave.2", kind: .info(""), wraps: true)]
             }
-            return [PanelRow(id: "together-start", title: PT.format(.start, game.name), detail: PT.text(.startDetail), symbol: "person.2.wave.2.fill",
-                             kind: .action(destructive: false) { [weak self] in self?.startPlayTogether(game) })]
+            return [about, PanelRow(id: "together-start", title: PT.format(.start, game.name), detail: PT.text(.startDetail), symbol: "person.2.wave.2.fill",
+                                    kind: .action(destructive: false) { [weak self] in self?.startPlayTogether(game) })]
         }
         let offer = togetherOffer(together, in: party)
         let mine = gameSession?.id == together.sessionId
         let hosting = together.hostId == me
-        var rows = [PanelRow(id: "together-title", title: PT.format(.title, gameName(together.titleId), together.players.count, together.capacity),
-                             detail: PT.format(.titleDetail, offer.hostName, together.gameVersion), symbol: "person.2.wave.2.fill", kind: .info(""))]
+        var rows = [about, PanelRow(id: "together-title", title: PT.format(.title, gameName(together.titleId), together.players.count, together.capacity),
+                                    detail: PT.format(.titleDetail, offer.hostName, together.gameVersion), symbol: "person.2.wave.2.fill", kind: .info(""))]
         let byId = Dictionary(party.members.map { ($0.userId, $0) }, uniquingKeysWith: { first, _ in first })
         for userId in together.players {
             guard let person = byId[userId] ?? gameSession?.players.first(where: { $0.userId == userId }) else { continue }
@@ -274,7 +291,7 @@ extension AppModel {
             default: title = PT.format(.joinRow, offer.hostName, gameName(together.titleId))
             }
             rows.append(PanelRow(id: "together-join", title: title, detail: verdictText(verdict, offer: offer) ?? PT.text(.joinDetail), symbol: "play.circle.fill",
-                                 kind: .action(destructive: false) { [weak self] in self?.joinPlayTogether(offer) }))
+                                 kind: .action(destructive: false) { [weak self] in self?.joinPlayTogether(offer) }, wraps: true))
             if let anyway = tryAnywayRow(offer, id: "together-try-anyway") { rows.append(anyway) }
         } else {
             if hosting {

@@ -152,8 +152,9 @@ public enum PlayTogetherCheck {
         let exact = fitting.first { $0.engineBuild == offer.engineBuild }
         let updatable = fitting.first { $0.unlocked && $0.nextEngineBuild == offer.engineBuild }
         guard let copy = exact ?? updatable else {
+            // Who is behind is read from the releases (a nightly before its release), never from a build's fingerprint.
             let have = fitting[0].engineBuild
-            return .engine(have: have, need: offer.engineBuild, youUpdate: TogetherGameSession.compareVersions(have, offer.engineBuild) < 0)
+            return .engine(have: have, need: offer.engineBuild, youUpdate: EngineAdvice.of(yours: have, host: offer.engineBuild, rebuildGives: fitting[0].nextEngineBuild).youUpdate)
         }
         if let running { return .closeFirst(running: running) }
         guard offer.players < offer.capacity else { return .full }

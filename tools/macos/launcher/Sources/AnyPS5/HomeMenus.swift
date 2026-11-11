@@ -202,6 +202,10 @@ extension AppModel {
                 }
             }
         }
+        // The party next to the game playing: who is in it, who plays another one (Join).
+        for row in partyGameRows() {
+            if let item = quickMenuRow(row, id: rows.count) { rows.append(item) }
+        }
         if let track = nowPlayingTrack {
             rows.append(QuickMenuRow(id: rows.count, title: TH.text(.nowPlaying), detail: Self.nowPlayingLabel(track), symbol: "music.note",
                                      run: { [weak self] in self?.nowPlayingCommand(.playPause) }, track: track))

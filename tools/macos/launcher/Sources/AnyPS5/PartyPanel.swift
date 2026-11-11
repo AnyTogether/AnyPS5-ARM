@@ -60,6 +60,15 @@ extension AppModel {
             if party.isLeader(member.userId) { details.append(T.text(.partyLeader)) }
             if party.call?.in.contains(member.userId) == true { details.append(T.text(.partyInVoice)) }
             if let state = voiceState(of: member.userId, in: party) { details.append(state) }
+            // In the user's game, in another one, or in none: the party alone does not say.
+            let game = member.userId == me.id ? nil : memberGame(member, in: party)
+            if let game { details.append(AppModel.memberGameText(game, title: gameName)) }
+            defer {
+                // Join right under a member in another game that takes players (the party's own Play Together game has its Join above).
+                if case .other(let sessionId, _, _, true, _, _)? = game, sessionId != party.together?.sessionId, let join = memberJoinRow(member, in: party, id: "party-member-join-\(member.userId)") {
+                    rows.append(join)
+                }
+            }
             rows.append(PanelRow(id: "party-member-\(member.userId)", title: member.userId == me.id ? "\(member.displayName) (\(T.text(.profileYou)))" : identity.name,
                                  detail: details.joined(separator: " · "), symbol: "person", kind: .info(""),
                                  person: member.userId == me.id ? PanelPerson(name: member.displayName, avatar: member.avatar, status: party.call?.in.contains(member.userId) == true ? .online : nil,
