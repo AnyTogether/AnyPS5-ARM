@@ -298,6 +298,15 @@ extension AppModel {
             case .select: menuIndex == 0 ? sendLauncherReport() : putLauncherReportAside()
             default: break
             }
+        case .confirmDeleteGame:
+            // "Delete <game>?", Cancel first: only Select on the destructive answer deletes.
+            switch command {
+            case .up, .left: move(-1, count: 2)
+            case .down, .right: move(1, count: 2)
+            case .back, .options: cancelDeleteGame()
+            case .select: menuIndex == 1 ? confirmDeleteGame() : cancelDeleteGame()
+            default: break
+            }
         case .profileMenu:
             let items = profileMenuItems()
             switch command {
@@ -600,7 +609,8 @@ struct GameMenuCard: View {
     }
 
     var body: some View {
-        let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport ? nil : (model.selectedGame ?? model.runningGame)
+        let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport ? nil
+            : model.overlay == .confirmDeleteGame ? model.deleteAsk?.plan.game : (model.selectedGame ?? model.runningGame)
         ZStack {
             FrostFill(opacity: 0.6).ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -613,6 +623,9 @@ struct GameMenuCard: View {
                     // one that cannot be undone on the right. Its line (a game closing with the
                     // launcher) sits under the question rather than in the button.
                     let answers = items(game)
+                    if model.overlay == .confirmDeleteGame, let ask = model.deleteAsk {
+                        deleteBody(ask).padding(.top, -4 * scale).padding(.bottom, 22 * scale)
+                    }
                     if let detail = answers.first(where: \.destructive)?.detail {
                         Text(detail).font(.display(14 * scale)).foregroundStyle(.white.opacity(0.66))
                             .fixedSize(horizontal: false, vertical: true)
@@ -654,7 +667,7 @@ struct GameMenuCard: View {
             }
             .padding(.horizontal, twoChoice ? 32 * scale : 40 * scale)
             .padding(.vertical, twoChoice ? 30 * scale : 36 * scale)
-            .frame(width: (twoChoice ? 480 : model.overlay == .closeGame ? 560 : 520) * scale)
+            .frame(width: (model.overlay == .confirmDeleteGame ? 580 : twoChoice ? 480 : model.overlay == .closeGame ? 560 : 520) * scale)
             .glass(30 * scale, opacity: 0.5)
             .overlay(alignment: .top) {
                 // The accent edge the console's cards wear: which game the menu is about.
@@ -715,6 +728,7 @@ struct GameMenuCard: View {
         case .homeMenu, .confirmQuit: return TH.text(.homeMenuKicker)
         case .profileMenu: return TPro.text(.menuKicker)
         case .launcherReport: return TC.text(.launcherReportWhen)
+        case .confirmDeleteGame: return T.text(.deleteGame)
         default: return TH.text(.quickMenuKicker)
         }
     }
@@ -725,6 +739,7 @@ struct GameMenuCard: View {
         case .homeMenu, .profileMenu: return model.currentProfile?.name ?? model.preferences.profileName
         case .confirmQuit: return TH.text(.quitQuestion)
         case .launcherReport: return model.launcherReport?.headline ?? ""
+        case .confirmDeleteGame: return T.format(model.deleteAsk?.permanent == true ? .deleteGameForeverTitle : .deleteGameTitle, game?.name ?? "")
         default: return game?.name ?? ""
         }
     }
@@ -815,6 +830,10 @@ struct GameMenuCard: View {
         case .launcherReport:
             return [Item(id: 0, title: TC.text(.launcherReportSend), detail: TC.text(.launcherReportSendDetail), symbol: "paperplane.fill"),
                     Item(id: 1, title: TC.text(.launcherReportLater), detail: TC.text(.launcherReportLaterDetail), symbol: "clock.arrow.circlepath")]
+        case .confirmDeleteGame:
+            let permanent = model.deleteAsk?.permanent == true
+            return [Item(id: 0, title: T.text(.cancel), symbol: "arrow.uturn.backward"),
+                    Item(id: 1, title: T.text(permanent ? .deleteGameForever : .deleteGame), symbol: permanent ? "trash.slash.fill" : "trash.fill", destructive: true)]
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         default:
@@ -887,8 +906,56 @@ struct GameMenuCard: View {
         .accessibilityLabel(item.title)
     }
 
-    /// Quit AnyPS5? and Close the game?: a plain yes or no, drawn as two answers side by side.
-    private var twoChoice: Bool { model.overlay == .confirmQuit || model.overlay == .closeGame }
+    /// Quit AnyPS5?, Close the game? and Delete the game?: a plain yes or no, drawn as two
+    /// answers side by side.
+    private var twoChoice: Bool { model.overlay == .confirmQuit || model.overlay == .closeGame || model.overlay == .confirmDeleteGame }
+
+    /// What the Delete game card says before its answers: the game's folder as a file strip (its
+    /// path, what it takes on the disk, what goes with it), then what goes and what stays.
+    private func deleteBody(_ ask: DeleteAsk) -> some View {
+        let trash = T.text(.trashMac)
+        return VStack(alignment: .leading, spacing: 12 * scale) {
+            HStack(alignment: .top, spacing: 12 * scale) {
+                Image(systemName: "folder.fill").font(.system(size: 16 * scale, weight: .semibold)).foregroundStyle(.white.opacity(0.8))
+                    .frame(width: 20 * scale).padding(.top, 1 * scale)
+                VStack(alignment: .leading, spacing: 6 * scale) {
+                    // A path reads left to right in every language.
+                    Text(ask.plan.folder.path).font(.display(13.5 * scale, .medium)).foregroundStyle(.white)
+                        .lineLimit(3).truncationMode(.middle).fixedSize(horizontal: false, vertical: true)
+                        .environment(\.layoutDirection, .leftToRight)
+                    if !ask.plan.extras.isEmpty {
+                        Text(T.format(.deleteGameWith, ask.plan.extras.map(\.lastPathComponent).joined(separator: ", ")))
+                            .font(.display(12.5 * scale)).foregroundStyle(.white.opacity(0.6))
+                            .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 8 * scale)
+                Text((ask.size ?? -1).byteText).font(.display(13 * scale, .bold)).monospacedDigit().foregroundStyle(.white)
+                    .padding(.horizontal, 10 * scale).padding(.vertical, 4 * scale)
+                    .background(Capsule().fill(Color.white.opacity(0.1)))
+            }
+            .padding(.leading, 14 * scale).padding(.trailing, 12 * scale).padding(.vertical, 12 * scale)
+            .background(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).fill(Color.white.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: 16 * scale, style: .continuous).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
+            .padding(.bottom, 4 * scale)
+            if ask.permanent {
+                deleteLine("exclamationmark.triangle.fill", Color(red: 1, green: 0.7, blue: 0.36), T.format(.deleteGameNoTrash, trash))
+            }
+            deleteLine(ask.permanent ? "trash.slash.fill" : "trash", Color(red: 1, green: 0.6, blue: 0.55),
+                       ask.permanent ? T.text(.deleteGameGoesForever) : T.format(.deleteGameGoes, trash))
+            deleteLine("checkmark.shield", Color(red: 0.44, green: 0.85, blue: 0.6), T.text(.deleteGameStays))
+        }
+    }
+
+    private func deleteLine(_ symbol: String, _ tint: Color, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 12 * scale) {
+            Image(systemName: symbol).font(.system(size: 14 * scale, weight: .semibold)).foregroundStyle(tint)
+                .frame(width: 20 * scale).padding(.top, 2 * scale)
+            Text(text).font(.display(13.5 * scale)).foregroundStyle(.white.opacity(0.72))
+                .lineSpacing(2 * scale).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
 
     /// One answer of a yes or no: a pill. Focused, the way back turns white and the destructive
     /// one red; the way back wears its key (esc, or ○ with a controller).
@@ -935,7 +1002,7 @@ struct GameMenuCard: View {
             Hint(keys: twoChoice ? "← →" : "↑ ↓", label: T.text(.hintMove))
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Spacer(minLength: 0)
-            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport {
+            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport || model.overlay == .confirmDeleteGame {
                 Hint(keys: "esc / ○", label: T.text(.hintBack))
             } else {
                 Hint(keys: "PS / esc / ○", label: TH.text(.resume))
@@ -953,7 +1020,7 @@ extension AppModel {
     /// The PS menus take every command while one is up.
     func gameMenuCommandIfOpen(_ command: Command) -> Bool? {
         switch overlay {
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport: return gameMenuCommand(command)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame: return gameMenuCommand(command)
         default: return nil
         }
     }

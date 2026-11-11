@@ -218,6 +218,43 @@ public final class Installer: @unchecked Sendable {
             .appendingPathComponent(bundle(for: game, root: root).deletingPathExtension().lastPathComponent)
     }
 
+    /// What of an installed game is the player's own: the saves, the save memory and the
+    /// trophies in place, every other profile's parked ones and the mark that says whose are in
+    /// place.
+    public static let savedParts = ProfileSaves.parts + [ProfileSaves.parkName, ProfileSaves.markName]
+
+    /// Where a deleted game's saves and trophies wait, in the store of the games folder: the next
+    /// unlock of a game in the same folder takes them back (`place`).
+    public static func keptSaves(for game: Game, root: URL) -> URL {
+        keptSaves(data: dataFolder(for: game, root: root))
+    }
+
+    /// The same, from the game's data folder (`<store>/Data/<name>` to `<store>/Saves/<name>`).
+    static func keptSaves(data: URL) -> URL {
+        data.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Saves").appendingPathComponent(data.lastPathComponent)
+    }
+
+    /// Before a game is deleted: its saves and trophies (`savedParts`) move out of the game's
+    /// data folder into `keptSaves`, so the uninstall that follows takes none of them. Renames on
+    /// one drive, quick however big they are. Something kept there already (the game deleted
+    /// before and never unlocked since) stays, the newer one beside it under its date. Throws
+    /// when one cannot be moved: the installed game is then left as it is.
+    public static func keepSaves(_ game: Game, root: URL) throws {
+        let fileManager = FileManager.default
+        let source = dataFolder(for: game, root: root).appendingPathComponent("game")
+        let kept = keptSaves(for: game, root: root)
+        for part in savedParts {
+            let item = source.appendingPathComponent(part)
+            guard let type = (try? fileManager.attributesOfItem(atPath: item.path))?[.type] as? FileAttributeType, type != .typeSymbolicLink else { continue }
+            try fileManager.createDirectory(at: kept, withIntermediateDirectories: true)
+            var target = kept.appendingPathComponent(part)
+            if (try? fileManager.attributesOfItem(atPath: target.path)) != nil {
+                target = kept.appendingPathComponent("\(part).\(Int(Date().timeIntervalSince1970 * 1_000_000))")
+            }
+            try fileManager.moveItem(at: item, to: target)
+        }
+    }
+
     /// Where an uninstall puts what it removes until it is gone, in the store of the games folder
     /// `root`.
     public static func removingFolder(root: URL) -> URL {
@@ -641,6 +678,12 @@ public final class Installer: @unchecked Sendable {
         let staged = partial.appendingPathComponent("Contents/Resources/game")
         let previous = bundle.appendingPathComponent("Contents/Resources/game")
         if fileManager.fileExists(atPath: previous.path) { try carryOver(from: previous.resolvingSymlinksInPath(), to: staged) }
+        // The saves a deleted game left (keepSaves) come back, unless the game has its own.
+        let kept = keptSaves(data: data)
+        if fileManager.fileExists(atPath: kept.path) {
+            try carryOver(from: kept, to: staged)
+            if (try? fileManager.contentsOfDirectory(atPath: kept.path))?.isEmpty == true { try? fileManager.removeItem(at: kept) }
+        }
         if fileManager.fileExists(atPath: bundle.path) { try fileManager.removeItem(at: bundle) }
         let game = data.appendingPathComponent("game")
         if fileManager.fileExists(atPath: game.path) { try fileManager.removeItem(at: game) }

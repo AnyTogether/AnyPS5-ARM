@@ -142,6 +142,9 @@ enum T {
         case overlay, overlayOff, overlayTopLeft, overlayTopRight, overlayBottomLeft, overlayBottomRight, overlayStyle, overlayMinimal, overlayDetailed, frameGeneration, frameGenerationDetail, frameGenerationLowPower, upscaling, upscalingDetail, upscalingBilinear, upscalingFsr1, fsrSharpness, fsrSharpnessDetail, linkNoGame, folderNoGames, useGamesFolder, useGamesFolderDetail, useGamesFolderConfirm, addFolder, addFolderDetail, removeFolder, removeFolderAsk, folderRemoved, folderNotConnected, folderGames, folderOneGame, copyLink, linkCopied, saveSync, saveSyncDetail, saveSyncNoFolder, syncFolder, syncFolderICloud, syncFolderNone, savesSyncedFrom, saveSyncFailed, clips, clipsDetail, clipLength, seconds, clipsNeedPermission, clipsNeedPermissionDetail, clipsOff, clipsOffDetail, clipSaved = "clipSavedTitle", clipSavedDetail, clipFailed, lowPowerTitle, lowPowerFrameGeneration, lowPowerRefresh, gameLanguage, followLauncher
         case newGame, newGames, newGameDetail
         case reinstall, showInFinder, openLog, uninstall, clearShaderCache, uninstallConfirm, uninstallDone, cacheCleared
+        case deleteGame, deleteGameDetail, deleteGameTitle, deleteGameGoes, deleteGameGoesForever, deleteGameWith, deleteGameStays, deleteGameDone, deleteGameDoneForever
+        case deleteGameFailed, deleteGameForeverTitle, deleteGameNoTrash, deleteGameForever, deleteGameRefusedFolder, deleteGameRefusedLink, deleteGameRefusedShared, deleteGamePartly
+        case trashMac, gameBusyUpdating
         case appearance, theme, accent, background, backgroundTheme, backgroundImage, backgroundVideo, chooseFile, gameArtwork
         case motion, motionFull, motionReduced, sounds, launcherVolume, launcherVolumeDetail, language, storage, rescan, installedSize, about, aboutText, toolkitVersion
         case profileName, behaviour, hideWhilePlaying, rosettaMissing, rosettaInstall, rosettaInstalled

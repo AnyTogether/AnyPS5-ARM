@@ -539,6 +539,10 @@ extension AppModel {
         if case .installed = state {
             rows.append(PanelRow(id: "uninstall", title: T.text(.uninstall), symbol: "trash", kind: .action(destructive: true) { [weak self] in self?.open(.confirmUninstall) }))
         }
+        // Last, after Uninstall: the game itself off the disk, whatever its state. While it plays
+        // or is being unlocked the row says why not.
+        rows.append(PanelRow(id: "deleteGame", title: T.text(.deleteGame), detail: deleteBlock(game) ?? T.text(.deleteGameDetail), symbol: "xmark.bin",
+                             kind: .action(destructive: true) { [weak self] in self?.askDeleteGame(game) }))
         // A failed unlock's error first: the end of it, as Update from Git shows its own; all of it
         // goes to the clipboard, as on Windows and Linux.
         if let failure = failures[game.id] {
