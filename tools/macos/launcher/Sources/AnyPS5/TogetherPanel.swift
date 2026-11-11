@@ -520,6 +520,7 @@ extension AppModel {
         togetherConnected = true
         startE2EE()
         updateTogetherPresence()
+        followNowPlaying()
         refreshFriends()
         loadTogetherProfile()
         loadInbox()

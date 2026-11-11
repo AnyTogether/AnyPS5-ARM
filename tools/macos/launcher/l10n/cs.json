@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Hrát znovu s chybějícími částmi považovanými za nainstalované",
   "reportPlayGoInstalledDetailMac": "Jen pro toto spuštění. Dump nemá tabulku částí PlayGo a části hry, které chybí, se nemusí načíst.",
   "engineNeedsNewerMac": "Tento motor potřebuje macOS %1$@ nebo novější a tento Mac má macOS %2$@. Vyberte jiný motor v Nastavení › Motor nebo aktualizujte macOS.",
-  "engineGameNeedsNewerMac": "%1$@ byla odemčena motorem, který potřebuje macOS %2$@ nebo novější, a tento Mac má macOS %3$@. Vyberte pro ni jiný motor v Nastavení › Motor a odemkněte ji znovu."
+  "engineGameNeedsNewerMac": "%1$@ byla odemčena motorem, který potřebuje macOS %2$@ nebo novější, a tento Mac má macOS %3$@. Vyberte pro ni jiný motor v Nastavení › Motor a odemkněte ji znovu.",
+  "nowPlaying": "Právě hraje",
+  "nowPlayingIn": "Právě hraje v aplikaci %@",
+  "nowPlayingPausedIn": "Pozastaveno v aplikaci %@",
+  "nowPlayingPrevious": "Předchozí skladba",
+  "nowPlayingNext": "Další skladba",
+  "nowPlayingPlayPause": "Přehrát nebo pozastavit",
+  "nowPlayingCard": "Právě hraje v rychlé nabídce",
+  "nowPlayingCardDetailMac": "V nabídce nad hrou ukazuje, co hraje Spotify nebo Hudba, s tlačítky předchozí, přehrát nebo pozastavit a další. macOS se pro každou z obou aplikací jednou zeptá, zda ji AnyPS5 smí ovládat. Jiné přehrávače na Macu číst nelze.",
+  "nowPlayingDeniedMac": "macOS nedovoluje AnyPS5 číst Spotify ani Hudbu. Povolte to v Nastavení systému, Soukromí a zabezpečení, Automatizace, AnyPS5.",
+  "nowPlayingShare": "Ukazovat přátelům, co poslouchám",
+  "nowPlayingShareDetail": "Přátelé na AnyTogether vidí název a interpreta, dokud skladba hraje. Dokud je tato možnost vypnutá, nic se neodesílá.",
+  "friendsListening": "Poslouchá %@",
+  "friendsListeningBy": "Poslouchá %1$@, %2$@"
 }

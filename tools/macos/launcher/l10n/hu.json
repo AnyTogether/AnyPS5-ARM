@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Újrajátszás a hiányzó darabok telepítettnek számításával",
   "reportPlayGoInstalledDetailMac": "Csak erre az indításra. A dumpból hiányzik a PlayGo-darabtábla, és a hiányzó játékrészek betöltése sikertelen lehet.",
   "engineNeedsNewerMac": "Ehhez a motorhoz macOS %1$@ vagy újabb kell, ezen a Macen pedig macOS %2$@ van. Válassz másik motort a Beállítások › Motor alatt, vagy frissítsd a macOS-t.",
-  "engineGameNeedsNewerMac": "A(z) %1$@ olyan motorral lett feloldva, amelyhez macOS %2$@ vagy újabb kell, ezen a Macen pedig macOS %3$@ van. Válassz hozzá másik motort a Beállítások › Motor alatt, és oldd fel újra."
+  "engineGameNeedsNewerMac": "A(z) %1$@ olyan motorral lett feloldva, amelyhez macOS %2$@ vagy újabb kell, ezen a Macen pedig macOS %3$@ van. Válassz hozzá másik motort a Beállítások › Motor alatt, és oldd fel újra.",
+  "nowPlaying": "Most szól",
+  "nowPlayingIn": "Most szól itt: %@",
+  "nowPlayingPausedIn": "Szüneteltetve itt: %@",
+  "nowPlayingPrevious": "Előző szám",
+  "nowPlayingNext": "Következő szám",
+  "nowPlayingPlayPause": "Lejátszás vagy szünet",
+  "nowPlayingCard": "Most szól a gyorsmenüben",
+  "nowPlayingCardDetailMac": "A játék fölötti menüben megmutatja, mit játszik a Spotify vagy a Zene, előző, lejátszás vagy szünet és következő gombbal. A macOS mindkét alkalmazásnál egyszer megkérdezi, hogy az AnyPS5 vezérelheti-e. Más lejátszók Macen nem olvashatók.",
+  "nowPlayingDeniedMac": "A macOS nem engedi, hogy az AnyPS5 olvassa a Spotifyt vagy a Zenét. Engedélyezd a Rendszerbeállítások, Adatvédelem és biztonság, Automatizálás, AnyPS5 alatt.",
+  "nowPlayingShare": "A barátaim lássák, mit hallgatok",
+  "nowPlayingShareDetail": "Az AnyTogether-barátaid látják a címet és az előadót, amíg szól. Amíg ez ki van kapcsolva, semmi sem kerül elküldésre.",
+  "friendsListening": "Ezt hallgatja: %@",
+  "friendsListeningBy": "Ezt hallgatja: %1$@, %2$@"
 }

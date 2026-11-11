@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "اللعب مجددًا مع اعتبار الأجزاء المفقودة مثبّتة",
   "reportPlayGoInstalledDetailMac": "لهذا التشغيل فقط. نسخة اللعبة لا تحتوي على جدول أجزاء PlayGo، وقد يفشل تحميل الأجزاء الناقصة من اللعبة.",
   "engineNeedsNewerMac": "يحتاج هذا المحرك إلى macOS %1$@ أو أحدث، وهذا الـ Mac عليه macOS %2$@. اختر محركًا آخر من الإعدادات › المحرك أو حدّث macOS.",
-  "engineGameNeedsNewerMac": "فُتح قفل %1$@ بمحرك يحتاج إلى macOS %2$@ أو أحدث، وهذا الـ Mac عليه macOS %3$@. اختر له محركًا آخر من الإعدادات › المحرك وافتح قفله من جديد."
+  "engineGameNeedsNewerMac": "فُتح قفل %1$@ بمحرك يحتاج إلى macOS %2$@ أو أحدث، وهذا الـ Mac عليه macOS %3$@. اختر له محركًا آخر من الإعدادات › المحرك وافتح قفله من جديد.",
+  "nowPlaying": "يُشغَّل الآن",
+  "nowPlayingIn": "يُشغَّل الآن في %@",
+  "nowPlayingPausedIn": "متوقف مؤقتًا في %@",
+  "nowPlayingPrevious": "المقطع السابق",
+  "nowPlayingNext": "المقطع التالي",
+  "nowPlayingPlayPause": "تشغيل أو إيقاف مؤقت",
+  "nowPlayingCard": "ما يُشغَّل الآن في القائمة السريعة",
+  "nowPlayingCardDetailMac": "يعرض ما يشغّله Spotify أو الموسيقى في القائمة فوق اللعبة، مع السابق، وتشغيل أو إيقاف مؤقت، والتالي. يسأل macOS مرة واحدة لكل من التطبيقين عمّا إذا كان يُسمح لـ AnyPS5 بالتحكم فيه. لا يمكن قراءة مشغّلات أخرى على Mac.",
+  "nowPlayingDeniedMac": "لا يسمح macOS لـ AnyPS5 بقراءة Spotify أو الموسيقى. اسمح بذلك في إعدادات النظام، الخصوصية والأمن، الأتمتة، AnyPS5.",
+  "nowPlayingShare": "إظهار ما أستمع إليه للأصدقاء",
+  "nowPlayingShareDetail": "يرى أصدقاؤك على AnyTogether العنوان والفنان أثناء التشغيل. لا يُرسَل شيء ما دام هذا الخيار متوقفًا.",
+  "friendsListening": "يستمع إلى %@",
+  "friendsListeningBy": "يستمع إلى %1$@، %2$@"
 }

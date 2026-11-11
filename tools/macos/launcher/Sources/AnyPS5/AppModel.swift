@@ -61,6 +61,10 @@ struct Preferences: Codable, Equatable {
     var discordPresence: Bool?
     /// A Join button with it, opening the party's or share play's join code page; nil means on.
     var discordJoin: Bool?
+    /// The Now playing card in the quick menu (NowPlaying.swift); nil means on.
+    var nowPlayingCard: Bool?
+    /// Friends on AnyTogether see the title and artist playing; nil means off.
+    var nowPlayingShare: Bool?
     /// Keeping the last seconds of the game playing, to save as a clip (Create, ⌥F12 or the
     /// phone); nil means off. clipLength is in seconds, nil for 30.
     var clips: Bool?
@@ -355,6 +359,8 @@ final class AppModel: ObservableObject {
                 if let overlay, [.friends, .party, .profile].contains(overlay), togetherUser != nil, identityBook.learnedAt != nil, identityBook.stale() { refreshFriends() }
                 askingRow = nil
                 if overlay == nil { offerLauncherReportSoon() }
+                // The Now playing card reads the players only while the quick menu shows it.
+                if overlay == .quickMenu || oldValue == .quickMenu { followNowPlaying() }
                 if rowEditor.editing != nil { rowEditor.stop() }
                 if typingRow != nil { typingRow = nil }
                 if shortcutCapture != nil { endShortcutCapture() }
@@ -595,6 +601,8 @@ final class AppModel: ObservableObject {
     var settlesSelection: Bool
     private var settleTask: Task<Void, Never>?
     let discord = DiscordPresence(applicationID: DiscordPresence.applicationID)
+    /// What Spotify or Music plays, for the quick menu's card and for friends (NowPlaying.swift).
+    let nowPlaying = NowPlayingCenter()
     private var starts: [String: Date] = [:]
     private(set) var remote: RemoteServer?
     /// iPhones on a cable reach the phone server through it, with no Wi-Fi.

@@ -100,6 +100,7 @@ cat > "$app/Contents/Info.plist" <<EOF
     <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
     <key>GCSupportsControllerUserInteraction</key><true/>
     <key>NSMicrophoneUsageDescription</key><string>AnyPS5 sends your voice to your friends in AnyTogether parties and calls while your microphone is on.</string>
+    <key>NSAppleEventsUsageDescription</key><string>AnyPS5 asks Spotify and Music what is playing and sends them play, pause, next and previous for the Now playing card in the menu over a game.</string>
     <key>NSLocalNetworkUsageDescription</key><string>AnyPS5 finds your phone on this network so it can be used as a controller.</string>
     <key>NSBonjourServices</key><array><string>_anyps5-remote._tcp</string></array>
     <key>CFBundleURLTypes</key>

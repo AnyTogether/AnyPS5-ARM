@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "不足しているチャンクをインストール済みとして数えて再プレイ",
   "reportPlayGoInstalledDetailMac": "今回の起動のみ有効です。このダンプには PlayGo のチャンクテーブルがなく、不足している部分は読み込みに失敗する場合があります。",
   "engineNeedsNewerMac": "このエンジンには macOS %1$@ 以降が必要ですが、この Mac は macOS %2$@ です。[設定] › [エンジン] で別のエンジンを選ぶか、macOS をアップデートしてください。",
-  "engineGameNeedsNewerMac": "%1$@ は macOS %2$@ 以降が必要なエンジンでロック解除されましたが、この Mac は macOS %3$@ です。[設定] › [エンジン] で別のエンジンを選び、もう一度ロック解除してください。"
+  "engineGameNeedsNewerMac": "%1$@ は macOS %2$@ 以降が必要なエンジンでロック解除されましたが、この Mac は macOS %3$@ です。[設定] › [エンジン] で別のエンジンを選び、もう一度ロック解除してください。",
+  "nowPlaying": "再生中",
+  "nowPlayingIn": "%@ で再生中",
+  "nowPlayingPausedIn": "%@ で一時停止中",
+  "nowPlayingPrevious": "前の曲",
+  "nowPlayingNext": "次の曲",
+  "nowPlayingPlayPause": "再生または一時停止",
+  "nowPlayingCard": "クイックメニューに再生中の曲を表示",
+  "nowPlayingCardDetailMac": "ゲーム上のメニューに、Spotifyまたはミュージックで再生中の曲を、前へ、再生または一時停止、次へのボタンとともに表示します。macOSは、AnyPS5による制御を許可するかどうかを2つのアプリそれぞれについて1回確認します。Macではほかのプレーヤーは読み取れません。",
+  "nowPlayingDeniedMac": "macOSがAnyPS5によるSpotifyまたはミュージックの読み取りを許可していません。システム設定、プライバシーとセキュリティ、オートメーション、AnyPS5で許可してください。",
+  "nowPlayingShare": "聴いている曲をフレンドに表示",
+  "nowPlayingShareDetail": "再生中は、AnyTogether のフレンドに曲名とアーティストが表示されます。オフの間は何も送信されません。",
+  "friendsListening": "%@ を聴いています",
+  "friendsListeningBy": "%1$@、%2$@ を聴いています"
 }

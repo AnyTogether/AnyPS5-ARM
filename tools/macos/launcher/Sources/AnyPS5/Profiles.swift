@@ -36,7 +36,7 @@ extension AppModel {
     /// server…) belong to the Mac.
     static let personalKeys: Set<String> = [
         "language", "theme", "accent", "customTheme", "backdrop", "backdropFile", "menuMusicFile", "gameArtwork", "glassTransparency", "glassArtwork", "reduceTransparency", "reducedMotion",
-        "sounds", "soundVolume", "musicVolume", "launcherVolume", "hideWhilePlaying", "pushToTalk", "noiseSuppression", "talkKey", "friendsJoin", "discordPresence", "discordJoin", "clips", "clipLength",
+        "sounds", "soundVolume", "musicVolume", "launcherVolume", "hideWhilePlaying", "pushToTalk", "noiseSuppression", "talkKey", "friendsJoin", "discordPresence", "discordJoin", "nowPlayingCard", "nowPlayingShare", "clips", "clipLength",
         "saveSync", "syncFolder", "syncThrough", "profileName", "alwaysShowHiddenTrophies", "controllerVibration", "controllerLight", "confirmCircle",
         "stickDeadzone", "pauseOnMenu", "shortcuts", "lastPlayed",
     ]

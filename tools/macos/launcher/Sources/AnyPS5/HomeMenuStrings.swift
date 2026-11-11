@@ -17,6 +17,9 @@ enum TH {
         case screenshotSaved, screenshotFailed, minutes = "menuMinutes", clipsCost = "menuClipsCost"
         case gameStopping = "actionStopping", gameStoppingState = "stateStopping", stopGame, stopGameDetail, trophyShot
         case hintChange = "menuHintChange", hintDone = "menuHintDone", hintClear = "menuHintClear"
+        case nowPlaying, nowPlayingIn, nowPlayingPausedIn, nowPlayingPrevious, nowPlayingNext, nowPlayingPlayPause
+        case nowPlayingCard, nowPlayingCardDetail = "nowPlayingCardDetailMac", nowPlayingDenied = "nowPlayingDeniedMac", nowPlayingShare, nowPlayingShareDetail
+        case friendsListening, friendsListeningBy
     }
 
     static func text(_ key: Key) -> String { T.string(key.rawValue) }

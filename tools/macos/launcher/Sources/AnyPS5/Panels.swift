@@ -354,6 +354,8 @@ extension AppModel {
                 if value { self?.checkForUpdate() }
             }),
         ]
+        // Now playing, after Discord's two rows, as on Windows and Linux.
+        if let discord = behaviour.firstIndex(where: { $0.id == "discordJoin" }) { behaviour.insert(contentsOf: nowPlayingSettingsRows(), at: discord + 1) }
         if rosettaMissing {
             behaviour.append(PanelRow(id: "rosetta", title: T.text(.rosettaInstall), detail: T.text(.rosettaMissing), symbol: "cpu", kind: .action(destructive: false) { [weak self] in self?.installRosetta() }))
         } else {

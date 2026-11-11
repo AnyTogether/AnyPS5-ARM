@@ -81,6 +81,8 @@ extension AppModel {
         if let game = presence?.game, game.together { return PT.format(.presence, gameName(game.titleId), game.players, game.capacity) }
         if presence?.game?.joinable == true { text += " · " + T.text(.gameJoinable) }
         if let party = presence?.party { text += " · " + T.format(.friendsInParty, party.size, party.max) }
+        // What they listen to, when they chose to show it.
+        if let listening = presence?.listening { text += " · " + Self.listeningText(listening) }
         return text
     }
 

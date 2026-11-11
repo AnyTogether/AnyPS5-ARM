@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Jugar de nuevo contando los fragmentos que faltan como instalados",
   "reportPlayGoInstalledDetailMac": "Solo para este inicio. El volcado no tiene tabla de fragmentos PlayGo y las partes del juego que le faltan pueden no cargarse.",
   "engineNeedsNewerMac": "Este motor necesita macOS %1$@ o posterior y este Mac tiene macOS %2$@. Elige otro motor en Ajustes › Motor o actualiza macOS.",
-  "engineGameNeedsNewerMac": "%1$@ se desbloqueó con un motor que necesita macOS %2$@ o posterior y este Mac tiene macOS %3$@. Elige otro motor para él en Ajustes › Motor y desbloquéalo de nuevo."
+  "engineGameNeedsNewerMac": "%1$@ se desbloqueó con un motor que necesita macOS %2$@ o posterior y este Mac tiene macOS %3$@. Elige otro motor para él en Ajustes › Motor y desbloquéalo de nuevo.",
+  "nowPlaying": "Reproduciendo ahora",
+  "nowPlayingIn": "Reproduciendo en %@",
+  "nowPlayingPausedIn": "En pausa en %@",
+  "nowPlayingPrevious": "Pista anterior",
+  "nowPlayingNext": "Pista siguiente",
+  "nowPlayingPlayPause": "Reproducir o pausar",
+  "nowPlayingCard": "Reproducción actual en el menú rápido",
+  "nowPlayingCardDetailMac": "Muestra lo que suena en Spotify o Música en el menú sobre un juego, con anterior, reproducir o pausar y siguiente. macOS pregunta una vez por cada una de las dos si AnyPS5 puede controlarla. En un Mac no se pueden leer otros reproductores.",
+  "nowPlayingDeniedMac": "macOS no permite que AnyPS5 lea Spotify o Música. Permítelo en Ajustes del Sistema, Privacidad y seguridad, Automatización, AnyPS5.",
+  "nowPlayingShare": "Mostrar a mis amigos lo que escucho",
+  "nowPlayingShareDetail": "Tus amigos de AnyTogether ven el título y el artista mientras suena. No se envía nada mientras esto esté desactivado.",
+  "friendsListening": "Escuchando %@",
+  "friendsListeningBy": "Escuchando %1$@, %2$@"
 }
