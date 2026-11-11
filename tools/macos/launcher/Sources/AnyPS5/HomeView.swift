@@ -842,7 +842,7 @@ extension AppModel {
             return true
         }
         switch overlay {
-        case .settings, .gameSettings, .confirmUninstall, .updateChoice, .updateRequired, .noSpace:
+        case .settings, .gameSettings, .confirmUninstall, .updateChoice, .updateRequired, .noSpace, .joinBlocked, .joinOrHost:
             return panelCommand(command)
         case .gameFiles:
             if command == .back || command == .options {

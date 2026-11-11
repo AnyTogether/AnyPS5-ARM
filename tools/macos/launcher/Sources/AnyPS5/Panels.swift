@@ -157,12 +157,18 @@ extension AppModel {
                 }),
                 PanelRow(id: "play", title: T.text(.playNow), detail: T.text(.playNowDetail), symbol: "play.fill", kind: .action(destructive: false) { [weak self] in
                     self?.closeOverlay()
-                    self?.play(game)
+                    self?.playAsItIs(game)
                 }),
             ])]
         case .noSpace:
             guard let (game, shortage) = spaceShortage else { return [] }
             return [PanelCategory(id: "noSpace", title: TPrep.text(.noSpaceTitle), symbol: "externaldrive.badge.exclamationmark", rows: noSpaceRows(game, shortage))]
+        case .joinBlocked:
+            guard let block = joinBlock else { return [] }
+            return [PanelCategory(id: "joinBlocked", title: PT.text(.blockedTitle), symbol: "exclamationmark.triangle", rows: joinBlockedRows(block))]
+        case .joinOrHost:
+            guard let choice = joinChoice else { return [] }
+            return [PanelCategory(id: "joinOrHost", title: choice.game.name, symbol: "person.2.wave.2", rows: joinOrHostRows(choice))]
         case .signIn: return [PanelCategory(id: "signin", title: "AnyTogether", symbol: "person.2.circle", rows: signInRows())]
         case .gameFiles: return [PanelCategory(id: "files", title: gameFilesTitle, symbol: "archivebox", rows: gameFilesRows())]
         default: return []

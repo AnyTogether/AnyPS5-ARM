@@ -10,7 +10,8 @@ extension AppModel {
     /// How many can play in a session the launcher opens; the game itself may take fewer.
     static let sessionCapacity = 4
 
-    /// The engine a game was unlocked with: only the same build is relied on to talk to itself.
+    /// The engine a game was unlocked with (its install record's, never the launcher's own
+    /// version while a copy stands): only the same build is relied on to talk to itself.
     func engineBuild(for game: Game) -> String {
         TogetherGameSession.engineBuild(installedRecords[game.id]?.toolkit ?? engineVersion(for: game) ?? AppModel.runningVersion)
     }
@@ -70,8 +71,11 @@ extension AppModel {
         }
     }
 
-    /// A friend's game, from their presence or an invite: the same game here, checked first.
-    func joinFriendGame(_ sessionId: String, titleId: String, host: String) {
+    /// A friend's game, from their presence or an invite: the same game here, checked first as
+    /// Play Together checks it. A copy made by an older engine than the one at hand, when that
+    /// one is the host's, is rebuilt and the join goes on (`rebuilt`: it just was); a different
+    /// game version or engine build is said whole in its panel.
+    func joinFriendGame(_ sessionId: String, titleId: String, host: String, rebuilt: Bool = false) {
         guard let me = togetherUser else { return }
         guard let game = games.first(where: { $0.titleID == titleId }) else {
             return show(T.format(.gameNotHere, titleId), symbol: "questionmark.square.dashed")
@@ -80,25 +84,43 @@ extension AppModel {
             return show(T.format(.gameCloseFirst, running.game.name), symbol: "xmark.app")
         }
         guard case .installed = state(of: game) else { return show(T.format(.gameUnlockFirst, game.name), symbol: "lock.fill") }
-        let version = gameVersion(for: game), engine = engineBuild(for: game)
         Task {
             do {
                 let session = try await together.gameSession(sessionId)
-                switch session.mismatch(gameVersion: version, engineBuild: engine) {
-                case .gameVersion?:
-                    return show(T.format(.gameVersionMismatch, host, session.gameVersion, version), symbol: "exclamationmark.triangle.fill")
-                case .engineBuild?:
-                    return show(T.format(.gameEngineMismatch, host, AppModel.release(session.engineBuild), AppModel.release(engine)), symbol: "exclamationmark.triangle.fill")
-                case nil:
-                    break
+                var offer = PlayTogetherOffer(session: session)
+                if !host.isEmpty { offer.hostName = host }
+                let again: () -> Void = { [weak self] in self?.joinFriendGame(sessionId, titleId: titleId, host: host, rebuilt: true) }
+                let copy: Game
+                switch PlayTogetherCheck.verdict(offer, signedIn: true, copies: togetherCopies(), running: running?.game.name) {
+                case .join(let id):
+                    guard let found = games.first(where: { $0.id == id }) else { return }
+                    copy = found
+                case .updateAndPlay(let id):
+                    guard !rebuilt, let stale = games.first(where: { $0.id == id }) else { return show(PT.text(.startFailed), symbol: "exclamationmark.triangle.fill") }
+                    return rebuildFirst(stale, then: again)
+                case .unlockAndPlay(let id):
+                    return show(T.format(.gameUnlockFirst, games.first { $0.id == id }?.name ?? game.name), symbol: "lock.fill")
+                case .gameVersion(let have, let need, let youUpdate):
+                    return tell(JoinBlock(kind: .gameVersion(youUpdate: youUpdate), hostName: offer.hostName, gameName: game.name, host: need, yours: have))
+                case .engine(let have, let need, _):
+                    return tell(engineBlock(hostName: offer.hostName, titleId: titleId, host: need, yours: have, rebuild: again))
+                case .closeFirst(let name):
+                    return show(T.format(.gameCloseFirst, name), symbol: "xmark.app")
+                case .full:
+                    return show(T.text(.gameSessionFull), symbol: "person.3.fill")
+                case .missing, .signIn:
+                    return show(T.format(.gameNotHere, titleId), symbol: "questionmark.square.dashed")
                 }
-                let joined = try await together.joinGameSession(sessionId, gameVersion: version, engineBuild: engine)
+                let joined = try await together.joinGameSession(sessionId, gameVersion: gameVersion(for: copy), engineBuild: engineBuild(for: copy))
                 keepSession(joined, me: me.id)
                 gameInvites.removeAll { $0.sessionId == sessionId }
-                show(T.format(.gameJoined, host, game.name), symbol: "person.2.wave.2.fill")
+                show(T.format(.gameJoined, offer.hostName, copy.name), symbol: "person.2.wave.2.fill")
                 if overlay != nil { closeOverlay() }
-                selected = games.firstIndex(of: game) ?? selected
-                play(game)
+                selected = games.firstIndex(of: copy) ?? selected
+                // The copy's engine is the host's: it starts as it is.
+                play(copy, asItIs: true)
+            } catch let problem as TogetherProblem where problem.joinRefusal != nil {
+                tell(refusalBlock(problem.joinRefusal!, hostName: host, titleId: titleId))
             } catch let problem as TogetherProblem where problem.code == "version_mismatch" {
                 show(problem.title, symbol: "exclamationmark.triangle.fill")
             } catch let problem as TogetherProblem where problem.code == "full" {
@@ -109,10 +131,11 @@ extension AppModel {
         }
     }
 
-    /// "0.2.13-a1b2c3d4e5f6" → "0.2.13 (a1b2c3)": the release, then which build of it.
-    static func release(_ engine: String) -> String {
-        let parts = engine.split(separator: "-", maxSplits: 1).map(String.init)
-        return parts.count == 2 ? "\(parts[0]) (\(parts[1].prefix(6)))" : engine
+    /// The server's refusal of a join as the panel says it: its two versions or builds whole.
+    func refusalBlock(_ refusal: TogetherJoinRefusal, hostName: String, titleId: String, rebuild: (() -> Void)? = nil, tryAnyway: (() -> Void)? = nil) -> JoinBlock {
+        if refusal.reason == .engine { return engineBlock(hostName: hostName, titleId: titleId, host: refusal.expected, yours: refusal.actual, rebuild: rebuild) }
+        return JoinBlock(kind: .gameVersion(youUpdate: refusal.youUpdate), hostName: hostName, gameName: gameName(titleId), host: refusal.expected, yours: refusal.actual,
+                         tryAnyway: refusal.overridable ? tryAnyway : nil)
     }
 
     func inviteToGame(_ friend: TogetherFriend) {
