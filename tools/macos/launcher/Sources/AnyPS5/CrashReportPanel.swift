@@ -52,6 +52,7 @@ extension AppModel {
         let settings = launchSettings(for: game)
         let unlockedWith = installedRecords[game.id]?.toolkit
         let relinkerFlags = installedRecords[game.id]?.relinkerFlags ?? []
+        let customRelinkerOptions = installedRecords[game.id]?.customRelinkerOptions ?? []
         let engineNow = engineVersion(for: game)
         let diagnosis = diagnoses[game.id]
         let channel = updateChannel.rawValue
@@ -71,6 +72,7 @@ extension AppModel {
             report.unlockedWith = unlockedWith
             report.engineNow = engineNow
             report.relinkerFlags = relinkerFlags
+            report.customRelinkerOptions = customRelinkerOptions
             report.diagnosis = diagnosis ?? Diagnosis.read(session: session, crashReport: crash)
             report.startedWithoutWindow = facts?.withoutWindow ?? false
             // A start the launcher no longer remembers says so on its start line.

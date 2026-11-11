@@ -1066,6 +1066,9 @@ final class AppModel: ObservableObject {
     @Published var identityBook = TogetherIdentityBook()
     var privateNameDraft: String?
     var serverDraft = ""
+    /// Advanced → Custom Relinker Options and Launch Options as typed while the text does not
+    /// pass its check (so it is not saved), by "<row id> <game id>".
+    @Published var optionDrafts: [String: String] = [:]
     @Published var togetherUser: TogetherUser?
     @Published var togetherStep = TogetherStep.idle
     @Published var togetherConnected = false
@@ -1571,7 +1574,7 @@ final class AppModel: ObservableObject {
         failures[game.id] = nil
         guard !queue.contains(game.id), progress[game.id] == nil else { return }
         // The room first: a drive that is short says so before anything is written.
-        if let shortage = Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: settings(for: game).chosenRelinkerFlags).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root)) {
+        if let shortage = Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: settings(for: game).chosenRelinkerFlags, customRelinkerOptions: settings(for: game).chosenRelinkerOptions).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root)) {
             return tellShortage(shortage, for: game)
         }
         queue.append(game.id)
@@ -1648,6 +1651,7 @@ final class AppModel: ObservableObject {
         })
         installer.background = background
         installer.relinkerFlags = settings(for: game).chosenRelinkerFlags
+        installer.customRelinkerOptions = settings(for: game).chosenRelinkerOptions
         // Uninstalled a moment ago: its old files go first (what could not be set aside is still
         // being removed where the new bundle goes).
         let removal = removals[id]
@@ -1752,7 +1756,7 @@ final class AppModel: ObservableObject {
         while true {
             let action = prepare.step(conditions) { [weak self] id in
                 guard let self, let game = self.games.first(where: { $0.id == id }), let toolkit = self.toolkit(for: game), let root = self.root(of: game) else { return nil }
-                return Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: self.settings(for: game).chosenRelinkerFlags).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root))
+                return Installer.plan(game: game, toolkit: toolkit, root: root, relinkerFlags: self.settings(for: game).chosenRelinkerFlags, customRelinkerOptions: self.settings(for: game).chosenRelinkerOptions).shortage(free: FreeSpace.available(at: root), volume: FreeSpace.volumeName(at: root))
             }
             switch action {
             case .none:
@@ -1925,7 +1929,7 @@ final class AppModel: ObservableObject {
         let written = (try? settings.writeInputFile(to: inputFile)) != nil
         let screenshots = screenshotsFolder
         try? FileManager.default.createDirectory(at: screenshots, withIntermediateDirectories: true)
-        configuration.environment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: gameFontsFolder(), trace: trace)
+        let launcherEnvironment = settings.environment(launcherLanguage: preferences.language.consoleLanguage, inputFile: written ? inputFile : nil, screenshots: screenshots, fonts: gameFontsFolder(), trace: trace)
             .merging(remote?.bridgeEnvironment ?? [:]) { _, phone in phone }
             // The update and add-ons dumped beside the game.
             .merging(GameAddons.environment(for: game)) { own, _ in own }
@@ -1937,7 +1941,12 @@ final class AppModel: ObservableObject {
             // The battery and heat profiles' frame cap, and the file they change it through live.
             .merging(powerEnvironment()) { _, power in power }
             .merging(once) { _, once in once }
-        markStart(of: game, traced: trace || settings.trace == true, once: once)
+        // Advanced → Launch Options: the player's variables under the launcher's (its value wins),
+        // the arguments to the launch script, which hands them to the game.
+        let launch = settings.chosenLaunchOptions
+        configuration.environment = launch.environment(under: launcherEnvironment, reserved: Installer.launchScriptVariables)
+        configuration.arguments = launch.arguments
+        markStart(of: game, traced: trace || settings.trace == true, once: once, launch: AppModel.launchNotes(settings.launchOptions, launch, launcherEnvironment))
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -2842,7 +2851,17 @@ final class AppModel: ObservableObject {
 
     /// The log line the diagnosis reads from, so only this start's output counts. A log grown
     /// too big is set aside first; a detailed one is kept under its cap while the game runs.
-    private func markStart(of game: Game, traced: Bool, once: [String: String] = [:]) {
+    /// The log's lines about a start's launch options: what was typed, and the variables the
+    /// launcher set too, whose own value was used.
+    static func launchNotes(_ typed: String?, _ options: LaunchOptions, _ launcher: [String: String]) -> [String] {
+        guard let typed, !options.isEmpty else { return [] }
+        var notes = ["launch options: \(typed)"]
+        let overridden = options.overridden(by: launcher, reserved: Installer.launchScriptVariables)
+        if !overridden.isEmpty { notes.append("launch options: the launcher's own value is used for \(overridden.joined(separator: ", "))") }
+        return notes
+    }
+
+    private func markStart(of game: Game, traced: Bool, once: [String: String] = [:], launch: [String] = []) {
         diagnoses[game.id] = nil
         starts[game.id] = Date()
         lastSessions[game.id] = LastSession(traced: traced)
@@ -2863,7 +2882,8 @@ final class AppModel: ObservableObject {
         // The controllers connected at the start, in the log a crash report reads.
         let pads = Controllers.shared.reportLines.map { "[anyps5-launcher] controllers: \($0)\n" }.joined()
         let onlyThisStart = once.sorted { $0.key < $1.key }.map { "[anyps5-launcher] this start only: \($0.key)=\($0.value)\n" }.joined()
-        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n" + pads + onlyThisStart
+        let launchLines = launch.map { "[anyps5-launcher] \($0)\n" }.joined()
+        let line = "\n\(Diagnosis.startMarker) \(ISO8601DateFormatter().string(from: Date())) \(game.titleID)\(traced ? " trace" : "")\n" + pads + onlyThisStart + launchLines
         if let handle = try? FileHandle(forWritingTo: file) {
             _ = try? handle.seekToEnd()
             try? handle.write(contentsOf: Data(line.utf8))
@@ -2947,6 +2967,7 @@ final class AppModel: ObservableObject {
         // A resolution only applies to the title whose patch offers it.
         if let resolution = imported.resolution, !resolutionChoices(for: game).contains(resolution) { imported.resolution = nil }
         update(game) { $0 = imported }
+        optionDrafts = optionDrafts.filter { !$0.key.hasSuffix(" " + game.id) }
         show(shared.titleID == game.titleID ? T.text(.settingsImported) : T.format(.settingsImportedOther, shared.game), symbol: "square.and.arrow.down")
     }
 
