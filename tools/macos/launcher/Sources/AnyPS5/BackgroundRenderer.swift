@@ -39,6 +39,8 @@ final class BackgroundView: MTKView, MTKViewDelegate {
     private var clock: Double = 0
     private var last = CACurrentMediaTime()
     private var palette: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>) = Theme.cosmic.palette
+    /// How many frames it has drawn (a paused background must have drawn one to show anything).
+    private(set) var frames = 0
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -104,6 +106,7 @@ final class BackgroundView: MTKView, MTKViewDelegate {
         encoder.endEncoding()
         commands.present(drawable)
         commands.commit()
+        frames += 1
     }
 
     /// The GPU time of one frame of a theme at a drawable size, averaged over `frames` (the
