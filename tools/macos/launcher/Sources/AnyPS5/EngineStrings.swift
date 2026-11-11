@@ -25,5 +25,7 @@ enum TE {
         case engineGitDone, engineGitBuiltAt, engineGitFailed, engineGitStopped, engineGitNotGit, engineGitDirty, engineGitNoBuildReason, engineGitPullFailed, engineGitSubmodulesFailed, engineGitBuildFailed
         case engineGitToolkitFailed, engineGitNeeds, engineGitNeedsReason, engineGitCopy, engineGitCopied, engineGitStop, engineGitRelinkAll, engineGitRelinkAllDetail, engineGitRelinking, engineGitWaitUnlock, engineGitBeforePlay, engineGitBeforePlayDetail, engineGitBeforePlayStart, engineGitChecking, engineGitPlayAnyway = "engineGitPlayAnywayMac"
         case engineGitSetUpDetail = "engineGitSetUpDetailMac", engineGitConfigureFailed, engineGitGuideMac
+        case engineGitFixCopy, engineGitFixCopied, engineGitFixRun, engineGitFixRunDetail, engineGitFixRunning, engineGitFixFailed, engineGitFixBrew = "engineGitFixBrewMac"
+        case engineGitRecheck, engineGitRecheckDetail, engineGitToolsReady, engineGitStillMissing
     }
 }

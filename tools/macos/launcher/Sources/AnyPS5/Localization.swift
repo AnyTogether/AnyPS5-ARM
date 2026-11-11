@@ -131,6 +131,7 @@ enum T {
     }
 
     enum Key: String, CaseIterable {
+        case togetherErrorBadRequest, togetherErrorSignedOut, togetherErrorForbidden, togetherErrorNotFound, togetherErrorConflict, togetherErrorFull, togetherErrorTooLarge, togetherErrorInternal, togetherErrorOther
         case welcome, welcomeSubtitle, chooseLanguage, chooseTheme, chooseThemeSubtitle, chooseFolder, chooseFolderSubtitle
         case pickFolder, changeFolder, gamesFound, noGamesFound, continueAction, back, start, skip
         case games, library, settings, settingsSearch, settingsSearchNone, play, unlock, unlocking, cancel, queued, update, retry, options
@@ -158,7 +159,7 @@ enum T {
         case togetherWithPhone, togetherWithPhoneDetail, togetherOnPhone, togetherPhoneDeclined, togetherPhoneSignedIn
         case profileTitle, profileMine, profileMineDetail, profileGames, profileHours, profileTrophies, profilePoints, profileGamesTitle, profileRecentTrophies, profilePrivate, profileFriendsOnly, profileDetailsPrivate, profileFailed, profileNoGames, profileNoTrophies, profileLoading, profileHoursMinutes, profileHoursOnly, profileMinutes, profileLastPlayed, profileYou, profileFriend
         case rarityCommon, rarityUncommon, rarityRare, rarityVeryRare, rarityUltraRare
-        case togetherEditProfile, togetherName, togetherBio, togetherCountry, togetherCountryDetail, togetherSaveProfile, togetherProfileSaved, togetherHandle, togetherHandleDetail, togetherHandleAgain, togetherChangeHandle, togetherHandleChanged, togetherHandleTaken, togetherHandleReserved, togetherHandleInvalid, togetherNoLinks, togetherPrivacyTitle, privacyLibrary, privacyTrophies, privacyFriends, privacyPresence, privacySearch, visibilityEveryone, visibilityFriends, visibilityNobody, visibilityNoOne
+        case togetherEditProfile, togetherName, togetherBio, togetherCountry, togetherCountryChoose, togetherCountryNone, togetherCountrySearch, togetherCountryNoMatch, togetherSaveProfile, togetherProfileSaved, togetherHandle, togetherHandleDetail, togetherHandleAgain, togetherChangeHandle, togetherHandleChanged, togetherHandleTaken, togetherHandleReserved, togetherHandleInvalid, togetherNoLinks, togetherPrivacyTitle, privacyLibrary, privacyTrophies, privacyFriends, privacyPresence, privacySearch, visibilityEveryone, visibilityFriends, visibilityNobody, visibilityNoOne
         case messagesTitle, messagesNone, messagesStart, messagesSayHello, messagesYou, messagesDeleted, messagesWrite, messagesFrom, messagesPick, messagesEmptyThread, messagesFailed, messagesEdited, messagesSend, quickHello, quickOnMyWay, quickJoinMe, quickOneSec
         case partyTitle, partyStart, partyStartDetail, partyOpen, partyOpenDetail, partyJoinOf, partySize, partyDecline, partyNone, partyMembers, partyLeader, partyInVoice, partyInviteFriends, partyInvite, partyInvited, partyLeave, partyInvites, partyInvitedYou, partyJoined, partyLeft, partyKicked, partyEnded, partyFull, friendsInParty
         case togetherServer, togetherServerDetail, togetherServerForced, togetherServerUse, togetherServerInvalid, togetherServerNow
@@ -177,7 +178,7 @@ enum T {
         case directionUp, directionDown, directionLeft, directionRight, keySpace, keyEnter
         case mouseLeft, mouseRight, mouseMiddle, mouseBack, mouseForward, wheelUp, wheelDown
         case trophies, trophyHidden, trophyHiddenDetail, trophyShow, trophyHide, alwaysShowHiddenTrophies = "showHiddenTrophies", alwaysShowHiddenTrophiesDetail, trophyLocked, gradePlatinum, gradeGold, gradeSilver, gradeBronze
-        case phoneServer, phoneServerDetail = "phoneServerDetailMac", phoneAddress, phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail, phoneOnline, phonesConnectedCount, phonePlayer, phoneWaiting
+        case phoneServer, phoneServerDetail = "phoneServerDetailMac", phoneAddress, phonePairingTitle, phonePairingText, phoneAllow, phoneDeny, phoneConnected, phones, phonesNone, phoneRemove, phoneOpenLauncher, phoneServerFailed, phoneConnecting, phoneNone, phoneConnectedDetail, phoneRemoveOnline, phoneBrowserName, phoneBrowserGeneric, phonesConnectedCount, phonePlayer, phoneWaiting
         case madeBy, builtOn
         case updateChoiceText, updateAndPlay, updateAndPlayDetail, playNow, playNowDetail
         case discordPresence, discordPresenceDetail, gameMusic, gameMusicDetail, checkUpdates, checkUpdatesDetail, screenshots, screenshotsNone, backUpSaves, backUpSavesDetail, lastBackup, restoreSaves, restoreSavesDetail, savesBackedUp, savesRestored, backupFailed, closeGameFirst, launcherUpdateAvailable, launcherUpToDate, updateCheckFailed, checkForUpdatesNow, checkForUpdatesDetail, checkingUpdates, lastChecked, updateTo, updateDetail, updateDownloading, whatsNew, updateFailed, updateCloseGame, updateNotWritable

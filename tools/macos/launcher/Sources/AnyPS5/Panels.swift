@@ -435,8 +435,9 @@ extension AppModel {
             : connectedPhones.isEmpty ? "" : T.format(.phonesConnectedCount, connectedPhones.count))))
         for device in phones {
             let online = connectedPhones.contains(device.id)
-            advanced.append(PanelRow(id: "phone-" + device.id, title: online ? "\(device.name) · \(T.text(.phoneOnline))" : device.name, detail: T.text(.phoneRemove),
-                                     symbol: online ? "iphone.gen3.radiowaves.left.and.right" : "iphone.gen3", kind: .action(destructive: true) { [weak self] in
+            // The device's kind before its name; whether it is connected now is said under it.
+            advanced.append(PanelRow(id: "phone-" + device.id, title: AppModel.phoneTitle(device.name), detail: T.text(online ? .phoneRemoveOnline : .phoneRemove),
+                                     symbol: AppModel.phoneSymbol(device.name), kind: .action(destructive: true) { [weak self] in
                 self?.removePhone(device.id)
             }))
         }
@@ -1431,6 +1432,10 @@ struct RowView: View {
                         }
                     }
                     .frame(width: 30 * scale)
+            } else if row.symbol == AndroidGlyph.symbol {
+                // Android has no SF Symbol: the launcher's own sign, in the row's ink.
+                AndroidGlyph().fill(destructive && !focused ? Color(red: 1, green: 0.55, blue: 0.5) : foreground.opacity(0.85), style: FillStyle(eoFill: true))
+                    .frame(width: 20 * scale, height: 14 * scale).frame(width: 24 * scale)
             } else if let symbol = row.symbol {
                 Image(systemName: symbol).font(.system(size: 17 * scale, weight: .medium)).frame(width: 24 * scale)
                     .foregroundStyle(destructive && !focused ? Color(red: 1, green: 0.55, blue: 0.5) : foreground.opacity(0.85))

@@ -23,6 +23,11 @@ extension AppModel {
     /// else, where Esc is Back as before.
     func escape() -> Bool {
         if overlay == .confirmQuit { return gameMenuCommand(.back) }
+        // The list under the profile picture is open: Esc closes it before it asks anything.
+        if profileSwitcherShown {
+            closeProfileSwitcher()
+            return true
+        }
         guard preferences.onboarded, overlay == nil, focus == .tiles, pairing == nil, ringing == nil, starting == nil, fontWait == nil, shareWatch == nil else { return false }
         forwardStep = nil
         menuIndex = 0

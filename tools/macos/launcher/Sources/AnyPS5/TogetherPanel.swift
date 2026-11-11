@@ -161,22 +161,103 @@ extension AppModel {
         var country = ""
         var handle = ""
         var loads = 0
+        /// The list of countries is open under the Country row, and what its search holds.
+        var pickingCountry = false
+        var countryQuery = ""
     }
 
     private func profileEditRows() -> [PanelRow] {
         guard let profile = togetherProfile else { return [] }
         let version = profileDraft.loads
         let handleDetail = profile.handleChangeAt.map { T.format(.togetherHandleAgain, ProfileView.day($0)) } ?? T.text(.togetherHandleDetail)
-        return [
+        var rows: [PanelRow] = [
             PanelRow(id: "together-edit", title: T.text(.togetherEditProfile), symbol: "pencil", kind: .info("")),
             PanelRow(id: "together-name-\(version)", title: T.text(.togetherName), symbol: "textformat", kind: .text(profileDraft.name) { [weak self] text in self?.profileDraft.name = text }),
             PanelRow(id: "together-bio-\(version)", title: T.text(.togetherBio), symbol: "text.quote", kind: .text(profileDraft.bio) { [weak self] text in self?.profileDraft.bio = text }),
-            PanelRow(id: "together-country-\(version)", title: T.text(.togetherCountry), detail: T.text(.togetherCountryDetail), symbol: "flag",
-                     kind: .text(profileDraft.country) { [weak self] text in self?.profileDraft.country = text }),
+        ]
+        rows += countryRows()
+        rows += [
             PanelRow(id: "together-save", title: T.text(.togetherSaveProfile), symbol: "checkmark.circle", kind: .action(destructive: false) { [weak self] in self?.saveTogetherProfile() }),
             PanelRow(id: "together-handle-\(version)", title: T.text(.togetherHandle), detail: handleDetail, symbol: "at", kind: .text(profileDraft.handle) { [weak self] text in self?.profileDraft.handle = text }),
             PanelRow(id: "together-handle-save", title: T.text(.togetherChangeHandle), symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.changeTogetherHandle() }),
         ]
+        return rows
+    }
+
+    // MARK: Country
+
+    /// The Country row: the country chosen by its name, and under it, once chosen, the list to
+    /// pick from: a search, None, and every country AnyTogether takes by its name in the
+    /// launcher's language. The profile keeps the two-letter code.
+    func countryRows() -> [PanelRow] {
+        let locale = T.locale
+        let code = profileDraft.country.uppercased()
+        let chosen = Countries.isKnown(code) ? AppModel.countryTitle(code, in: locale) : nil
+        var rows = [PanelRow(id: AppModel.countryRow, title: T.text(.togetherCountry), detail: chosen ?? T.text(.togetherCountryChoose),
+                             symbol: profileDraft.pickingCountry ? "chevron.up" : "flag", kind: .action(destructive: false) { [weak self] in self?.toggleCountryPicker() })]
+        guard profileDraft.pickingCountry else { return rows }
+        let query = profileDraft.countryQuery
+        rows.append(PanelRow(id: AppModel.countrySearchRow, title: T.text(.togetherCountrySearch), symbol: "magnifyingglass",
+                             kind: .text(query) { [weak self] text in self?.searchCountries(text) }))
+        let found = Countries.search(query, in: AppModel.countries(in: locale))
+        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            rows.append(PanelRow(id: "together-country-none", title: T.text(.togetherCountryNone), symbol: code.isEmpty ? "checkmark.circle.fill" : "circle.slash",
+                                 kind: .action(destructive: false) { [weak self] in self?.chooseCountry("") }))
+        } else if found.isEmpty {
+            rows.append(PanelRow(id: "together-country-nomatch", title: T.format(.togetherCountryNoMatch, query.trimmingCharacters(in: .whitespaces)), symbol: "magnifyingglass", kind: .info("")))
+        }
+        rows += found.map { country in
+            PanelRow(id: "together-country-" + country.code, title: AppModel.countryTitle(country.code, in: locale), symbol: country.code == code ? "checkmark.circle.fill" : "circle",
+                     kind: .action(destructive: false) { [weak self] in self?.chooseCountry(country.code) })
+        }
+        return rows
+    }
+
+    /// The countries by name in `locale`'s language, sorted once per language (the rows are made
+    /// again with every key while the list is open).
+    static func countries(in locale: Locale) -> [Countries.Country] {
+        if let kept = sortedCountries, kept.locale == locale.identifier { return kept.list }
+        let list = Countries.all(in: locale)
+        sortedCountries = (locale.identifier, list)
+        return list
+    }
+
+    private static var sortedCountries: (locale: String, list: [Countries.Country])?
+
+    static let countryRow = "together-country"
+    static let countrySearchRow = "together-country-search"
+
+    /// "🇹🇷 Türkiye": the flag and the name in `locale`'s language.
+    static func countryTitle(_ code: String, in locale: Locale) -> String {
+        let flag = Countries.flag(code)
+        return (flag.isEmpty ? "" : flag + " ") + Countries.name(code, in: locale)
+    }
+
+    func toggleCountryPicker() {
+        objectWillChange.send()
+        profileDraft.pickingCountry.toggle()
+        profileDraft.countryQuery = ""
+    }
+
+    /// The search's words as they are typed: the list under it follows.
+    func searchCountries(_ text: String) {
+        guard text != profileDraft.countryQuery else { return }
+        objectWillChange.send()
+        profileDraft.countryQuery = text
+    }
+
+    /// A country picked from the list (an empty code: None): the list closes, the focus goes back
+    /// to the Country row, and the profile is saved with it.
+    func chooseCountry(_ code: String) {
+        objectWillChange.send()
+        profileDraft.country = code
+        profileDraft.pickingCountry = false
+        profileDraft.countryQuery = ""
+        let categories = panelCategories()
+        if categories.indices.contains(panelCategory), let index = categories[panelCategory].rows.firstIndex(where: { $0.id == AppModel.countryRow }) {
+            panelRow = index
+        }
+        saveTogetherProfile()
     }
 
     private func privacyRows() -> [PanelRow] {
@@ -239,7 +320,9 @@ extension AppModel {
 
     private func keepProfile(_ profile: TogetherOwnProfile) {
         togetherProfile = profile
-        profileDraft = ProfileDraft(name: profile.displayName, bio: profile.bio ?? "", country: profile.country ?? "", handle: profile.handle, loads: profileDraft.loads + 1)
+        // A list of countries open meanwhile stays open.
+        profileDraft = ProfileDraft(name: profile.displayName, bio: profile.bio ?? "", country: profile.country ?? "", handle: profile.handle, loads: profileDraft.loads + 1,
+                                    pickingCountry: profileDraft.pickingCountry, countryQuery: profileDraft.countryQuery)
         togetherUser = together.user
         ownProfileReadAt = Date()
     }
@@ -591,7 +674,7 @@ extension AppModel {
             switch problem.code {
             case "handle_taken": return T.text(.togetherHandleTaken)
             case "handle_reserved": return T.text(.togetherHandleReserved)
-            case "handle_cooldown": return problem.handleChangeAt.map { T.format(.togetherHandleAgain, ProfileView.day($0)) } ?? problem.title
+            case "handle_cooldown": return problem.handleChangeAt.map { T.format(.togetherHandleAgain, ProfileView.day($0)) } ?? T.format(.togetherErrorOther, problem.code)
             case "links_not_allowed": return T.text(.togetherNoLinks)
             case "link_blocked": return T.text(.togetherLinkBlocked)
             case "code_invalid": return T.text(.togetherCodeWrong)
@@ -599,7 +682,18 @@ extension AppModel {
             case "code_locked": return T.text(.togetherCodeLocked)
             case "rate_limited": return T.text(.togetherTooMany)
             case "media_server_off": return SP.format(.mediaServerOff, problem.max ?? SharePlayRoster.maxViewers)
-            default: return problem.title
+            // The server's own words are English: every other answer is said in the launcher's
+            // language, by its code (packages/shared/src/errors.ts there), never as it came.
+            case "bad_request": return T.text(.togetherErrorBadRequest)
+            case "unauthorized", "session_revoked", "refresh_reused": return T.text(.togetherErrorSignedOut)
+            case "forbidden": return T.text(.togetherErrorForbidden)
+            case "not_found": return T.text(.togetherErrorNotFound)
+            case "conflict": return T.text(.togetherErrorConflict)
+            case "full": return T.text(.togetherErrorFull)
+            case "payload_too_large": return T.text(.togetherErrorTooLarge)
+            case "internal": return T.text(.togetherErrorInternal)
+            // English is what the server writes in: there its sentence says more than the code.
+            default: return T.language == .english && !problem.title.isEmpty ? problem.title : T.format(.togetherErrorOther, problem.code)
             }
         }
         return T.text(.togetherUnreachable)

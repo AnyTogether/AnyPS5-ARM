@@ -22,6 +22,10 @@ struct EngineGitState: Equatable {
     var tools: DevTools?
     /// The remote being asked for new commits before a game starts.
     var checking = false
+    /// Homebrew's brew on this Mac, looked for with the tools: it installs CMake and Ninja.
+    var homebrew: URL?
+    /// The tools being installed now (Install now), nil when none are.
+    var installing: [String]?
 }
 
 extension AppModel {
@@ -40,12 +44,96 @@ extension AppModel {
     }
 
     /// The developer tools looked for again, away from the interface (xcode-select runs).
-    func refreshEngineTools() {
+    /// `announce` says what it found (Check again, and after an install): everything is there, or
+    /// what still is not. Nothing has to be restarted: the folders are read again each time.
+    func refreshEngineTools(announce: Bool = false) {
         guard let checkout = engineCheckout else { return }
         let cache = checkout.cache
         Task.detached(priority: .utility) {
             let tools = DevTools.find(cache: cache)
-            await MainActor.run { if self.engineGit.tools != tools { self.engineGit.tools = tools } }
+            let homebrew = DevTools.homebrew()
+            await MainActor.run { self.engineToolsFound(tools, homebrew: homebrew, announce: announce) }
+        }
+    }
+
+    func engineToolsFound(_ tools: DevTools, homebrew: URL?, announce: Bool) {
+        if engineGit.tools != tools { engineGit.tools = tools }
+        if engineGit.homebrew != homebrew { engineGit.homebrew = homebrew }
+        // An update that stopped for a tool that is there now no longer says so.
+        if tools.missing.isEmpty, let stopped = engineGit.failure, case .missingTools = stopped.kind { engineGit.failure = nil }
+        guard announce else { return }
+        if tools.missing.isEmpty {
+            show(TE.text(.engineGitToolsReady), symbol: "checkmark.circle.fill")
+        } else {
+            show(TE.format(.engineGitStillMissing, ListFormatter.localizedString(byJoining: tools.missing)), symbol: "hammer")
+        }
+    }
+
+    /// The rows under Update from Git while tools are missing: for each way to get them, the
+    /// command to copy (or the page to open), Install now where the launcher can run it as the
+    /// user (Homebrew), and Check again.
+    func engineToolFixRows(_ tools: DevTools) -> [PanelRow] {
+        var rows: [PanelRow] = []
+        for fix in tools.fixes(homebrew: engineGit.homebrew) {
+            let names = ListFormatter.localizedString(byJoining: fix.names)
+            if let link = fix.link {
+                rows.append(PanelRow(id: "engineGitFixLink-" + fix.id, title: TE.format(.engineGitFixBrew, names), detail: (link.host ?? "") + link.path, symbol: "link",
+                                     kind: .action(destructive: false) { NSWorkspace.shared.open(link) }, wraps: true))
+            }
+            guard let command = fix.command else { continue }
+            rows.append(PanelRow(id: "engineGitFixCopy-" + fix.id, title: TE.format(.engineGitFixCopy, names), detail: command, symbol: "doc.on.doc",
+                                 kind: .action(destructive: false) { [weak self] in self?.copyEngineToolCommand(command) }, wraps: true))
+            if fix.program != nil {
+                rows.append(PanelRow(id: "engineGitFixRun-" + fix.id, title: TE.format(.engineGitFixRun, names), detail: TE.text(.engineGitFixRunDetail), symbol: "arrow.down.circle",
+                                     kind: .action(destructive: false) { [weak self] in self?.installEngineTools(fix) }, wraps: true))
+            }
+        }
+        rows.append(PanelRow(id: "engineGitRecheck", title: TE.text(.engineGitRecheck), detail: TE.text(.engineGitRecheckDetail), symbol: "arrow.clockwise",
+                             kind: .action(destructive: false) { [weak self] in self?.refreshEngineTools(announce: true) }))
+        return rows
+    }
+
+    func copyEngineToolCommand(_ command: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(command, forType: .string)
+        show(TE.text(.engineGitFixCopied), symbol: "doc.on.doc")
+    }
+
+    /// Install now: `fix`'s command run here as the user, its lines shown as an update's are. It
+    /// never runs as administrator and nothing is typed into it; when it ends the tools are looked
+    /// for again.
+    func installEngineTools(_ fix: DevToolFix, runner: CommandRunner = SystemCommands()) {
+        guard let program = fix.program, let checkout = engineCheckout, engineGit.step == nil, engineGit.installing == nil else { return }
+        let cancel = UnpackCancel()
+        engineGitCancel = cancel
+        engineGit.installing = fix.names
+        engineGit.lines = []
+        let names = ListFormatter.localizedString(byJoining: fix.names)
+        let arguments = fix.arguments, directory = checkout.root
+        let lines = LineThrottle { [weak self] recent in
+            Task { @MainActor in if self?.engineGit.installing != nil { self?.engineGit.lines = recent } }
+        }
+        Task.detached(priority: .userInitiated) {
+            var environment = ProcessInfo.processInfo.environment
+            // Homebrew's own folders on PATH (an app opened from the Finder has a short one).
+            environment["PATH"] = (DevTools.extraFolders + [environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"]).joined(separator: ":")
+            let code = (try? runner.run(program, arguments, in: directory, environment: environment, cancel: cancel, onLine: lines.add)) ?? -1
+            let stopped = cancel.cancelled
+            await MainActor.run { self.engineToolsInstalled(names, worked: code == 0, stopped: stopped) }
+        }
+    }
+
+    func engineToolsInstalled(_ names: String, worked: Bool, stopped: Bool) {
+        engineGitCancel = nil
+        engineGit.installing = nil
+        engineGit.lines = []
+        if stopped { return }
+        if worked {
+            refreshEngineTools(announce: true)
+        } else {
+            Sounds.shared.play(.back)
+            show(TE.format(.engineGitFixFailed, names), symbol: "exclamationmark.triangle.fill")
+            refreshEngineTools()
         }
     }
 
@@ -127,7 +215,7 @@ extension AppModel {
 
     /// Pulls, builds and makes the engine; `quiet` leaves what it says to `then`.
     func updateEngineFromGit(quiet: Bool = false, then: ((Result<GitUpdateResult, GitUpdateFailure>) -> Void)? = nil) {
-        guard let checkout = engineCheckout, engineGit.step == nil else { return }
+        guard let checkout = engineCheckout, engineGit.step == nil, engineGit.installing == nil else { return }
         // A game being unlocked uses the engine the update would replace.
         if unlockBusy { return show(TE.text(.engineGitWaitUnlock), symbol: "hourglass") }
         let tools = engineGit.tools ?? DevTools.find(cache: checkout.cache)
@@ -260,9 +348,15 @@ extension AppModel {
             rows.append(PanelRow(id: "engineGitUpdate", title: TE.format(.engineGitRunning, AppModel.engineGitStepName(step)),
                                  detail: (state.lines.map { $0.trimmingCharacters(in: .whitespaces) } + [TE.text(.engineGitStop)]).joined(separator: "\n"),
                                  symbol: "hammer", kind: .action(destructive: true) { [weak self] in self?.stopEngineGit() }, wraps: true))
-        } else if let missing = state.tools?.missing, !missing.isEmpty {
-            rows.append(PanelRow(id: "engineGitUpdate", title: TE.text(.engineGitUpdate), detail: TE.format(.engineGitNeeds, ListFormatter.localizedString(byJoining: missing)),
+        } else if let installing = state.installing {
+            rows.append(PanelRow(id: "engineGitFixRunning", title: TE.format(.engineGitFixRunning, ListFormatter.localizedString(byJoining: installing)),
+                                 detail: (state.lines.map { $0.trimmingCharacters(in: .whitespaces) } + [TE.text(.engineGitStop)]).joined(separator: "\n"),
+                                 symbol: "arrow.down.circle", kind: .action(destructive: true) { [weak self] in self?.stopEngineGit() }, wraps: true))
+        } else if let tools = state.tools, !tools.missing.isEmpty {
+            // Everything missing at once, then how to get each: nothing is found out one run at a time.
+            rows.append(PanelRow(id: "engineGitUpdate", title: TE.text(.engineGitUpdate), detail: TE.format(.engineGitNeeds, ListFormatter.localizedString(byJoining: tools.missing)),
                                  symbol: "hammer", kind: .action(destructive: false) { NSWorkspace.shared.open(AppModel.engineBuildGuide) }, wraps: true))
+            rows += engineToolFixRows(tools)
         } else if let build = checkout.buildFolder {
             rows.append(PanelRow(id: "engineGitUpdate", title: TE.text(.engineGitUpdate), detail: TE.format(.engineGitUpdateDetail, build.lastPathComponent),
                                  symbol: "hammer", kind: .action(destructive: false) { [weak self] in self?.updateEngineFromGit() }, wraps: true))
