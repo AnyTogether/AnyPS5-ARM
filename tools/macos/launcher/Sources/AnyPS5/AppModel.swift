@@ -1873,11 +1873,11 @@ final class AppModel: ObservableObject {
     /// after, off the main thread, so the launcher keeps answering while a big game goes. A second
     /// Uninstall meanwhile does nothing, and an unlock of the game waits until its old files are
     /// gone.
-    /// Delete game uninstalls too, from the games folder it knew (`given`) and without the
-    /// notice (`quiet`): it has its own.
-    func uninstall(_ game: Game, root given: URL? = nil, quiet: Bool = false) {
+    /// Delete game uninstalls too, from the games folder it knew (`given`), the places it read
+    /// while the dump was still there (`places`) and without the notice (`quiet`): it has its own.
+    func uninstall(_ game: Game, root given: URL? = nil, places: Installer.Places? = nil, quiet: Bool = false) {
         guard let root = given ?? root(of: game), removals[game.id] == nil else { return }
-        let going = Installer.setAside(game, root: root)
+        let going = Installer.setAside(places ?? Installer.places(for: game, root: root), root: root)
         installedRecords[game.id] = nil
         recordsGeneration += 1
         if !quiet { show(T.text(.uninstallDone), symbol: "trash") }
@@ -1974,15 +1974,18 @@ final class AppModel: ObservableObject {
         } catch {
             return show(AppModel.refusalText(error), symbol: "exclamationmark.triangle.fill")
         }
+        // Where the installation is, read while the dump is there: its names hash the dump's path
+        // as it reads now.
+        let places = Installer.places(for: game, root: plan.root)
         hide(game)
         let trash = trashItem, permanent = ask.permanent
         deletions[game.id] = Task.detached(priority: .userInitiated) {
             let outcome = GameDeletion.run(plan, permanent: permanent, trash: trash)
-            await MainActor.run { self.deletionEnded(plan, permanent: permanent, outcome: outcome) }
+            await MainActor.run { self.deletionEnded(plan, places: places, permanent: permanent, outcome: outcome) }
         }
     }
 
-    private func deletionEnded(_ plan: DeletionPlan, permanent: Bool, outcome: DeletionOutcome) {
+    private func deletionEnded(_ plan: DeletionPlan, places: Installer.Places, permanent: Bool, outcome: DeletionOutcome) {
         let game = plan.game
         deletions[game.id] = nil
         switch outcome {
@@ -1990,7 +1993,7 @@ final class AppModel: ObservableObject {
             // The saves and trophies stay in the store; the rest of the installation goes as
             // Uninstall takes it. Saves that cannot be moved keep the whole installation in
             // place: nothing of the player's is lost.
-            if (try? Installer.keepSaves(game, root: plan.root)) != nil { uninstall(game, root: plan.root, quiet: true) }
+            if (try? Installer.keepSaves(places)) != nil { uninstall(game, root: plan.root, places: places, quiet: true) }
             sizes[game.id] = nil
             failures[game.id] = nil
             trophies[game.id] = nil

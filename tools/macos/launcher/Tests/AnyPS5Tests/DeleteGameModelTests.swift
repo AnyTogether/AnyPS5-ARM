@@ -160,7 +160,9 @@ final class DeleteGameModelTests: XCTestCase {
     func testTheTileLeavesAtOnceTheFilesGoToTheTrashTheInstallationGoesAndTheSavesStay() async throws {
         let (model, game, trash) = try launcher()
         let root = try XCTUnwrap(model.root(of: game))
-        let bundle = Installer.bundle(for: game, root: root)
+        // Read while the dump is there, as the launcher does: their names hash the dump's path.
+        let places = Installer.places(for: game, root: root)
+        let bundle = places.bundle
         let archive = game.folder.deletingLastPathComponent().appendingPathComponent(game.folder.lastPathComponent + ".zip")
         try write("the zip it came in", to: archive)
         let others = model.games.filter { $0 != game }.map(\.id)
@@ -183,8 +185,8 @@ final class DeleteGameModelTests: XCTestCase {
         XCTAssertTrue(fm.fileExists(atPath: trash.folder.appendingPathComponent(game.folder.lastPathComponent).appendingPathComponent("eboot.bin").path), "in the Trash, whole")
         XCTAssertTrue(fm.fileExists(atPath: trash.folder.appendingPathComponent(archive.lastPathComponent).path))
         XCTAssertFalse(fm.fileExists(atPath: bundle.path), "the installation went too")
-        XCTAssertFalse(fm.fileExists(atPath: Installer.dataFolder(for: game, root: root).path))
-        XCTAssertEqual(try String(contentsOf: Installer.keptSaves(for: game, root: root).appendingPathComponent("_sd/save.dat"), encoding: .utf8), "forty hours",
+        XCTAssertFalse(fm.fileExists(atPath: places.data.path))
+        XCTAssertEqual(try String(contentsOf: places.saves.appendingPathComponent("_sd/save.dat"), encoding: .utf8), "forty hours",
                        "the saves are kept in the store")
         XCTAssertEqual(model.toast?.text, T.format(.deleteGameDone, game.name, T.text(.trashMac)))
         XCTAssertEqual(model.games.map(\.id), others)
@@ -195,6 +197,7 @@ final class DeleteGameModelTests: XCTestCase {
     func testTheFilesCouldNotGoTheTileComesBackSelectedWithTheReason() async throws {
         let (model, game, trash) = try launcher()
         let root = try XCTUnwrap(model.root(of: game))
+        let bundle = Installer.bundle(for: game, root: root)
         trash.answer(.failed("the folder is in use"))
         model.askDeleteGame(game)
         model.confirmDeleteGame()
@@ -204,7 +207,7 @@ final class DeleteGameModelTests: XCTestCase {
         XCTAssertEqual(model.games.map(\.name), model.games.map(\.name).sorted(), "back where the library's order has it")
         XCTAssertEqual(model.selectedGame, game)
         guard case .installed = model.state(of: game) else { return XCTFail("nothing of the installation was touched") }
-        XCTAssertTrue(fm.fileExists(atPath: Installer.bundle(for: game, root: root).path))
+        XCTAssertTrue(fm.fileExists(atPath: bundle.path))
         XCTAssertTrue(fm.fileExists(atPath: game.folder.path))
         XCTAssertEqual(model.toast?.text, T.format(.deleteGameFailed, game.name, "the folder is in use"))
         XCTAssertNil(model.overlay)

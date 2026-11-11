@@ -240,9 +240,30 @@ public final class Installer: @unchecked Sendable {
     /// before and never unlocked since) stays, the newer one beside it under its date. Throws
     /// when one cannot be moved: the installed game is then left as it is.
     public static func keepSaves(_ game: Game, root: URL) throws {
+        try keepSaves(places(for: game, root: root))
+    }
+
+    /// Where an installed game lives in the store of its games folder: its bundle, its files and
+    /// what it wrote, the relinker's kept output, and where its saves wait once it is deleted.
+    /// The names carry a hash of the dump's path as it reads while the dump is there, so Delete
+    /// game asks for them before the dump goes and uses them after.
+    public struct Places: Equatable, Sendable {
+        public let bundle: URL
+        public let data: URL
+        public let relinked: URL
+        public let saves: URL
+    }
+
+    public static func places(for game: Game, root: URL) -> Places {
+        Places(bundle: bundle(for: game, root: root), data: dataFolder(for: game, root: root), relinked: keptRelink(for: game, root: root),
+               saves: keptSaves(for: game, root: root))
+    }
+
+    /// `keepSaves(_:root:)` for the places read earlier.
+    public static func keepSaves(_ places: Places) throws {
         let fileManager = FileManager.default
-        let source = dataFolder(for: game, root: root).appendingPathComponent("game")
-        let kept = keptSaves(for: game, root: root)
+        let source = places.data.appendingPathComponent("game")
+        let kept = places.saves
         for part in savedParts {
             let item = source.appendingPathComponent(part)
             guard let type = (try? fileManager.attributesOfItem(atPath: item.path))?[.type] as? FileAttributeType, type != .typeSymbolicLink else { continue }
@@ -269,11 +290,16 @@ public final class Installer: @unchecked Sendable {
     /// launcher quit before it was done) is in it too. Something that cannot be moved is given
     /// where it is.
     public static func setAside(_ game: Game, root: URL) -> [URL] {
+        setAside(places(for: game, root: root), root: root)
+    }
+
+    /// `setAside(_:root:)` for the places read earlier (Delete game: the dump is gone by then).
+    public static func setAside(_ places: Places, root: URL) -> [URL] {
         let fileManager = FileManager.default
         let removing = removingFolder(root: root)
         let left = (try? fileManager.contentsOfDirectory(at: removing, includingPropertiesForKeys: nil)) ?? []
         var going: [URL] = []
-        for (item, label) in [(bundle(for: game, root: root), "bundle"), (dataFolder(for: game, root: root), "data"), (keptRelink(for: game, root: root), "relinked")] {
+        for (item, label) in [(places.bundle, "bundle"), (places.data, "data"), (places.relinked, "relinked")] {
             guard (try? item.checkResourceIsReachable()) == true || (try? fileManager.destinationOfSymbolicLink(atPath: item.path)) != nil else { continue }
             let aside = removing.appendingPathComponent("\(item.deletingPathExtension().lastPathComponent)-\(label)-\(UUID().uuidString)")
             do {

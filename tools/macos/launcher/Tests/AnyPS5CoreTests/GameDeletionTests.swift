@@ -195,11 +195,11 @@ final class GameDeletionTests: XCTestCase {
             XCTFail("the Trash is not asked when deleting for good")
             return .noTrash
         }, remove: { url in
-            asked.append(url.standardizedFileURL.path)
+            asked.append(url.lastPathComponent)
             try FileManager.default.removeItem(at: url)
         })
         XCTAssertEqual(outcome, .deleted(left: []))
-        XCTAssertEqual(asked, found.items.map(\.standardizedFileURL.path))
+        XCTAssertEqual(asked, ["astro", "astro-UPDATE"], "the game's folder first")
         XCTAssertFalse(fm.fileExists(atPath: astro.path))
         XCTAssertFalse(fm.fileExists(atPath: update.path))
     }
