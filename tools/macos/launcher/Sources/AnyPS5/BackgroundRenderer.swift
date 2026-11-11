@@ -41,6 +41,9 @@ final class BackgroundView: MTKView, MTKViewDelegate {
     private var palette: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>) = Theme.cosmic.palette
     /// How many frames it has drawn (a paused background must have drawn one to show anything).
     private(set) var frames = 0
+    /// The drawable's size when the last frame was drawn: a view that grew since shows that
+    /// frame stretched until it draws again.
+    private(set) var drawnSize = CGSize.zero
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -107,6 +110,7 @@ final class BackgroundView: MTKView, MTKViewDelegate {
         commands.present(drawable)
         commands.commit()
         frames += 1
+        drawnSize = drawableSize
     }
 
     /// The GPU time of one frame of a theme at a drawable size, averaged over `frames` (the

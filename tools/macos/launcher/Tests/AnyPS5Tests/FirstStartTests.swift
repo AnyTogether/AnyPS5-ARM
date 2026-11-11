@@ -115,6 +115,33 @@ final class FirstStartTests: XCTestCase {
         XCTAssertGreaterThan(card.frames, 0, "a paused card drew nothing (the selected one drew \(selected.frames) frames, window shown: \(shown))")
     }
 
+    /// The theme step as a person reaches it: the language chosen, the step coming in. Every
+    /// card's background has drawn a frame at the size the card has.
+    func testEveryThemeCardHasItsPictureWhenTheStepComesUp() throws {
+        guard MTLCreateSystemDefaultDevice() != nil else { throw XCTSkip("no Metal device here") }
+        let model = try fresh()
+        let screen = try LauncherWindow(model)
+        defer { screen.close() }
+        XCTAssertEqual(model.onboardingStep, 0)
+        model.onboardingConfirm()
+        XCTAssertEqual(model.onboardingStep, 1)
+        screen.wait(2)
+        // The cards' backgrounds are the small ones: the window's own is as large as the window.
+        let cards = screen.views(BackgroundView.self).filter { $0.bounds.width < 600 }
+            .sorted { screen.frame($0).minX < screen.frame($1).minX }
+        for card in cards {
+            print("theme card at \(screen.frame(card)): paused \(card.isPaused), \(card.frames) frames, drawn at \(card.drawnSize), drawable \(card.drawableSize)")
+        }
+        XCTAssertEqual(cards.count, Theme.allCases.count, "a background for every theme")
+        for (index, card) in cards.enumerated() {
+            XCTAssertGreaterThan(card.bounds.width, 100, "card \(index) has no size")
+            XCTAssertGreaterThan(card.frames, 0, "card \(index) drew nothing")
+            XCTAssertEqual(card.drawnSize, card.drawableSize, "card \(index) drew its picture at another size than it has now")
+            XCTAssertGreaterThan(card.drawnSize.width, 50, "card \(index) drew a picture of \(card.drawnSize)")
+        }
+        XCTAssertEqual(cards.filter { !$0.isPaused }.count, 1, "the selected card moves, the others stand still")
+    }
+
     /// The four screens as they come up, in English and in Turkish, kept as pictures when
     /// ANYPS5_TEST_SHOTS says where.
     func testTheFirstStartScreensDraw() throws {
