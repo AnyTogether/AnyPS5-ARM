@@ -16,7 +16,7 @@ struct PairingCard: View {
                     .foregroundStyle(model.accent)
                 VStack(spacing: 8 * scale) {
                     Text(T.text(.phonePairingTitle)).font(.display(30 * scale, .light)).foregroundStyle(.white)
-                    Text(request.deviceName).font(.display(17 * scale, .medium)).foregroundStyle(.white.opacity(0.7))
+                    Text(AppModel.phoneTitle(request.deviceName)).font(.display(17 * scale, .medium)).foregroundStyle(.white.opacity(0.7))
                 }
                 HStack(spacing: 14 * scale) {
                     ForEach(Array(request.code.enumerated()), id: \.offset) { _, digit in

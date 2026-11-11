@@ -219,7 +219,7 @@ struct BrowserPlayCard: View {
                                 HStack(spacing: 10 * scale) {
                                     Circle().fill(pad.allowed ? PhoneIndicator.green : PhoneIndicator.orange).frame(width: 9 * scale, height: 9 * scale)
                                         .shadow(color: pad.allowed ? PhoneIndicator.green : PhoneIndicator.orange, radius: 4 * scale)
-                                    Text(pad.name).font(.display(16 * scale, .semibold)).foregroundStyle(.white)
+                                    Text(AppModel.phoneTitle(pad.name)).font(.display(16 * scale, .semibold)).foregroundStyle(.white)
                                     Text(TW.text(pad.allowed ? .playing : .asking)).font(.display(15 * scale)).foregroundStyle(.white.opacity(0.55))
                                 }
                             }

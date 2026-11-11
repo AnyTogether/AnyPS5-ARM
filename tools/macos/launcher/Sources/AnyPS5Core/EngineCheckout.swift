@@ -171,6 +171,67 @@ public struct DevTools: Equatable, Sendable {
     }
 }
 
+/// One way to put right what DevTools.missing names: a command for a terminal (which the launcher
+/// can run itself when `program` is set), or a page to get it from.
+public struct DevToolFix: Equatable, Sendable {
+    public let id: String
+    /// What it installs, by the names DevTools.missing uses.
+    public let names: [String]
+    /// The command as it is typed in a terminal; nil for a page.
+    public let command: String?
+    /// The program and arguments of `command` when the launcher may run it: one that installs for
+    /// the user alone and never asks to be an administrator (Homebrew). nil: to copy only.
+    public let program: URL?
+    public let arguments: [String]
+    /// Where to get it when no command does (Homebrew's site).
+    public let link: URL?
+
+    public init(id: String, names: [String], command: String? = nil, program: URL? = nil, arguments: [String] = [], link: URL? = nil) {
+        self.id = id
+        self.names = names
+        self.command = command
+        self.program = program
+        self.arguments = arguments
+        self.link = link
+    }
+}
+
+extension DevTools {
+    /// Apple's own installer of the Command Line Tools (a window of macOS asks first).
+    public static let commandLineToolsCommand = "xcode-select --install"
+    public static let homebrewSite = URL(string: "https://brew.sh")!
+
+    /// Homebrew's `brew` on PATH or in its usual folders, nil without Homebrew.
+    public static func homebrew(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
+        let folders = (environment["PATH"] ?? "").split(separator: ":").map(String.init) + extraFolders
+        for folder in folders {
+            let candidate = URL(fileURLWithPath: folder).appendingPathComponent("brew")
+            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
+    /// How to get everything in `missing`, in the order to do it: the Command Line Tools from
+    /// Apple (Git comes with them), then CMake and Ninja (and Git, where the tools are there but
+    /// it is not) in one Homebrew command, which the launcher can run when `homebrew` is found.
+    /// Without Homebrew its site comes first; the command is still there to copy for afterwards.
+    public func fixes(homebrew: URL?) -> [DevToolFix] {
+        var fixes: [DevToolFix] = []
+        if developer == nil {
+            fixes.append(DevToolFix(id: "xcode", names: ["Xcode Command Line Tools"], command: DevTools.commandLineToolsCommand))
+        }
+        var names: [String] = []
+        if developer != nil, git == nil { names.append("Git") }
+        if cmake == nil { names.append("CMake") }
+        if ninja == nil { names.append("Ninja") }
+        guard !names.isEmpty else { return fixes }
+        let formulae = names.map { $0.lowercased() }
+        if homebrew == nil { fixes.append(DevToolFix(id: "homebrew", names: names, link: DevTools.homebrewSite)) }
+        fixes.append(DevToolFix(id: "brew", names: names, command: "brew install " + formulae.joined(separator: " "), program: homebrew, arguments: ["install"] + formulae))
+        return fixes
+    }
+}
+
 /// Runs a program away from the interface and hands each line it prints (stdout and stderr);
 /// replaceable in tests.
 public protocol CommandRunner: Sendable {

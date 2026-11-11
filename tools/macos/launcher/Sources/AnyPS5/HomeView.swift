@@ -175,6 +175,11 @@ struct HomeView: View {
             }
         }
         .animation(Motion.layout, value: model.selectedGame?.id)
+        // Over the tiles and the game's words, under the top bar's own picture.
+        .overlayPreferenceValue(ProfileSwitcherAnchor.self) { anchor in
+            ProfileSwitcherLayer(anchor: anchor)
+        }
+        .animation(Motion.focus, value: model.profileSwitcherShown)
     }
 }
 
@@ -225,6 +230,14 @@ struct TopBar: View {
                 Text(name).font(.display(16 * scale, .medium)).foregroundStyle(.white.opacity(0.9)).legible(12)
                 if let level = model.myLevel { LevelBadgeView(badge: level.badge, size: 30 * scale) }
             }
+            // The pointer over it, a click, or the keys' focus: the other profiles in a list under it.
+            .contentShape(Rectangle())
+            .focusRing(model.switcherFocus == 0 && model.overlay == nil, radius: 20 * scale)
+            .onHover { model.hoverProfileSwitcher("picture", $0) }
+            .onTapGesture { model.toggleProfileSwitcher() }
+            .anchorPreference(key: ProfileSwitcherAnchor.self, value: .bounds) { $0 }
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel(TH.text(.switchProfile))
             Clock().legible(12)
         }
         .glassGroup(look, spacing: 10 * scale)
@@ -1000,6 +1013,11 @@ extension AppModel {
         case nil:
             break
         }
+        // The list under the profile picture, however it was opened: Back closes it.
+        if command == .back, profileSwitcherShown {
+            closeProfileSwitcher()
+            return true
+        }
         guard let game = selectedGame else {
             if command == .select { pickGamesFolder() }
             return true
@@ -1024,6 +1042,9 @@ extension AppModel {
         case (.notice, .select):
             updateLater()
             moveFocus(.top(0))
+        // Past the last button: the profile picture, whose list of profiles opens with the focus.
+        case (.top(5), .right): moveFocus(.switcher(0))
+        case (.switcher(let index), _): switcherCommand(index, command)
         case (.top(let index), .right): moveFocus(.top(min(5, index + 1)))
         case (.top, .down), (.top, .back): moveFocus(.tiles)
         case (.top(3), .select): openMessages()

@@ -196,6 +196,9 @@ enum HomeFocus: Equatable {
     case notice(Int)
     case tiles
     case actions(Int)
+    /// The profile picture at the top bar's end and the list under it (ProfileSwitcher.swift):
+    /// 0 the picture, then the other profiles, then Add Profile.
+    case switcher(Int)
 }
 
 extension Overlay {
@@ -359,6 +362,8 @@ final class AppModel: ObservableObject {
         didSet { if selected != oldValue { selectionMoved(from: oldValue) } }
     }
     @Published var focus = HomeFocus.tiles
+    /// Home's profile picture and the list of the other profiles under it (ProfileSwitcher.swift).
+    @Published var profileSwitcher = ProfileSwitcherState()
     @Published var overlay: Overlay? {
         didSet {
             if oldValue != overlay {
@@ -2705,7 +2710,7 @@ final class AppModel: ObservableObject {
         withAnimation(Motion.overlay) { pairing = request }
         Sounds.shared.play(.select)
         // A game in front keeps its focus: the phone asks through a card over it instead.
-        if !NSApp.isActive { TrophyBanner.shared.notice(T.text(.phonePairingTitle), detail: T.format(.phoneOpenLauncher, request.deviceName), symbol: "iphone.gen3", sounds: preferences.sounds) }
+        if !NSApp.isActive { TrophyBanner.shared.notice(T.text(.phonePairingTitle), detail: T.format(.phoneOpenLauncher, AppModel.phoneTitle(request.deviceName)), symbol: "iphone.gen3", sounds: preferences.sounds) }
     }
 
     func answerPairing(_ allow: Bool) {
@@ -3368,6 +3373,9 @@ final class AppModel: ObservableObject {
     }
 
     func open(_ next: Overlay) {
+        // Home's list of profiles does not come back once the screen opened over it closes.
+        if profileSwitcher != ProfileSwitcherState() { profileSwitcher = ProfileSwitcherState() }
+        if case .switcher = focus { focus = .tiles }
         if next == .settings {
             settingsQuery = ""
             settingsSearchFocused = false
