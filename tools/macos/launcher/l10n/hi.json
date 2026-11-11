@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "छूटे हुए चंक्स को इंस्टॉल मानकर फिर खेलें",
   "reportPlayGoInstalledDetailMac": "केवल इस बार के लिए। डंप में PlayGo चंक तालिका नहीं है, और गेम के जो हिस्से उसमें नहीं हैं वे लोड न हो पाएँ।",
   "engineNeedsNewerMac": "इस इंजन को macOS %1$@ या नया चाहिए और इस Mac पर macOS %2$@ है। सेटिंग्स › इंजन में कोई दूसरा इंजन चुनें या macOS अपडेट करें।",
-  "engineGameNeedsNewerMac": "%1$@ को ऐसे इंजन से अनलॉक किया गया था जिसे macOS %2$@ या नया चाहिए और इस Mac पर macOS %3$@ है। सेटिंग्स › इंजन में इसके लिए दूसरा इंजन चुनें और इसे फिर से अनलॉक करें।"
+  "engineGameNeedsNewerMac": "%1$@ को ऐसे इंजन से अनलॉक किया गया था जिसे macOS %2$@ या नया चाहिए और इस Mac पर macOS %3$@ है। सेटिंग्स › इंजन में इसके लिए दूसरा इंजन चुनें और इसे फिर से अनलॉक करें।",
+  "nowPlaying": "अभी चल रहा है",
+  "nowPlayingIn": "%@ में चल रहा है",
+  "nowPlayingPausedIn": "%@ में रुका हुआ है",
+  "nowPlayingPrevious": "पिछला ट्रैक",
+  "nowPlayingNext": "अगला ट्रैक",
+  "nowPlayingPlayPause": "चलाएँ या रोकें",
+  "nowPlayingCard": "त्वरित मेनू में अभी चल रहा गाना दिखाएँ",
+  "nowPlayingCardDetailMac": "गेम के ऊपर के मेनू में दिखाता है कि Spotify या Music में क्या चल रहा है, पिछला, चलाएँ या रोकें और अगला के साथ। macOS दोनों में से हर एक के लिए एक बार पूछता है कि AnyPS5 उसे नियंत्रित कर सकता है या नहीं। Mac पर दूसरे प्लेयर नहीं पढ़े जा सकते।",
+  "nowPlayingDeniedMac": "macOS, AnyPS5 को Spotify या Music पढ़ने नहीं देता। इसे सिस्टम सेटिंग्स, गोपनीयता और सुरक्षा, ऑटोमेशन, AnyPS5 में अनुमति दें।",
+  "nowPlayingShare": "दोस्तों को दिखाएँ कि मैं क्या सुन रहा हूँ",
+  "nowPlayingShareDetail": "AnyTogether पर आपके दोस्त चलते समय शीर्षक और कलाकार देखते हैं। इसके बंद रहने पर कुछ नहीं भेजा जाता।",
+  "friendsListening": "%@ सुन रहे हैं",
+  "friendsListeningBy": "%1$@, %2$@ सुन रहे हैं"
 }

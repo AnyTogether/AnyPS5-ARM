@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Eksik parçaları kurulu sayarak yeniden oyna",
   "reportPlayGoInstalledDetailMac": "Yalnızca bu açılış için. Dump'ta PlayGo parça tablosu yok ve oyunun eksik bölümleri yüklenemeyebilir.",
   "engineNeedsNewerMac": "Bu motor macOS %1$@ ya da daha yenisini istiyor ama bu Mac'te macOS %2$@ var. Ayarlar › Motor'dan başka bir motor seçin ya da macOS'i güncelleyin.",
-  "engineGameNeedsNewerMac": "%1$@, macOS %2$@ ya da daha yenisini isteyen bir motorla açıldı ama bu Mac'te macOS %3$@ var. Ayarlar › Motor'dan ona başka bir motor seçip kilidini yeniden açın."
+  "engineGameNeedsNewerMac": "%1$@, macOS %2$@ ya da daha yenisini isteyen bir motorla açıldı ama bu Mac'te macOS %3$@ var. Ayarlar › Motor'dan ona başka bir motor seçip kilidini yeniden açın.",
+  "nowPlaying": "Şimdi çalıyor",
+  "nowPlayingIn": "%@ uygulamasında çalıyor",
+  "nowPlayingPausedIn": "%@ uygulamasında duraklatıldı",
+  "nowPlayingPrevious": "Önceki parça",
+  "nowPlayingNext": "Sonraki parça",
+  "nowPlayingPlayPause": "Oynat ya da duraklat",
+  "nowPlayingCard": "Hızlı menüde şimdi çalanı göster",
+  "nowPlayingCardDetailMac": "Oyunun üstündeki menüde Spotify ya da Müzik'te çalanı gösterir. Önceki, oynat ya da duraklat ve sonraki düğmeleri vardır. macOS, AnyPS5'in bu iki uygulamayı denetlemesine izin verip vermediğini her biri için bir kez sorar. Mac'te başka oynatıcılar okunamaz.",
+  "nowPlayingDeniedMac": "macOS, AnyPS5'in Spotify ya da Müzik'i okumasına izin vermiyor. Sistem Ayarları, Gizlilik ve Güvenlik, Otomasyon, AnyPS5 bölümünden izin ver.",
+  "nowPlayingShare": "Arkadaşlarıma ne dinlediğimi göster",
+  "nowPlayingShareDetail": "AnyTogether'daki arkadaşların, çalarken parçanın adını ve sanatçısını görür. Bu kapalıyken hiçbir şey gönderilmez.",
+  "friendsListening": "%@ dinliyor",
+  "friendsListeningBy": "%1$@, %2$@ dinliyor"
 }

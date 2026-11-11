@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Spill igjen med manglende deler regnet som installert",
   "reportPlayGoInstalledDetailMac": "Bare for denne starten. Dumpen har ingen PlayGo-delstabell, og deler av spillet den mangler, kan feile ved innlasting.",
   "engineNeedsNewerMac": "Denne motoren krever macOS %1$@ eller nyere, og denne Macen har macOS %2$@. Velg en annen motor under Innstillinger › Motor, eller oppdater macOS.",
-  "engineGameNeedsNewerMac": "%1$@ ble låst opp med en motor som krever macOS %2$@ eller nyere, og denne Macen har macOS %3$@. Velg en annen motor for det under Innstillinger › Motor, og lås det opp på nytt."
+  "engineGameNeedsNewerMac": "%1$@ ble låst opp med en motor som krever macOS %2$@ eller nyere, og denne Macen har macOS %3$@. Velg en annen motor for det under Innstillinger › Motor, og lås det opp på nytt.",
+  "nowPlaying": "Spilles nå",
+  "nowPlayingIn": "Spilles nå i %@",
+  "nowPlayingPausedIn": "Satt på pause i %@",
+  "nowPlayingPrevious": "Forrige spor",
+  "nowPlayingNext": "Neste spor",
+  "nowPlayingPlayPause": "Spill av eller sett på pause",
+  "nowPlayingCard": "Spilles nå i hurtigmenyen",
+  "nowPlayingCardDetailMac": "Viser hva Spotify eller Musikk spiller, i menyen over et spill, med forrige, spill av eller pause og neste. macOS spør én gang for hver av de to om AnyPS5 kan styre den. Andre spillere kan ikke leses på en Mac.",
+  "nowPlayingDeniedMac": "macOS lar ikke AnyPS5 lese Spotify eller Musikk. Tillat det i Systeminnstillinger, Personvern og sikkerhet, Automatisering, AnyPS5.",
+  "nowPlayingShare": "Vis venner hva jeg hører på",
+  "nowPlayingShareDetail": "Venner på AnyTogether ser tittel og artist mens det spilles. Ingenting sendes mens dette er slått av.",
+  "friendsListening": "Hører på %@",
+  "friendsListeningBy": "Hører på %1$@, %2$@"
 }

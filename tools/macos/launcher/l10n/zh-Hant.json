@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "將缺少的區塊視為已安裝並再次遊玩",
   "reportPlayGoInstalledDetailMac": "僅限這次啟動。此轉儲沒有 PlayGo 區塊表，缺少的遊戲部分可能無法載入。",
   "engineNeedsNewerMac": "此引擎需要 macOS %1$@ 或以上版本，而這台 Mac 是 macOS %2$@。請在「設定 › 引擎」中選擇其他引擎，或更新 macOS。",
-  "engineGameNeedsNewerMac": "%1$@ 是用需要 macOS %2$@ 或以上版本的引擎解鎖的，而這台 Mac 是 macOS %3$@。請在「設定 › 引擎」中為它選擇其他引擎並重新解鎖。"
+  "engineGameNeedsNewerMac": "%1$@ 是用需要 macOS %2$@ 或以上版本的引擎解鎖的，而這台 Mac 是 macOS %3$@。請在「設定 › 引擎」中為它選擇其他引擎並重新解鎖。",
+  "nowPlaying": "正在播放",
+  "nowPlayingIn": "正在 %@ 中播放",
+  "nowPlayingPausedIn": "已在 %@ 中暫停",
+  "nowPlayingPrevious": "上一首",
+  "nowPlayingNext": "下一首",
+  "nowPlayingPlayPause": "播放或暫停",
+  "nowPlayingCard": "在快速選單中顯示正在播放",
+  "nowPlayingCardDetailMac": "在遊戲上方的選單中顯示 Spotify 或「音樂」正在播放的內容，並提供上一首、播放或暫停和下一首。macOS 會針對這兩個 App 各詢問一次是否允許 AnyPS5 控制它。在 Mac 上無法讀取其他播放器。",
+  "nowPlayingDeniedMac": "macOS 不允許 AnyPS5 讀取 Spotify 或「音樂」。請在系統設定、隱私權與安全性、自動化、AnyPS5 中允許。",
+  "nowPlayingShare": "向好友顯示我在聽什麼",
+  "nowPlayingShareDetail": "播放時，AnyTogether 上的好友會看到標題和藝人。關閉時不會傳送任何內容。",
+  "friendsListening": "正在聽 %@",
+  "friendsListeningBy": "正在聽 %1$@，%2$@"
 }

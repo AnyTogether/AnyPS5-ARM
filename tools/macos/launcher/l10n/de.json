@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Erneut spielen, fehlende Chunks als installiert zählen",
   "reportPlayGoInstalledDetailMac": "Nur für diesen Start. Dem Dump fehlt die PlayGo-Chunk-Tabelle, und fehlende Teile des Spiels können beim Laden Fehler verursachen.",
   "engineNeedsNewerMac": "Diese Engine braucht macOS %1$@ oder neuer, dieser Mac hat macOS %2$@. Wähle eine andere Engine unter Einstellungen › Engine oder aktualisiere macOS.",
-  "engineGameNeedsNewerMac": "%1$@ wurde mit einer Engine entsperrt, die macOS %2$@ oder neuer braucht, dieser Mac hat macOS %3$@. Wähle dafür unter Einstellungen › Engine eine andere Engine und entsperre es erneut."
+  "engineGameNeedsNewerMac": "%1$@ wurde mit einer Engine entsperrt, die macOS %2$@ oder neuer braucht, dieser Mac hat macOS %3$@. Wähle dafür unter Einstellungen › Engine eine andere Engine und entsperre es erneut.",
+  "nowPlaying": "Aktuelle Wiedergabe",
+  "nowPlayingIn": "Wiedergabe in %@",
+  "nowPlayingPausedIn": "Pausiert in %@",
+  "nowPlayingPrevious": "Vorheriger Titel",
+  "nowPlayingNext": "Nächster Titel",
+  "nowPlayingPlayPause": "Wiedergabe oder Pause",
+  "nowPlayingCard": "Aktuelle Wiedergabe im Schnellmenü",
+  "nowPlayingCardDetailMac": "Zeigt im Menü über einem Spiel, was Spotify oder Musik gerade spielt, mit Zurück, Wiedergabe oder Pause und Weiter. macOS fragt für jede der beiden Apps einmal, ob AnyPS5 sie steuern darf. Andere Player können auf einem Mac nicht gelesen werden.",
+  "nowPlayingDeniedMac": "macOS erlaubt AnyPS5 nicht, Spotify oder Musik zu lesen. Erlaube es in Systemeinstellungen, Datenschutz & Sicherheit, Automation, AnyPS5.",
+  "nowPlayingShare": "Freunden zeigen, was ich höre",
+  "nowPlayingShareDetail": "Freunde auf AnyTogether sehen Titel und Interpret, solange etwas läuft. Solange dies aus ist, wird nichts gesendet.",
+  "friendsListening": "Hört %@",
+  "friendsListeningBy": "Hört %1$@, %2$@"
 }

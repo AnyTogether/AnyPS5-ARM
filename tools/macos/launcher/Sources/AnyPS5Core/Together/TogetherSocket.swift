@@ -36,6 +36,8 @@ public final class TogetherSocket: @unchecked Sendable {
     private var task: URLSessionWebSocketTask?
     private var lastEventID: String?
     private var presence: Presence = .online
+    /// What the user listens to, when they chose to show it (Settings › Behaviour).
+    private var listening: TogetherListening?
     private var heartbeat: Timer?
     private var running = false
     private var attempt = 0
@@ -75,6 +77,16 @@ public final class TogetherSocket: @unchecked Sendable {
     public func setPresence(_ presence: Presence) {
         queue.async { [self] in
             self.presence = presence
+            sendHeartbeat()
+        }
+    }
+
+    /// What the user listens to, for friends: sent at once when it changed and with every
+    /// heartbeat after; nil (nothing plays, or the user does not show it) leaves it out.
+    public func setListening(_ listening: TogetherListening?) {
+        queue.async { [self] in
+            guard listening != self.listening else { return }
+            self.listening = listening
             sendHeartbeat()
         }
     }
@@ -203,15 +215,23 @@ public final class TogetherSocket: @unchecked Sendable {
 
     private func sendHeartbeat() {
         guard let task else { return }
-        var state: [String: String]
+        let data = TogetherSocket.heartbeatFrame(presence: presence, listening: listening)
+        task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
+    }
+
+    /// The heartbeat as the gateway reads it: the presence, with `listening` (a title and, when
+    /// there is one, an artist) only while there is something to show. A gateway from before it
+    /// reads state, titleId and since and passes over the rest.
+    static func heartbeatFrame(presence: Presence, listening: TogetherListening? = nil) -> Data {
+        var state: [String: Any]
         switch presence {
         case .online: state = ["state": "online"]
         case .away: state = ["state": "away"]
         case .inGame(let titleID, let since): state = ["state": "in_game", "titleId": titleID, "since": ISO8601DateFormatter().string(from: since)]
         }
+        if let listening { state["listening"] = listening.json }
         let frame: [String: Any] = ["op": "heartbeat", "presence": state]
-        guard let data = try? JSONSerialization.data(withJSONObject: frame) else { return }
-        task.send(.string(String(decoding: data, as: UTF8.self))) { _ in }
+        return (try? JSONSerialization.data(withJSONObject: frame)) ?? Data()
     }
 
     private func retryLater() {

@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Joacă din nou cu fragmentele lipsă considerate instalate",
   "reportPlayGoInstalledDetailMac": "Doar pentru această pornire. Dump-ul nu are tabel de fragmente PlayGo, iar părțile jocului care lipsesc pot să nu se încarce.",
   "engineNeedsNewerMac": "Acest motor necesită macOS %1$@ sau mai nou, iar acest Mac are macOS %2$@. Alege alt motor în Setări › Motor sau actualizează macOS.",
-  "engineGameNeedsNewerMac": "%1$@ a fost deblocat cu un motor care necesită macOS %2$@ sau mai nou, iar acest Mac are macOS %3$@. Alege alt motor pentru el în Setări › Motor și deblochează-l din nou."
+  "engineGameNeedsNewerMac": "%1$@ a fost deblocat cu un motor care necesită macOS %2$@ sau mai nou, iar acest Mac are macOS %3$@. Alege alt motor pentru el în Setări › Motor și deblochează-l din nou.",
+  "nowPlaying": "Se redă acum",
+  "nowPlayingIn": "Se redă acum în %@",
+  "nowPlayingPausedIn": "În pauză în %@",
+  "nowPlayingPrevious": "Piesa anterioară",
+  "nowPlayingNext": "Piesa următoare",
+  "nowPlayingPlayPause": "Redă sau pune pauză",
+  "nowPlayingCard": "Redarea curentă în meniul rapid",
+  "nowPlayingCardDetailMac": "Arată ce redă Spotify sau Muzică în meniul de deasupra unui joc, cu anterior, redare sau pauză și următor. macOS întreabă o dată pentru fiecare dintre cele două dacă AnyPS5 o poate controla. Alte playere nu pot fi citite pe un Mac.",
+  "nowPlayingDeniedMac": "macOS nu permite ca AnyPS5 să citească Spotify sau Muzică. Permite acest lucru în Configurări sistem, Intimitate și securitate, Automatizare, AnyPS5.",
+  "nowPlayingShare": "Arată-le prietenilor ce ascult",
+  "nowPlayingShareDetail": "Prietenii de pe AnyTogether văd titlul și artistul cât timp se redă. Nu se trimite nimic cât timp opțiunea este dezactivată.",
+  "friendsListening": "Ascultă %@",
+  "friendsListeningBy": "Ascultă %1$@, %2$@"
 }

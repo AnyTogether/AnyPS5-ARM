@@ -54,9 +54,11 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
         /// The status they chose: online, idle, dnd (do not disturb) or invisible; nil from an
         /// older server, where state alone says it.
         public let status: String?
+        /// What they listen to, when they chose to show it; nil from an older server.
+        public let listening: TogetherListening?
 
         public init(state: String, titleId: String?, since: String?, party: Party? = nil, game: Game? = nil, share: TogetherSharePresence? = nil,
-                    status: String? = nil) {
+                    status: String? = nil, listening: TogetherListening? = nil) {
             self.state = state
             self.titleId = titleId
             self.since = since
@@ -64,6 +66,18 @@ public struct TogetherFriend: Decodable, Equatable, Sendable, Identifiable {
             self.game = game
             self.share = share
             self.status = status
+            self.listening = listening
+        }
+
+        enum CodingKeys: String, CodingKey { case state, titleId, since, party, game, share, status, listening }
+
+        /// As the server sends it; a `listening` that cannot be read is none, never a presence lost.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(state: try container.decode(String.self, forKey: .state), titleId: try container.decodeIfPresent(String.self, forKey: .titleId),
+                      since: try container.decodeIfPresent(String.self, forKey: .since), party: try container.decodeIfPresent(Party.self, forKey: .party),
+                      game: try container.decodeIfPresent(Game.self, forKey: .game), share: try container.decodeIfPresent(TogetherSharePresence.self, forKey: .share),
+                      status: try container.decodeIfPresent(String.self, forKey: .status), listening: try? container.decodeIfPresent(TogetherListening.self, forKey: .listening))
         }
 
         public var online: Bool { state != "offline" && status != TogetherPresenceStatus.invisible.rawValue }

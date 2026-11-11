@@ -136,6 +136,8 @@ extension AppModel {
         /// The share play row it shows (focus follows it when a row asks first).
         var key: String?
         var person: PanelPerson?
+        /// The Now playing card: ← and → skip, choosing it plays or pauses (NowPlaying.swift).
+        var track: NowPlayingTrack?
     }
 
     /// A share play's row as the quick menu shows it: what the Friends panel has, every control.
@@ -165,7 +167,7 @@ extension AppModel {
 
     /// The quick menu, as on Windows and Linux: Resume, Game Settings, the battery and heat
     /// profile's Undo while there is one, Broadcast and Share play for the game playing (while it
-    /// is shared, every one of its controls), Close.
+    /// is shared, every one of its controls), what Spotify or Music plays (Now playing), Close.
     func quickMenuRows() -> [QuickMenuRow] {
         var rows: [QuickMenuRow] = []
         func add(_ title: String, detail: String? = nil, symbol: String, destructive: Bool = false, run: (() -> Void)?) {
@@ -200,6 +202,10 @@ extension AppModel {
                 }
             }
         }
+        if let track = nowPlayingTrack {
+            rows.append(QuickMenuRow(id: rows.count, title: TH.text(.nowPlaying), detail: Self.nowPlayingLabel(track), symbol: "music.note",
+                                     run: { [weak self] in self?.nowPlayingCommand(.playPause) }, track: track))
+        }
         add(TH.text(.closeGame), symbol: "xmark.circle", destructive: true, run: { [weak self] in
             Sounds.shared.play(.select)
             self?.menuIndex = 0
@@ -231,7 +237,10 @@ extension AppModel {
             case .down: move(1, count: rows.count)
             case .left, .right:
                 let delta = command == .left ? -1 : 1
-                if rows.indices.contains(menuIndex), let control = rows[menuIndex].control {
+                if rows.indices.contains(menuIndex), rows[menuIndex].track != nil {
+                    // On the Now playing card: the track before, the track after.
+                    nowPlayingCommand(delta < 0 ? .previous : .next)
+                } else if rows.indices.contains(menuIndex), let control = rows[menuIndex].control {
                     change(control, by: delta)
                 } else {
                     move(delta, count: rows.count)
@@ -587,6 +596,7 @@ struct GameMenuCard: View {
         var disabled = false
         var value: String?
         var person: PanelPerson?
+        var track: NowPlayingTrack?
     }
 
     var body: some View {
@@ -808,11 +818,22 @@ struct GameMenuCard: View {
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         default:
-            return model.quickMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value, person: $0.person) }
+            return model.quickMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value, person: $0.person, track: $0.track) }
         }
     }
 
-    private func row(_ item: Item) -> some View {
+    /// A row of the menu, or the Now playing card in its place.
+    @ViewBuilder private func row(_ item: Item) -> some View {
+        if let track = item.track {
+            NowPlayingCard(track: track, focused: model.menuIndex == item.id, accent: model.accent,
+                           focus: { model.menuIndex = item.id }, command: { model.nowPlayingCommand($0) })
+                .hoverTick("menu-\(item.id)")
+        } else {
+            plainRow(item)
+        }
+    }
+
+    private func plainRow(_ item: Item) -> some View {
         let focused = model.menuIndex == item.id
         // Focused, a destructive item turns red rather than white: what X does here cannot be undone.
         let danger = focused && item.destructive

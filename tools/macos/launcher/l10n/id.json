@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Mainkan lagi dengan chunk yang hilang dianggap terpasang",
   "reportPlayGoInstalledDetailMac": "Hanya untuk permulaan ini. Dump tidak memiliki tabel chunk PlayGo, dan bagian game yang tidak ada mungkin gagal dimuat.",
   "engineNeedsNewerMac": "Mesin ini memerlukan macOS %1$@ atau yang lebih baru dan Mac ini memiliki macOS %2$@. Pilih mesin lain di Pengaturan › Mesin atau perbarui macOS.",
-  "engineGameNeedsNewerMac": "%1$@ dibuka dengan mesin yang memerlukan macOS %2$@ atau yang lebih baru dan Mac ini memiliki macOS %3$@. Pilih mesin lain untuknya di Pengaturan › Mesin lalu buka kuncinya lagi."
+  "engineGameNeedsNewerMac": "%1$@ dibuka dengan mesin yang memerlukan macOS %2$@ atau yang lebih baru dan Mac ini memiliki macOS %3$@. Pilih mesin lain untuknya di Pengaturan › Mesin lalu buka kuncinya lagi.",
+  "nowPlaying": "Sedang diputar",
+  "nowPlayingIn": "Sedang diputar di %@",
+  "nowPlayingPausedIn": "Dijeda di %@",
+  "nowPlayingPrevious": "Lagu sebelumnya",
+  "nowPlayingNext": "Lagu berikutnya",
+  "nowPlayingPlayPause": "Putar atau jeda",
+  "nowPlayingCard": "Sedang diputar di menu cepat",
+  "nowPlayingCardDetailMac": "Menampilkan apa yang diputar Spotify atau Musik di menu di atas game, dengan sebelumnya, putar atau jeda, dan berikutnya. macOS bertanya sekali untuk masing-masing apakah AnyPS5 boleh mengendalikannya. Pemutar lain tidak dapat dibaca di Mac.",
+  "nowPlayingDeniedMac": "macOS tidak mengizinkan AnyPS5 membaca Spotify atau Musik. Izinkan di Pengaturan Sistem, Privasi & Keamanan, Automasi, AnyPS5.",
+  "nowPlayingShare": "Tampilkan kepada teman apa yang saya dengarkan",
+  "nowPlayingShareDetail": "Teman di AnyTogether melihat judul dan artis selama diputar. Tidak ada yang dikirim selama ini nonaktif.",
+  "friendsListening": "Mendengarkan %@",
+  "friendsListeningBy": "Mendengarkan %1$@, %2$@"
 }

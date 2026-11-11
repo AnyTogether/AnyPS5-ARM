@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "Main semula dengan bahagian yang hilang dikira sebagai dipasang",
   "reportPlayGoInstalledDetailMac": "Untuk permulaan ini sahaja. Dump tiada jadual bahagian PlayGo, dan bahagian permainan yang tiada mungkin gagal dimuatkan.",
   "engineNeedsNewerMac": "Enjin ini memerlukan macOS %1$@ atau lebih baharu dan Mac ini mempunyai macOS %2$@. Pilih enjin lain dalam Tetapan › Enjin atau kemas kini macOS.",
-  "engineGameNeedsNewerMac": "%1$@ dibuka kunci dengan enjin yang memerlukan macOS %2$@ atau lebih baharu dan Mac ini mempunyai macOS %3$@. Pilih enjin lain untuknya dalam Tetapan › Enjin dan buka kuncinya semula."
+  "engineGameNeedsNewerMac": "%1$@ dibuka kunci dengan enjin yang memerlukan macOS %2$@ atau lebih baharu dan Mac ini mempunyai macOS %3$@. Pilih enjin lain untuknya dalam Tetapan › Enjin dan buka kuncinya semula.",
+  "nowPlaying": "Sedang dimainkan",
+  "nowPlayingIn": "Sedang dimainkan dalam %@",
+  "nowPlayingPausedIn": "Dijeda dalam %@",
+  "nowPlayingPrevious": "Lagu sebelumnya",
+  "nowPlayingNext": "Lagu seterusnya",
+  "nowPlayingPlayPause": "Main atau jeda",
+  "nowPlayingCard": "Sedang dimainkan dalam menu pantas",
+  "nowPlayingCardDetailMac": "Menunjukkan apa yang dimainkan oleh Spotify atau Muzik dalam menu di atas permainan, dengan sebelumnya, main atau jeda dan seterusnya. macOS bertanya sekali bagi setiap satu daripada dua itu sama ada AnyPS5 boleh mengawalnya. Pemain lain tidak boleh dibaca pada Mac.",
+  "nowPlayingDeniedMac": "macOS tidak membenarkan AnyPS5 membaca Spotify atau Muzik. Benarkannya dalam Tetapan Sistem, Privasi & Keselamatan, Automasi, AnyPS5.",
+  "nowPlayingShare": "Tunjukkan kepada rakan apa yang saya dengar",
+  "nowPlayingShareDetail": "Rakan di AnyTogether melihat tajuk dan artis semasa ia dimainkan. Tiada apa-apa dihantar semasa ini dimatikan.",
+  "friendsListening": "Mendengar %@",
+  "friendsListeningBy": "Mendengar %1$@, %2$@"
 }

@@ -4,5 +4,8 @@
 <dict>
     <!-- The microphone for voice in AnyTogether parties, under the hardened runtime. -->
     <key>com.apple.security.device.audio-input</key><true/>
+    <!-- Apple events to Spotify and Music for the Now playing card (NowPlaying.swift), under the
+         hardened runtime. macOS asks the user once for each of the two. -->
+    <key>com.apple.security.automation.apple-events</key><true/>
 </dict>
 </plist>

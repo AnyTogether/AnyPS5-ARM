@@ -2130,5 +2130,18 @@
   "reportPlayGoInstalledMac": "누락된 청크를 설치된 것으로 간주하고 다시 플레이",
   "reportPlayGoInstalledDetailMac": "이번 시작에만 적용됩니다. 덤프에 PlayGo 청크 표가 없으며 누락된 게임 부분은 로드되지 않을 수 있습니다.",
   "engineNeedsNewerMac": "이 엔진은 macOS %1$@ 이상이 필요하지만 이 Mac은 macOS %2$@입니다. '설정 › 엔진'에서 다른 엔진을 선택하거나 macOS를 업데이트하세요.",
-  "engineGameNeedsNewerMac": "%1$@은(는) macOS %2$@ 이상이 필요한 엔진으로 잠금 해제되었지만 이 Mac은 macOS %3$@입니다. '설정 › 엔진'에서 다른 엔진을 선택하고 다시 잠금 해제하세요."
+  "engineGameNeedsNewerMac": "%1$@은(는) macOS %2$@ 이상이 필요한 엔진으로 잠금 해제되었지만 이 Mac은 macOS %3$@입니다. '설정 › 엔진'에서 다른 엔진을 선택하고 다시 잠금 해제하세요.",
+  "nowPlaying": "지금 재생 중",
+  "nowPlayingIn": "%@에서 재생 중",
+  "nowPlayingPausedIn": "%@에서 일시 정지됨",
+  "nowPlayingPrevious": "이전 곡",
+  "nowPlayingNext": "다음 곡",
+  "nowPlayingPlayPause": "재생 또는 일시 정지",
+  "nowPlayingCard": "퀵 메뉴에 지금 재생 중인 곡 표시",
+  "nowPlayingCardDetailMac": "게임 위 메뉴에 Spotify 또는 음악에서 재생 중인 곡을 이전, 재생 또는 일시 정지, 다음 버튼과 함께 표시합니다. macOS는 두 앱 각각에 대해 AnyPS5가 제어해도 되는지 한 번씩 묻습니다. Mac에서는 다른 플레이어를 읽을 수 없습니다.",
+  "nowPlayingDeniedMac": "macOS가 AnyPS5의 Spotify 또는 음악 읽기를 허용하지 않습니다. 시스템 설정, 개인정보 보호 및 보안, 자동화, AnyPS5에서 허용하세요.",
+  "nowPlayingShare": "친구에게 내가 듣는 곡 표시",
+  "nowPlayingShareDetail": "재생되는 동안 AnyTogether 친구에게 제목과 아티스트가 표시됩니다. 꺼져 있는 동안에는 아무것도 전송되지 않습니다.",
+  "friendsListening": "%@ 듣는 중",
+  "friendsListeningBy": "%1$@, %2$@ 듣는 중"
 }
