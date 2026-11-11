@@ -83,8 +83,9 @@ final class TypingTests: XCTestCase {
         screen.click(NSPoint(x: box.minX - 60, y: box.midY))
         XCTAssertEqual(model.typingRow, "together-email", "a click on the row's name did not start typing")
         XCTAssertTrue(screen.typing, "a click on the row's name did not put the cursor in the field")
+        // A field entered this way has its text selected, as macOS does: typing writes over it.
         screen.type("b")
-        XCTAssertEqual(model.togetherEmail, "ab")
+        XCTAssertEqual(model.togetherEmail, "b")
     }
 
     func testUpFromAddProfilesCardsTypesTheNameAndBackGivesTheKeysBack() throws {
