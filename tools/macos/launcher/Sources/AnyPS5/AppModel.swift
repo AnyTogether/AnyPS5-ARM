@@ -217,6 +217,8 @@ enum Overlay: Equatable {
     case library
     case log
     case confirmUninstall
+    /// Game Settings › Delete game: the game's own files off the disk, asked first (HomeMenus.swift).
+    case confirmDeleteGame
     /// Play on a game an older toolkit made: update it first, or play it as it is.
     case updateChoice
     /// AnyTogether no longer answers this launcher's version: update (UpdateRequired.swift).
@@ -1339,14 +1341,16 @@ final class AppModel: ObservableObject {
         if libraryFolders != update.folders { libraryFolders = update.folders }
         // A game being uninstalled is not installed, whatever is left of it on the disk.
         let records = (generation == recordsGeneration ? scanned : AppModel.records(of: update.games, roots: update.roots)).filter { removals[$0.key] == nil }
-        let listingChanged = !GameLibrary.sameListing(games, update.games)
+        // A game being deleted stays out of the library until its files are gone or came back.
+        let found = deletions.isEmpty ? update.games : update.games.filter { deletions[$0.id] == nil }
+        let listingChanged = !GameLibrary.sameListing(games, found)
         if records.mapValues(\.toolkit) != installedRecords.mapValues(\.toolkit) || records.mapValues(\.date) != installedRecords.mapValues(\.date) {
             installedRecords = records
         }
         if listingChanged {
             let current = selectedGame?.id
             let focusedInLibrary = games.indices.contains(libraryIndex) ? games[libraryIndex].id : nil
-            games = update.games
+            games = found
             if let current, let index = games.firstIndex(where: { $0.id == current }) { selected = index } else { selected = min(selected, max(0, games.count - 1)) }
             if let focusedInLibrary, let index = games.firstIndex(where: { $0.id == focusedInLibrary }) { libraryIndex = index } else { libraryIndex = min(libraryIndex, max(0, games.count - 1)) }
         }
@@ -1920,17 +1924,174 @@ final class AppModel: ObservableObject {
     /// after, off the main thread, so the launcher keeps answering while a big game goes. A second
     /// Uninstall meanwhile does nothing, and an unlock of the game waits until its old files are
     /// gone.
-    func uninstall(_ game: Game) {
-        guard let root = root(of: game), removals[game.id] == nil else { return }
-        let going = Installer.setAside(game, root: root)
+    /// Delete game uninstalls too, from the games folder it knew (`given`), the places it read
+    /// while the dump was still there (`places`) and without the notice (`quiet`): it has its own.
+    func uninstall(_ game: Game, root given: URL? = nil, places: Installer.Places? = nil, quiet: Bool = false) {
+        guard let root = given ?? root(of: game), removals[game.id] == nil else { return }
+        let going = Installer.setAside(places ?? Installer.places(for: game, root: root), root: root)
         installedRecords[game.id] = nil
         recordsGeneration += 1
-        show(T.text(.uninstallDone), symbol: "trash")
+        if !quiet { show(T.text(.uninstallDone), symbol: "trash") }
         let id = game.id
         removals[id] = Task.detached(priority: .utility) {
             Installer.remove(going)
             await MainActor.run { self.removals[id] = nil }
         }
+    }
+
+    // MARK: Delete game
+
+    /// What the Delete game card asks, nil while it is closed.
+    @Published var deleteAsk: DeleteAsk?
+    /// The games being deleted, by id, until their files are gone or came back: out of the
+    /// library whatever a scan finds meanwhile.
+    private(set) var deletions: [String: Task<Void, Never>] = [:]
+    /// The Mac's Trash; the tests give one of their own, in a temporary folder.
+    var trashItem: @Sendable (URL) -> TrashResult = { GameDeletion.systemTrash($0) }
+    /// How what goes is measured for the card (off the main thread).
+    var deletionSize: @Sendable ([URL]) -> Int64 = { GameDeletion.size(of: $0) }
+
+    /// Why `game` cannot be deleted now, nil when it can: playing, being unlocked, or a file job
+    /// (an unpack, an update being copied in) at work.
+    func deleteBlock(_ game: Game) -> String? {
+        switch state(of: game) {
+        case .starting, .running, .stopping: return T.text(.closeGameFirst)
+        case .installing, .queued: return T.text(.gameBusyUpdating)
+        default: return gameFiles.working != nil ? TFiles.text(.filesBusy) : nil
+        }
+    }
+
+    /// What deleting `game` would take, or the refusal (GameDeletion.plan).
+    func deletionPlan(_ game: Game) throws -> DeletionPlan {
+        let folder = game.folder.standardizedFileURL.path
+        // A dump kept loose in a games folder is found in that folder itself.
+        guard let root = root(of: game) ?? libraryRoots.first(where: { $0.standardizedFileURL.path == folder }) else { throw DeletionRefusal.linkedElsewhere }
+        return try GameDeletion.plan(game, root: root, roots: libraryRoots, games: games)
+    }
+
+    static func refusalText(_ error: Error) -> String {
+        switch error as? DeletionRefusal {
+        case .libraryFolder: return T.text(.deleteGameRefusedFolder)
+        case .sharedFolder: return T.text(.deleteGameRefusedShared)
+        default: return T.text(.deleteGameRefusedLink)
+        }
+    }
+
+    /// Game Settings › Delete game: the card, or why not.
+    func askDeleteGame(_ game: Game) {
+        if let busy = deleteBlock(game) { return show(busy, symbol: "exclamationmark.triangle.fill") }
+        do {
+            askDelete(DeleteAsk(plan: try deletionPlan(game)))
+        } catch {
+            show(AppModel.refusalText(error), symbol: "exclamationmark.triangle.fill")
+        }
+    }
+
+    private func askDelete(_ ask: DeleteAsk) {
+        deleteAsk = ask
+        let items = ask.plan.items, measure = deletionSize
+        Task.detached(priority: .utility) {
+            let size = measure(items)
+            await MainActor.run {
+                if self.deleteAsk?.plan == ask.plan, self.deleteAsk?.permanent == ask.permanent { self.deleteAsk?.size = size }
+            }
+        }
+        // Cancel is where the focus starts.
+        menuIndex = 0
+        open(.confirmDeleteGame)
+    }
+
+    /// Cancel, Back, or esc on the card.
+    func cancelDeleteGame() {
+        deleteAsk = nil
+        closeOverlay()
+    }
+
+    /// The card's destructive answer. The game leaves the library at once; its files go after,
+    /// off the main thread, so the launcher keeps answering.
+    func confirmDeleteGame() {
+        guard let ask = deleteAsk else { return }
+        deleteAsk = nil
+        closeOverlay()
+        let game = ask.plan.game
+        // Started, or began unlocking, while the card was up.
+        if let busy = deleteBlock(game) { return show(busy, symbol: "exclamationmark.triangle.fill") }
+        guard deletions[game.id] == nil else { return }
+        // The library changed under the card (another games folder, a game copied into this
+        // one): what may go is decided again.
+        let plan: DeletionPlan
+        do {
+            plan = try deletionPlan(game)
+        } catch {
+            return show(AppModel.refusalText(error), symbol: "exclamationmark.triangle.fill")
+        }
+        // Where the installation is, read while the dump is there: its names hash the dump's path
+        // as it reads now.
+        let places = Installer.places(for: game, root: plan.root)
+        hide(game)
+        let trash = trashItem, permanent = ask.permanent
+        deletions[game.id] = Task.detached(priority: .userInitiated) {
+            let outcome = GameDeletion.run(plan, permanent: permanent, trash: trash)
+            await MainActor.run { self.deletionEnded(plan, places: places, permanent: permanent, outcome: outcome) }
+        }
+    }
+
+    private func deletionEnded(_ plan: DeletionPlan, places: Installer.Places, permanent: Bool, outcome: DeletionOutcome) {
+        let game = plan.game
+        deletions[game.id] = nil
+        switch outcome {
+        case .deleted(let left):
+            // The saves and trophies stay in the store; the rest of the installation goes as
+            // Uninstall takes it. Saves that cannot be moved keep the whole installation in
+            // place: nothing of the player's is lost.
+            if (try? Installer.keepSaves(places)) != nil { uninstall(game, root: plan.root, places: places, quiet: true) }
+            sizes[game.id] = nil
+            failures[game.id] = nil
+            trophies[game.id] = nil
+            trophiesRead.remove(game.id)
+            if libraryMonitor != nil { rescan() }
+            if !left.isEmpty {
+                show(T.format(.deleteGamePartly, game.name, left.map(\.lastPathComponent).joined(separator: ", ")), symbol: "exclamationmark.triangle.fill")
+            } else if permanent {
+                show(T.format(.deleteGameDoneForever, game.name), symbol: "trash")
+            } else {
+                show(T.format(.deleteGameDone, game.name, T.text(.trashMac)), symbol: "trash")
+            }
+        case .needsPermanent:
+            comeBack(game)
+            // Asked again, Cancel first: this time nothing can be put back.
+            guard overlay == nil, let again = try? deletionPlan(game) else {
+                return show(T.format(.deleteGameFailed, game.name, T.format(.deleteGameNoTrash, T.text(.trashMac))), symbol: "exclamationmark.triangle.fill")
+            }
+            askDelete(DeleteAsk(plan: again, permanent: true))
+        case .failed(let message):
+            comeBack(game)
+            show(T.format(.deleteGameFailed, game.name, message), symbol: "exclamationmark.triangle.fill")
+        }
+    }
+
+    /// `game` out of the library at once, before its files are gone: the selection stays where
+    /// it is, on the game that takes its place.
+    private func hide(_ game: Game) {
+        guard let index = games.firstIndex(of: game) else { return }
+        games.remove(at: index)
+        if selected > index { selected -= 1 }
+        selected = min(selected, max(0, games.count - 1))
+        if libraryIndex > index { libraryIndex -= 1 }
+        libraryIndex = min(libraryIndex, max(0, games.count - 1))
+    }
+
+    /// The files are still there: the tile comes back where the library's order has it,
+    /// selected when nothing is over the home screen.
+    private func comeBack(_ game: Game) {
+        if !games.contains(game) {
+            let index = games.firstIndex { $0.name.localizedCaseInsensitiveCompare(game.name) == .orderedDescending } ?? games.count
+            games.insert(game, at: index)
+            if selected >= index, games.count > 1 { selected += 1 }
+            if libraryIndex >= index, games.count > 1 { libraryIndex += 1 }
+        }
+        if overlay == nil, let index = games.firstIndex(of: game) { selected = index }
+        if libraryMonitor != nil { rescan() }
     }
 
     func clearShaderCache(_ game: Game) {

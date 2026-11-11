@@ -363,6 +363,16 @@ jobs:
           while read -r pattern _; do skips+=(--skip "$pattern"); done < <(grep -Ev '^(#|[[:space:]]*$)' "$GITHUB_WORKSPACE/.github/anytogether-ci/swift-test-skips.txt")
           echo "swift test ${skips[*]}"
           swift test "${skips[@]}"
+        env:
+          # Where the tests keep the screens they draw (FirstStartTests).
+          ANYPS5_TEST_SHOTS: ${{ runner.temp }}/launcher-shots
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: launcher-test-screens
+          path: ${{ runner.temp }}/launcher-shots
+          if-no-files-found: ignore
+          retention-days: 14
 
   # ---------------------------------------------------------------- phone app
 

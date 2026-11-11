@@ -59,36 +59,100 @@ private struct StepTitle: View {
     }
 }
 
+/// The language cards' rows: `columns` to a row (the step's arrows move along them), each card
+/// as wide and as tall as the space lets it be, up to 200 by 96, as on Windows and Linux.
+struct LanguageGrid: Equatable {
+    static let columns = 7
+
+    let rows: Int
+    let spacing: CGFloat
+    let runSpacing: CGFloat
+    let width: CGFloat
+    let height: CGFloat
+    let padding: CGFloat
+    /// A short card leaves the code out: the name is what a person looks for.
+    let withCode: Bool
+
+    init(count: Int, size: CGSize, scale: CGFloat) {
+        let columns = CGFloat(LanguageGrid.columns)
+        rows = max(1, (count + LanguageGrid.columns - 1) / LanguageGrid.columns)
+        spacing = 20 * scale
+        runSpacing = 18 * scale
+        width = max(0, min(200 * scale, (size.width - spacing * (columns - 1)) / columns))
+        // Room under the last row, so it does not run into the hint bar.
+        let room = size.height - 28 * scale
+        height = max(0, min(96 * scale, (room - runSpacing * CGFloat(rows - 1)) / CGFloat(rows)))
+        padding = (height >= 96 * scale ? 18 : 12) * scale
+        withCode = height >= 80 * scale
+    }
+
+    /// The cards of one row, by their place in the list.
+    func row(_ row: Int, count: Int) -> Range<Int> {
+        let first = min(count, row * LanguageGrid.columns)
+        return first..<min(count, first + LanguageGrid.columns)
+    }
+
+    /// Where an arrow takes the selection from `choice`; nil where there is nothing that way.
+    static func move(_ command: Command, from choice: Int, count: Int) -> Int? {
+        let next: Int
+        switch command {
+        case .left: next = choice - 1
+        case .right: next = choice + 1
+        case .up: next = choice - columns
+        case .down: next = choice + columns
+        default: return nil
+        }
+        return next >= 0 && next < count ? next : nil
+    }
+}
+
 private struct LanguageStep: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
     var body: some View {
+        let languages = Language.allCases
         VStack(alignment: .leading, spacing: 46 * scale) {
             StepTitle(title: T.text(.welcome), subtitle: T.text(.welcomeSubtitle))
             VStack(alignment: .leading, spacing: 16 * scale) {
-                Text(T.text(.chooseLanguage)).font(.display(14 * scale, .semibold)).textCase(.uppercase).tracking(0.8).foregroundStyle(.white.opacity(0.55))
-                HStack(spacing: 20 * scale) {
-                    ForEach(Array(Language.allCases.enumerated()), id: \.element) { index, language in
-                        let focused = model.onboardingChoice == index
-                        VStack(alignment: .leading, spacing: 10 * scale) {
-                            Text(language.code.uppercased()).font(.display(15 * scale, .bold)).opacity(0.6)
-                            Text(language.displayName).font(.display(28 * scale, .medium))
+                // In the language's own capitals (Turkish DİL, not DIL).
+                Text(T.text(.chooseLanguage).uppercased(with: T.locale)).font(.display(14 * scale, .semibold)).tracking(0.8).foregroundStyle(.white.opacity(0.55))
+                // The cards share the space the step has: every language is on the screen at once.
+                GeometryReader { proxy in
+                    let grid = LanguageGrid(count: languages.count, size: proxy.size, scale: scale)
+                    VStack(alignment: .leading, spacing: grid.runSpacing) {
+                        ForEach(0..<grid.rows, id: \.self) { row in
+                            HStack(spacing: grid.spacing) {
+                                ForEach(Array(grid.row(row, count: languages.count)), id: \.self) { index in
+                                    card(languages[index], index, grid)
+                                }
+                            }
                         }
-                        .foregroundStyle(focused ? Color.black : .white)
-                        .padding(26 * scale)
-                        .frame(width: 280 * scale, height: 150 * scale, alignment: .bottomLeading)
-                        .background(FocusFill(RoundedRectangle(cornerRadius: 20 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(0.1)))
-                        .overlay(RoundedRectangle(cornerRadius: 20 * scale, style: .continuous).strokeBorder(Color.white.opacity(focused ? 0 : 0.14)))
-                        .scaleEffect(focused ? 1.04 : 1)
-                        .shadow(color: .white.opacity(focused ? 0.3 : 0), radius: 20 * scale)
-                        .onTapGesture { model.onboardingChoice = index; model.onboardingConfirm() }
-                        .spokenButton(language.displayName, selected: focused) { model.onboardingChoice = index; model.onboardingConfirm() }
                     }
+                    .animation(Motion.focus, value: model.onboardingChoice)
                 }
-                .animation(Motion.focus, value: model.onboardingChoice)
             }
         }
+    }
+
+    private func card(_ language: Language, _ index: Int, _ grid: LanguageGrid) -> some View {
+        let focused = model.onboardingChoice == index
+        return VStack(alignment: .leading, spacing: 6 * scale) {
+            if grid.withCode { Text(language.code.uppercased()).font(.display(13 * scale, .bold)).opacity(0.6).lineLimit(1) }
+            // A long name (Bahasa Indonesia) is drawn smaller, never cut off.
+            Text(language.displayName).font(.display(22 * scale, .medium)).lineLimit(1).minimumScaleFactor(0.5)
+        }
+        .foregroundStyle(focused ? Color.black : .white)
+        .padding(grid.padding)
+        .frame(width: grid.width, height: grid.height, alignment: .bottomLeading)
+        .background(FocusFill(RoundedRectangle(cornerRadius: 20 * scale, style: .continuous), focused: focused, idle: Color.white.opacity(0.1)))
+        .overlay(RoundedRectangle(cornerRadius: 20 * scale, style: .continuous).strokeBorder(Color.white.opacity(focused ? 0 : 0.14)))
+        .scaleEffect(focused ? 1.04 : 1)
+        .shadow(color: .white.opacity(focused ? 0.3 : 0), radius: 20 * scale)
+        .zIndex(focused ? 1 : 0)
+        .contentShape(Rectangle())
+        .onTapGesture { model.onboardingChoice = index; model.onboardingConfirm() }
+        .spokenButton(language.displayName, selected: focused) { model.onboardingChoice = index; model.onboardingConfirm() }
     }
 }
 
@@ -110,6 +174,8 @@ private struct ThemeStep: View {
                             if let still = stills[theme] {
                                 Image(nsImage: still).resizable().aspectRatio(contentMode: .fill)
                             } else {
+                                // Paused, a card stands still on one frame (BackgroundView draws
+                                // it when the card gets its size).
                                 ThemeBackground(theme: theme, paused: !focused)
                             }
                         }
@@ -210,10 +276,10 @@ extension AppModel {
         if onboardingStep == 3 { return overlay == .signIn ? signInCommand(command) : modeChoiceCommand(command) }
         let count = onboardingStep == 0 ? Language.allCases.count : onboardingStep == 1 ? Theme.allCases.count : (preferences.libraryFolders.isEmpty ? 1 : 2)
         switch command {
-        case .left:
-            if onboardingChoice > 0 { onboardingChoice -= 1; previewChoice(); Sounds.shared.play(.move) }
-        case .right:
-            if onboardingChoice < count - 1 { onboardingChoice += 1; previewChoice(); Sounds.shared.play(.move) }
+        case .left, .right, .up, .down:
+            // The languages are rows of cards: up and down move a row there, and nowhere else.
+            guard onboardingStep == 0 || command == .left || command == .right else { break }
+            if let next = LanguageGrid.move(command, from: onboardingChoice, count: count) { onboardingChoice = next; previewChoice(); Sounds.shared.play(.move) }
         case .select:
             onboardingConfirm()
         case .back:
