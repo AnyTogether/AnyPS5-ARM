@@ -23,7 +23,7 @@ final class SlickFeedbackCoreTests: XCTestCase {
         XCTAssertTrue(BrowserPadAccess.deviceName(userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8)").hasSuffix(PhoneLabel.browserSuffix))
     }
 
-    func testTheCountriesAreTheServersAndNamedInTheLanguage() {
+    func testTheCountriesAreTheServersAndNamedInTheLanguage() throws {
         XCTAssertEqual(Countries.codes.count, 249)
         XCTAssertEqual(Set(Countries.codes).count, 249)
         XCTAssertTrue(Countries.codes.allSatisfy { $0.count == 2 && $0 == $0.uppercased() })
@@ -40,8 +40,10 @@ final class SlickFeedbackCoreTests: XCTestCase {
         XCTAssertEqual(all.count, 249)
         // In Turkish's own order: Ç after C, İ after I.
         let names = all.map(\.name)
-        XCTAssertLessThan(names.firstIndex(of: "Almanya")!, names.firstIndex(of: "Çin")!)
-        XCTAssertLessThan(names.firstIndex(of: "Çin")!, names.firstIndex(of: "Danimarka")!)
+        let germany = try XCTUnwrap(names.firstIndex(of: "Almanya")), denmark = try XCTUnwrap(names.firstIndex(of: "Danimarka"))
+        let cedilla = try XCTUnwrap(names.firstIndex { $0.hasPrefix("Ç") }, "a country whose Turkish name begins with Ç")
+        XCTAssertLessThan(germany, cedilla)
+        XCTAssertLessThan(cedilla, denmark)
     }
 
     func testASearchFindsACountryByNameWithoutAccentsOrCapitalsAndByCode() {
