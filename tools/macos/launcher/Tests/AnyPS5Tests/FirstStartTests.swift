@@ -34,6 +34,28 @@ final class FirstStartTests: XCTestCase {
         XCTAssertLessThanOrEqual(wanted.height, 900)
     }
 
+    /// The cards of every language fit the room the step has, at the window's usual size and
+    /// at its smallest.
+    func testTheLanguageCardsFitTheRoomTheyHave() {
+        for (size, scale) in [(CGSize(width: 1380, height: 430), CGFloat(1)), (CGSize(width: 938, height: 290), 0.68), (CGSize(width: 2000, height: 640), 1.45)] {
+            let grid = LanguageGrid(count: 28, size: size, scale: scale)
+            XCTAssertEqual(grid.rows, 4)
+            let columns = CGFloat(LanguageGrid.columns)
+            XCTAssertLessThanOrEqual(grid.width * columns + grid.spacing * (columns - 1), size.width + 0.01, "seven cards and their gaps fit the width")
+            XCTAssertLessThanOrEqual(grid.height * CGFloat(grid.rows) + grid.runSpacing * CGFloat(grid.rows - 1), size.height + 0.01, "the rows fit the height")
+            XCTAssertLessThanOrEqual(grid.width, 200 * scale)
+            XCTAssertLessThanOrEqual(grid.height, 96 * scale)
+            XCTAssertGreaterThan(grid.height, 40 * scale, "a card tall enough for a name")
+            XCTAssertEqual((0..<grid.rows).flatMap { Array(grid.row($0, count: 28)) }, Array(0..<28), "every language has its card, once")
+        }
+        XCTAssertEqual(LanguageGrid(count: 2, size: CGSize(width: 1380, height: 430), scale: 1).rows, 1)
+        XCTAssertEqual(LanguageGrid(count: 2, size: CGSize(width: 1380, height: 430), scale: 1).height, 96, "few languages: the card at its full size")
+        XCTAssertEqual(LanguageGrid.move(.down, from: 3, count: 28), 10)
+        XCTAssertNil(LanguageGrid.move(.down, from: 24, count: 28))
+        XCTAssertNil(LanguageGrid.move(.left, from: 0, count: 28))
+        XCTAssertEqual(LanguageGrid.move(.right, from: 6, count: 28), 7, "right at a row's end goes on to the next row")
+    }
+
     func testTheThemeStepFitsTheWindow() throws {
         let model = try fresh()
         model.onboardingStep = 1

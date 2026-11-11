@@ -75,23 +75,44 @@ final class BackgroundView: MTKView, MTKViewDelegate {
     func configure(theme: Theme, palette: (SIMD3<Float>, SIMD3<Float>, SIMD3<Float>)? = nil, paused: Bool, speed: Float) {
         self.theme = theme
         let wanted = palette ?? theme.palette
+        // A paused background shows the new theme and the new colors too.
+        var changed = theme != shown
         if wanted != self.palette {
             self.palette = wanted
-            // A paused background shows the new colors too.
-            if isPaused { needsDisplay = true }
+            changed = true
         }
         self.speed = speed
         if isPaused != paused {
             isPaused = paused
             last = CACurrentMediaTime()
-            if paused { needsDisplay = true }
+            changed = true
         }
+        if changed { drawStill() }
     }
 
     override func layout() {
         super.layout()
         let scale = (window?.backingScaleFactor ?? 2) * 0.5
         drawableSize = CGSize(width: max(1, bounds.width * scale), height: max(1, bounds.height * scale))
+        // A view made paused (a theme card that is not the selected one) has drawn nothing yet,
+        // and a paused one is not drawn again at its new size.
+        drawStill()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { needsLayout = true }
+    }
+
+    /// The theme the last frame was drawn in.
+    private var shown: Theme?
+
+    /// One frame of what a paused view shows now. Paused, the view draws only when it is told
+    /// to (it does not follow needsDisplay), so every change that a moving view would pick up
+    /// with its next frame is drawn here: the first size, another size, other colors.
+    private func drawStill() {
+        guard isPaused, window != nil, bounds.width >= 1, bounds.height >= 1 else { return }
+        draw()
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
@@ -111,6 +132,7 @@ final class BackgroundView: MTKView, MTKViewDelegate {
         commands.commit()
         frames += 1
         drawnSize = drawableSize
+        shown = theme
     }
 
     /// The GPU time of one frame of a theme at a drawable size, averaged over `frames` (the
