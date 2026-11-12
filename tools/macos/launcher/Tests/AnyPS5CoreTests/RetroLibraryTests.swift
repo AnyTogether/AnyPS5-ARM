@@ -299,7 +299,8 @@ final class RetroLibraryTests: XCTestCase {
         let executable = try write(Data(), "MacOS/PCSX2", in: app)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
         let program = try XCTUnwrap(StandaloneEmulator.executable(of: app.deletingLastPathComponent()))
-        XCTAssertEqual(program.resolvingSymlinksInPath().path, app.appendingPathComponent("MacOS/PCSX2").path, "the bundle's CFBundleExecutable, whatever the bundle is called")
+        // Both written the same way: the bundle may give its path without /private.
+        XCTAssertEqual(program.resolvingSymlinksInPath().path, app.appendingPathComponent("MacOS/PCSX2").resolvingSymlinksInPath().path, "the bundle's CFBundleExecutable, whatever the bundle is called")
         let binary = try write(Data(), "duckstation")
         XCTAssertEqual(StandaloneEmulator.executable(of: binary), binary, "a program picked as it is")
         XCTAssertNil(StandaloneEmulator.executable(of: try folder("Not an app")))

@@ -216,7 +216,10 @@ final class EmulatorGamesTests: XCTestCase {
             try await settle({ model.emulator != nil }, "\(platform) plays")
             let call = try XCTUnwrap(starts.calls.first)
             XCTAssertEqual(call.program.resolvingSymlinksInPath().path, program.resolvingSymlinksInPath().path, "the bundle's own program")
-            XCTAssertEqual(call.arguments, platform == .ps3 ? ["--no-gui", boot.path] : ["-nogui", "--", boot.path])
+            // The temporary folder is listed through /private: both written the same way.
+            let real = { (path: String) in path.hasPrefix("/") ? URL(fileURLWithPath: path).resolvingSymlinksInPath().path : path }
+            let bootPath = real(boot.path)
+            XCTAssertEqual(call.arguments.map(real), platform == .ps3 ? ["--no-gui", bootPath] : ["-nogui", "--", bootPath])
             XCTAssertNotNil(model.preferences.lastPlayed[game.id])
             XCTAssertEqual(model.state(of: game), .running)
             XCTAssertNil(model.running, "the PS5 game's slot, which presence, Discord and sessions follow, stays empty")
