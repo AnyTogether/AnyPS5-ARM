@@ -161,11 +161,11 @@ struct RetroFolderTile: View {
             Text(console.label)
                 .font(.display(size * 0.24, .semibold))
                 .tracking(size * 0.008)
-                .foregroundStyle(.white)
+                .foregroundStyle(model.accent)
                 .offset(y: -size * 0.06)
             Image(systemName: "chevron.down")
                 .font(.system(size: size * 0.11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.7))
+                .foregroundStyle(model.accent)
                 .offset(y: size * 0.33)
             if look.glass {
                 LinearGradient(stops: [.init(color: .white.opacity(focused ? 0.2 : 0.12), location: 0), .init(color: .white.opacity(0), location: 0.42)], startPoint: .topLeading, endPoint: .bottomTrailing)
