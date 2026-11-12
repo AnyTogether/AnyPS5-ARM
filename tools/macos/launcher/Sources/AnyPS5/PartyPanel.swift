@@ -138,7 +138,7 @@ extension AppModel {
     }
 
     /// The game a public party or share play is about: the one running, else the one selected.
-    var listingGame: Game? { running?.game ?? selectedGame }
+    var listingGame: Game? { running?.game ?? selectedPS5Game }
 
     /// Listing the party in public: off, anyone may ask, anyone may walk in; its game and language.
     func partyListingRows(_ party: TogetherParty) -> [PanelRow] {

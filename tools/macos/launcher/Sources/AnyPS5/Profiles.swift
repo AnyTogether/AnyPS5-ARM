@@ -91,7 +91,7 @@ extension AppModel {
 
     /// Why the switch cannot happen now, told; nil when it can.
     func switchRefusal(to id: String) -> ProfileSwitch.Refusal? {
-        ProfileSwitch.check(to: id, in: profiles.book, running: running?.game.name, starting: starting?.name, syncing: syncing != nil)
+        ProfileSwitch.check(to: id, in: profiles.book, running: playingGame?.name, starting: starting?.name, syncing: syncing != nil)
     }
 
     func tell(_ refusal: ProfileSwitch.Refusal) {
@@ -177,7 +177,7 @@ extension AppModel {
     /// it has no session): never while a game plays.
     func toggleProfileMode() {
         guard let profile = currentProfile else { return }
-        if let refusal = ProfileSwitch.checkModeChange(running: running?.game.name, starting: starting?.name) { return tell(refusal) }
+        if let refusal = ProfileSwitch.checkModeChange(running: playingGame?.name, starting: starting?.name) { return tell(refusal) }
         withAnimation(Motion.overlay) { overlay = nil }
         if profile.mode == .online {
             disconnectTogether()
@@ -211,7 +211,7 @@ extension AppModel {
     /// A new profile that signs in: its own session from the start, the profile playing kept
     /// for Cancel.
     func beginOnlineProfile() {
-        if let refusal = ProfileSwitch.checkModeChange(running: running?.game.name, starting: starting?.name) { return tell(refusal) }
+        if let refusal = ProfileSwitch.checkModeChange(running: playingGame?.name, starting: starting?.name) { return tell(refusal) }
         let first = profiles.book.profiles.isEmpty
         if !first {
             keepPersonalSettings()
@@ -306,7 +306,7 @@ extension AppModel {
     // MARK: Adding
 
     func openAddProfile() {
-        if let refusal = ProfileSwitch.checkModeChange(running: running?.game.name, starting: starting?.name) { return tell(refusal) }
+        if let refusal = ProfileSwitch.checkModeChange(running: playingGame?.name, starting: starting?.name) { return tell(refusal) }
         profileFlow.modeChoice = 0
         profileFlow.name = TPro.format(.playerNumber, profiles.book.profiles.count + 1)
         profileFlow.origin = .adding
@@ -324,7 +324,7 @@ extension AppModel {
             profilesChanged()
             return finishOnboarding()
         }
-        if let refusal = ProfileSwitch.checkModeChange(running: running?.game.name, starting: starting?.name) { return tell(refusal) }
+        if let refusal = ProfileSwitch.checkModeChange(running: playingGame?.name, starting: starting?.name) { return tell(refusal) }
         let profile = profiles.add(name: name, mode: .offline)
         profilesChanged()
         switchProfile(to: profile.id)
@@ -374,7 +374,7 @@ extension AppModel {
     // MARK: The picker
 
     func openProfilePicker(atLaunch: Bool = false) {
-        if !atLaunch, let refusal = ProfileSwitch.checkModeChange(running: running?.game.name, starting: starting?.name) { return tell(refusal) }
+        if !atLaunch, let refusal = ProfileSwitch.checkModeChange(running: playingGame?.name, starting: starting?.name) { return tell(refusal) }
         profileFlow.atLaunch = atLaunch
         profileFlow.pickerIndex = 0
         menuIndex = 0
@@ -517,7 +517,7 @@ extension AppModel {
     /// session ends on the server too.
     func deleteProfile(_ id: String) {
         guard let profile = profiles.profile(id) else { return }
-        if let refusal = ProfileSwitch.checkModeChange(running: running?.game.name, starting: starting?.name) { return tell(refusal) }
+        if let refusal = ProfileSwitch.checkModeChange(running: playingGame?.name, starting: starting?.name) { return tell(refusal) }
         if persists, let owner = profiles.book.legacyOwner {
             for game in games {
                 guard let folder = gameFolder(game) else { continue }

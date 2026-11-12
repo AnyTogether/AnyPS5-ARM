@@ -305,6 +305,8 @@ extension AppModel {
             PanelRow(id: "prepare", title: TPrep.text(.prepareNewGames), detail: TPrep.text(.prepareNewGamesDetail), symbol: "arrow.down.circle",
                      kind: .toggle(preparesNewGames) { [weak self] value in self?.preferences.prepareNewGames = value ? nil : false }),
             PanelRow(id: "clones", title: T.text(.installedSize), kind: .info("")),
+            // Emulator games, the library's last row, as on Windows and Linux.
+            retroLibraryRow(),
         ]
 
         let language = PanelRow(id: "language", title: T.text(.language), symbol: "globe", kind: .choice(options: Language.allCases.map(\.displayName), selected: Language.allCases.firstIndex(of: preferences.language) ?? 0) { [weak self] index in
@@ -443,7 +445,7 @@ extension AppModel {
         }
         if phoneServerOn { advanced += browserPlayRows() }
 
-        return [
+        var categories = [
             PanelCategory(id: "profiles", title: TPro.text(.profilesCategory), symbol: "person.crop.circle", rows: profileRows()),
             PanelCategory(id: "appearance", title: T.text(.appearance), symbol: "paintbrush", rows: appearance),
             PanelCategory(id: "library", title: T.text(.storage), symbol: "square.grid.2x2", rows: library),
@@ -463,9 +465,14 @@ extension AppModel {
             PanelCategory(id: "fonts", title: TF.text(.title), symbol: "textformat", rows: fontRows()),
             PanelCategory(id: "about", title: T.text(.about), symbol: "info.circle", rows: about),
         ]
+        // Settings › Emulators while Emulator games is on, before About, as on Windows and Linux.
+        if listsRetroGames { categories.insert(standaloneEmulatorSettings(), at: categories.count - 1) }
+        return categories
     }
 
     private func gameRows(_ game: Game) -> [PanelRow] {
+        // A disc has its emulator and its log, nothing of a PS5 game's.
+        if let disc = game.retro { return retroGameRows(game, disc) }
         let settings = settings(for: game)
         // The game playing can be broadcast from here (BroadcastPanel.swift).
         var rows: [PanelRow] = broadcastGameRows(game)

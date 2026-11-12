@@ -270,7 +270,7 @@ extension AppModel {
         let filter = discover.filter
         // The game filter: all, the selected game, then games with open posts.
         var titles: [(String?, String)] = [(nil, FP.text(.allGames))]
-        if let game = selectedGame { titles.append((game.titleID, game.name)) }
+        if let game = selectedPS5Game { titles.append((game.titleID, game.name)) }
         for game in discover.games where !titles.contains(where: { $0.0 == game.titleId }) {
             titles.append((game.titleId, "\(games.first { $0.titleID == game.titleId }?.name ?? game.name(in: lang)) (\(game.posts))"))
         }
@@ -293,7 +293,7 @@ extension AppModel {
             PanelRow(id: "lfg-now", title: FP.text(.startingSoon), detail: FP.text(.startingSoonDetail), symbol: "clock",
                      kind: .toggle(filter.now) { [weak self] value in self?.setBoardFilter { $0.now = value } }),
         ]
-        if let game = filter.titleId.map({ ($0, gameName($0)) }) ?? selectedGame.map({ ($0.titleID, $0.name) }) {
+        if let game = filter.titleId.map({ ($0, gameName($0)) }) ?? selectedPS5Game.map({ ($0.titleID, $0.name) }) {
             rows.append(PanelRow(id: "lfg-post", title: FP.format(.findFor, game.1), detail: FP.text(.findForDetail), symbol: "plus.bubble",
                                  kind: .action(destructive: false) { [weak self] in self?.openLfgPost(titleId: game.0, name: game.1) }))
             rows.append(PanelRow(id: "lfg-hub", title: FP.format(.hubOf, game.1), detail: FP.text(.hubDetail), symbol: "square.grid.3x1.below.line.grid.1x2",
@@ -318,7 +318,7 @@ extension AppModel {
     func myPostRows() -> [PanelRow] {
         var rows: [PanelRow] = []
         let open = discover.mine.filter { $0.isOpen() }
-        if let game = selectedGame, open.count < 3 {
+        if let game = selectedPS5Game, open.count < 3 {
             rows.append(PanelRow(id: "mine-post", title: FP.format(.findFor, game.name), detail: FP.text(.findForDetail), symbol: "plus.bubble",
                                  kind: .action(destructive: false) { [weak self] in self?.openLfgPost(titleId: game.titleID, name: game.name) }))
         }

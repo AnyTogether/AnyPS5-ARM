@@ -36,7 +36,8 @@ final class ThemeMusic {
     func play(_ game: Game?, fallback: URL? = nil) {
         let song: (id: String, url: URL, atrac9: Bool)?
         if let game, let music = game.music {
-            song = (game.id, music, true)
+            // A disc's song is a file AVFoundation reads (retro.json's music), not a dump's ATRAC9.
+            song = (game.id, music, game.retro == nil)
         } else {
             song = fallback.map { ("theme:" + $0.path, $0, false) }
         }

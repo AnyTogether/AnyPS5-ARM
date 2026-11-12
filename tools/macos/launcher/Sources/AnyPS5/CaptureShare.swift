@@ -91,7 +91,7 @@ extension AppModel {
         captures.stage = .idle
         captures.clipCheck = nil
         captures.clipMs = nil
-        withAnimation(Motion.overlay) { captures.draft = TogetherPostDraft(titleId: selectedGame?.titleID ?? AppModel.titleId(of: shot)) }
+        withAnimation(Motion.overlay) { captures.draft = TogetherPostDraft(titleId: selectedPS5Game?.titleID ?? AppModel.titleId(of: shot)) }
         Sounds.shared.play(.select)
         if Screenshots.isClip(shot) { checkClip(shot) }
     }
@@ -243,7 +243,7 @@ extension AppModel {
 
     func previewPostDraft(caption: String = "", visibility: TogetherPostVisibility = .friends, row: CapturesState.DraftRow = .caption,
                           clipMs: Int? = nil, check: TogetherClipCheck? = nil, stage: CapturesState.Stage = .idle) {
-        captures.draft = TogetherPostDraft(caption: caption, visibility: visibility, titleId: selectedGame?.titleID)
+        captures.draft = TogetherPostDraft(caption: caption, visibility: visibility, titleId: selectedPS5Game?.titleID)
         captures.draftFile = galleryShots.indices.contains(galleryIndex) ? galleryShots[galleryIndex] : nil
         captures.draftRow = row
         captures.clipMs = clipMs

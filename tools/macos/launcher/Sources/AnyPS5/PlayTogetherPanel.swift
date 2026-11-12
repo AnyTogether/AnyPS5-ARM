@@ -13,7 +13,7 @@ extension AppModel {
 
     /// This Mac's copies of every game, for the join check.
     func togetherCopies() -> [PlayTogetherCheck.Copy] {
-        games.map { game in
+        games.filter { $0.retro == nil }.map { game in
             let unlocked = installedRecords[game.id] != nil
             let current = engineBuild(for: game)
             let next = engineVersion(for: game).map(TogetherGameSession.engineBuild)
@@ -36,8 +36,8 @@ extension AppModel {
     /// A copy made by another engine than the one at hand is rebuilt first, so the session
     /// carries the build the party's up-to-date launchers have.
     func startPlayTogether(_ game: Game) {
-        guard togetherUser != nil, party != nil else { return }
-        if let running { return show(PT.format(.closeFirst, running.game.name), symbol: "xmark.app") }
+        guard togetherUser != nil, party != nil, game.retro == nil else { return }
+        if let playing = playingGame { return show(PT.format(.closeFirst, playing.name), symbol: "xmark.app") }
         guard case .installed = state(of: game) else { return show(T.format(.gameUnlockFirst, game.name), symbol: "lock.fill") }
         rebuildFirst(game) { [weak self] in self?.hostPlayTogether(game) }
     }
@@ -84,7 +84,7 @@ extension AppModel {
     /// Join from the party or the offer: the check first, then the game in the same session. After
     /// Try anyway the check looks past the game version (never the engine).
     func joinPlayTogether(_ offer: PlayTogetherOffer, afterUnlock: Bool = false) {
-        let verdict = PlayTogetherCheck.verdict(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: running?.game.name,
+        let verdict = PlayTogetherCheck.verdict(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: playingGame?.name,
                                                 overrideVersion: togetherTryAnyway.contains(offer.sessionId))
         switch verdict {
         case .join(let id):
@@ -124,9 +124,9 @@ extension AppModel {
 
     /// Only the game version keeps this Mac out, here or as the server said.
     func canTryAnyway(_ offer: PlayTogetherOffer) -> Bool {
-        if PlayTogetherCheck.tryAnyway(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: running?.game.name) != nil { return true }
+        if PlayTogetherCheck.tryAnyway(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: playingGame?.name) != nil { return true }
         guard togetherVersionRefused.contains(offer.sessionId) else { return false }
-        switch PlayTogetherCheck.verdict(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: running?.game.name, overrideVersion: true) {
+        switch PlayTogetherCheck.verdict(offer, signedIn: togetherUser != nil, copies: togetherCopies(), running: playingGame?.name, overrideVersion: true) {
         case .join, .unlockAndPlay, .updateAndPlay: return true
         default: return false
         }
@@ -258,7 +258,7 @@ extension AppModel {
         // A party is not a game session: said once, over whatever Play Together shows.
         let about = PanelRow(id: "together-about", title: PT.text(.pickGame), detail: PT.text(.about), symbol: "info.circle", kind: .info(""), wraps: true)
         guard let together = party.together else {
-            guard let game = selectedGame, running == nil else {
+            guard let game = selectedPS5Game, running == nil, emulator == nil else {
                 return [PanelRow(id: "together-pick", title: PT.text(.pickGame), detail: PT.text(.about) + "\n" + PT.text(.pickGameDetail), symbol: "person.2.wave.2", kind: .info(""), wraps: true)]
             }
             return [about, PanelRow(id: "together-start", title: PT.format(.start, game.name), detail: PT.text(.startDetail), symbol: "person.2.wave.2.fill",
@@ -283,7 +283,7 @@ extension AppModel {
                                  kind: .info(""), person: identity == nil ? PanelPerson(name: person.displayName, avatar: person.avatar, status: .playing) : panelPerson(person, status: .playing)))
         }
         if !mine {
-            let verdict = PlayTogetherCheck.verdict(offer, signedIn: true, copies: togetherCopies(), running: running?.game.name)
+            let verdict = PlayTogetherCheck.verdict(offer, signedIn: true, copies: togetherCopies(), running: playingGame?.name)
             let title: String
             switch verdict {
             case .unlockAndPlay: title = PT.text(.unlockAndPlay)

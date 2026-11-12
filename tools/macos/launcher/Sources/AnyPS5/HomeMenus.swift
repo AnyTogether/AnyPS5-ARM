@@ -23,7 +23,7 @@ extension AppModel {
         case .home:
             if hold { homeButton(hold: true) } else { _ = handle(.home) }
         case .quickMenu:
-            guard running != nil, starting == nil, pairing == nil else { return }
+            guard running != nil || emulator != nil, starting == nil, pairing == nil else { return }
             if NSApp.isActive && overlay == .quickMenu { resumeGame() } else if !NSApp.isActive { openGameMenu(.quickMenu) }
         case .screenshot:
             takeScreenshot()
@@ -49,7 +49,7 @@ extension AppModel {
         }
         let now = Date()
         if let last = lastHome, now.timeIntervalSince(last) < Self.toggleDebounce, now >= last { return }
-        if running != nil, !NSApp.isActive {
+        if running != nil || emulator != nil, !NSApp.isActive {
             lastHome = now
             return openGameMenu(hold ? .closeGame : .quickMenu)
         }
@@ -72,11 +72,12 @@ extension AppModel {
     /// the game first (with the setting on and a way in, GamePause), while the game still has
     /// the screen to see it.
     func openGameMenu(_ next: Overlay) {
-        guard running != nil, starting == nil else { return }
-        let settle = next == .quickMenu ? pauseGame() : nil
+        guard running != nil || emulator != nil, starting == nil else { return }
+        // An emulator takes no Options press from the launcher: its game is not paused.
+        let settle = next == .quickMenu && running != nil ? pauseGame() : nil
         let paused = settle != nil
         let show = { [weak self] in
-            guard let self, let game = self.running?.game else { return }
+            guard let self, let game = self.playingGame else { return }
             if let index = self.games.firstIndex(where: { $0.id == game.id }) { self.selected = index }
             self.pausedGame = paused
             self.menuIndex = 0
@@ -95,11 +96,10 @@ extension AppModel {
     func resumeGame() {
         pausedGame = false
         withAnimation(Motion.overlay) { overlay = nil }
-        guard let running else { return }
+        guard running != nil || emulator != nil else { return }
         Sounds.shared.play(.select)
         lastHome = Date()
-        NSApp.yieldActivation(to: running.app)
-        running.app.activate()
+        giveGameFront()
     }
 
     /// Close Game from the quick menu or its question, as on Windows and Linux: the game is
@@ -115,6 +115,9 @@ extension AppModel {
     func quitApp() {
         if let running {
             running.app.forceTerminate()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { NSApp.terminate(nil) }
+        } else if emulator != nil {
+            endEmulatorNow()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { NSApp.terminate(nil) }
         } else {
             NSApp.terminate(nil)
@@ -1017,7 +1020,7 @@ struct GameMenuCard: View {
 
 extension AppModel {
     /// The game playing, whichever game the home screen has selected.
-    var runningGame: Game? { running?.game }
+    var runningGame: Game? { playingGame }
 }
 
 extension AppModel {

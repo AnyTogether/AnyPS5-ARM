@@ -28,6 +28,8 @@ extension AppModel {
             closeProfileSwitcher()
             return true
         }
+        // A console's folder open on Home closes first.
+        if preferences.onboarded, overlay == nil, focus == .tiles, pairing == nil, ringing == nil, starting == nil, closeHomeFolder() { return true }
         guard preferences.onboarded, overlay == nil, focus == .tiles, pairing == nil, ringing == nil, starting == nil, fontWait == nil, shareWatch == nil else { return false }
         forwardStep = nil
         menuIndex = 0
