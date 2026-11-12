@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether tidak dapat melakukannya (%@).",
   "phoneBrowserName": "Pelayar %@",
   "phoneBrowserGeneric": "Pelayar telefon",
-  "phoneRemoveOnline": "Disambungkan sekarang, pilih untuk membuang"
+  "phoneRemoveOnline": "Disambungkan sekarang, pilih untuk membuang",
+  "retroEmulators": "Emulator",
+  "retroGames": "Permainan %@",
+  "retroSelectExecutable": "Pilih fail boleh laku %@",
+  "retroChooseExecutable": "Pilih fail boleh laku yang dipasang",
+  "retroEmulatorPickerFailed": "Tidak dapat membuka pemilih fail emulator",
+  "retroChooseEmulator": "Pilih emulator",
+  "retroEmulatorNeeded": "Memerlukan emulator",
+  "retroShowFolders": "Tunjukkan sebagai folder",
+  "retroDiscMoved": "Fail permainan tiada. Letakkannya semula atau imbas pustaka sekali lagi.",
+  "retroEmulatorStartFailed": "Tidak dapat memulakan %@",
+  "retroEmulatorExited": "%@ ditutup dengan kod keluar %d",
+  "retroLibrary": "Permainan emulator",
+  "retroLibraryDetail": "Menunjukkan permainan PS1, PS2 dan PS3 dalam folder permainan anda dan memainkannya dalam emulator yang telah anda pasang."
 }

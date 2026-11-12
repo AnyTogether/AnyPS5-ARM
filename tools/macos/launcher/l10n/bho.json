@@ -2188,5 +2188,18 @@
   "togetherErrorOther": "AnyTogether ई ना कर सकल (%@)।",
   "phoneBrowserName": "%@ ब्राउज़र",
   "phoneBrowserGeneric": "फोन ब्राउज़र",
-  "phoneRemoveOnline": "अबहीं जुड़ल बा, हटावे खातिर चुनीं"
+  "phoneRemoveOnline": "अबहीं जुड़ल बा, हटावे खातिर चुनीं",
+  "retroEmulators": "एमुलेटर",
+  "retroGames": "%@ गेम",
+  "retroSelectExecutable": "%@ के executable फाइल चुनीं",
+  "retroChooseExecutable": "इंस्टॉल कइल executable फाइल चुनीं",
+  "retroEmulatorPickerFailed": "एमुलेटर के फाइल चुने वाला ना खुल पावल",
+  "retroChooseEmulator": "एमुलेटर चुनीं",
+  "retroEmulatorNeeded": "एमुलेटर जरूरी बा",
+  "retroShowFolders": "फोल्डर के रूप में देखाईं",
+  "retroDiscMoved": "गेम फाइल ना मिलल। ओकरा के वापस रखीं भा लाइब्रेरी फेर से स्कैन करीं।",
+  "retroEmulatorStartFailed": "%@ शुरू ना हो पावल",
+  "retroEmulatorExited": "%@ एग्जिट कोड %d के साथे बंद हो गइल",
+  "retroLibrary": "एमुलेटर गेम",
+  "retroLibraryDetail": "राउर गेम फोल्डर में PS1, PS2 आ PS3 गेम देखावेला आ ओह के राउर इंस्टॉल कइल एमुलेटर में चलावेला।"
 }

@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether n’a pas pu faire cela (%@).",
   "phoneBrowserName": "Navigateur %@",
   "phoneBrowserGeneric": "Navigateur du téléphone",
-  "phoneRemoveOnline": "Connecté en ce moment, sélectionnez pour supprimer"
+  "phoneRemoveOnline": "Connecté en ce moment, sélectionnez pour supprimer",
+  "retroEmulators": "Émulateurs",
+  "retroGames": "Jeux %@",
+  "retroSelectExecutable": "Sélectionnez l’exécutable de %@",
+  "retroChooseExecutable": "Choisir un exécutable installé",
+  "retroEmulatorPickerFailed": "Impossible d’ouvrir le sélecteur de fichiers de l’émulateur",
+  "retroChooseEmulator": "Choisir l’émulateur",
+  "retroEmulatorNeeded": "Émulateur requis",
+  "retroShowFolders": "Afficher en dossiers",
+  "retroDiscMoved": "Le fichier du jeu est introuvable. Remettez-le en place ou analysez de nouveau la bibliothèque.",
+  "retroEmulatorStartFailed": "Impossible de lancer %@",
+  "retroEmulatorExited": "%@ s’est fermé avec le code de sortie %d",
+  "retroLibrary": "Jeux d’émulateur",
+  "retroLibraryDetail": "Affiche les jeux PS1, PS2 et PS3 de vos dossiers de jeux et les lance dans un émulateur que vous avez installé."
 }

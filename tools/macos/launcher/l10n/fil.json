@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "Hindi iyon nagawa ng AnyTogether (%@).",
   "phoneBrowserName": "%@ browser",
   "phoneBrowserGeneric": "Browser ng telepono",
-  "phoneRemoveOnline": "Konektado ngayon, piliin para alisin"
+  "phoneRemoveOnline": "Konektado ngayon, piliin para alisin",
+  "retroEmulators": "Mga emulator",
+  "retroGames": "Mga laro ng %@",
+  "retroSelectExecutable": "Piliin ang executable ng %@",
+  "retroChooseExecutable": "Pumili ng naka-install na executable",
+  "retroEmulatorPickerFailed": "Hindi mabuksan ang file picker ng emulator",
+  "retroChooseEmulator": "Pumili ng emulator",
+  "retroEmulatorNeeded": "Kailangan ng emulator",
+  "retroShowFolders": "Ipakita bilang mga folder",
+  "retroDiscMoved": "Nawawala ang file ng laro. Ibalik ito o i-scan muli ang library.",
+  "retroEmulatorStartFailed": "Hindi masimulan ang %@",
+  "retroEmulatorExited": "Nagsara ang %@ na may exit code na %d",
+  "retroLibrary": "Mga laro sa emulator",
+  "retroLibraryDetail": "Ipinapakita ang mga larong PS1, PS2 at PS3 sa iyong mga folder ng laro at nilalaro ang mga ito sa emulator na na-install mo."
 }

@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether はそれを実行できませんでした (%@)。",
   "phoneBrowserName": "%@ ブラウザ",
   "phoneBrowserGeneric": "スマートフォンのブラウザ",
-  "phoneRemoveOnline": "接続中です。選択すると削除します"
+  "phoneRemoveOnline": "接続中です。選択すると削除します",
+  "retroEmulators": "エミュレーター",
+  "retroGames": "%@ のゲーム",
+  "retroSelectExecutable": "%@ の実行ファイルを選択",
+  "retroChooseExecutable": "インストール済みの実行ファイルを選択",
+  "retroEmulatorPickerFailed": "エミュレーターのファイル選択を開けませんでした",
+  "retroChooseEmulator": "エミュレーターを選択",
+  "retroEmulatorNeeded": "エミュレーターが必要",
+  "retroShowFolders": "フォルダーで表示",
+  "retroDiscMoved": "ゲームファイルが見つかりません。元に戻すか、ライブラリをもう一度スキャンしてください。",
+  "retroEmulatorStartFailed": "%@ を起動できませんでした",
+  "retroEmulatorExited": "%@ が終了コード %d で終了しました",
+  "retroLibrary": "エミュレーターのゲーム",
+  "retroLibraryDetail": "ゲームフォルダー内の PS1、PS2、PS3 のゲームを表示し、インストール済みのエミュレーターでプレイします。"
 }

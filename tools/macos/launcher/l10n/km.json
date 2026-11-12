@@ -2191,5 +2191,18 @@
   "togetherErrorOther": "AnyTogether មិនអាចធ្វើដូច្នេះបានទេ (%@)។",
   "phoneBrowserName": "កម្មវិធីរុករក %@",
   "phoneBrowserGeneric": "កម្មវិធីរុករកលើទូរសព្ទ",
-  "phoneRemoveOnline": "កំពុងភ្ជាប់ឥឡូវនេះ ជ្រើសរើសដើម្បីលុបចេញ"
+  "phoneRemoveOnline": "កំពុងភ្ជាប់ឥឡូវនេះ ជ្រើសរើសដើម្បីលុបចេញ",
+  "retroEmulators": "កម្មវិធីត្រាប់",
+  "retroGames": "ហ្គេម %@",
+  "retroSelectExecutable": "ជ្រើសឯកសារដំណើរការរបស់ %@",
+  "retroChooseExecutable": "ជ្រើសឯកសារដំណើរការដែលបានដំឡើង",
+  "retroEmulatorPickerFailed": "មិនអាចបើកកម្មវិធីជ្រើសឯកសាររបស់កម្មវិធីត្រាប់បានទេ",
+  "retroChooseEmulator": "ជ្រើសកម្មវិធីត្រាប់",
+  "retroEmulatorNeeded": "ត្រូវការកម្មវិធីត្រាប់",
+  "retroShowFolders": "បង្ហាញជាថត",
+  "retroDiscMoved": "រកមិនឃើញឯកសារហ្គេមទេ។ សូមដាក់វាត្រឡប់មកវិញ ឬស្កេនបណ្ណាល័យម្ដងទៀត។",
+  "retroEmulatorStartFailed": "មិនអាចចាប់ផ្ដើម %@ បានទេ",
+  "retroEmulatorExited": "%@ បានបិទដោយលេខកូដចេញ %d",
+  "retroLibrary": "ហ្គេមកម្មវិធីត្រាប់",
+  "retroLibraryDetail": "បង្ហាញហ្គេម PS1, PS2 និង PS3 នៅក្នុងថតហ្គេមរបស់អ្នក ហើយលេងវានៅក្នុងកម្មវិធីត្រាប់ដែលអ្នកបានដំឡើង។"
 }

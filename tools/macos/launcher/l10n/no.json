@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether kunne ikke gjøre det (%@).",
   "phoneBrowserName": "%@-nettleser",
   "phoneBrowserGeneric": "Mobilnettleser",
-  "phoneRemoveOnline": "Tilkoblet nå, velg for å fjerne"
+  "phoneRemoveOnline": "Tilkoblet nå, velg for å fjerne",
+  "retroEmulators": "Emulatorer",
+  "retroGames": "%@-spill",
+  "retroSelectExecutable": "Velg programfilen til %@",
+  "retroChooseExecutable": "Velg en installert programfil",
+  "retroEmulatorPickerFailed": "Kunne ikke åpne filvelgeren for emulatoren",
+  "retroChooseEmulator": "Velg emulator",
+  "retroEmulatorNeeded": "Krever emulator",
+  "retroShowFolders": "Vis som mapper",
+  "retroDiscMoved": "Spillfilen mangler. Legg den tilbake, eller skann biblioteket på nytt.",
+  "retroEmulatorStartFailed": "Kunne ikke starte %@",
+  "retroEmulatorExited": "%@ ble lukket med avslutningskode %d",
+  "retroLibrary": "Emulatorspill",
+  "retroLibraryDetail": "Viser PS1-, PS2- og PS3-spillene i spillmappene dine og spiller dem i en emulator du har installert."
 }

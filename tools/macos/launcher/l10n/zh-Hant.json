@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether 無法完成此操作（%@）。",
   "phoneBrowserName": "%@ 瀏覽器",
   "phoneBrowserGeneric": "手機瀏覽器",
-  "phoneRemoveOnline": "目前已連線，選取即可移除"
+  "phoneRemoveOnline": "目前已連線，選取即可移除",
+  "retroEmulators": "模擬器",
+  "retroGames": "%@ 遊戲",
+  "retroSelectExecutable": "選擇 %@ 的執行檔",
+  "retroChooseExecutable": "選擇已安裝的執行檔",
+  "retroEmulatorPickerFailed": "無法開啟模擬器的檔案選擇器",
+  "retroChooseEmulator": "選擇模擬器",
+  "retroEmulatorNeeded": "需要模擬器",
+  "retroShowFolders": "以資料夾顯示",
+  "retroDiscMoved": "找不到遊戲檔案。請將它放回原處，或重新掃描遊戲庫。",
+  "retroEmulatorStartFailed": "無法啟動 %@",
+  "retroEmulatorExited": "%@ 已結束，結束代碼為 %d",
+  "retroLibrary": "模擬器遊戲",
+  "retroLibraryDetail": "列出遊戲資料夾中的 PS1、PS2 和 PS3 遊戲，並用你已安裝的模擬器執行。"
 }

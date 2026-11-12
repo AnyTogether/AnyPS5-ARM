@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether kunde inte göra det (%@).",
   "phoneBrowserName": "%@-webbläsare",
   "phoneBrowserGeneric": "Mobilwebbläsare",
-  "phoneRemoveOnline": "Ansluten nu, välj för att ta bort"
+  "phoneRemoveOnline": "Ansluten nu, välj för att ta bort",
+  "retroEmulators": "Emulatorer",
+  "retroGames": "%@-spel",
+  "retroSelectExecutable": "Välj programfilen för %@",
+  "retroChooseExecutable": "Välj en installerad programfil",
+  "retroEmulatorPickerFailed": "Det gick inte att öppna emulatorns filväljare",
+  "retroChooseEmulator": "Välj emulator",
+  "retroEmulatorNeeded": "Kräver emulator",
+  "retroShowFolders": "Visa som mappar",
+  "retroDiscMoved": "Spelfilen saknas. Lägg tillbaka den eller sök igenom biblioteket igen.",
+  "retroEmulatorStartFailed": "Det gick inte att starta %@",
+  "retroEmulatorExited": "%@ stängdes med slutkod %d",
+  "retroLibrary": "Emulatorspel",
+  "retroLibraryDetail": "Visar PS1-, PS2- och PS3-spelen i dina spelmappar och spelar dem i en emulator som du har installerat."
 }

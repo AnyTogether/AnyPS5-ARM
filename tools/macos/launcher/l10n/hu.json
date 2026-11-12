@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "Az AnyTogether ezt nem tudta megtenni (%@).",
   "phoneBrowserName": "%@ böngésző",
   "phoneBrowserGeneric": "Telefonos böngésző",
-  "phoneRemoveOnline": "Most csatlakozik, válaszd ki az eltávolításhoz"
+  "phoneRemoveOnline": "Most csatlakozik, válaszd ki az eltávolításhoz",
+  "retroEmulators": "Emulátorok",
+  "retroGames": "%@-játékok",
+  "retroSelectExecutable": "Válaszd ki a(z) %@ futtatható fájlját",
+  "retroChooseExecutable": "Telepített futtatható fájl kiválasztása",
+  "retroEmulatorPickerFailed": "Nem sikerült megnyitni az emulátor fájlválasztóját",
+  "retroChooseEmulator": "Emulátor kiválasztása",
+  "retroEmulatorNeeded": "Emulátor szükséges",
+  "retroShowFolders": "Megjelenítés mappaként",
+  "retroDiscMoved": "A játékfájl hiányzik. Tedd vissza, vagy keresd át újra a könyvtárat.",
+  "retroEmulatorStartFailed": "Nem sikerült elindítani: %@",
+  "retroEmulatorExited": "A(z) %@ %d kilépési kóddal bezárult",
+  "retroLibrary": "Emulátoros játékok",
+  "retroLibraryDetail": "Megjeleníti a játékmappáidban lévő PS1-, PS2- és PS3-játékokat, és egy általad telepített emulátorban futtatja őket."
 }

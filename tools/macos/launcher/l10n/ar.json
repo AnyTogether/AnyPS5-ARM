@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "تعذّر على AnyTogether تنفيذ ذلك (%@).",
   "phoneBrowserName": "متصفح %@",
   "phoneBrowserGeneric": "متصفح الهاتف",
-  "phoneRemoveOnline": "متصل الآن، حدد للإزالة"
+  "phoneRemoveOnline": "متصل الآن، حدد للإزالة",
+  "retroEmulators": "المحاكيات",
+  "retroGames": "ألعاب %@",
+  "retroSelectExecutable": "اختر الملف التنفيذي لـ %@",
+  "retroChooseExecutable": "اختر ملفًا تنفيذيًا مثبتًا",
+  "retroEmulatorPickerFailed": "تعذر فتح منتقي ملفات المحاكي",
+  "retroChooseEmulator": "اختر المحاكي",
+  "retroEmulatorNeeded": "يلزم محاكٍ",
+  "retroShowFolders": "العرض كمجلدات",
+  "retroDiscMoved": "ملف اللعبة مفقود. أعده إلى مكانه أو افحص المكتبة مرة أخرى.",
+  "retroEmulatorStartFailed": "تعذر تشغيل %@",
+  "retroEmulatorExited": "أُغلق %@ برمز الخروج %d",
+  "retroLibrary": "ألعاب المحاكي",
+  "retroLibraryDetail": "يعرض ألعاب PS1 وPS2 وPS3 الموجودة في مجلدات ألعابك ويشغلها في محاكٍ ثبّته."
 }

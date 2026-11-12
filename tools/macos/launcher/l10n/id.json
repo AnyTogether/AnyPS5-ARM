@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether tidak dapat melakukannya (%@).",
   "phoneBrowserName": "Browser %@",
   "phoneBrowserGeneric": "Browser ponsel",
-  "phoneRemoveOnline": "Sedang tersambung, pilih untuk menghapus"
+  "phoneRemoveOnline": "Sedang tersambung, pilih untuk menghapus",
+  "retroEmulators": "Emulator",
+  "retroGames": "Game %@",
+  "retroSelectExecutable": "Pilih file program %@",
+  "retroChooseExecutable": "Pilih file program yang terpasang",
+  "retroEmulatorPickerFailed": "Tidak dapat membuka pemilih file emulator",
+  "retroChooseEmulator": "Pilih emulator",
+  "retroEmulatorNeeded": "Perlu emulator",
+  "retroShowFolders": "Tampilkan sebagai folder",
+  "retroDiscMoved": "File game tidak ada. Kembalikan file tersebut atau pindai ulang perpustakaan.",
+  "retroEmulatorStartFailed": "Tidak dapat memulai %@",
+  "retroEmulatorExited": "%@ ditutup dengan kode keluar %d",
+  "retroLibrary": "Game emulator",
+  "retroLibraryDetail": "Menampilkan game PS1, PS2, dan PS3 di folder game Anda dan memainkannya di emulator yang telah Anda pasang."
 }
