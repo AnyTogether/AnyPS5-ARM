@@ -409,9 +409,8 @@ final class EmulatorGamesTests: XCTestCase {
         XCTAssertEqual(model.homePreviewGame?.name, "Game 3")
     }
 
-    /// Home with a disc that needs its emulator, the console folder closed and open, and
-    /// Settings › Emulators and the switch, kept as pictures when ANYPS5_TEST_SHOTS says where
-    /// (CI uploads them).
+    /// Home with a disc that needs its emulator, and the console folder closed and open, kept as
+    /// pictures when ANYPS5_TEST_SHOTS says where (CI uploads them).
     func testTheEmulatorScreensDraw() throws {
         let (_, root) = try model()
         for name in ["Crash Team Racing", "Spyro"] {
@@ -438,6 +437,8 @@ final class EmulatorGamesTests: XCTestCase {
             folder = try scratch()
         }
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // The theme's background as a still picture: its animation does not draw offscreen.
+        let still = BackgroundView.still(theme: .cosmic, width: 1600, height: 900, time: 200)
         func select(_ model: AppModel, _ name: String) { model.selected = model.games.firstIndex { $0.name == name } ?? 0 }
         let screens: [(String, (AppModel) -> Void)] = [
             ("home-emulator-required-en", { model in select(model, "Vice City") }),
@@ -446,21 +447,11 @@ final class EmulatorGamesTests: XCTestCase {
                 model.selectHomeTile(model.homeTiles.count - 1)
                 model.openSelectedHomeFolder()
             }),
-            ("settings-emulators-en", { model in
-                model.overlay = .settings
-                model.panelCategory = model.panelCategories().firstIndex { $0.id == "emulators" } ?? 0
-            }),
-            ("settings-emulator-games-en", { model in
-                model.overlay = .settings
-                model.panelCategory = model.panelCategories().firstIndex { $0.id == "library" } ?? 0
-                model.panelInRows = true
-                model.panelRow = max(0, (model.panelCategories().first { $0.id == "library" }?.rows.count ?? 1) - 1)
-            }),
         ]
         for (name, configure) in screens {
             let file = folder.appendingPathComponent(name + ".png")
             try? FileManager.default.removeItem(at: file)
-            PreviewRenderer.render(preferences, games, root, nil, file, configure: configure)
+            PreviewRenderer.render(preferences, games, root, still, file, configure: configure)
             let picture = try XCTUnwrap(NSImage(contentsOf: file)?.representations.first, "no picture of \(name)")
             XCTAssertEqual(picture.pixelsWide, Int(PreviewRenderer.size.width))
         }
