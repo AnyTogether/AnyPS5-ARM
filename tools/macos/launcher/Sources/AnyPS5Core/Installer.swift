@@ -1128,10 +1128,27 @@ public final class Installer: @unchecked Sendable {
     /// option cannot change these, as it cannot change what the launcher passes.
     public static let launchScriptVariables: Set<String> = ["VK_DRIVER_FILES", "ANYPS5_SHADER_CACHE_DIR", "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS"]
 
-    static func launchHead(identifier: String) -> String {
+    /// How long the launch script waits, in fifths of a second, for the game's files to become
+    /// readable before the engine starts: two minutes for the player to answer macOS.
+    public static let readWaitTries = 600
+
+    /// The head of a game's launch script. A games folder on an external drive is a removable
+    /// volume to macOS, and the game runs there as its own app, so its first reads of the drive
+    /// can bring up "would like to access files on a removable volume". The script reads one of
+    /// the game's files first, before any `cd` into the drive, and tries again until the read
+    /// gets through (or `waitTries` run out): the engine starts once the player has answered, so
+    /// none of the game's own reads meets the prompt.
+    static func launchHead(identifier: String, waitTries: Int = readWaitTries) -> String {
         """
         #!/bin/sh
         # Starts the title from its game folder: AnyPS5 maps /app0 under the working directory.
+        # On an external drive macOS asks first whether the game may read it: the game waits for the answer.
+        probe="$(dirname "$0")/../Resources/game/app0/sce_sys/param.json"
+        tries=0
+        until { true < "$probe"; } 2>/dev/null || [ "$tries" -ge \(waitTries) ]; do
+            tries=$((tries + 1))
+            sleep 0.2
+        done
         here="$(cd "$(dirname "$0")" && pwd)"
         export VK_DRIVER_FILES="${VK_DRIVER_FILES:-$here/../Resources/vulkan/icd.d/MoltenVK_icd.json}"
         export ANYPS5_SHADER_CACHE_DIR="${ANYPS5_SHADER_CACHE_DIR:-$HOME/Library/Caches/\(identifier)/shader_cache}"
