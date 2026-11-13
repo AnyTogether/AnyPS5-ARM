@@ -1570,7 +1570,7 @@ void CheckStorageAliasRetirement() {
     std::puts("cached storage span retires only intersecting native depth owners");
 }
 
-enum class ClearFault { None, PartialStore, CpuWrite, DepthWrite, BadMetadata, UnprovenDispatch, PendingWrite, Overlap, PossibleStore, CompletedPossibleStore, DriverDispatch, ImportWindowWrite, FillDuringClear, DriverBufferDispatch };
+enum class ClearFault { None, PartialStore, CpuWrite, DepthWrite, BadMetadata, UnprovenDispatch, PendingWrite, Overlap, PossibleStore, CompletedPossibleStore, DriverDispatch, ImportWindowWrite, FillDuringClear, DriverBufferDispatch, OverlapUnarmed, OverlapInFlight, OverlapFill };
 enum class ClearSource { HtileDispatch, Fill, QueuedFill };
 
 void CheckClearDispatch() {
@@ -1787,10 +1787,11 @@ void CheckDepthTarget(Context context, VkFormat format, std::uint32_t fragments,
                         }
                     } else {
                         const auto nativeBytes = fault == ClearFault::UnprovenDispatch ? 0u : static_cast<std::size_t>(metadataBytes);
-                        if (fault == ClearFault::PartialStore || fault == ClearFault::PossibleStore || fault == ClearFault::CompletedPossibleStore) {
+                        if (fault == ClearFault::PartialStore || fault == ClearFault::PossibleStore || fault == ClearFault::CompletedPossibleStore || fault == ClearFault::OverlapInFlight) {
                             for (std::size_t i = 0u; i < metadataBytes / 4u; ++i) std::memcpy(metadata.Data() + i * 4u, &clearPattern, 4u);
                         }
                         const bool completionCandidate = NoteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes), nativeBytes);
+                        if (fault == ClearFault::OverlapUnarmed) Require(NoteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes), nativeBytes), "a second HTILE clear noted before the first was recorded was refused");
                         if (fault == ClearFault::FillDuringClear) NoteDepthMetadataFill(target.htileAddress, static_cast<std::size_t>(metadataBytes), clearPattern);
                         if (fault == ClearFault::ImportWindowWrite) {
                             const auto beforeImport = AgcDriver::GuestMemory::TrackerGeneration();
@@ -1815,17 +1816,33 @@ void CheckDepthTarget(Context context, VkFormat format, std::uint32_t fragments,
                             Require(DepthSurfaceAt(target.address), "an accepted HTILE buffer access retired its native depth owner");
                         }
                         if (completionCandidate) ArmHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
+                        if (fault == ClearFault::OverlapUnarmed) ArmHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
                         if (completionCandidate && fault == ClearFault::None) {
                             TargetRefuses([&] { RequireNoResidentDepthRead_nid_no_patch(target.htileAddress, metadataBytes, std::pair{target.htileAddress, static_cast<std::size_t>(metadataBytes)}); }, "sample-preserving guest publication");
                         }
-                        if (fault == ClearFault::Overlap) NoteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes), nativeBytes);
+                        if (fault == ClearFault::Overlap || fault == ClearFault::OverlapInFlight) {
+                            if (fault == ClearFault::OverlapInFlight) QueueHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
+                            Require(NoteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes), nativeBytes), "a second HTILE clear over a recorded one was refused");
+                            const auto accepted = std::pair{target.htileAddress, static_cast<std::size_t>(metadataBytes)};
+                            RequireNoResidentDepthRead_nid_no_patch(target.htileAddress, metadataBytes, accepted);
+                            ArmHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
+                        }
+                        if (fault == ClearFault::OverlapInFlight) {
+                            QueueHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
+                            auto scratch = std::make_shared<Buffer>(context, static_cast<std::size_t>(metadataBytes), VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+                            context.Function<PFN_vkCmdFillBuffer>("vkCmdFillBuffer")(recorder.Commands(), scratch->Handle(), 0u, metadataBytes, clearPattern);
+                            recorder.Keep(scratch);
+                            recorder.NotePendingWrite(target.htileAddress, static_cast<std::size_t>(metadataBytes));
+                            recorder.OnComplete([htile = target.htileAddress, size = static_cast<std::size_t>(metadataBytes)] { CompleteHtileDepthClear(htile, size); });
+                            CompleteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
+                        }
                         const auto storedBytes = fault == ClearFault::PartialStore ? 4u : static_cast<std::size_t>(metadataBytes);
                         if (fault == ClearFault::PossibleStore || fault == ClearFault::CompletedPossibleStore) {
                             const auto generation = AgcDriver::GuestMemory::TrackerGeneration();
                             AgcDriver::GuestMemory::MarkPossiblyWritten(target.htileAddress, metadataBytes);
                             Require(!AgcDriver::GuestMemory::StoredAllSince_nid_no_patch(target.htileAddress, metadataBytes, generation), "a possible HTILE range proved complete coverage");
                             if (fault == ClearFault::CompletedPossibleStore) CompleteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
-                        } else AgcDriver::GuestMemory::StoreOwnBytes(target.htileAddress, storedBytes, [&] {
+                        } else if (fault != ClearFault::OverlapInFlight) AgcDriver::GuestMemory::StoreOwnBytes(target.htileAddress, storedBytes, [&] {
                             for (std::size_t i = 0u; i < storedBytes / 4u; ++i) std::memcpy(metadata.Data() + i * 4u, &clearPattern, 4u);
                             if (fault == ClearFault::BadMetadata) metadata.Data()[0] = std::byte{0x0f};
                         });
@@ -1836,16 +1853,27 @@ void CheckDepthTarget(Context context, VkFormat format, std::uint32_t fragments,
                 } else {
                     const auto nativeBytes = fault == ClearFault::UnprovenDispatch ? 0u : static_cast<std::size_t>(metadataBytes);
                     const auto storedBytes = fault == ClearFault::PartialStore ? 4u : static_cast<std::size_t>(metadataBytes);
+                    const std::uint32_t otherPattern = clearOne ? 0u : (depthOnly ? 0xfffffff0u : 0xfffc00f0u);
                     if (source == ClearSource::QueuedFill) {
                         const std::uint32_t queuedPattern = fault == ClearFault::BadMetadata ? 0x0fu : clearPattern;
-                        AgcDriver::GuestMemory::StoreOwnBytes(target.htileAddress, static_cast<std::size_t>(metadataBytes), [&] {
-                            for (std::size_t i = 0u; i < metadataBytes / 4u; ++i) std::memcpy(metadata.Data() + i * 4u, &queuedPattern, 4u);
-                        });
-                        QueueTargetFill(context, recorder, target.htileAddress, static_cast<std::size_t>(metadataBytes), queuedPattern);
+                        if (fault == ClearFault::OverlapFill) {
+                            QueueTargetWordFill(context, recorder, target.htileAddress, static_cast<std::size_t>(metadataBytes), otherPattern);
+                            NoteDepthMetadataFill(target.htileAddress, static_cast<std::size_t>(metadataBytes), otherPattern);
+                            QueueTargetWordFill(context, recorder, target.htileAddress, static_cast<std::size_t>(metadataBytes), queuedPattern);
+                        } else {
+                            AgcDriver::GuestMemory::StoreOwnBytes(target.htileAddress, static_cast<std::size_t>(metadataBytes), [&] {
+                                for (std::size_t i = 0u; i < metadataBytes / 4u; ++i) std::memcpy(metadata.Data() + i * 4u, &queuedPattern, 4u);
+                            });
+                            QueueTargetFill(context, recorder, target.htileAddress, static_cast<std::size_t>(metadataBytes), queuedPattern);
+                        }
                         NoteDepthMetadataFill(target.htileAddress, static_cast<std::size_t>(metadataBytes), queuedPattern);
                     } else {
+                        if (fault == ClearFault::OverlapFill) NoteDepthMetadataFill(target.htileAddress, static_cast<std::size_t>(metadataBytes), otherPattern);
                         NoteDepthMetadataFill(target.htileAddress, static_cast<std::size_t>(metadataBytes), clearPattern);
-                        if (fault == ClearFault::Overlap) NoteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes), nativeBytes);
+                        if (fault == ClearFault::Overlap) {
+                            Require(NoteHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes), nativeBytes), "an HTILE clear dispatch over a pending metadata fill was refused");
+                            ArmHtileDepthClear(target.htileAddress, static_cast<std::size_t>(metadataBytes));
+                        }
                         AgcDriver::GuestMemory::StoreOwnBytes(target.htileAddress, storedBytes, [&] {
                             for (std::size_t i = 0u; i < storedBytes / 4u; ++i) std::memcpy(metadata.Data() + i * 4u, &clearPattern, 4u);
                             if (fault == ClearFault::BadMetadata) metadata.Data()[0] = std::byte{0x0f};
@@ -2141,6 +2169,7 @@ void CheckStencilTarget(Context context, std::uint32_t fragments, bool one, bool
             target.clearStencil = iteration == 1u ? 0x33u : 0x5au;
             Require(DepthSurfaceView(context, target) == view, "updating the native depth-stencil clear values replaced its attachment");
             const auto fillBytes = fault == StencilFault::FillPartial ? metadataBytes - 4u : metadataBytes;
+            if (fault == StencilFault::FillOverlap) NoteDepthMetadataFill(target.htileAddress, fillBytes, clearWord(!clearOne));
             if (fault == StencilFault::MaskClear) NoteHtileDepthClear(target.htileAddress, metadataBytes, metadataBytes);
             else NoteDepthMetadataFill(target.htileAddress, fillBytes, clearWord(clearOne));
             if (fault == StencilFault::FillOverlap) NoteDepthMetadataFill(target.htileAddress, fillBytes, clearWord(clearOne));
@@ -3411,7 +3440,6 @@ int main(int argc, char** argv) {
                      std::pair{ClearFault::PossibleStore, "no complete tracked HTILE store"},
                      std::pair{ClearFault::UnprovenDispatch, "incomplete or unproven"},
                      std::pair{ClearFault::PendingWrite, "external GPU writes"},
-                     std::pair{ClearFault::Overlap, "overlapping native multisample depth"},
                      std::pair{ClearFault::FillDuringClear, "metadata fill over a pending HTILE clear dispatch"}}) {
                 TargetRefuses([&] { CheckDepthTarget(context, VK_FORMAT_D32_SFLOAT, 4u, false, true, false, fault, ClearSource::HtileDispatch, lock); }, expected);
                 std::printf("Native depth clear fault=%u refused: %s\n", static_cast<std::uint32_t>(fault), expected);
@@ -3455,6 +3483,21 @@ int main(int argc, char** argv) {
             ++checked;
             CheckDepthTarget(context, VK_FORMAT_D32_SFLOAT, 4u, false, true, false, ClearFault::DriverDispatch, ClearSource::HtileDispatch, lock);
             ++checked;
+            for (const bool one : {false, true}) {
+                for (const auto fault : {ClearFault::Overlap, ClearFault::OverlapUnarmed, ClearFault::OverlapInFlight}) {
+                    CheckDepthTarget(context, VK_FORMAT_D32_SFLOAT, 4u, one, true, false, fault, ClearSource::HtileDispatch, lock);
+                    std::printf("Native depth clear superseding an unretired one (fault=%u value=%u) completed\n", static_cast<std::uint32_t>(fault), one);
+                    ++checked;
+                }
+                for (const auto fault : {ClearFault::Overlap, ClearFault::OverlapFill}) {
+                    CheckDepthTarget(context, VK_FORMAT_D32_SFLOAT, 4u, one, true, false, fault, ClearSource::Fill, lock);
+                    std::printf("Native depth clear superseding an unretired metadata fill (fault=%u value=%u) completed\n", static_cast<std::uint32_t>(fault), one);
+                    ++checked;
+                }
+                CheckDepthTarget(context, VK_FORMAT_D32_SFLOAT, 4u, one, true, false, ClearFault::OverlapFill, ClearSource::QueuedFill, lock);
+                std::printf("Native depth queued metadata fill superseding an unretired one (value=%u) completed\n", one);
+                ++checked;
+            }
             std::printf("Native depth completed clear cases checked=%u unavailable=%u\n", checked, unavailable);
             return 0;
         }
@@ -3467,6 +3510,11 @@ int main(int argc, char** argv) {
                 for (const bool one : {false, true}) {
                     for (const bool filling : {false, true}) { CheckStencilTarget(context, samples, one, filling); ++checked; }
                 }
+            }
+            for (const bool one : {false, true}) {
+                CheckStencilTarget(context, 4u, one, true, StencilFault::FillOverlap);
+                std::printf("Native depth-stencil fills superseding unretired ones (value=%u) completed\n", one);
+                ++checked;
             }
             for (const auto& [fault, filling, expected] : std::array{
                      std::tuple{StencilFault::DepthWord, false, "native multisample depth initial HTILE does not prove its clear value"},
@@ -3482,7 +3530,6 @@ int main(int argc, char** argv) {
                      std::tuple{StencilFault::FillPartialStore, true, "no complete tracked HTILE store"},
                      std::tuple{StencilFault::FillCpuWrite, true, "CPU writes raced"},
                      std::tuple{StencilFault::FillStencilWrite, true, "guest writes over native multisample depth"},
-                     std::tuple{StencilFault::FillOverlap, true, "overlapping native multisample depth"},
                      std::tuple{StencilFault::MaskClear, true, "HTILE mask clear of a stencil surface"}}) {
                 TargetRefuses([&] { CheckStencilTarget(context, 4u, false, filling, fault); }, expected);
                 std::printf("Native depth-stencil fault=%u refused: %s\n", static_cast<std::uint32_t>(fault), expected);
