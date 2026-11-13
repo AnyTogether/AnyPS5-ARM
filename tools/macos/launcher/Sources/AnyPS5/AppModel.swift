@@ -124,6 +124,15 @@ struct Preferences: Codable, Equatable {
     var engineGitBeforePlay: Bool?
     /// Settings → Game Library: new games unlocked in the background (PrepareQueue); nil means on.
     var prepareNewGames: Bool?
+    /// Settings › Library › Emulator games: the games folders' PS1, PS2 and PS3 discs are listed
+    /// too, for the emulators in Settings › Emulators. nil means off, so a PS5-only library is
+    /// scanned as before. The same keys as AnyPS5 Desktop's settings.
+    var retroLibrary: Bool?
+    /// The emulator chosen for each console (ps1, ps2, ps3): the application or program picked,
+    /// by its path; nil for none.
+    var retroEmulators: [String: String]?
+    /// Settings › Emulators › Show as folders: a console's games in one tile on Home; nil means off.
+    var showRetroFolders: Bool?
     /// The window full screen at start (WindowStart): nil the first time, then as it was left.
     var fullScreen: Bool?
     /// Settings → Behaviour → Pause Game When Opening the Menu: nil means on.
@@ -184,6 +193,8 @@ enum GameState: Equatable {
     case installing(step: Installer.Step, fraction: Double)
     case failed(String)
     case installed(outdated: Bool)
+    /// A disc whose console has no emulator chosen yet (Settings › Emulators).
+    case needsEmulator
     case starting
     case running
     /// Stop asked it to close: it may still be saving (GameStop.swift).
@@ -359,8 +370,20 @@ final class AppModel: ObservableObject {
     /// A game is being unlocked or prepared, or waits to be: the engine it uses must stay as it is.
     var unlockBusy: Bool { installer != nil || preparer != nil || !queue.isEmpty }
     @Published var selected = 0 {
-        didSet { if selected != oldValue { selectionMoved(from: oldValue) } }
+        didSet {
+            if selected != oldValue { selectionMoved(from: oldValue) }
+            // A game selected from anywhere but Home's rows shows inside its console's folder; a
+            // scan that keeps the selection where it was leaves the folder as it is.
+            if !anchoringHome, selected != oldValue {
+                let folder = showsRetroFolders && games.indices.contains(selected) ? games[selected].retro?.platform : nil
+                if homeRetroFolder != folder { homeRetroFolder = folder }
+            }
+        }
     }
+    /// The console folder open on Home, its games in the row under it (RetroHomeFolders.swift).
+    @Published var homeRetroFolder: RetroPlatform?
+    /// Home's rows are moving the selection themselves, the folder with it.
+    var anchoringHome = false
     @Published var focus = HomeFocus.tiles
     /// Home's profile picture and the list of the other profiles under it (ProfileSwitcher.swift).
     @Published var profileSwitcher = ProfileSwitcherState()
@@ -491,6 +514,30 @@ final class AppModel: ObservableObject {
     @Published private(set) var starting: Game? {
         didSet { if (oldValue == nil) != (starting == nil) { prepareSoon() } }
     }
+
+    /// The emulator playing a disc (StandaloneEmulators.swift). Apart from `running`, which is a
+    /// PS5 game's own process: what follows that one (AnyTogether's presence and play sessions,
+    /// Discord, Play Together, Remote Play, broadcasts, share play, clips, trophies, save sync)
+    /// never sees an emulator game.
+    @Published private(set) var emulator: (game: Game, run: EmulatorRun)? {
+        didSet { if (oldValue == nil) != (emulator == nil) { prepareSoon() } }
+    }
+    /// Counts the emulator starts and the ones given up: a start whose turn has passed is ended
+    /// when its emulator comes up after all.
+    private var emulatorTurn = 0
+    /// Stop ended the emulator: its exit code is not told.
+    var emulatorStopped = false
+    /// Starts an emulator's program with its arguments, its output in the log; replaced in tests.
+    var startEmulator: @Sendable (URL, [String], URL) async throws -> EmulatorRun = { try EmulatorProcess.start(executable: $0, arguments: $1, log: $2) }
+    /// Asks for an emulator's application or program in place of the file panel (the tests);
+    /// nil from it when the choice was given up.
+    var pickEmulator: ((String) throws -> URL?)?
+    /// The program each chosen emulator starts, by the path chosen (StandaloneEmulators.swift).
+    var emulatorPrograms: [String: URL] = [:]
+    /// A game or an emulator plays, or one is starting.
+    var playing: Bool { running != nil || emulator != nil || starting != nil }
+    /// The game playing, a PS5 game or a disc in its emulator.
+    var playingGame: Game? { running?.game ?? emulator?.game }
 
     /// A game starting or ending: the background preparation stops for it or goes on, once the
     /// change has settled.
@@ -801,9 +848,10 @@ final class AppModel: ObservableObject {
             let prefix = folder.standardizedFileURL.path + "/"
             return GameLibrary.FolderStatus(url: folder, connected: there, games: there ? games.filter { $0.folder.standardizedFileURL.path.hasPrefix(prefix) }.count : 0)
         }
-        installedRecords = Dictionary(uniqueKeysWithValues: games.compactMap { game in Installer.record(of: Installer.bundle(for: game, root: root)).map { (game.id, $0) } })
+        installedRecords = Dictionary(uniqueKeysWithValues: games.filter { $0.retro == nil }.compactMap { game in Installer.record(of: Installer.bundle(for: game, root: root)).map { (game.id, $0) } })
         for game in games {
-            sizes[game.id] = GameLibrary.size(of: game.folder)
+            sizes[game.id] = game.files.map { files in files.reduce(Int64(0)) { $0 + GameLibrary.size(of: $1) } } ?? GameLibrary.size(of: game.folder)
+            guard game.retro == nil else { continue }
             trophies[game.id] = Trophies.load(game, bundle: Installer.bundle(for: game, root: root), languages: trophyLanguages(game))
             trophiesRead.insert(game.id)
         }
@@ -996,7 +1044,7 @@ final class AppModel: ObservableObject {
     /// restart waits for it to close.
     func restartForUpdate() {
         guard readyUpdate != nil else { return }
-        switch UpdateRestart.decide(gameRunning: running != nil || starting != nil) {
+        switch UpdateRestart.decide(gameRunning: playing) {
         case .afterGame:
             restartAfterGame = true
         case .now:
@@ -1036,7 +1084,7 @@ final class AppModel: ObservableObject {
         guard restartAfterGame else { return }
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(5))
-            guard self.restartAfterGame, self.running == nil, self.starting == nil else { return }
+            guard self.restartAfterGame, !self.playing else { return }
             self.restartForUpdate()
         }
     }
@@ -1060,10 +1108,10 @@ final class AppModel: ObservableObject {
 
     /// The selected game's song while the launcher is in front and idle, silence otherwise.
     private func updateMusic() {
-        let quiet = !preferences.onboarded || !active || running != nil || starting != nil || musicVolume == 0 || launcherVolume == 0
+        let quiet = !preferences.onboarded || !active || playing || musicVolume == 0 || launcherVolume == 0
         let ownMusic = preferences.menuMusicFile.map { URL(fileURLWithPath: $0) }.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
         let menuMusic = activeDesign.flatMap { themes.file($0.music, of: $0) } ?? ownMusic
-        ThemeMusic.shared.play(quiet ? nil : selectedGame, fallback: quiet ? nil : menuMusic)
+        ThemeMusic.shared.play(quiet ? nil : homePreviewGame, fallback: quiet ? nil : menuMusic)
     }
 
     var accent: Color { activeDesign.map { Color(rgb: $0.accentRGB) } ?? preferences.accentColor }
@@ -1316,13 +1364,14 @@ final class AppModel: ObservableObject {
         if installer == nil && preparer == nil {
             for root in roots where FileManager.default.fileExists(atPath: root.path) { Installer.removeLeftovers(root: root) }
         }
-        if let monitor = libraryMonitor, monitor.roots == roots {
+        // Emulator games turned on or off: a new watch, whose first scan announces no game.
+        if let monitor = libraryMonitor, monitor.roots == roots, monitor.includeRetro == listsRetroGames {
             monitor.rescan()
             return
         }
         libraryMonitor?.stop()
         let stamp = recordsStamp
-        let monitor = LibraryMonitor(roots: roots) { [weak self] update in
+        let monitor = LibraryMonitor(roots: roots, includeRetro: listsRetroGames) { [weak self] update in
             // The records are read off the main thread too; each game's is one small file.
             let generation = stamp.withLock { $0 }
             let records = AppModel.records(of: update.games, roots: update.roots)
@@ -1333,7 +1382,7 @@ final class AppModel: ObservableObject {
     }
 
     nonisolated private static func records(of games: [Game], roots: [String: URL]) -> [String: InstallRecord] {
-        Dictionary(games.compactMap { game in roots[game.id].flatMap { Installer.record(of: Installer.bundle(for: game, root: $0)) }.map { (game.id, $0) } },
+        Dictionary(games.filter { $0.retro == nil }.compactMap { game in roots[game.id].flatMap { Installer.record(of: Installer.bundle(for: game, root: $0)) }.map { (game.id, $0) } },
                    uniquingKeysWith: { first, _ in first })
     }
 
@@ -1372,7 +1421,7 @@ final class AppModel: ObservableObject {
         let prepared = prepareNewGames(added)
         let text = AppModel.newGameText(added.map(\.name), preparing: prepared.preparing, waiting: prepared.waiting, skipped: prepared.skipped)
         let icon = added.count == 1 ? added[0].icon : nil
-        if overlay == nil, running == nil, starting == nil, let index = games.firstIndex(of: added[0]) {
+        if overlay == nil, !playing, let index = games.firstIndex(of: added[0]) {
             withAnimation(Motion.focus) {
                 selected = index
                 focus = .tiles
@@ -1431,7 +1480,8 @@ final class AppModel: ObservableObject {
         sizes[game.id] = -1
         let measure = folderSize
         Task.detached(priority: .utility) {
-            let size = measure(game.folder)
+            // A disc beside others counts only its own files.
+            let size = game.files.map { files in files.reduce(Int64(0)) { $0 + measure($1) } } ?? measure(game.folder)
             await MainActor.run {
                 self.sizes[game.id] = size
                 self.sizeWalk = nil
@@ -1441,7 +1491,7 @@ final class AppModel: ObservableObject {
     }
 
     private func readSelectedTrophies() {
-        guard let game = selectedGame, root(of: game) != nil, !trophiesRead.contains(game.id), trophyRead == nil else { return }
+        guard let game = selectedGame, game.retro == nil, root(of: game) != nil, !trophiesRead.contains(game.id), trophyRead == nil else { return }
         trophyRead = game.id
         loadTrophies(game) { [weak self] in
             self?.trophyRead = nil
@@ -1459,7 +1509,7 @@ final class AppModel: ObservableObject {
     /// passes a game every 60 to 80 ms; a 0.55 s fade and a 4K decode for each would pile up.
     var backdropGame: Game? {
         if let id = backdropID, let game = games.first(where: { $0.id == id }) { return game }
-        return selectedGame
+        return homePreviewGame
     }
 
     static let selectionSettle: Duration = .milliseconds(180)
@@ -1478,7 +1528,9 @@ final class AppModel: ObservableObject {
 
     func state(of game: Game) -> GameState {
         if starting?.id == game.id { return .starting }
-        if running?.game.id == game.id { return stopping ? .stopping : .running }
+        if running?.game.id == game.id || emulator?.game.id == game.id { return stopping ? .stopping : .running }
+        // A disc is ready once its console's emulator is chosen: nothing of it is unlocked.
+        if let disc = game.retro { return standaloneEmulator(disc.platform) == nil ? .needsEmulator : .installed(outdated: false) }
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
@@ -1498,7 +1550,7 @@ final class AppModel: ObservableObject {
     }
 
     func loadTrophies(_ game: Game, again: Bool = false, then done: (@MainActor () -> Void)? = nil) {
-        guard let root = root(of: game), again || !trophiesRead.contains(game.id) else { return }
+        guard game.retro == nil, let root = root(of: game), again || !trophiesRead.contains(game.id) else { return }
         trophiesRead.insert(game.id)
         let bundle = Installer.bundle(for: game, root: root)
         let languages = trophyLanguages(game)
@@ -1596,7 +1648,7 @@ final class AppModel: ObservableObject {
     // MARK: Unlocking
 
     func unlock(_ game: Game) {
-        guard let root = root(of: game) else { return }
+        guard game.retro == nil, let root = root(of: game) else { return }
         guard let toolkit = toolkit(for: game) else { show(T.text(.noToolkit), symbol: "exclamationmark.triangle"); return }
         // Asked for while it is being prepared: it becomes the user's own and goes on at full speed.
         if prepare.active == game.id { return promotePreparation(game) }
@@ -1810,7 +1862,7 @@ final class AppModel: ObservableObject {
 
     /// What the background preparation looks at now.
     private var prepareConditions: PrepareConditions {
-        PrepareConditions(enabled: preparesNewGames && preferences.onboarded && persists, playing: running != nil || starting != nil,
+        PrepareConditions(enabled: preparesNewGames && preferences.onboarded && persists, playing: playing,
                           unlocking: installer != nil || !queue.isEmpty, power: PowerState.current())
     }
 
@@ -1866,7 +1918,7 @@ final class AppModel: ObservableObject {
                 let text = TPrep.format(.readyToPlay, game.name)
                 if NSApp.isActive || !self.persists {
                     self.show(text, symbol: "checkmark.circle.fill", icon: game.icon)
-                } else if self.running == nil && self.starting == nil {
+                } else if !self.playing {
                     TrophyBanner.shared.notice(text, detail: TPrep.text(.readyToPlayDetail), symbol: "checkmark.circle.fill", icon: game.icon, cue: .unlocked, sounds: self.preferences.sounds)
                 }
                 if promoted, self.playAfterUnlock == id {
@@ -2122,6 +2174,10 @@ final class AppModel: ObservableObject {
     func primaryAction(_ game: Game) {
         if familyPrimaryAction(game) { return }
         switch state(of: game) {
+        case .needsEmulator:
+            if let platform = game.retro?.platform { chooseStandaloneEmulator(platform) }
+        case .installed where game.retro != nil:
+            play(game)
         case .installed:
             // A copy made by another engine is rebuilt on the way (play); a game someone the
             // user knows already plays asks first whether to join theirs.
@@ -2133,7 +2189,7 @@ final class AppModel: ObservableObject {
         case .locked, .failed: unlock(game)
         case .installing where isPreparing(game): promotePreparation(game)
         case .installing, .queued: cancelUnlock(game)
-        case .running: running?.app.activate()
+        case .running: giveGameFront()
         case .starting, .stopping: break
         case .unreadable: show(T.text(.unreadableDump), symbol: "xmark.octagon")
         }
@@ -2147,7 +2203,8 @@ final class AppModel: ObservableObject {
     /// launchers on the same release always play the same build; `asItIs` starts the copy as it
     /// is (it was just rebuilt, it joins a host on that very engine, or the user chose to).
     func play(_ game: Game, trace: Bool = false, once: [String: String] = [:], asItIs: Bool = false) {
-        guard root(of: game) != nil, starting == nil, running == nil, syncing == nil, fontWait == nil else { return }
+        if let disc = game.retro { return playStandalone(game, disc) }
+        guard root(of: game) != nil, starting == nil, running == nil, emulator == nil, syncing == nil, fontWait == nil else { return }
         if !asItIs, needsRebuild(game) {
             return rebuildFirst(game) { [weak self] in self?.play(game, trace: trace, once: once, asItIs: true) }
         }
@@ -2157,7 +2214,7 @@ final class AppModel: ObservableObject {
     }
 
     private func start(_ game: Game, trace: Bool = false, once: [String: String] = [:]) {
-        guard let root = root(of: game), starting == nil, running == nil else { return }
+        guard let root = root(of: game), starting == nil, running == nil, emulator == nil else { return }
         let bundle = Installer.bundle(for: game, root: root)
         if let needed = SystemMinimum.unmet(requiredSystem(of: game, bundle: bundle)) {
             return show(AppModel.gameNewerMacText(game.name, needed), symbol: "exclamationmark.triangle.fill")
@@ -2541,9 +2598,108 @@ final class AppModel: ObservableObject {
     func cancelStart() {
         guard starting != nil else { return }
         startWatch?.cancel()
+        // An emulator still on its way is given up: it is ended when it comes up after all.
+        emulatorTurn += 1
         Sounds.shared.play(.back)
         withAnimation(Motion.overlay) { starting = nil }
         running?.app.forceTerminate()
+    }
+
+    // MARK: Emulator games
+
+    /// Starts `game`'s disc in its console's emulator, as on Windows and Linux: the emulator's
+    /// own program with the disc, in a window of its own. Given up while the emulator starts
+    /// (cancelStart), the start lets the slot go at once, and an emulator that starts after all
+    /// is stopped.
+    func playStandalone(_ game: Game, _ disc: RetroDisc) {
+        guard !playing else { return }
+        familyGate(game) { self.startStandalone(game, disc) }
+    }
+
+    private func startStandalone(_ game: Game, _ disc: RetroDisc) {
+        guard !playing else { return }
+        guard let program = standaloneEmulator(disc.platform) else { return chooseStandaloneEmulator(disc.platform) }
+        guard StandaloneEmulator.discThere(disc, folder: game.folder) else { return show(TRetro.text(.retroDiscMoved), symbol: "opticaldisc") }
+        Sounds.shared.play(.select)
+        emulatorTurn += 1
+        let turn = emulatorTurn
+        withAnimation(Motion.overlay) { starting = game }
+        let start = startEmulator
+        let arguments = StandaloneEmulator.arguments(disc.platform, boot: StandaloneEmulator.bootFile(disc, folder: game.folder))
+        let log = AppModel.logFile(for: game)
+        Task { @MainActor in
+            let run: EmulatorRun
+            do {
+                run = try await start(program, arguments, log)
+            } catch {
+                guard turn == self.emulatorTurn else { return }
+                withAnimation(Motion.overlay) { self.starting = nil }
+                NSLog("[anyps5-launcher] could not start %@: %@", disc.platform.emulator, String(describing: error))
+                self.show(TRetro.format(.retroEmulatorStartFailed, disc.platform.emulator), symbol: "exclamationmark.triangle.fill")
+                return
+            }
+            guard turn == self.emulatorTurn else {
+                // The emulator of a start given up: asked to end, then ended after the same grace
+                // as Stop. A start begun in the meantime is left alone.
+                let grace = self.gameStopGrace
+                let end = Task {
+                    try? await Task.sleep(for: grace)
+                    if !Task.isCancelled { run.kill() }
+                }
+                if !run.stop() { run.kill() }
+                _ = await run.exitCode()
+                end.cancel()
+                return
+            }
+            withAnimation(Motion.overlay) { self.starting = nil }
+            self.emulator = (game, run)
+            self.emulatorStopped = false
+            self.stopping = false
+            self.preferences.lastPlayed[game.id] = run.started
+            self.sessionStart = run.started
+            self.familyGameStarted()
+            self.bringEmulatorFront(run)
+            let code = await run.exitCode()
+            self.emulatorEnded(game, disc, run, code: code)
+        }
+    }
+
+    /// The emulator closed: the launcher comes back, and an exit code other than zero is told
+    /// unless Stop ended it. Its time counts for the family's play time on this Mac only.
+    private func emulatorEnded(_ game: Game, _ disc: RetroDisc, _ run: EmulatorRun, code: Int32) {
+        guard emulator?.run === run else { return }
+        emulator = nil
+        defer { restartIfWaiting() }
+        gameStopped()
+        if overlay == .quickMenu || overlay == .closeGame { overlay = nil }
+        if let start = sessionStart { familyPlayed(game, from: start, session: nil) }
+        sessionStart = nil
+        familyGameEnded()
+        showWindows()
+        NSApp.activate(ignoringOtherApps: true)
+        if !emulatorStopped, code != 0 { show(TRetro.format(.retroEmulatorExited, disc.platform.emulator, Int(code)), symbol: "exclamationmark.triangle.fill") }
+        if let next = launchAfterExit, let game = games.first(where: { $0.id == next }) {
+            launchAfterExit = nil
+            selected = games.firstIndex(of: game) ?? selected
+            primaryAction(game)
+        }
+    }
+
+    /// The game playing takes the front: the PS5 game's window, or the emulator's.
+    func giveGameFront() {
+        if let running {
+            NSApp.yieldActivation(to: running.app)
+            running.app.activate()
+        } else if let emulator {
+            bringEmulatorFront(emulator.run)
+        }
+    }
+
+    /// The emulator playing is ended at once (the phone asks for another game, the launcher quits).
+    func endEmulatorNow() {
+        guard let emulator else { return }
+        emulatorStopped = true
+        emulator.run.kill()
     }
 
     private func applicationEnded(_ pid: pid_t?) {
@@ -2896,7 +3052,7 @@ final class AppModel: ObservableObject {
             phoneLookSent = look
             remote.publish(look)
         }
-        let library = RemoteMessage.library(games: games.map(remoteGame), selected: selectedGame?.id, running: (running?.game ?? starting)?.id,
+        let library = RemoteMessage.library(games: games.map(remoteGame), selected: selectedGame?.id, running: (playingGame ?? starting)?.id,
                                             language: preferences.language.rawValue)
         guard library != phoneLibrary else { return }
         phoneLibrary = library
@@ -2942,7 +3098,7 @@ final class AppModel: ObservableObject {
     private func remoteGame(_ game: Game) -> RemoteGame {
         let state: RemoteGame.State
         switch self.state(of: game) {
-        case .unreadable: state = .unavailable
+        case .unreadable, .needsEmulator: state = .unavailable
         case .locked, .failed: state = .locked
         case .queued, .installing: state = .installing
         case .installed(let outdated): state = outdated ? .update : .installed
@@ -2991,19 +3147,23 @@ final class AppModel: ObservableObject {
                 running.app.forceTerminate()
                 return
             }
+            if let emulator, emulator.game.id != id {
+                launchAfterExit = id
+                endEmulatorNow()
+                return
+            }
             withAnimation(Motion.overlay) { selected = index }
-            if let running {
-                NSApp.yieldActivation(to: running.app)
-                running.app.activate()
+            if running != nil || emulator != nil {
+                giveGameFront()
             } else {
                 primaryAction(games[index])
             }
         case .close:
-            if starting != nil { cancelStart() } else { running?.app.forceTerminate() }
+            if starting != nil { cancelStart() } else if emulator != nil { stopRunningGame() } else { running?.app.forceTerminate() }
         case .home:
             // The phone's PS: the quick menu over a game in front, as a controller's does.
             InputModeState.shared.usedPad()
-            if running != nil, !NSApp.isActive { shortcut(.home, hold: false) } else { bringLauncherFront() }
+            if running != nil || emulator != nil, !NSApp.isActive { shortcut(.home, hold: false) } else { bringLauncherFront() }
         case .saveLayout(let id, let layout):
             guard let game = games.first(where: { $0.id == id }) else { return }
             update(game) { $0.phoneLayout = layout }
@@ -3019,14 +3179,13 @@ final class AppModel: ObservableObject {
     /// nothing (macOS tells the launcher it is active a moment after the switch, and the same press
     /// seen again then would switch straight back).
     func togglePlaying() {
-        guard let running, starting == nil else { return bringLauncherFront() }
+        guard running != nil || emulator != nil, starting == nil else { return bringLauncherFront() }
         let now = Date()
         if let last = lastToggle, now.timeIntervalSince(last) < Self.toggleDebounce, now >= last { return }
         lastToggle = now
         if NSApp.isActive {
             Sounds.shared.play(.select)
-            NSApp.yieldActivation(to: running.app)
-            running.app.activate()
+            giveGameFront()
         } else {
             bringLauncherFront()
             Sounds.shared.play(.select)

@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether 无法完成此操作（%@）。",
   "phoneBrowserName": "%@ 浏览器",
   "phoneBrowserGeneric": "手机浏览器",
-  "phoneRemoveOnline": "当前已连接，选择即可移除"
+  "phoneRemoveOnline": "当前已连接，选择即可移除",
+  "retroEmulators": "模拟器",
+  "retroGames": "%@ 游戏",
+  "retroSelectExecutable": "选择 %@ 的可执行文件",
+  "retroChooseExecutable": "选择已安装的可执行文件",
+  "retroEmulatorPickerFailed": "无法打开模拟器的文件选择器",
+  "retroChooseEmulator": "选择模拟器",
+  "retroEmulatorNeeded": "需要模拟器",
+  "retroShowFolders": "以文件夹显示",
+  "retroDiscMoved": "找不到游戏文件。请将其放回原处，或重新扫描游戏库。",
+  "retroEmulatorStartFailed": "无法启动 %@",
+  "retroEmulatorExited": "%@ 已退出，退出代码为 %d",
+  "retroLibrary": "模拟器游戏",
+  "retroLibraryDetail": "列出游戏文件夹中的 PS1、PS2 和 PS3 游戏，并用你已安装的模拟器运行。"
 }

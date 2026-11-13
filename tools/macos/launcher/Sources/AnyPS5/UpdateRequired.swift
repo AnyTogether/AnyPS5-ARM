@@ -22,7 +22,7 @@ extension AppModel {
         updateRequired = old
         guard first else { return }
         lookUpUpdateQuietly()
-        if overlay == nil, running == nil, starting == nil, preferences.onboarded {
+        if overlay == nil, !playing, preferences.onboarded {
             open(.updateRequired)
         } else {
             show(TK.format(.updateRequiredToast, old.minimum), symbol: "arrow.down.circle.fill")

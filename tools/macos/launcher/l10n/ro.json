@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether nu a putut face asta (%@).",
   "phoneBrowserName": "Browser %@",
   "phoneBrowserGeneric": "Browserul telefonului",
-  "phoneRemoveOnline": "Conectat acum, selectează pentru a elimina"
+  "phoneRemoveOnline": "Conectat acum, selectează pentru a elimina",
+  "retroEmulators": "Emulatoare",
+  "retroGames": "Jocuri %@",
+  "retroSelectExecutable": "Selectează executabilul %@",
+  "retroChooseExecutable": "Alege un executabil instalat",
+  "retroEmulatorPickerFailed": "Selectorul de fișiere al emulatorului nu a putut fi deschis",
+  "retroChooseEmulator": "Alege emulatorul",
+  "retroEmulatorNeeded": "Necesită emulator",
+  "retroShowFolders": "Afișează ca dosare",
+  "retroDiscMoved": "Fișierul jocului lipsește. Pune-l la loc sau scanează din nou biblioteca.",
+  "retroEmulatorStartFailed": "%@ nu a putut fi pornit",
+  "retroEmulatorExited": "%@ s-a închis cu codul de ieșire %d",
+  "retroLibrary": "Jocuri pentru emulator",
+  "retroLibraryDetail": "Afișează jocurile PS1, PS2 și PS3 din dosarele tale de jocuri și le rulează într-un emulator pe care l-ai instalat."
 }

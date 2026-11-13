@@ -80,8 +80,8 @@ extension AppModel {
         guard let game = games.first(where: { $0.titleID == titleId }) else {
             return show(T.format(.gameNotHere, titleId), symbol: "questionmark.square.dashed")
         }
-        if let running {
-            return show(T.format(.gameCloseFirst, running.game.name), symbol: "xmark.app")
+        if let playing = playingGame {
+            return show(T.format(.gameCloseFirst, playing.name), symbol: "xmark.app")
         }
         guard case .installed = state(of: game) else { return show(T.format(.gameUnlockFirst, game.name), symbol: "lock.fill") }
         Task {
@@ -91,7 +91,7 @@ extension AppModel {
                 if !host.isEmpty { offer.hostName = host }
                 let again: () -> Void = { [weak self] in self?.joinFriendGame(sessionId, titleId: titleId, host: host, rebuilt: true) }
                 let copy: Game
-                switch PlayTogetherCheck.verdict(offer, signedIn: true, copies: togetherCopies(), running: running?.game.name) {
+                switch PlayTogetherCheck.verdict(offer, signedIn: true, copies: togetherCopies(), running: playingGame?.name) {
                 case .join(let id):
                     guard let found = games.first(where: { $0.id == id }) else { return }
                     copy = found

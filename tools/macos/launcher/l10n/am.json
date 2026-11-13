@@ -2189,5 +2189,18 @@
   "togetherErrorOther": "AnyTogether ያንን ማድረግ አልቻለም (%@)።",
   "phoneBrowserName": "የ%@ አሳሽ",
   "phoneBrowserGeneric": "የስልክ አሳሽ",
-  "phoneRemoveOnline": "አሁን ተገናኝቷል፣ ለማስወገድ ይምረጡ"
+  "phoneRemoveOnline": "አሁን ተገናኝቷል፣ ለማስወገድ ይምረጡ",
+  "retroEmulators": "ኢሙሌተሮች",
+  "retroGames": "የ%@ ጨዋታዎች",
+  "retroSelectExecutable": "የ%@ ማስኬጃ ፋይልን ይምረጡ",
+  "retroChooseExecutable": "የተጫነ ማስኬጃ ፋይል ይምረጡ",
+  "retroEmulatorPickerFailed": "የኢሙሌተሩን ፋይል መምረጫ መክፈት አልተቻለም",
+  "retroChooseEmulator": "ኢሙሌተር ይምረጡ",
+  "retroEmulatorNeeded": "ኢሙሌተር ያስፈልጋል",
+  "retroShowFolders": "እንደ አቃፊዎች አሳይ",
+  "retroDiscMoved": "የጨዋታው ፋይል የለም። መልሰው ያስቀምጡት ወይም ቤተ-መጽሐፍቱን እንደገና ይቃኙ።",
+  "retroEmulatorStartFailed": "%@ን ማስጀመር አልተቻለም",
+  "retroEmulatorExited": "%@ በመውጫ ኮድ %d ተዘግቷል",
+  "retroLibrary": "የኢሙሌተር ጨዋታዎች",
+  "retroLibraryDetail": "በጨዋታ አቃፊዎችዎ ውስጥ ያሉትን የPS1፣ PS2 እና PS3 ጨዋታዎች ያሳያል እና በጫኑት ኢሙሌተር ያጫውታቸዋል።"
 }

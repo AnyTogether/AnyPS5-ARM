@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether এটি করতে পারেনি (%@)।",
   "phoneBrowserName": "%@ ব্রাউজার",
   "phoneBrowserGeneric": "ফোন ব্রাউজার",
-  "phoneRemoveOnline": "এখন সংযুক্ত, সরাতে নির্বাচন করুন"
+  "phoneRemoveOnline": "এখন সংযুক্ত, সরাতে নির্বাচন করুন",
+  "retroEmulators": "এমুলেটর",
+  "retroGames": "%@ গেম",
+  "retroSelectExecutable": "%@-এর executable ফাইল নির্বাচন করুন",
+  "retroChooseExecutable": "ইনস্টল করা executable ফাইল বেছে নিন",
+  "retroEmulatorPickerFailed": "এমুলেটরের ফাইল নির্বাচক খোলা যায়নি",
+  "retroChooseEmulator": "এমুলেটর বেছে নিন",
+  "retroEmulatorNeeded": "এমুলেটর প্রয়োজন",
+  "retroShowFolders": "ফোল্ডার হিসেবে দেখান",
+  "retroDiscMoved": "গেম ফাইলটি পাওয়া যাচ্ছে না। এটি আবার রাখুন বা লাইব্রেরি আবার স্ক্যান করুন।",
+  "retroEmulatorStartFailed": "%@ চালু করা যায়নি",
+  "retroEmulatorExited": "%@ এক্সিট কোড %d দিয়ে বন্ধ হয়েছে",
+  "retroLibrary": "এমুলেটর গেম",
+  "retroLibraryDetail": "আপনার গেম ফোল্ডারের PS1, PS2 ও PS3 গেম দেখায় এবং আপনার ইনস্টল করা এমুলেটরে সেগুলো চালায়।"
 }

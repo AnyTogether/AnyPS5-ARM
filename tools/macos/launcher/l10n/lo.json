@@ -2191,5 +2191,18 @@
   "togetherErrorOther": "AnyTogether ບໍ່ສາມາດເຮັດແນວນັ້ນໄດ້ (%@).",
   "phoneBrowserName": "ບຣາວເຊີ %@",
   "phoneBrowserGeneric": "ບຣາວເຊີໂທລະສັບ",
-  "phoneRemoveOnline": "ເຊື່ອມຕໍ່ຢູ່ດຽວນີ້, ເລືອກເພື່ອເອົາອອກ"
+  "phoneRemoveOnline": "ເຊື່ອມຕໍ່ຢູ່ດຽວນີ້, ເລືອກເພື່ອເອົາອອກ",
+  "retroEmulators": "ອີມູເລເຕີ",
+  "retroGames": "ເກມ %@",
+  "retroSelectExecutable": "ເລືອກໄຟລ໌ໂປຣແກຣມຂອງ %@",
+  "retroChooseExecutable": "ເລືອກໄຟລ໌ໂປຣແກຣມທີ່ຕິດຕັ້ງແລ້ວ",
+  "retroEmulatorPickerFailed": "ບໍ່ສາມາດເປີດຕົວເລືອກໄຟລ໌ຂອງອີມູເລເຕີໄດ້",
+  "retroChooseEmulator": "ເລືອກອີມູເລເຕີ",
+  "retroEmulatorNeeded": "ຕ້ອງການອີມູເລເຕີ",
+  "retroShowFolders": "ສະແດງເປັນໂຟນເດີ",
+  "retroDiscMoved": "ບໍ່ພົບໄຟລ໌ເກມ. ໃຫ້ເອົາມັນກັບຄືນ ຫຼື ສະແກນຄັງເກມອີກຄັ້ງ.",
+  "retroEmulatorStartFailed": "ບໍ່ສາມາດເລີ່ມ %@ ໄດ້",
+  "retroEmulatorExited": "%@ ປິດດ້ວຍລະຫັດອອກ %d",
+  "retroLibrary": "ເກມອີມູເລເຕີ",
+  "retroLibraryDetail": "ສະແດງເກມ PS1, PS2 ແລະ PS3 ໃນໂຟນເດີເກມຂອງທ່ານ ແລະ ຫຼິ້ນມັນໃນອີມູເລເຕີທີ່ທ່ານຕິດຕັ້ງໄວ້."
 }

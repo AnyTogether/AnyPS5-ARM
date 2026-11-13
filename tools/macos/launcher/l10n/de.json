@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether konnte das nicht tun (%@).",
   "phoneBrowserName": "%@-Browser",
   "phoneBrowserGeneric": "Handy-Browser",
-  "phoneRemoveOnline": "Gerade verbunden, zum Entfernen auswählen"
+  "phoneRemoveOnline": "Gerade verbunden, zum Entfernen auswählen",
+  "retroEmulators": "Emulatoren",
+  "retroGames": "%@-Spiele",
+  "retroSelectExecutable": "Programmdatei von %@ auswählen",
+  "retroChooseExecutable": "Installierte Programmdatei auswählen",
+  "retroEmulatorPickerFailed": "Die Dateiauswahl für den Emulator konnte nicht geöffnet werden",
+  "retroChooseEmulator": "Emulator auswählen",
+  "retroEmulatorNeeded": "Emulator erforderlich",
+  "retroShowFolders": "Als Ordner anzeigen",
+  "retroDiscMoved": "Die Spieldatei fehlt. Lege sie zurück oder durchsuche die Bibliothek erneut.",
+  "retroEmulatorStartFailed": "%@ konnte nicht gestartet werden",
+  "retroEmulatorExited": "%@ wurde mit Exitcode %d beendet",
+  "retroLibrary": "Emulator-Spiele",
+  "retroLibraryDetail": "Zeigt die PS1-, PS2- und PS3-Spiele in deinen Spieleordnern an und startet sie in einem installierten Emulator."
 }

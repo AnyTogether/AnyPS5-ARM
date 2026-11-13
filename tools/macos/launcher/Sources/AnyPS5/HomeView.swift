@@ -9,7 +9,7 @@ struct Backdrop: View {
 
     var body: some View {
         let preferences = model.preferences
-        let paused = model.running != nil || !model.active || preferences.reducedMotion || model.powerDimmed
+        let paused = model.running != nil || model.emulator != nil || !model.active || preferences.reducedMotion || model.powerDimmed
         ZStack {
             if let design = model.activeDesign, let file = model.themes.file(design.background, of: design) {
                 if design.backgroundIsVideo {
@@ -159,8 +159,14 @@ struct HomeView: View {
             } else {
                 TileRow()
                     .padding(.top, 34 * scale)
+                // A console's folder: its games in a row under Home's (RetroHomeFolders.swift).
+                if model.homeFolderPlatform != nil {
+                    TileRow(folderContents: true)
+                        .padding(.top, 24 * scale)
+                        .transition(.opacity.combined(with: .offset(y: -10 * scale)))
+                }
                 Spacer(minLength: 0)
-                if let game = model.selectedGame {
+                if let game = model.homePreviewGame {
                     HeroInfo(game: game)
                         .id(game.id)
                         .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 14 * scale)), removal: .opacity))
@@ -168,13 +174,15 @@ struct HomeView: View {
                 }
                 HStack {
                     Spacer()
-                    HintBar()
+                    // A folder has no settings of its own: no △ for them on it.
+                    HintBar(options: model.selectedHomeFolder == nil)
                 }
                 .padding(.horizontal, 64 * scale)
                 .padding(.vertical, 28 * scale)
             }
         }
-        .animation(Motion.layout, value: model.selectedGame?.id)
+        .animation(Motion.layout, value: model.homePreviewGame?.id)
+        .animation(Motion.layout, value: model.homeFolderPlatform)
         // Over the tiles and the game's words, under the top bar's own picture.
         .overlayPreferenceValue(ProfileSwitcherAnchor.self) { anchor in
             ProfileSwitcherLayer(anchor: anchor)
@@ -353,43 +361,67 @@ private struct NoticeCapsule: ViewModifier {
 }
 
 /// The row of game tiles: the selected one is larger, sits at the row's start and carries the
-/// game's name beside it, as on the console.
+/// game's name beside it, as on the console. With Settings › Emulators › Show as folders, a
+/// console's games are one folder tile in it, and `folderContents` is the row of that folder's
+/// games under it: a preview of small tiles until Down goes into it.
 struct TileRow: View {
+    var folderContents = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
     var body: some View {
-        let small = 118 * scale
-        let large = 176 * scale
+        let rowFocused = folderContents == (model.activeHomeRetroFolder != nil)
+        let preview = folderContents && !rowFocused
+        let small = (folderContents ? 112 : 118) * scale
+        let large = (folderContents ? 148 : 176) * scale
         let gap = 16 * scale
         let label = 300 * scale
         let leading = 64 * scale
+        let tiles = folderContents ? model.homeFolderTiles : model.homeTiles
+        let at = preview ? 0 : model.homeTileIndex(tiles, folderContents: folderContents)
         GeometryReader { _ in
             ZStack(alignment: .topLeading) {
-                ForEach(Array(model.games.enumerated()), id: \.element.id) { index, game in
-                    let selected = index == model.selected
-                    let offset = index - model.selected
-                    let x: CGFloat = offset < 0
+                ForEach(Array(tiles.enumerated()), id: \.element.id) { index, tile in
+                    let game = model.games[tile.gameIndex]
+                    let selected = index == at
+                    let offset = index - at
+                    let x: CGFloat = preview
+                        ? leading + CGFloat(index) * (small + gap)
+                        : offset < 0
                         ? leading + CGFloat(offset) * (small + gap)
                         : offset == 0 ? leading : leading + large + gap + label + CGFloat(offset - 1) * (small + gap)
-                    GameTile(game: game, size: selected ? large : small, focused: selected && model.focus == .tiles && model.overlay == nil)
-                        .offset(x: x, y: selected ? 0 : (large - small) * 0.18)
-                        .opacity(offset < 0 ? 0.0 : 1)
-                        .hoverTick("tile-\(game.id)")
-                        .onTapGesture(count: 2) { model.selected = index; model.primaryAction(game) }
-                        .onTapGesture {
-                            if model.selected != index { Sounds.shared.play(.move) }
-                            model.selected = index
-                            model.focus = .tiles
-                            model.measureSelected()
+                    let size = selected && !preview ? large : small
+                    let focused = selected && rowFocused && model.focus == .tiles && model.overlay == nil
+                    Group {
+                        if let console = tile.folder {
+                            RetroFolderTile(console: console, size: size, focused: focused)
+                                // The pointer over a folder shows its games, as on Windows and Linux.
+                                .onHover { inside in
+                                    if inside, !selected, offset >= 0, model.overlay == nil { model.selectHomeTile(index, folderContents: folderContents) }
+                                }
+                                .onTapGesture {
+                                    model.selectHomeTile(index, folderContents: folderContents)
+                                    model.openSelectedHomeFolder()
+                                }
+                        } else {
+                            GameTile(game: game, size: size, focused: focused)
+                                .onTapGesture(count: 2) {
+                                    model.selectHomeTile(index, folderContents: folderContents)
+                                    model.primaryAction(game)
+                                }
+                                .onTapGesture { model.selectHomeTile(index, folderContents: folderContents) }
                         }
-                    if selected {
+                    }
+                    .offset(x: x, y: selected || preview ? 0 : (large - small) * 0.18)
+                    .opacity(offset < 0 ? 0.0 : 1)
+                    .hoverTick("tile-\(tile.id)")
+                    if selected && !preview {
                         VStack(alignment: .leading, spacing: 6 * scale) {
-                            Text(game.name)
+                            Text(tile.folder.map { TRetro.format(.retroGames, $0.label) } ?? game.name)
                                 .font(.display(22 * scale, .semibold))
                                 .foregroundStyle(.white)
                                 .lineLimit(2)
-                            StateLabel(state: model.state(of: game), game: game)
+                            if tile.folder == nil { StateLabel(state: model.state(of: game), game: game) }
                         }
                         .legible(16)
                         .frame(width: label - gap, alignment: .leading)
@@ -399,6 +431,7 @@ struct TileRow: View {
                 }
             }
             .animation(Motion.layout, value: model.selected)
+            .animation(Motion.layout, value: model.homeRetroFolder)
         }
         .frame(height: large + 10 * scale)
     }
@@ -420,7 +453,8 @@ struct GameTile: View {
             if let icon = game.icon {
                 ArtworkImage(url: icon, maxPixels: 400)
             } else {
-                Image(systemName: "gamecontroller.fill").font(.system(size: size * 0.32)).foregroundStyle(.white.opacity(0.5))
+                // A disc without art: a disc, not a controller.
+                Image(systemName: game.retro == nil ? "gamecontroller.fill" : "opticaldisc").font(.system(size: size * 0.32)).foregroundStyle(.white.opacity(0.5))
             }
             overlay(for: state)
             if look.glass {
@@ -449,6 +483,17 @@ struct GameTile: View {
                     .padding(size * 0.08)
                     .background(Circle().fill(Color.black.opacity(0.55)).padding(size * 0.035))
                     .accessibilityLabel(T.text(state == .unreadable ? .unreadableDump : (state == .locked ? .locked : .failed)))
+            }
+        case .needsEmulator:
+            // Emulator required: dimmed, with the settings mark its button opens.
+            ZStack(alignment: .bottomTrailing) {
+                Color.black.opacity(0.42)
+                Image(systemName: "gearshape.fill")
+                    .font(.system(size: size * 0.13, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .padding(size * 0.08)
+                    .background(Circle().fill(Color.black.opacity(0.55)).padding(size * 0.035))
+                    .accessibilityLabel(TRetro.text(.retroEmulatorNeeded))
             }
         case .installing(let step, let fraction):
             VStack {
@@ -485,6 +530,7 @@ struct StateLabel: View {
             case .locked where model.prepare.pending.contains(game?.id ?? ""): return ("clock", TPrep.text(.waitingToPrepare), .white.opacity(0.75))
             case .locked: return ("lock.fill", T.text(.locked), .white.opacity(0.75))
             case .unreadable: return ("xmark.octagon.fill", T.text(.unreadableDump), Color(red: 1, green: 0.6, blue: 0.55))
+            case .needsEmulator: return ("gearshape.fill", TRetro.text(.retroEmulatorNeeded), .white.opacity(0.75))
             case .queued: return ("clock", T.text(.queued), .white.opacity(0.75))
             case .installing where game.map(model.isPreparing) == true:
                 return model.prepare.paused ? ("pause.circle.fill", TPrep.text(.preparingPaused), .white.opacity(0.75)) : ("arrow.down.circle.fill", TPrep.text(.preparing), model.accent)
@@ -586,30 +632,36 @@ struct HeroInfo: View {
                 InfoCard(title: T.text(.titleID), symbol: "number") {
                     Text(game.titleID).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
                 }
-                InfoCard(title: T.text(.version), symbol: "tag") {
-                    VStack(alignment: .leading, spacing: 1 * scale) {
-                        Text(game.update?.version ?? game.version).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
-                        // The update dumped beside it, else the engine that unlocked it.
-                        if let update = game.update {
-                            let applied = model.installedRecords[game.id]?.update == update.version
-                            Text(TAddons.format(applied ? .updateApplied : .updateToApply, update.shortVersion))
-                                .font(.display(12 * scale, .medium)).foregroundStyle(applied ? .white.opacity(0.5) : model.accent).lineLimit(1).truncationMode(.middle)
-                        } else if let record = model.installedRecords[game.id] {
-                            Text(TE.text(.engineTitle) + " " + Toolkit.shortVersion(record.toolkit))
-                                .font(.display(12 * scale, .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(1).truncationMode(.middle)
-                        }
-                    }
-                }
-                CommunityCard(game: game)
+                // A disc has no PS5 version, engine or community reports, as on Windows and Linux.
+                if game.retro == nil { versionCard }
+                if game.retro == nil { CommunityCard(game: game) }
                 if !game.addons.isEmpty { AddonsCard(addons: game.addons) }
             }
         }
         .onAppear { model.measureSelected() }
     }
 
+    private var versionCard: some View {
+        InfoCard(title: T.text(.version), symbol: "tag") {
+            VStack(alignment: .leading, spacing: 1 * scale) {
+                Text(game.update?.version ?? game.version).font(.display(17 * scale, .semibold)).foregroundStyle(.white)
+                // The update dumped beside it, else the engine that unlocked it.
+                if let update = game.update {
+                    let applied = model.installedRecords[game.id]?.update == update.version
+                    Text(TAddons.format(applied ? .updateApplied : .updateToApply, update.shortVersion))
+                        .font(.display(12 * scale, .medium)).foregroundStyle(applied ? .white.opacity(0.5) : model.accent).lineLimit(1).truncationMode(.middle)
+                } else if let record = model.installedRecords[game.id] {
+                    Text(TE.text(.engineTitle) + " " + Toolkit.shortVersion(record.toolkit))
+                        .font(.display(12 * scale, .medium)).foregroundStyle(.white.opacity(0.5)).lineLimit(1).truncationMode(.middle)
+                }
+            }
+        }
+    }
+
     private func primaryTitle(_ state: GameState) -> String {
         switch state {
         case .installed: return T.text(.play)
+        case .needsEmulator: return TRetro.text(.retroChooseEmulator)
         case .locked, .unreadable: return T.text(.unlock)
         case .failed: return T.text(.retry)
         case .installing, .queued: return T.text(.cancel)
@@ -622,6 +674,7 @@ struct HeroInfo: View {
     private func primarySymbol(_ state: GameState) -> String {
         switch state {
         case .installed: return "play.fill"
+        case .needsEmulator: return "gearshape.fill"
         case .locked, .unreadable: return "lock.open.fill"
         case .failed: return "arrow.clockwise"
         case .installing, .queued: return "xmark"
@@ -764,7 +817,8 @@ struct LogView: View {
             HStack(spacing: 14 * scale) {
                 Text(T.text(.logTitle) + (model.selectedGame.map { " · " + $0.name } ?? "")).font(.display(30 * scale, .light)).foregroundStyle(.white)
                 Spacer()
-                if let game = model.selectedGame {
+                // A report is about the engine: an emulator's log has none to make.
+                if let game = model.selectedGame, game.retro == nil {
                     ConsoleButton(title: T.text(.makeReport), symbol: "stethoscope", focused: false) { model.makeReport(game) }
                 }
                 ConsoleButton(title: T.text(.close), symbol: "xmark", focused: true) { model.closeOverlay() }
@@ -1026,11 +1080,14 @@ extension AppModel {
         if case .notice = focus, !showsUpdateNotice { focus = .top(0) }
         if case .notice(1) = focus, restartAfterGame { focus = .notice(0) }
         switch (focus, command) {
-        case (.tiles, .left): moveSelection(-1)
-        case (.tiles, .right): moveSelection(1)
-        case (.tiles, .down): moveFocus(.actions(0))
-        case (.tiles, .up): moveFocus(.top(1))
-        case (.tiles, .select): primaryAction(game)
+        // With console folders: through the row that has the selection, Down or Select into a
+        // folder's games, Up or Back out of them (RetroHomeFolders.swift).
+        case (.tiles, .left): moveHomeSelection(-1)
+        case (.tiles, .right): moveHomeSelection(1)
+        case (.tiles, .down): if !openSelectedHomeFolder() { moveFocus(.actions(0)) }
+        case (.tiles, .up): if !closeHomeFolder() { moveFocus(.top(1)) }
+        case (.tiles, .back): closeHomeFolder()
+        case (.tiles, .select): if !openSelectedHomeFolder() { primaryAction(game) }
         case (.top(0), .left) where showsUpdateNotice: moveFocus(.notice(restartAfterGame ? 0 : 1))
         case (.top(let index), .left): moveFocus(.top(max(0, index - 1)))
         case (.notice(let index), .left): moveFocus(.notice(max(0, index - 1)))
@@ -1057,7 +1114,7 @@ extension AppModel {
         case (.actions(0), .select): primaryAction(game)
         case (.actions(1), .select) where actionCount == 3: open(.trophies)
         case (.actions, .select): open(.gameSettings)
-        case (_, .options): open(.gameSettings)
+        case (_, .options): if selectedHomeFolder == nil { open(.gameSettings) }
         default: break
         }
         return true

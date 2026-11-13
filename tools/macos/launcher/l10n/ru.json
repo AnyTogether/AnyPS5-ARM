@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether не смог это сделать (%@).",
   "phoneBrowserName": "Браузер %@",
   "phoneBrowserGeneric": "Браузер телефона",
-  "phoneRemoveOnline": "Сейчас подключено, выберите для удаления"
+  "phoneRemoveOnline": "Сейчас подключено, выберите для удаления",
+  "retroEmulators": "Эмуляторы",
+  "retroGames": "Игры %@",
+  "retroSelectExecutable": "Выберите исполняемый файл %@",
+  "retroChooseExecutable": "Выберите установленный исполняемый файл",
+  "retroEmulatorPickerFailed": "Не удалось открыть выбор файла эмулятора",
+  "retroChooseEmulator": "Выбрать эмулятор",
+  "retroEmulatorNeeded": "Нужен эмулятор",
+  "retroShowFolders": "Показывать папками",
+  "retroDiscMoved": "Файл игры не найден. Верните его на место или снова просканируйте библиотеку.",
+  "retroEmulatorStartFailed": "Не удалось запустить %@",
+  "retroEmulatorExited": "%@ завершился с кодом выхода %d",
+  "retroLibrary": "Игры для эмуляторов",
+  "retroLibraryDetail": "Показывает игры PS1, PS2 и PS3 из ваших папок с играми и запускает их в установленном эмуляторе."
 }

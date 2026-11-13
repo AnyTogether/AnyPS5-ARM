@@ -9,9 +9,13 @@ public struct Game: Identifiable, Hashable, Sendable {
         case container
         /// Neither: an encrypted or unknown file.
         case unreadable
+        /// No eboot.bin: a PS1, PS2 or PS3 disc that an installed emulator plays (`retro`).
+        case disc
     }
 
-    public var id: String { folder.path }
+    /// What the launcher keeps per game under (last played, sizes, records): the folder's path
+    /// for a dump, `libraryID` for a disc.
+    public var id: String { libraryID ?? folder.path }
     public let folder: URL
     public let titleID: String
     public let name: String
@@ -26,13 +30,25 @@ public struct Game: Identifiable, Hashable, Sendable {
     public var update: GameUpdate? = nil
     /// The add-ons dumped beside the game (GameAddons).
     public var addons: [GameAddon] = []
+    /// The disc an emulator plays, for a game that is not a PS5 dump; nil for a dump.
+    public var retro: RetroDisc? = nil
+    /// The game's own identifier when its folder is not one (`retro` discs): the disc's path
+    /// inside its games folder, so it stays the same when the drive's mount point changes.
+    public var libraryID: String? = nil
+    /// The game's own files when it shares its folder with other games (disc images side by
+    /// side): what its size counts. nil when the whole folder is the game's.
+    public var files: [URL]? = nil
 
     public var bundleIdentifier: String {
         "org.anyps5." + titleID.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
-    public static func == (left: Game, right: Game) -> Bool { left.folder == right.folder }
-    public func hash(into hasher: inout Hasher) { hasher.combine(folder) }
+    /// A dump is its folder; discs side by side in one folder are told apart by `libraryID`.
+    public static func == (left: Game, right: Game) -> Bool { left.folder == right.folder && left.libraryID == right.libraryID }
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(folder)
+        hasher.combine(libraryID)
+    }
 }
 
 public enum GameLibrary {
@@ -48,19 +64,35 @@ public enum GameLibrary {
         public var incomplete: [URL] = []
     }
 
-    /// Finds every game folder under `root`, down to three levels.
-    public static func scan(_ root: URL) -> [Game] {
-        survey(root).games
+    /// Finds every game folder under `root`, down to three levels. With `includeRetro`, the PS1,
+    /// PS2 and PS3 discs in them too (RetroLibrary.swift).
+    public static func scan(_ root: URL, includeRetro: Bool = false, cache: RetroScanCache? = nil) -> [Game] {
+        survey(root, includeRetro: includeRetro, cache: cache).games
     }
 
     /// The games under `root` and the dumps that are not whole yet. Cheap: a folder listing per
-    /// level and each game's param.json.
-    public static func survey(_ root: URL) -> Survey {
+    /// level and each game's param.json. With `includeRetro`, also the discs: what was read from
+    /// a disc file is kept in `cache` (the shared `retroCache` by default) until the file changes.
+    public static func survey(_ root: URL, includeRetro: Bool = false, cache: RetroScanCache? = nil) -> Survey {
         var found = Survey()
-        visit(root, depth: 0, into: &found)
+        visit(root, depth: 0, into: &found, retro: includeRetro ? RetroScan(root: root, cache: cache ?? retroCache) : nil)
         GameAddons.attach(to: &found)
-        found.games.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        found.games.sort(by: byName)
         return found
+    }
+
+    /// The library's order: by name. Games of one name stay as the scan found them, as before
+    /// there were discs; a disc of that name comes after the dumps, and discs of one name go by
+    /// folder, then by identifier, so the order never depends on the listing.
+    static func byName(_ left: Game, _ right: Game) -> Bool {
+        switch left.name.localizedCaseInsensitiveCompare(right.name) {
+        case .orderedAscending: return true
+        case .orderedDescending: return false
+        case .orderedSame:
+            guard right.retro != nil else { return false }
+            guard left.retro != nil else { return true }
+            return left.folder.path != right.folder.path ? left.folder.path < right.folder.path : left.id < right.id
+        }
     }
 
     /// One of the user's games folders as the last look found it: there or not (a drive
@@ -90,12 +122,18 @@ public enum GameLibrary {
 
     /// The games under every folder in `roots`, in their order. A folder that is not there is
     /// skipped and said to be not connected.
-    public static func survey(roots: [URL]) -> Library {
+    ///
+    /// With `includeRetro`, the discs too; what `cache` holds of files no longer in any folder
+    /// is let go.
+    public static func survey(roots: [URL], includeRetro: Bool = false, cache: RetroScanCache? = nil) -> Library {
         let fileManager = FileManager.default
+        let retro = cache ?? retroCache
+        if includeRetro { retro.begin() }
+        defer { if includeRetro { retro.end() } }
         return merge(roots.map { root in
             var directory: ObjCBool = false
             let there = fileManager.fileExists(atPath: root.path, isDirectory: &directory) && directory.boolValue
-            return (root, there ? survey(root) : nil)
+            return (root, there ? survey(root, includeRetro: includeRetro, cache: retro) : nil)
         })
     }
 
@@ -118,7 +156,7 @@ public enum GameLibrary {
             }
             earlier.formUnion(survey.games.map(\.titleID))
         }
-        library.games.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        library.games.sort(by: byName)
         return library
     }
 
@@ -128,31 +166,42 @@ public enum GameLibrary {
         return zip(left, right).allSatisfy { a, b in
             a.folder == b.folder && a.titleID == b.titleID && a.name == b.name && a.version == b.version && a.icon == b.icon
                 && a.background == b.background && a.music == b.music && a.executable == b.executable && a.ageLevels == b.ageLevels
-                && a.update == b.update && a.addons == b.addons
+                && a.update == b.update && a.addons == b.addons && a.id == b.id && a.retro == b.retro && a.files == b.files
         }
     }
 
-    static func visit(_ folder: URL, depth: Int, into found: inout Survey) {
-        if let game = inspect(folder) {
+    static func visit(_ folder: URL, depth: Int, into found: inout Survey, retro: RetroScan? = nil) {
+        if let game = inspect(folder, includeRetro: retro != nil, root: retro?.root, cache: retro?.cache) {
             found.games.append(game)
             return
         }
         let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: folder.appendingPathComponent("sce_sys").path) || fileManager.fileExists(atPath: folder.appendingPathComponent("eboot.bin").path) {
+        let unfinished = fileManager.fileExists(atPath: folder.appendingPathComponent("sce_sys").path) || fileManager.fileExists(atPath: folder.appendingPathComponent("eboot.bin").path)
+        if unfinished {
             found.incomplete.append(folder)
         }
-        guard depth < 3, let entries = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey], options: [.skipsHiddenFiles]) else { return }
+        guard depth < 3 || retro != nil, let entries = try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey, .isPackageKey], options: [.skipsHiddenFiles]) else { return }
+        // Disc images side by side, in a folder that is no game of its own: each one a game.
+        if let retro, !unfinished, !fileManager.fileExists(atPath: folder.appendingPathComponent("retro.json").path) {
+            found.games += retroFiles(in: folder, entries: entries, scan: retro)
+        }
+        guard depth < 3 else { return }
         for entry in entries {
             let values = try? entry.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
             guard values?.isDirectory == true, values?.isPackage != true, !skipped.contains(entry.lastPathComponent) else { continue }
-            visit(entry, depth: depth + 1, into: &found)
+            visit(entry, depth: depth + 1, into: &found, retro: retro)
         }
     }
 
-    public static func inspect(_ folder: URL) -> Game? {
+    /// The game in `folder`, or nil when it is not a dump. With `includeRetro`, a folder with a
+    /// retro.json or an extracted PS3 disc too, identified inside the games folder `root`.
+    public static func inspect(_ folder: URL, includeRetro: Bool = false, root: URL? = nil, cache: RetroScanCache? = nil) -> Game? {
         let fileManager = FileManager.default
         let system = folder.appendingPathComponent("sce_sys")
         let eboot = folder.appendingPathComponent("eboot.bin")
+        if includeRetro, !fileManager.fileExists(atPath: eboot.path) {
+            return inspectRetro(folder, root: root) ?? inspectPS3(folder, root: root, cache: cache ?? retroCache)
+        }
         guard fileManager.fileExists(atPath: eboot.path),
               let data = try? Data(contentsOf: system.appendingPathComponent("param.json")),
               let parameters = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
@@ -189,8 +238,11 @@ public enum GameLibrary {
         return levels.isEmpty ? nil : levels
     }
 
-    /// The total allocated size of a folder.
+    /// The total allocated size of a folder; a file's own when `url` is one (a disc's files).
     public static func size(of url: URL) -> Int64 {
+        if let values = try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]), values.isRegularFile == true {
+            return Int64(values.totalFileAllocatedSize ?? 0)
+        }
         guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) else { return 0 }
         var total: Int64 = 0
         for case let file as URL in enumerator {

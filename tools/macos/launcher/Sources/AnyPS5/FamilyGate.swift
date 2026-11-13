@@ -87,7 +87,7 @@ extension AppModel {
         guard case .limited(let status, _) = family, let rules = status.effectiveRestrictions else { return nil }
         let zone = rules.playTime.timeZone
         let played = FamilyPolicy.playedToday(status: status, records: familyCache.records, pending: togetherSync.pendingSessionIDs,
-                                              running: running == nil ? nil : sessionStart, now: now, timeZone: zone)
+                                              running: playingGame == nil ? nil : sessionStart, now: now, timeZone: zone)
         return FamilyPolicy.allowance(rules.playTime, now: now, playedSeconds: played, bonusMinutes: FamilyPolicy.bonusToday(status: status, now: now, timeZone: zone))
     }
 
@@ -211,7 +211,8 @@ extension AppModel {
     }
 
     private func familyTick(now: Date = Date()) {
-        guard let running else { return familyGameEnded() }
+        // A PS5 game, or a disc in its emulator: the family's play time counts both.
+        guard let game = playingGame else { return familyGameEnded() }
         let remaining: Int?
         let allowed: Bool
         var rules: FamilyRestrictions?
@@ -245,13 +246,18 @@ extension AppModel {
             case .limitReached(let closesAt):
                 FamilyNotice.shared.show(closesAt: closesAt, sounds: preferences.sounds)
                 if playTime.notifyParents, togetherUser != nil {
-                    let titleId = running.game.titleID
+                    let titleId = game.titleID
                     Task { try? await together.familyLimitReached(titleId: titleId) }
                 }
             case .quit:
-                running.app.terminate()
+                if let running {
+                    running.app.terminate()
+                } else if let run = emulator?.run {
+                    emulatorStopped = true
+                    _ = run.stop()
+                }
             case .forceQuit:
-                running.app.forceTerminate()
+                if let running { running.app.forceTerminate() } else { endEmulatorNow() }
             case .resumed:
                 FamilyNotice.shared.hide()
                 if let remaining { TrophyBanner.shared.notice(FS.format(.moreTime, FS.duration(remaining)), detail: "", symbol: "hourglass", sounds: preferences.sounds) }

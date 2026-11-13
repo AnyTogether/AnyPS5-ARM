@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether to nedokázal provést (%@).",
   "phoneBrowserName": "Prohlížeč %@",
   "phoneBrowserGeneric": "Prohlížeč v telefonu",
-  "phoneRemoveOnline": "Právě připojeno, výběrem odstraníte"
+  "phoneRemoveOnline": "Právě připojeno, výběrem odstraníte",
+  "retroEmulators": "Emulátory",
+  "retroGames": "Hry pro %@",
+  "retroSelectExecutable": "Vyberte spustitelný soubor %@",
+  "retroChooseExecutable": "Vybrat nainstalovaný spustitelný soubor",
+  "retroEmulatorPickerFailed": "Výběr souboru emulátoru se nepodařilo otevřít",
+  "retroChooseEmulator": "Vybrat emulátor",
+  "retroEmulatorNeeded": "Je potřeba emulátor",
+  "retroShowFolders": "Zobrazit jako složky",
+  "retroDiscMoved": "Soubor hry chybí. Vraťte ho zpět nebo znovu prohledejte knihovnu.",
+  "retroEmulatorStartFailed": "%@ se nepodařilo spustit",
+  "retroEmulatorExited": "%@ se ukončil s návratovým kódem %d",
+  "retroLibrary": "Hry pro emulátory",
+  "retroLibraryDetail": "Zobrazí hry pro PS1, PS2 a PS3 ze složek s hrami a spustí je v nainstalovaném emulátoru."
 }

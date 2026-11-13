@@ -71,6 +71,8 @@ public final class LibraryMonitor: @unchecked Sendable {
     }
 
     public let roots: [URL]
+    /// The scans list the PS1, PS2 and PS3 discs too (Settings › Library › Emulator games).
+    public let includeRetro: Bool
     private let timing: Timing
     private let deliver: @Sendable (Update) -> Void
     private let queue = DispatchQueue(label: "org.anyps5.library-monitor", qos: .utility)
@@ -90,8 +92,9 @@ public final class LibraryMonitor: @unchecked Sendable {
         self.init(roots: [root], timing: timing, deliver: deliver)
     }
 
-    public init(roots: [URL], timing: Timing = Timing(), deliver: @escaping @Sendable (Update) -> Void) {
+    public init(roots: [URL], includeRetro: Bool = false, timing: Timing = Timing(), deliver: @escaping @Sendable (Update) -> Void) {
         self.roots = roots
+        self.includeRetro = includeRetro
         self.timing = timing
         self.deliver = deliver
         queue.setSpecific(key: queueKey, value: true)
@@ -232,7 +235,7 @@ public final class LibraryMonitor: @unchecked Sendable {
         guard !stopped else { return }
         pending = nil
         firstRequest = nil
-        let survey = GameLibrary.survey(roots: roots)
+        let survey = GameLibrary.survey(roots: roots, includeRetro: includeRetro)
         let added = tracker.update(survey.games)
         scans += 1
         let update = Update(games: survey.games, roots: survey.roots, folders: survey.folders, added: added, incomplete: survey.incomplete, first: scans == 1)

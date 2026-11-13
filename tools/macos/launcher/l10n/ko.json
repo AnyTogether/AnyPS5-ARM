@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether에서 처리하지 못했습니다(%@).",
   "phoneBrowserName": "%@ 브라우저",
   "phoneBrowserGeneric": "휴대폰 브라우저",
-  "phoneRemoveOnline": "지금 연결됨, 제거하려면 선택하세요"
+  "phoneRemoveOnline": "지금 연결됨, 제거하려면 선택하세요",
+  "retroEmulators": "에뮬레이터",
+  "retroGames": "%@ 게임",
+  "retroSelectExecutable": "%@ 실행 파일 선택",
+  "retroChooseExecutable": "설치된 실행 파일 선택",
+  "retroEmulatorPickerFailed": "에뮬레이터 파일 선택기를 열 수 없습니다",
+  "retroChooseEmulator": "에뮬레이터 선택",
+  "retroEmulatorNeeded": "에뮬레이터 필요",
+  "retroShowFolders": "폴더로 표시",
+  "retroDiscMoved": "게임 파일이 없습니다. 원래 위치에 다시 넣거나 라이브러리를 다시 검색하세요.",
+  "retroEmulatorStartFailed": "%@을(를) 시작할 수 없습니다",
+  "retroEmulatorExited": "%@이(가) 종료 코드 %d(으)로 종료되었습니다",
+  "retroLibrary": "에뮬레이터 게임",
+  "retroLibraryDetail": "게임 폴더에 있는 PS1, PS2, PS3 게임을 표시하고 설치한 에뮬레이터로 실행합니다."
 }

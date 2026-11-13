@@ -152,7 +152,7 @@ extension AppModel {
         // A question another screen took the place of is dropped.
         if gameFiles.asked != nil, overlay == .gameFiles { return }
         gameFiles.asked = nil
-        guard overlay == nil, running == nil, starting == nil else { return }
+        guard overlay == nil, !playing else { return }
         guard let next = gameFilesWork.waiting.first(where: { !gameFilesWork.later.contains($0.archive?.url.path ?? "") }) else { return }
         gameFiles.asked = next
         open(.gameFiles)

@@ -2204,5 +2204,18 @@
   "togetherErrorOther": "AnyTogether یہ نہیں کر سکا (%@)۔",
   "phoneBrowserName": "%@ براؤزر",
   "phoneBrowserGeneric": "فون براؤزر",
-  "phoneRemoveOnline": "ابھی جڑا ہوا ہے، ہٹانے کے لیے منتخب کریں"
+  "phoneRemoveOnline": "ابھی جڑا ہوا ہے، ہٹانے کے لیے منتخب کریں",
+  "retroEmulators": "ایمولیٹرز",
+  "retroGames": "%@ گیمز",
+  "retroSelectExecutable": "%@ کی ایگزیکیوٹیبل فائل منتخب کریں",
+  "retroChooseExecutable": "انسٹال شدہ ایگزیکیوٹیبل فائل منتخب کریں",
+  "retroEmulatorPickerFailed": "ایمولیٹر کا فائل منتخب کنندہ نہیں کھل سکا",
+  "retroChooseEmulator": "ایمولیٹر منتخب کریں",
+  "retroEmulatorNeeded": "ایمولیٹر درکار ہے",
+  "retroShowFolders": "فولڈرز کی صورت میں دکھائیں",
+  "retroDiscMoved": "گیم فائل موجود نہیں۔ اسے واپس رکھیں یا لائبریری دوبارہ اسکین کریں۔",
+  "retroEmulatorStartFailed": "%@ شروع نہیں ہو سکا",
+  "retroEmulatorExited": "%@ ایگزٹ کوڈ %d کے ساتھ بند ہو گیا",
+  "retroLibrary": "ایمولیٹر گیمز",
+  "retroLibraryDetail": "آپ کے گیم فولڈرز میں PS1، PS2 اور PS3 گیمز دکھاتا ہے اور انہیں آپ کے انسٹال کردہ ایمولیٹر میں چلاتا ہے۔"
 }
