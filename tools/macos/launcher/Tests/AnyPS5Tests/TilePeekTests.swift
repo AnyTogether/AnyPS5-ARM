@@ -1,5 +1,6 @@
 @testable import AnyPS5
 import AnyPS5Core
+import AppKit
 import XCTest
 
 /// The home tile row as on Windows and Linux: the previous game stays in view at the left edge,
@@ -48,5 +49,33 @@ final class TilePeekTests: XCTestCase {
         XCTAssertFalse(StateLabel.iconOnlyHidden(.locked, waitingToPrepare: true), "waiting to be prepared shows the clock")
         XCTAssertFalse(StateLabel.iconOnlyHidden(.queued, waitingToPrepare: false))
         XCTAssertFalse(StateLabel.iconOnlyHidden(.installed(outdated: false), waitingToPrepare: false))
+    }
+
+    /// Home on the first game and on the second, kept as pictures when ANYPS5_TEST_SHOTS says
+    /// where (CI uploads them): the previous tile peeks in only on the second.
+    func testTheHomeRowDrawsOnTheFirstAndTheSecondGame() throws {
+        let root = try LauncherFixture.folder(games: 4)
+        let games = GameLibrary.scan(root)
+        XCTAssertEqual(games.count, 4)
+        var preferences = Preferences()
+        preferences.onboarded = true
+        preferences.sounds = false
+        preferences.libraryFolders = [root.path]
+        let folder: URL
+        if let kept = ProcessInfo.processInfo.environment["ANYPS5_TEST_SHOTS"], !kept.isEmpty {
+            folder = URL(fileURLWithPath: kept)
+        } else {
+            folder = FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-shots-\(UUID().uuidString)")
+        }
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        // The theme's background as a still picture: its animation does not draw offscreen.
+        let still = BackgroundView.still(theme: .cosmic, width: 1600, height: 900, time: 200)
+        for (name, index) in [("home-tile-row-first-en", 0), ("home-tile-row-peek-en", 1)] {
+            let file = folder.appendingPathComponent(name + ".png")
+            try? FileManager.default.removeItem(at: file)
+            PreviewRenderer.render(preferences, games, root, still, file) { model in model.selected = index }
+            let picture = try XCTUnwrap(NSImage(contentsOf: file)?.representations.first, "no picture of \(name)")
+            XCTAssertEqual(picture.pixelsWide, Int(PreviewRenderer.size.width))
+        }
     }
 }
