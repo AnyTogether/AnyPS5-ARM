@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "Tidak dapat memulai %@",
   "retroEmulatorExited": "%@ ditutup dengan kode keluar %d",
   "retroLibrary": "Game emulator",
-  "retroLibraryDetail": "Menampilkan game PS1, PS2, dan PS3 di folder game Anda dan memainkannya di emulator yang telah Anda pasang."
+  "retroLibraryDetail": "Menampilkan game PS1, PS2, dan PS3 di folder game Anda dan memainkannya di emulator yang telah Anda pasang.",
+  "unlockPause": "Jeda",
+  "unlockResume": "Lanjutkan",
+  "unlockCancelling": "Membatalkan…",
+  "unlockPausedState": "Dijeda",
+  "cancelUnlock": "Batalkan Buka Kunci",
+  "keepGoing": "Teruskan",
+  "cancelUnlockAskTitle": "Batalkan buka kunci %@?",
+  "cancelUnlockAskDetail": "Pekerjaan sejauh ini akan hilang. Jeda saja untuk berhenti sekarang dan lanjut nanti.",
+  "quitUnlocksTitle": "Keluar saat game sedang dibuka kuncinya?",
+  "quitRemovingTitle": "Keluar saat game sedang dihapus?",
+  "quitGoBack": "Kembali",
+  "quitCancelAndQuit": "Batalkan dan keluar",
+  "quitAnyway": "Tetap keluar",
+  "quitUnlocksDetail": "Batalkan dan keluar membuang pekerjaannya. Untuk berhenti dan lanjut nanti, kembali dan gunakan Jeda, lalu biarkan launcher tetap terbuka.",
+  "quitRemovingNote": "Penghapusan game tidak bisa dijeda maupun dibatalkan."
 }

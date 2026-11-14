@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "تعذر تشغيل %@",
   "retroEmulatorExited": "أُغلق %@ برمز الخروج %d",
   "retroLibrary": "ألعاب المحاكي",
-  "retroLibraryDetail": "يعرض ألعاب PS1 وPS2 وPS3 الموجودة في مجلدات ألعابك ويشغلها في محاكٍ ثبّته."
+  "retroLibraryDetail": "يعرض ألعاب PS1 وPS2 وPS3 الموجودة في مجلدات ألعابك ويشغلها في محاكٍ ثبّته.",
+  "unlockPause": "إيقاف مؤقت",
+  "unlockResume": "استئناف",
+  "unlockCancelling": "جارٍ الإلغاء…",
+  "unlockPausedState": "متوقف مؤقتًا",
+  "cancelUnlock": "إلغاء القفل",
+  "keepGoing": "متابعة",
+  "cancelUnlockAskTitle": "هل تريد إلغاء فتح قفل %@؟",
+  "cancelUnlockAskDetail": "سيضيع العمل المنجز حتى الآن. استخدم الإيقاف المؤقت بدلًا من ذلك لتتوقف الآن وتكمل لاحقًا.",
+  "quitUnlocksTitle": "هل تريد الإنهاء أثناء فتح قفل الألعاب؟",
+  "quitRemovingTitle": "هل تريد الإنهاء أثناء إزالة الألعاب؟",
+  "quitGoBack": "رجوع",
+  "quitCancelAndQuit": "إلغاء وإنهاء",
+  "quitAnyway": "إنهاء على أي حال",
+  "quitUnlocksDetail": "يتخلص خيار إلغاء وإنهاء من العمل. لتتوقف وتكمل لاحقًا، ارجع واستخدم الإيقاف المؤقت وأبقِ المشغّل مفتوحًا.",
+  "quitRemovingNote": "لا يمكن إيقاف إزالة الألعاب مؤقتًا ولا إلغاؤها."
 }

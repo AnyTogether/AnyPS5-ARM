@@ -300,6 +300,10 @@ enum Overlay: Equatable {
     case homeMenu
     /// Esc on the home screen: "Quit AnyPS5?", Cancel first.
     case confirmQuit
+    /// The small Cancel button of an unlock: "Cancel the unlock of <game>?", Keep going first.
+    case confirmCancelUnlock
+    /// Quitting while games are unlocked or removed: Go back, or Cancel and quit.
+    case confirmQuitUnlocks
     /// The launcher's own crash or stall last time: Send Report, Not Now (LauncherReport.swift).
     case launcherReport
     /// "Who's playing?": the profiles' tiles and Add Profile (Profiles.swift).
@@ -368,7 +372,7 @@ final class AppModel: ObservableObject {
     @Published var engineGit = EngineGitState()
     var engineGitCancel: UnpackCancel?
     /// A game is being unlocked or prepared, or waits to be: the engine it uses must stay as it is.
-    var unlockBusy: Bool { installer != nil || preparer != nil || !queue.isEmpty }
+    var unlockBusy: Bool { installer != nil || !parked.isEmpty || preparer != nil || !queue.isEmpty }
     @Published var selected = 0 {
         didSet {
             if selected != oldValue { selectionMoved(from: oldValue) }
@@ -626,7 +630,27 @@ final class AppModel: ObservableObject {
     /// Where each start's lines begin in the game's log, until the fonts it opened are known.
     var fontLogOffsets: [String: UInt64] = [:]
     var fontWatch: Task<Void, Never>?
-    private var installer: Installer?
+    /// The unlock that has the running place, and its game.
+    private var installer: UnlockWork?
+    private var installerID: String?
+    /// Unlocks paused by hand that stepped aside so the next one could start: game id to its
+    /// installer, frozen until Resume (or Cancel).
+    private var parked: [String: UnlockWork] = [:]
+    /// Unlocks the user paused (UnlockStrings.swift): the relinker stands still until Resume.
+    @Published private(set) var handPaused: Set<String> = []
+    /// Parked unlocks whose Resume was pressed while another one runs: they wait their turn, so
+    /// only one unlock works at a time.
+    @Published private(set) var resumeWaiting: [String] = []
+    /// Unlocks being stopped for good, until their work has ended.
+    @Published private(set) var cancelling: Set<String> = []
+    /// The unlock the cancel question (Overlay.confirmCancelUnlock) is about.
+    @Published var cancelAsking: Game?
+    /// Starts the queue's next unlock in place of the relinker; the tests set it.
+    var unlockStarter: ((Game, @escaping (Result<URL, Error>) -> Void) -> UnlockWork)?
+    /// Ends the app after Cancel and quit; the tests keep it.
+    var terminateApp: () -> Void = { NSApp.terminate(nil) }
+    /// Cancel and quit was answered: the next terminate goes through without asking.
+    private(set) var quitConfirmed = false
     /// New games prepared in the background (PrepareQueue) and the unlock doing it.
     @Published private(set) var prepare = PrepareQueue()
     private var preparer: Installer?
@@ -751,6 +775,7 @@ final class AppModel: ObservableObject {
                 DispatchQueue.main.async { self?.togetherSocket?.signal(to: to, device: device, gameSession: session, kind: kind, json: data) }
             })
             AppModel.opener = { [weak self] urls in self?.open(urls) }
+            AppModel.terminateAsks = { [weak self] in self?.terminateAsks() ?? false }
             AppModel.beforeQuit = { [weak self] in
                 // A ready update goes in as the launcher quits: the next launch is the new version.
                 self?.placeUpdate(relaunch: false)
@@ -859,6 +884,13 @@ final class AppModel: ObservableObject {
 
     func previewProgress(_ game: Game, step: Installer.Step, fraction: Double) {
         progress[game.id] = (step, fraction)
+    }
+
+    /// Puts `game` in the unlock queue as Unlock does, without the engine and room checks: the
+    /// tests start it through `unlockStarter`.
+    func previewQueueUnlock(_ game: Game) {
+        queue.append(game.id)
+        startNext()
     }
 
     func previewRunning(_ game: Game, app: NSRunningApplication) {
@@ -1361,7 +1393,8 @@ final class AppModel: ObservableObject {
             return
         }
         scanning = true
-        if installer == nil && preparer == nil {
+        // A paused unlock keeps its work folder: nothing is cleared while one waits.
+        if installer == nil && parked.isEmpty && preparer == nil {
             for root in roots where FileManager.default.fileExists(atPath: root.path) { Installer.removeLeftovers(root: root) }
         }
         // Emulator games turned on or off: a new watch, whose first scan announces no game.
@@ -1679,36 +1712,66 @@ final class AppModel: ObservableObject {
 
     /// The next game in the queue, into the store of the games folder it is in.
     private func startNext() {
-        guard installer == nil, !queue.isEmpty else { return }
-        let id = queue.removeFirst()
-        guard let game = games.first(where: { $0.id == id }), let toolkit = toolkit(for: game), let root = root(of: game) else { startNext(); return }
-        installer = runUnlock(game, toolkit: toolkit, root: root, background: false) { [weak self] result in
-            guard let self else { return }
-            self.installer = nil
-            switch result {
-            case .success:
-                Sounds.shared.play(.unlocked)
-                self.show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
-                if self.playAfterUnlock == id {
-                    self.playAfterUnlock = nil
-                    self.play(game)
-                }
-                self.togetherUnlockDone(id, succeeded: true)
-                self.rebuildDone(id, succeeded: true)
-            case .failure(let error) where error is CancellationError:
-                self.togetherUnlockDone(id, succeeded: false)
-                self.rebuildDone(id, succeeded: false)
-            case .failure(let shortage as SpaceShortage):
-                self.tellShortage(shortage, for: game)
-            case .failure(let error):
-                self.failures[id] = error.localizedDescription
-                self.togetherUnlockDone(id, succeeded: false)
-                self.rebuildDone(id, succeeded: false)
-                self.show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
-            }
-            self.startNext()
-            self.stepPrepare()
+        guard !queue.isEmpty, !quitConfirmed else { return }
+        if let current = installer {
+            // The one under way was paused by hand: it steps aside, frozen, and the next one starts.
+            guard let id = installerID, handPaused.contains(id) else { return }
+            parked[id] = current
+            installer = nil
+            installerID = nil
         }
+        let id = queue.removeFirst()
+        guard let game = games.first(where: { $0.id == id }) else { startNext(); return }
+        let done: (Result<URL, Error>) -> Void = { [weak self] result in self?.unlockEnded(game, result) }
+        if let unlockStarter {
+            progress[id] = (.unwrap, 0)
+            installerID = id
+            installer = unlockStarter(game, done)
+            return
+        }
+        guard let toolkit = toolkit(for: game), let root = root(of: game) else { startNext(); return }
+        installerID = id
+        installer = runUnlock(game, toolkit: toolkit, root: root, background: false, done: done)
+    }
+
+    /// An unlock asked for ended (done, failed or cancelled): a parked one ends without touching
+    /// the one that runs now; then the next one goes on.
+    private func unlockEnded(_ game: Game, _ result: Result<URL, Error>) {
+        let id = game.id
+        if parked.removeValue(forKey: id) == nil, installerID == id || installerID == nil {
+            installer = nil
+            installerID = nil
+        }
+        progress[id] = nil
+        handPaused.remove(id)
+        cancelling.remove(id)
+        resumeWaiting.removeAll { $0 == id }
+        focusMainActionIfCancelWent(id)
+        switch result {
+        case .success:
+            Sounds.shared.play(.unlocked)
+            show(game.name + " · " + T.text(.ready), symbol: "lock.open.fill")
+            if playAfterUnlock == id {
+                playAfterUnlock = nil
+                play(game)
+            }
+            togetherUnlockDone(id, succeeded: true)
+            rebuildDone(id, succeeded: true)
+        case .failure(let error) where error is CancellationError:
+            togetherUnlockDone(id, succeeded: false)
+            rebuildDone(id, succeeded: false)
+        case .failure(let shortage as SpaceShortage):
+            tellShortage(shortage, for: game)
+        case .failure(let error):
+            failures[id] = error.localizedDescription
+            togetherUnlockDone(id, succeeded: false)
+            rebuildDone(id, succeeded: false)
+            show(T.text(.unlockFailed) + ": " + game.name, symbol: "exclamationmark.triangle.fill")
+        }
+        // A resumed unlock waiting its turn goes on before the queue's next one starts.
+        startResumed()
+        startNext()
+        stepPrepare()
     }
 
     /// Starts unlocking `game`: its progress, its log, the toolkit checked again where it was
@@ -1848,8 +1911,187 @@ final class AppModel: ObservableObject {
             return
         }
         if let index = queue.firstIndex(of: game.id) { queue.remove(at: index); stepPrepare(); return }
-        if progress[game.id] != nil { installer?.cancel() }
+        if progress[game.id] != nil {
+            if let work = work(of: game.id) {
+                // The button waits until the work has ended (unlockEnded).
+                if unlockControl(game) != nil { cancelling.insert(game.id) }
+                handPaused.remove(game.id)
+                resumeWaiting.removeAll { $0 == game.id }
+                focusMainActionIfCancelWent(game.id)
+                work.cancel()
+            } else {
+                installer?.cancel()
+            }
+        }
         Sounds.shared.play(.back)
+    }
+
+    // MARK: Pause, Resume and Cancel (as on Windows and Linux)
+
+    /// Where a plain unlock the user asked for stands: what its main button and its small Cancel
+    /// button do. A background preparation, an update and an unlock that plays after have none.
+    enum UnlockControl: Equatable {
+        case running, paused, waiting, cancelling
+    }
+
+    func unlockControl(_ game: Game) -> UnlockControl? {
+        let id = game.id
+        guard progress[id] != nil, prepare.active != id, installedRecords[id] == nil, playAfterUnlock != id, afterRebuild?.id != id,
+              installerID == id || parked[id] != nil else { return nil }
+        if cancelling.contains(id) { return .cancelling }
+        if resumeWaiting.contains(id) { return .waiting }
+        return handPaused.contains(id) ? .paused : .running
+    }
+
+    /// Whether the small Cancel button follows the main button: an unlock under way, paused or
+    /// waiting to go on.
+    func showsCancelUnlock(_ game: Game) -> Bool {
+        guard let control = unlockControl(game) else { return false }
+        return control != .cancelling
+    }
+
+    private func work(of id: String) -> UnlockWork? {
+        installerID == id ? installer : parked[id]
+    }
+
+    /// Stops the unlock where it is: the relinker is frozen (SIGSTOP) and the launcher's own steps
+    /// wait at their next file. Nothing is lost, Resume goes on. A paused unlock does not hold
+    /// the others back: the next one waiting starts now.
+    func pauseUnlock(_ game: Game) {
+        let id = game.id
+        switch unlockControl(game) {
+        case .waiting:
+            // Resumed but not yet on its way: it is paused again and stays aside.
+            resumeWaiting.removeAll { $0 == id }
+            handPaused.insert(id)
+            Sounds.shared.play(.select)
+        case .running:
+            guard let work = work(of: id) else { return }
+            work.pause()
+            handPaused.insert(id)
+            Sounds.shared.play(.select)
+            startResumed()
+            startNext()
+        default:
+            return
+        }
+    }
+
+    /// Goes on from where it stood; while another unlock runs, it waits its turn instead of working
+    /// alongside it.
+    func resumeUnlock(_ game: Game) {
+        let id = game.id
+        guard unlockControl(game) == .paused else { return }
+        handPaused.remove(id)
+        Sounds.shared.play(.select)
+        if installerID == id {
+            installer?.resume()
+            return
+        }
+        if let current = installerID, !handPaused.contains(current) {
+            resumeWaiting.append(id)
+            return
+        }
+        promote(id)
+        installer?.resume()
+    }
+
+    /// Puts the parked unlock `id` in the running place; the one there (paused) steps aside.
+    private func promote(_ id: String) {
+        guard let target = parked.removeValue(forKey: id) else { return }
+        if let current = installer, let currentID = installerID { parked[currentID] = current }
+        installer = target
+        installerID = id
+    }
+
+    /// Starts the first resumed unlock waiting its turn, when nothing else runs.
+    private func startResumed() {
+        if let current = installerID, !handPaused.contains(current) { return }
+        while let id = resumeWaiting.first {
+            resumeWaiting.removeFirst()
+            guard parked[id] != nil else { continue }
+            promote(id)
+            installer?.resume()
+            return
+        }
+    }
+
+    /// The small Cancel button: the question first (Keep going is where the focus starts).
+    func askCancelUnlock(_ game: Game) {
+        guard showsCancelUnlock(game) else { return }
+        cancelAsking = game
+        menuIndex = 0
+        open(.confirmCancelUnlock)
+    }
+
+    /// Cancel unlock on the question.
+    func cancelUnlockAnswered() {
+        let game = cancelAsking
+        cancelAsking = nil
+        closeOverlay()
+        if let game { cancelUnlock(game) }
+    }
+
+    /// Keep going on the question.
+    func keepUnlocking() {
+        cancelAsking = nil
+        closeOverlay()
+    }
+
+    /// The small Cancel button went (the unlock ended or is being cancelled): the focus goes back
+    /// to the main button, so it does not land on another one.
+    private func focusMainActionIfCancelWent(_ id: String) {
+        guard selectedGame?.id == id, case .actions(let index) = focus, index > 0 else { return }
+        focus = .actions(0)
+    }
+
+    // MARK: Quitting while games are unlocked or removed
+
+    /// Unlocks the user asked for are under way, paused or waiting (the games prepared on their
+    /// own while the Mac idles do not count: quitting with only those asks nothing).
+    var hasUserUnlock: Bool {
+        installer != nil || !parked.isEmpty || !queue.isEmpty || (preparer != nil && prepare.promoted)
+    }
+
+    /// Whether quitting asks first: an unlock asked for, or a game being removed.
+    var quitAsks: Bool { !quitConfirmed && (hasUserUnlock || !removals.isEmpty) }
+
+    /// What the app delegate asks before it terminates: true opens the question and stops the
+    /// quit; otherwise the paused relinkers are cancelled, so none is left stopped behind.
+    func terminateAsks() -> Bool {
+        if quitAsks {
+            menuIndex = 0
+            open(.confirmQuitUnlocks)
+            return true
+        }
+        cancelAllUnlocks()
+        return false
+    }
+
+    /// Cancel and quit (or Quit anyway, with only a removal): the work is stopped, then the app
+    /// terminates once it has ended, ten seconds at most.
+    func quitWithUnlocks() {
+        guard !quitConfirmed else { return }
+        quitConfirmed = true
+        closeOverlay()
+        cancelAllUnlocks()
+        Task { @MainActor [weak self] in
+            for _ in 0..<100 {
+                guard let self, self.installer != nil || !self.parked.isEmpty || self.preparer != nil else { break }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            self?.quitApp()
+        }
+    }
+
+    /// Every unlock stops: the queue is emptied, and each installer (a paused one is let go on so
+    /// it gets the termination) is cancelled.
+    private func cancelAllUnlocks() {
+        queue.removeAll()
+        resumeWaiting.removeAll()
+        installer?.cancel()
+        for work in parked.values { work.cancel() }
+        preparer?.cancel()
     }
 
     // MARK: Preparing new games
@@ -1870,7 +2112,8 @@ final class AppModel: ObservableObject {
     /// (unless `quiet`, when the caller tells them) and returned.
     @discardableResult
     func stepPrepare(quiet: Bool = false) -> [(String, PrepareSkip)] {
-        guard !libraryRoots.isEmpty else { return [] }
+        // Cancel and quit: nothing new starts while the work ends.
+        guard !libraryRoots.isEmpty, !quitConfirmed else { return [] }
         let conditions = prepareConditions
         var skipped: [(String, PrepareSkip)] = []
         while true {
@@ -2188,6 +2431,14 @@ final class AppModel: ObservableObject {
         case .failed where installedRecords[game.id] != nil: open(.updateChoice)
         case .locked, .failed: unlock(game)
         case .installing where isPreparing(game): promotePreparation(game)
+        // An unlock asked for stops without being lost: Pause, then Resume (the small Cancel
+        // button beside it drops it); while it is being cancelled, nothing to press.
+        case .installing where unlockControl(game) != nil:
+            switch unlockControl(game) {
+            case .running, .waiting: pauseUnlock(game)
+            case .paused: resumeUnlock(game)
+            default: break
+            }
         case .installing, .queued: cancelUnlock(game)
         case .running: giveGameFront()
         case .starting, .stopping: break
@@ -2285,6 +2536,8 @@ final class AppModel: ObservableObject {
     private static var opener: (([URL]) -> Void)?
     /// What has to reach a server before the app quits (leaving a call), when there is any.
     static var beforeQuit: (() -> Task<Void, Never>?)?
+    /// Whether quitting asks first (terminateAsks), from the app delegate.
+    static var terminateAsks: (() -> Bool)?
 
     static func received(_ urls: [URL]) {
         if let opener { opener(urls) } else { pending += urls }
@@ -3076,8 +3329,10 @@ final class AppModel: ObservableObject {
     private var activityStart: (id: String, date: Date)?
 
     /// The game starting, else the one installing, else the next one waiting.
-    private func activityForPhone() -> RemoteActivity? {
-        guard let game = starting ?? games.first(where: { progress[$0.id] != nil }) ?? games.first(where: { queue.contains($0.id) }) else {
+    func activityForPhone() -> RemoteActivity? {
+        // A paused unlock is not what the launcher is busy with: the one that runs is.
+        let busy = games.first { progress[$0.id] != nil && !handPaused.contains($0.id) && !resumeWaiting.contains($0.id) }
+        guard let game = starting ?? busy ?? games.first(where: { queue.contains($0.id) }) else {
             activityStart = nil
             return nil
         }
@@ -3095,11 +3350,13 @@ final class AppModel: ObservableObject {
                               elapsed: Date().timeIntervalSince(activityStart?.date ?? Date()))
     }
 
-    private func remoteGame(_ game: Game) -> RemoteGame {
+    func remoteGame(_ game: Game) -> RemoteGame {
         let state: RemoteGame.State
         switch self.state(of: game) {
         case .unreadable, .needsEmulator: state = .unavailable
         case .locked, .failed: state = .locked
+        // Paused by hand, nothing goes on: as good as locked to the phone, whose Unlock resumes it.
+        case .installing where unlockControl(game) == .paused: state = .locked
         case .queued, .installing: state = .installing
         case .installed(let outdated): state = outdated ? .update : .installed
         case .starting: state = .starting
@@ -3642,3 +3899,12 @@ enum Rosetta {
     }
 }
 
+
+/// What the model does with an unlock under way: an Installer, or a stand-in in the tests.
+protocol UnlockWork: AnyObject {
+    func pause()
+    func resume()
+    func cancel()
+}
+
+extension Installer: UnlockWork {}

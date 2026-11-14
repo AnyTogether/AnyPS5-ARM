@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "Det gick inte att starta %@",
   "retroEmulatorExited": "%@ stängdes med slutkod %d",
   "retroLibrary": "Emulatorspel",
-  "retroLibraryDetail": "Visar PS1-, PS2- och PS3-spelen i dina spelmappar och spelar dem i en emulator som du har installerat."
+  "retroLibraryDetail": "Visar PS1-, PS2- och PS3-spelen i dina spelmappar och spelar dem i en emulator som du har installerat.",
+  "unlockPause": "Pausa",
+  "unlockResume": "Återuppta",
+  "unlockCancelling": "Avbryter…",
+  "unlockPausedState": "Pausad",
+  "cancelUnlock": "Avbryt upplåsning",
+  "keepGoing": "Fortsätt",
+  "cancelUnlockAskTitle": "Avbryta upplåsningen av %@?",
+  "cancelUnlockAskDetail": "Arbetet hittills går förlorat. Pausa i stället för att stoppa nu och fortsätta senare.",
+  "quitUnlocksTitle": "Avsluta medan spel låses upp?",
+  "quitRemovingTitle": "Avsluta medan spel tas bort?",
+  "quitGoBack": "Gå tillbaka",
+  "quitCancelAndQuit": "Avbryt och avsluta",
+  "quitAnyway": "Avsluta ändå",
+  "quitUnlocksDetail": "Avbryt och avsluta kastar arbetet. För att stoppa och fortsätta senare, gå tillbaka, använd Pausa och låt startprogrammet vara öppet.",
+  "quitRemovingNote": "Borttagning av spel kan varken pausas eller avbrytas."
 }

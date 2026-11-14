@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "无法启动 %@",
   "retroEmulatorExited": "%@ 已退出，退出代码为 %d",
   "retroLibrary": "模拟器游戏",
-  "retroLibraryDetail": "列出游戏文件夹中的 PS1、PS2 和 PS3 游戏，并用你已安装的模拟器运行。"
+  "retroLibraryDetail": "列出游戏文件夹中的 PS1、PS2 和 PS3 游戏，并用你已安装的模拟器运行。",
+  "unlockPause": "暂停",
+  "unlockResume": "继续",
+  "unlockCancelling": "正在取消…",
+  "unlockPausedState": "已暂停",
+  "cancelUnlock": "取消解锁",
+  "keepGoing": "继续解锁",
+  "cancelUnlockAskTitle": "要取消 %@ 的解锁吗？",
+  "cancelUnlockAskDetail": "目前完成的工作会丢失。想现在停下、以后再继续，请改用暂停。",
+  "quitUnlocksTitle": "要在解锁游戏时退出吗？",
+  "quitRemovingTitle": "要在移除游戏时退出吗？",
+  "quitGoBack": "返回",
+  "quitCancelAndQuit": "取消并退出",
+  "quitAnyway": "仍然退出",
+  "quitUnlocksDetail": "取消并退出会丢弃已完成的工作。想停下以后再继续，请返回并使用暂停，并保持启动器打开。",
+  "quitRemovingNote": "移除游戏既不能暂停也不能取消。"
 }

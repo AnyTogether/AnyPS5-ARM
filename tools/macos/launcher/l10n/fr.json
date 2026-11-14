@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "Impossible de lancer %@",
   "retroEmulatorExited": "%@ s’est fermé avec le code de sortie %d",
   "retroLibrary": "Jeux d’émulateur",
-  "retroLibraryDetail": "Affiche les jeux PS1, PS2 et PS3 de vos dossiers de jeux et les lance dans un émulateur que vous avez installé."
+  "retroLibraryDetail": "Affiche les jeux PS1, PS2 et PS3 de vos dossiers de jeux et les lance dans un émulateur que vous avez installé.",
+  "unlockPause": "Pause",
+  "unlockResume": "Reprendre",
+  "unlockCancelling": "Annulation…",
+  "unlockPausedState": "En pause",
+  "cancelUnlock": "Annuler le déverrouillage",
+  "keepGoing": "Continuer",
+  "cancelUnlockAskTitle": "Annuler le déblocage de %@ ?",
+  "cancelUnlockAskDetail": "Le travail déjà fait est perdu. Mettez plutôt en pause pour arrêter maintenant et reprendre plus tard.",
+  "quitUnlocksTitle": "Quitter pendant le déblocage de jeux ?",
+  "quitRemovingTitle": "Quitter pendant la suppression de jeux ?",
+  "quitGoBack": "Retour",
+  "quitCancelAndQuit": "Annuler et quitter",
+  "quitAnyway": "Quitter quand même",
+  "quitUnlocksDetail": "Annuler et quitter jette le travail. Pour arrêter et reprendre plus tard, revenez et utilisez Pause, en gardant le lanceur ouvert.",
+  "quitRemovingNote": "La suppression de jeux ne peut être ni mise en pause ni annulée."
 }

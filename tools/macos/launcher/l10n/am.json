@@ -2202,5 +2202,6 @@
   "retroEmulatorStartFailed": "%@ን ማስጀመር አልተቻለም",
   "retroEmulatorExited": "%@ በመውጫ ኮድ %d ተዘግቷል",
   "retroLibrary": "የኢሙሌተር ጨዋታዎች",
-  "retroLibraryDetail": "በጨዋታ አቃፊዎችዎ ውስጥ ያሉትን የPS1፣ PS2 እና PS3 ጨዋታዎች ያሳያል እና በጫኑት ኢሙሌተር ያጫውታቸዋል።"
+  "retroLibraryDetail": "በጨዋታ አቃፊዎችዎ ውስጥ ያሉትን የPS1፣ PS2 እና PS3 ጨዋታዎች ያሳያል እና በጫኑት ኢሙሌተር ያጫውታቸዋል።",
+  "cancelUnlock": "ክፈትን (unlock) ሰርዝ"
 }

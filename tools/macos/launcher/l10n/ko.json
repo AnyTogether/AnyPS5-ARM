@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "%@을(를) 시작할 수 없습니다",
   "retroEmulatorExited": "%@이(가) 종료 코드 %d(으)로 종료되었습니다",
   "retroLibrary": "에뮬레이터 게임",
-  "retroLibraryDetail": "게임 폴더에 있는 PS1, PS2, PS3 게임을 표시하고 설치한 에뮬레이터로 실행합니다."
+  "retroLibraryDetail": "게임 폴더에 있는 PS1, PS2, PS3 게임을 표시하고 설치한 에뮬레이터로 실행합니다.",
+  "unlockPause": "일시 정지",
+  "unlockResume": "계속",
+  "unlockCancelling": "취소하는 중…",
+  "unlockPausedState": "일시 정지됨",
+  "cancelUnlock": "잠금 해제 취소",
+  "keepGoing": "계속하기",
+  "cancelUnlockAskTitle": "%@의 잠금 해제를 취소할까요?",
+  "cancelUnlockAskDetail": "지금까지 한 작업이 사라집니다. 지금 멈추고 나중에 이어 하려면 대신 일시 정지하세요.",
+  "quitUnlocksTitle": "게임 잠금 해제 중에 종료할까요?",
+  "quitRemovingTitle": "게임 제거 중에 종료할까요?",
+  "quitGoBack": "돌아가기",
+  "quitCancelAndQuit": "취소하고 종료",
+  "quitAnyway": "그래도 종료",
+  "quitUnlocksDetail": "취소하고 종료하면 작업이 버려집니다. 멈췄다가 나중에 이어 하려면 돌아가서 일시 정지를 사용하고 런처를 열어 두세요.",
+  "quitRemovingNote": "게임 제거는 일시 정지하거나 취소할 수 없습니다."
 }

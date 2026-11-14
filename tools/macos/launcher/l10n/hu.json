@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "Nem sikerült elindítani: %@",
   "retroEmulatorExited": "A(z) %@ %d kilépési kóddal bezárult",
   "retroLibrary": "Emulátoros játékok",
-  "retroLibraryDetail": "Megjeleníti a játékmappáidban lévő PS1-, PS2- és PS3-játékokat, és egy általad telepített emulátorban futtatja őket."
+  "retroLibraryDetail": "Megjeleníti a játékmappáidban lévő PS1-, PS2- és PS3-játékokat, és egy általad telepített emulátorban futtatja őket.",
+  "unlockPause": "Szüneteltetés",
+  "unlockResume": "Folytatás",
+  "unlockCancelling": "Megszakítás…",
+  "unlockPausedState": "Szüneteltetve",
+  "cancelUnlock": "Feloldás megszakítása",
+  "keepGoing": "Tovább",
+  "cancelUnlockAskTitle": "Megszakítod a(z) %@ feloldását?",
+  "cancelUnlockAskDetail": "Az eddig elvégzett munka elvész. Inkább szüneteltesd, hogy most leállj, és később folytasd.",
+  "quitUnlocksTitle": "Kilépsz, miközben játékok feloldása folyik?",
+  "quitRemovingTitle": "Kilépsz, miközben játékok eltávolítása folyik?",
+  "quitGoBack": "Vissza",
+  "quitCancelAndQuit": "Megszakítás és kilépés",
+  "quitAnyway": "Kilépés mégis",
+  "quitUnlocksDetail": "A Megszakítás és kilépés eldobja a munkát. Ha most leállnál és később folytatnád, menj vissza, használd a Szüneteltetést, és hagyd nyitva a launchert.",
+  "quitRemovingNote": "A játékok eltávolítása nem szüneteltethető és nem szakítható meg."
 }

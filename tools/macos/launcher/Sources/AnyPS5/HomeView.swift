@@ -532,6 +532,9 @@ struct StateLabel: View {
             case .unreadable: return ("xmark.octagon.fill", T.text(.unreadableDump), Color(red: 1, green: 0.6, blue: 0.55))
             case .needsEmulator: return ("gearshape.fill", TRetro.text(.retroEmulatorNeeded), .white.opacity(0.75))
             case .queued: return ("clock", T.text(.queued), .white.opacity(0.75))
+            case .installing where game.flatMap(model.unlockControl) == .cancelling: return ("xmark.circle", TUnlock.text(.unlockCancelling), .white.opacity(0.75))
+            case .installing where game.flatMap(model.unlockControl) == .paused: return ("pause.circle.fill", TUnlock.text(.unlockPausedState), .white.opacity(0.75))
+            case .installing where game.flatMap(model.unlockControl) == .waiting: return ("clock", T.text(.queued), .white.opacity(0.75))
             case .installing where game.map(model.isPreparing) == true:
                 return model.prepare.paused ? ("pause.circle.fill", TPrep.text(.preparingPaused), .white.opacity(0.75)) : ("arrow.down.circle.fill", TPrep.text(.preparing), model.accent)
             case .installing(let step, _): return ("arrow.down.circle.fill", step.title, model.accent)
@@ -570,13 +573,25 @@ struct HeroInfo: View {
             HStack(spacing: 16 * scale) {
                 let family = model.familyPrimary(game, state)
                 let preparing = model.isPreparing(game)
-                ConsoleButton(title: family?.title ?? (preparing ? TPrep.text(.playWhenReady) : primaryTitle(state)), symbol: family?.symbol ?? (preparing ? "play.fill" : primarySymbol(state)), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210, lens: ("action-0", lens)) {
+                let control = model.unlockControl(game)
+                ConsoleButton(title: family?.title ?? (preparing ? TPrep.text(.playWhenReady) : control.map(unlockTitle) ?? primaryTitle(state)), symbol: family?.symbol ?? (preparing ? "play.fill" : control.map(unlockSymbol) ?? primarySymbol(state)), focused: model.focus == .actions(0) && model.overlay == nil, prominent: true, minWidth: 210, lens: ("action-0", lens)) {
                     model.focus = .actions(0)
                     model.primaryAction(game)
                 }
+                // Being cancelled: greyed until the work has ended, a second press does nothing.
+                .opacity(control == .cancelling ? 0.55 : 1)
+                // Stops the unlock for good (it asks first); Pause is the main button.
+                if model.showsCancelUnlock(game) {
+                    ConsoleButton(title: "", symbol: "xmark", focused: model.focus == .actions(model.cancelAction) && model.overlay == nil, lens: ("action-cancel", lens)) {
+                        model.focus = .actions(model.cancelAction)
+                        model.askCancelUnlock(game)
+                    }
+                    .help(TUnlock.text(.cancelUnlock))
+                    .accessibilityLabel(TUnlock.text(.cancelUnlock))
+                }
                 if let set = model.trophies[game.id] {
-                    ConsoleButton(title: "\(set.unlockedCount)/\(set.trophies.count)", symbol: "trophy.fill", focused: model.focus == .actions(1) && model.overlay == nil, lens: ("action-1", lens)) {
-                        model.focus = .actions(1)
+                    ConsoleButton(title: "\(set.unlockedCount)/\(set.trophies.count)", symbol: "trophy.fill", focused: model.focus == .actions(model.trophiesAction) && model.overlay == nil, lens: ("action-1", lens)) {
+                        model.focus = .actions(model.trophiesAction)
                         model.open(.trophies)
                     }
                 }
@@ -588,12 +603,12 @@ struct HeroInfo: View {
                 if case .installing(let step, let fraction) = state {
                     VStack(alignment: .leading, spacing: 8 * scale) {
                         HStack {
-                            Text(model.isPreparing(game) ? (model.prepare.paused ? TPrep.text(.preparingPaused) : TPrep.format(.preparingStep, step.title)) : step.title).font(.display(15 * scale, .medium))
+                            Text(model.isPreparing(game) ? (model.prepare.paused ? TPrep.text(.preparingPaused) : TPrep.format(.preparingStep, step.title)) : unlockStepLine(model.unlockControl(game)) ?? step.title).font(.display(15 * scale, .medium))
                             Spacer()
                             Text("\(Int(step.overall(fraction) * 100))%").font(.display(15 * scale, .semibold)).monospacedDigit()
                         }
                         .foregroundStyle(.white.opacity(0.85))
-                        if step == .relink && fraction == 0 {
+                        if step == .relink && fraction == 0 && model.unlockControl(game).map({ $0 == .running }) ?? true {
                             IndeterminateLine(color: model.accent)
                         } else {
                             ProgressLine(fraction: step.overall(fraction), color: model.accent)
@@ -668,6 +683,34 @@ struct HeroInfo: View {
         case .starting: return T.text(.starting)
         case .running: return T.text(.running)
         case .stopping: return TH.text(.gameStopping)
+        }
+    }
+
+    /// The main button of an unlock asked for: Pause while it runs (or waits to go on), Resume
+    /// once paused, Cancelling… while it is being stopped.
+    private func unlockTitle(_ control: AppModel.UnlockControl) -> String {
+        switch control {
+        case .running, .waiting: return TUnlock.text(.unlockPause)
+        case .paused: return TUnlock.text(.unlockResume)
+        case .cancelling: return TUnlock.text(.unlockCancelling)
+        }
+    }
+
+    private func unlockSymbol(_ control: AppModel.UnlockControl) -> String {
+        switch control {
+        case .running, .waiting: return "pause.fill"
+        case .paused: return "play.fill"
+        case .cancelling: return "xmark"
+        }
+    }
+
+    /// The line over the bar: Paused, Queued or Cancelling… in place of the step.
+    private func unlockStepLine(_ control: AppModel.UnlockControl?) -> String? {
+        switch control {
+        case .paused: return TUnlock.text(.unlockPausedState)
+        case .waiting: return T.text(.queued)
+        case .cancelling: return TUnlock.text(.unlockCancelling)
+        default: return nil
         }
     }
 
@@ -856,10 +899,20 @@ extension AppModel {
         measureSelected()
     }
 
-    /// Play, the trophies when the game has any, and the settings.
+    /// Play, the small Cancel of an unlock under way, the trophies when the game has any, and the
+    /// settings.
     var actionCount: Int {
-        selectedGame.flatMap { trophies[$0.id] } != nil ? 3 : 2
+        2 + (hasTrophyAction ? 1 : 0) + (cancelShown ? 1 : 0)
     }
+
+    private var hasTrophyAction: Bool { selectedGame.flatMap { trophies[$0.id] } != nil }
+
+    /// The small Cancel button follows the main one: an unlock asked for, under way or paused.
+    var cancelShown: Bool { selectedGame.map(showsCancelUnlock) ?? false }
+
+    /// Which of the buttons under the title is Cancel, and which the trophies.
+    var cancelAction: Int { 1 }
+    var trophiesAction: Int { cancelShown ? 2 : 1 }
 
     func pickFromLibrary() {
         guard games.indices.contains(libraryIndex) else { return }
@@ -1029,7 +1082,7 @@ extension AppModel {
             return controllerTestCommand(command)
         case .browserPlay:
             return browserPlayCommand(command)
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame:
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks:
             return gameMenuCommand(command)
         case .profilePicker:
             return pickerCommand(command)
@@ -1112,7 +1165,8 @@ extension AppModel {
         case (.actions(let index), .right): moveFocus(.actions(min(actionCount - 1, index + 1)))
         case (.actions, .up), (.actions, .back): moveFocus(.tiles)
         case (.actions(0), .select): primaryAction(game)
-        case (.actions(1), .select) where actionCount == 3: open(.trophies)
+        case (.actions(let index), .select) where cancelShown && index == cancelAction: askCancelUnlock(game)
+        case (.actions(let index), .select) where hasTrophyAction && index == trophiesAction: open(.trophies)
         case (.actions, .select): open(.gameSettings)
         case (_, .options): if selectedHomeFolder == nil { open(.gameSettings) }
         default: break
@@ -1175,6 +1229,7 @@ extension AppModel {
             }
         }
         if focus == .actions(1), actionCount < 3 { focus = .actions(0) }
+        if case .actions(let index) = focus, index >= actionCount { focus = .actions(0) }
     }
 
     private func moveFocus(_ next: HomeFocus) {
