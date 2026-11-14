@@ -361,9 +361,12 @@ private struct NoticeCapsule: ViewModifier {
 }
 
 /// The row of game tiles: the selected one is larger, sits at the row's start and carries the
-/// game's name beside it, as on the console. With Settings › Emulators › Show as folders, a
-/// console's games are one folder tile in it, and `folderContents` is the row of that folder's
-/// games under it: a preview of small tiles until Down goes into it.
+/// game's name beside it, under the next tiles and with the state as a small icon, as on the
+/// console. The tiles are top-aligned and the next ones follow right after the selected one. The
+/// previous game stays visible on the left, cut by the edge (TilePeek), as on Windows and Linux.
+/// With Settings › Emulators › Show as folders, a console's games are one folder tile in it, and
+/// `folderContents` is the row of that folder's games under it: a preview of small tiles until
+/// Down goes into it.
 struct TileRow: View {
     var folderContents = false
     @EnvironmentObject private var model: AppModel
@@ -379,17 +382,15 @@ struct TileRow: View {
         let leading = 64 * scale
         let tiles = folderContents ? model.homeFolderTiles : model.homeTiles
         let at = preview ? 0 : model.homeTileIndex(tiles, folderContents: folderContents)
+        // From the second game on the row moves right, so the previous tile stays in view.
+        let peek = !preview && at > 0 ? TilePeek.shift * scale : 0
         GeometryReader { _ in
             ZStack(alignment: .topLeading) {
                 ForEach(Array(tiles.enumerated()), id: \.element.id) { index, tile in
                     let game = model.games[tile.gameIndex]
                     let selected = index == at
                     let offset = index - at
-                    let x: CGFloat = preview
-                        ? leading + CGFloat(index) * (small + gap)
-                        : offset < 0
-                        ? leading + CGFloat(offset) * (small + gap)
-                        : offset == 0 ? leading : leading + large + gap + label + CGFloat(offset - 1) * (small + gap)
+                    let x = TileRow.x(index: index, offset: offset, preview: preview, leading: leading + peek, small: small, large: large, gap: gap)
                     let size = selected && !preview ? large : small
                     let focused = selected && rowFocused && model.focus == .tiles && model.overlay == nil
                     Group {
@@ -412,20 +413,23 @@ struct TileRow: View {
                                 .onTapGesture { model.selectHomeTile(index, folderContents: folderContents) }
                         }
                     }
-                    .offset(x: x, y: selected || preview ? 0 : (large - small) * 0.18)
-                    .opacity(offset < 0 ? 0.0 : 1)
+                    .offset(x: x, y: 0)
+                    .opacity(preview ? 1 : TileRow.opacity(offset: offset))
                     .hoverTick("tile-\(tile.id)")
                     if selected && !preview {
-                        VStack(alignment: .leading, spacing: 6 * scale) {
+                        HStack(spacing: 8 * scale) {
                             Text(tile.folder.map { TRetro.format(.retroGames, $0.label) } ?? game.name)
-                                .font(.display(22 * scale, .semibold))
+                                .font(.display(18 * scale, .medium))
                                 .foregroundStyle(.white)
-                                .lineLimit(2)
-                            if tile.folder == nil { StateLabel(state: model.state(of: game), game: game) }
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            // The state is only an icon here (the hero says it in words). A plain
+                            // locked game shows none, its tile carries the padlock already.
+                            if tile.folder == nil { StateLabel(state: model.state(of: game), game: game, iconOnly: true) }
                         }
-                        .legible(16)
-                        .frame(width: label - gap, alignment: .leading)
-                        .offset(x: leading + large + gap * 1.4, y: large * 0.32)
+                        .legible(12)
+                        .frame(width: label, alignment: .leading)
+                        .offset(x: leading + peek + large + gap * 0.75, y: large - 28 * scale)
                         .transition(.opacity)
                     }
                 }
@@ -434,6 +438,20 @@ struct TileRow: View {
             .animation(Motion.layout, value: model.homeRetroFolder)
         }
         .frame(height: large + 10 * scale)
+    }
+
+    /// Where a tile starts along the row: the selected one at `leading`, the next ones right
+    /// after it, the earlier ones to its left (the one right before it peeks in from the edge).
+    static func x(index: Int, offset: Int, preview: Bool, leading: CGFloat, small: CGFloat, large: CGFloat, gap: CGFloat) -> CGFloat {
+        if preview { return leading + CGFloat(index) * (small + gap) }
+        if offset < 0 { return leading + CGFloat(offset) * (small + gap) }
+        if offset == 0 { return leading }
+        return leading + large + gap + CGFloat(offset - 1) * (small + gap)
+    }
+
+    /// The game right before the selected one stays almost at full brightness, the ones before it fade out.
+    static func opacity(offset: Int) -> Double {
+        offset == -1 ? TilePeek.opacity : offset < 0 ? 0 : 1
     }
 }
 
@@ -521,6 +539,9 @@ struct StateLabel: View {
     let state: GameState
     /// The game it is about, for what the background preparation adds.
     var game: Game? = nil
+    /// Only the state's icon, no words (the tile row). A plain locked game shows none there, its
+    /// tile carries the padlock already. The words stay the icon's accessibility label.
+    var iconOnly = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
@@ -542,10 +563,26 @@ struct StateLabel: View {
             case .stopping: return ("stop.circle", TH.text(.gameStoppingState), Color(red: 1, green: 0.6, blue: 0.55))
             }
         }()
-        Label(text, systemImage: symbol)
-            .font(.display(14 * scale, .medium))
-            .foregroundStyle(tint)
-            .lineLimit(2)
+        if iconOnly {
+            if !StateLabel.iconOnlyHidden(state, waitingToPrepare: model.prepare.pending.contains(game?.id ?? "")) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18 * scale, weight: .medium))
+                    .foregroundStyle(tint)
+                    .accessibilityLabel(text)
+                    .help(text)
+            }
+        } else {
+            Label(text, systemImage: symbol)
+                .font(.display(14 * scale, .medium))
+                .foregroundStyle(tint)
+                .lineLimit(2)
+        }
+    }
+
+    /// The tile row shows no icon for a plain locked game: its tile carries the padlock already.
+    static func iconOnlyHidden(_ state: GameState, waitingToPrepare: Bool) -> Bool {
+        if case .locked = state { return !waitingToPrepare }
+        return false
     }
 }
 

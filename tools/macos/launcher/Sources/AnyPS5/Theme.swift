@@ -80,3 +80,11 @@ enum Motion {
     static var fade: Animation { .easeInOut(duration: reduced ? 0.15 : 0.55) }
     static var overlay: Animation { reduced ? .easeOut(duration: 0.15) : .spring(response: 0.42, dampingFraction: 0.9) }
 }
+
+/// The game right before the selected one stays on the home tile row, partly past the window's
+/// edge and almost at full brightness, as on Windows and Linux. A shift of 0 keeps the selected
+/// tile in line with the hero title and shows a thinner strip of the previous tile.
+enum TilePeek {
+    static let shift: CGFloat = 48
+    static let opacity = 0.85
+}
