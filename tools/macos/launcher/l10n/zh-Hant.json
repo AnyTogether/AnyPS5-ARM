@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "無法啟動 %@",
   "retroEmulatorExited": "%@ 已結束，結束代碼為 %d",
   "retroLibrary": "模擬器遊戲",
-  "retroLibraryDetail": "列出遊戲資料夾中的 PS1、PS2 和 PS3 遊戲，並用你已安裝的模擬器執行。"
+  "retroLibraryDetail": "列出遊戲資料夾中的 PS1、PS2 和 PS3 遊戲，並用你已安裝的模擬器執行。",
+  "unlockPause": "暫停",
+  "unlockResume": "繼續",
+  "unlockCancelling": "正在取消…",
+  "unlockPausedState": "已暫停",
+  "cancelUnlock": "取消解鎖",
+  "keepGoing": "繼續解鎖",
+  "cancelUnlockAskTitle": "要取消 %@ 的解鎖嗎？",
+  "cancelUnlockAskDetail": "目前完成的工作會遺失。想現在停下、之後再繼續，請改用暫停。",
+  "quitUnlocksTitle": "要在解鎖遊戲時結束嗎？",
+  "quitRemovingTitle": "要在移除遊戲時結束嗎？",
+  "quitGoBack": "返回",
+  "quitCancelAndQuit": "取消並結束",
+  "quitAnyway": "仍然結束",
+  "quitUnlocksDetail": "取消並結束會捨棄已完成的工作。想停下之後再繼續，請返回並使用暫停，並保持啟動器開啟。",
+  "quitRemovingNote": "移除遊戲既無法暫停也無法取消。"
 }

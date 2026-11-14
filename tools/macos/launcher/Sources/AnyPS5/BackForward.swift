@@ -22,7 +22,7 @@ extension AppModel {
     /// nothing open, "Quit AnyPS5?" with Cancel first; on that question, Cancel. False everywhere
     /// else, where Esc is Back as before.
     func escape() -> Bool {
-        if overlay == .confirmQuit { return gameMenuCommand(.back) }
+        if overlay == .confirmQuit || overlay == .confirmQuitUnlocks || overlay == .confirmCancelUnlock { return gameMenuCommand(.back) }
         // The list under the profile picture is open: Esc closes it before it asks anything.
         if profileSwitcherShown {
             closeProfileSwitcher()

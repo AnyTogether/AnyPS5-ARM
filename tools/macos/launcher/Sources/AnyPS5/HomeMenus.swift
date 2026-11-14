@@ -113,14 +113,19 @@ extension AppModel {
 
     /// Quit AnyPS5 from the home menu: a game playing closes first.
     func quitApp() {
+        // Games being unlocked or removed: the question first, before a game playing is closed.
+        if quitAsks {
+            menuIndex = 0
+            return open(.confirmQuitUnlocks)
+        }
         if let running {
             running.app.forceTerminate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { NSApp.terminate(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.terminateApp() }
         } else if emulator != nil {
             endEmulatorNow()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { NSApp.terminate(nil) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.terminateApp() }
         } else {
-            NSApp.terminate(nil)
+            terminateApp()
         }
     }
 
@@ -303,6 +308,30 @@ extension AppModel {
             case .down, .right: move(1, count: 2)
             case .back, .options: closeOverlay()
             case .select: menuIndex == 0 ? sendLauncherReport() : putLauncherReportAside()
+            default: break
+            }
+        case .confirmCancelUnlock:
+            // "Cancel the unlock of <game>?", Keep going first: only Select on Cancel unlock drops it.
+            switch command {
+            case .up, .left: move(-1, count: 2)
+            case .down, .right: move(1, count: 2)
+            case .back, .options: keepUnlocking()
+            case .select: menuIndex == 1 ? cancelUnlockAnswered() : keepUnlocking()
+            default: break
+            }
+        case .confirmQuitUnlocks:
+            // Quitting while games are unlocked or removed: Go back first.
+            switch command {
+            case .up, .left: move(-1, count: 2)
+            case .down, .right: move(1, count: 2)
+            case .back, .options: closeOverlay()
+            case .select:
+                if menuIndex == 1 {
+                    Sounds.shared.play(.select)
+                    quitWithUnlocks()
+                } else {
+                    closeOverlay()
+                }
             default: break
             }
         case .confirmDeleteGame:
@@ -616,8 +645,8 @@ struct GameMenuCard: View {
     }
 
     var body: some View {
-        let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport ? nil
-            : model.overlay == .confirmDeleteGame ? model.deleteAsk?.plan.game : (model.selectedGame ?? model.runningGame)
+        let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .confirmQuitUnlocks || model.overlay == .launcherReport ? nil
+            : model.overlay == .confirmDeleteGame ? model.deleteAsk?.plan.game : model.overlay == .confirmCancelUnlock ? model.cancelAsking : (model.selectedGame ?? model.runningGame)
         ZStack {
             FrostFill(opacity: 0.6).ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -674,7 +703,7 @@ struct GameMenuCard: View {
             }
             .padding(.horizontal, twoChoice ? 32 * scale : 40 * scale)
             .padding(.vertical, twoChoice ? 30 * scale : 36 * scale)
-            .frame(width: (model.overlay == .confirmDeleteGame ? 580 : twoChoice ? 480 : model.overlay == .closeGame ? 560 : 520) * scale)
+            .frame(width: (model.overlay == .confirmDeleteGame ? 580 : model.overlay == .confirmQuitUnlocks || model.overlay == .confirmCancelUnlock ? 540 : twoChoice ? 480 : model.overlay == .closeGame ? 560 : 520) * scale)
             .glass(30 * scale, opacity: 0.5)
             .overlay(alignment: .top) {
                 // The accent edge the console's cards wear: which game the menu is about.
@@ -691,7 +720,7 @@ struct GameMenuCard: View {
 
     @ViewBuilder private func header(_ game: Game?) -> some View {
         HStack(alignment: .center, spacing: 18 * scale) {
-            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit {
+            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .confirmQuitUnlocks {
                 ProfileTileAvatar(profile: model.currentProfile, picture: model.profilePicture, size: 64 * scale)
             } else if model.overlay == .launcherReport {
                 // The launcher's own trouble: its mark, not a game's.
@@ -732,7 +761,8 @@ struct GameMenuCard: View {
     private var kicker: String {
         switch model.overlay {
         case .closeGame: return TH.text(.closeGame)
-        case .homeMenu, .confirmQuit: return TH.text(.homeMenuKicker)
+        case .homeMenu, .confirmQuit, .confirmQuitUnlocks: return TH.text(.homeMenuKicker)
+        case .confirmCancelUnlock: return TUnlock.text(.cancelUnlock)
         case .profileMenu: return TPro.text(.menuKicker)
         case .launcherReport: return TC.text(.launcherReportWhen)
         case .confirmDeleteGame: return T.text(.deleteGame)
@@ -745,6 +775,8 @@ struct GameMenuCard: View {
         case .closeGame: return TH.format(.closeGameTitle, game?.name ?? "")
         case .homeMenu, .profileMenu: return model.currentProfile?.name ?? model.preferences.profileName
         case .confirmQuit: return TH.text(.quitQuestion)
+        case .confirmQuitUnlocks: return TUnlock.text(model.hasUserUnlock ? .quitUnlocksTitle : .quitRemovingTitle)
+        case .confirmCancelUnlock: return TUnlock.format(.cancelUnlockAskTitle, game?.name ?? "")
         case .launcherReport: return model.launcherReport?.headline ?? ""
         case .confirmDeleteGame: return T.format(model.deleteAsk?.permanent == true ? .deleteGameForeverTitle : .deleteGameTitle, game?.name ?? "")
         default: return game?.name ?? ""
@@ -837,6 +869,15 @@ struct GameMenuCard: View {
         case .launcherReport:
             return [Item(id: 0, title: TC.text(.launcherReportSend), detail: TC.text(.launcherReportSendDetail), symbol: "paperplane.fill"),
                     Item(id: 1, title: TC.text(.launcherReportLater), detail: TC.text(.launcherReportLaterDetail), symbol: "clock.arrow.circlepath")]
+        case .confirmCancelUnlock:
+            return [Item(id: 0, title: TUnlock.text(.keepGoing), symbol: "arrow.uturn.backward"),
+                    Item(id: 1, title: TUnlock.text(.cancelUnlock), detail: TUnlock.text(.cancelUnlockAskDetail), symbol: "xmark.circle.fill", destructive: true)]
+        case .confirmQuitUnlocks:
+            // A removal can be neither paused nor cancelled: the card says so.
+            let unlocks = model.hasUserUnlock
+            let detail = [unlocks ? TUnlock.text(.quitUnlocksDetail) : nil, model.removals.isEmpty ? nil : TUnlock.text(.quitRemovingNote)].compactMap { $0 }.joined(separator: " ")
+            return [Item(id: 0, title: TUnlock.text(.quitGoBack), symbol: "arrow.uturn.backward"),
+                    Item(id: 1, title: TUnlock.text(unlocks ? .quitCancelAndQuit : .quitAnyway), detail: detail.isEmpty ? nil : detail, symbol: "power", destructive: true)]
         case .confirmDeleteGame:
             let permanent = model.deleteAsk?.permanent == true
             return [Item(id: 0, title: T.text(.cancel), symbol: "arrow.uturn.backward"),
@@ -915,7 +956,9 @@ struct GameMenuCard: View {
 
     /// Quit AnyPS5?, Close the game? and Delete the game?: a plain yes or no, drawn as two
     /// answers side by side.
-    private var twoChoice: Bool { model.overlay == .confirmQuit || model.overlay == .closeGame || model.overlay == .confirmDeleteGame }
+    private var twoChoice: Bool {
+        model.overlay == .confirmQuit || model.overlay == .closeGame || model.overlay == .confirmDeleteGame || model.overlay == .confirmCancelUnlock || model.overlay == .confirmQuitUnlocks
+    }
 
     /// What the Delete game card says before its answers: the game's folder as a file strip (its
     /// path, what it takes on the disk, what goes with it), then what goes and what stays.
@@ -1009,7 +1052,8 @@ struct GameMenuCard: View {
             Hint(keys: twoChoice ? "← →" : "↑ ↓", label: T.text(.hintMove))
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Spacer(minLength: 0)
-            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport || model.overlay == .confirmDeleteGame {
+            if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport || model.overlay == .confirmDeleteGame
+                || model.overlay == .confirmCancelUnlock || model.overlay == .confirmQuitUnlocks {
                 Hint(keys: "esc / ○", label: T.text(.hintBack))
             } else {
                 Hint(keys: "PS / esc / ○", label: TH.text(.resume))
@@ -1027,7 +1071,7 @@ extension AppModel {
     /// The PS menus take every command while one is up.
     func gameMenuCommandIfOpen(_ command: Command) -> Bool? {
         switch overlay {
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame: return gameMenuCommand(command)
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks: return gameMenuCommand(command)
         default: return nil
         }
     }

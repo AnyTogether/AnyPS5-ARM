@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "%@ nu a putut fi pornit",
   "retroEmulatorExited": "%@ s-a închis cu codul de ieșire %d",
   "retroLibrary": "Jocuri pentru emulator",
-  "retroLibraryDetail": "Afișează jocurile PS1, PS2 și PS3 din dosarele tale de jocuri și le rulează într-un emulator pe care l-ai instalat."
+  "retroLibraryDetail": "Afișează jocurile PS1, PS2 și PS3 din dosarele tale de jocuri și le rulează într-un emulator pe care l-ai instalat.",
+  "unlockPause": "Pauză",
+  "unlockResume": "Reia",
+  "unlockCancelling": "Se anulează…",
+  "unlockPausedState": "În pauză",
+  "cancelUnlock": "Anulare deblocare",
+  "keepGoing": "Continuă",
+  "cancelUnlockAskTitle": "Anulezi deblocarea pentru %@?",
+  "cancelUnlockAskDetail": "Munca făcută până acum se pierde. Folosește mai bine Pauză ca să te oprești acum și să continui mai târziu.",
+  "quitUnlocksTitle": "Închizi în timp ce jocuri sunt deblocate?",
+  "quitRemovingTitle": "Închizi în timp ce jocuri sunt eliminate?",
+  "quitGoBack": "Înapoi",
+  "quitCancelAndQuit": "Anulează și închide",
+  "quitAnyway": "Închide oricum",
+  "quitUnlocksDetail": "Anulează și închide aruncă munca. Ca să te oprești și să continui mai târziu, întoarce-te, folosește Pauză și lasă launcherul deschis.",
+  "quitRemovingNote": "Eliminarea jocurilor nu poate fi nici pusă pe pauză, nici anulată."
 }

@@ -2204,5 +2204,6 @@
   "retroEmulatorStartFailed": "ບໍ່ສາມາດເລີ່ມ %@ ໄດ້",
   "retroEmulatorExited": "%@ ປິດດ້ວຍລະຫັດອອກ %d",
   "retroLibrary": "ເກມອີມູເລເຕີ",
-  "retroLibraryDetail": "ສະແດງເກມ PS1, PS2 ແລະ PS3 ໃນໂຟນເດີເກມຂອງທ່ານ ແລະ ຫຼິ້ນມັນໃນອີມູເລເຕີທີ່ທ່ານຕິດຕັ້ງໄວ້."
+  "retroLibraryDetail": "ສະແດງເກມ PS1, PS2 ແລະ PS3 ໃນໂຟນເດີເກມຂອງທ່ານ ແລະ ຫຼິ້ນມັນໃນອີມູເລເຕີທີ່ທ່ານຕິດຕັ້ງໄວ້.",
+  "cancelUnlock": "ຍົກເລີກການປົດລັອກ"
 }

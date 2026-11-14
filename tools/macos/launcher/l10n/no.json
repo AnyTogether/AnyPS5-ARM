@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "Kunne ikke starte %@",
   "retroEmulatorExited": "%@ ble lukket med avslutningskode %d",
   "retroLibrary": "Emulatorspill",
-  "retroLibraryDetail": "Viser PS1-, PS2- og PS3-spillene i spillmappene dine og spiller dem i en emulator du har installert."
+  "retroLibraryDetail": "Viser PS1-, PS2- og PS3-spillene i spillmappene dine og spiller dem i en emulator du har installert.",
+  "unlockPause": "Sett på pause",
+  "unlockResume": "Fortsett",
+  "unlockCancelling": "Avbryter…",
+  "unlockPausedState": "På pause",
+  "cancelUnlock": "Avbryt opplåsing",
+  "keepGoing": "Fortsett likevel",
+  "cancelUnlockAskTitle": "Avbryte opplåsingen av %@?",
+  "cancelUnlockAskDetail": "Arbeidet så langt går tapt. Sett heller på pause for å stoppe nå og fortsette senere.",
+  "quitUnlocksTitle": "Avslutte mens spill låses opp?",
+  "quitRemovingTitle": "Avslutte mens spill fjernes?",
+  "quitGoBack": "Gå tilbake",
+  "quitCancelAndQuit": "Avbryt og avslutt",
+  "quitAnyway": "Avslutt likevel",
+  "quitUnlocksDetail": "Avbryt og avslutt kaster arbeidet. For å stoppe og fortsette senere, gå tilbake, bruk Sett på pause og la launcheren være åpen.",
+  "quitRemovingNote": "Fjerning av spill kan verken settes på pause eller avbrytes."
 }

@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "%@ を起動できませんでした",
   "retroEmulatorExited": "%@ が終了コード %d で終了しました",
   "retroLibrary": "エミュレーターのゲーム",
-  "retroLibraryDetail": "ゲームフォルダー内の PS1、PS2、PS3 のゲームを表示し、インストール済みのエミュレーターでプレイします。"
+  "retroLibraryDetail": "ゲームフォルダー内の PS1、PS2、PS3 のゲームを表示し、インストール済みのエミュレーターでプレイします。",
+  "unlockPause": "一時停止",
+  "unlockResume": "再開",
+  "unlockCancelling": "キャンセル中…",
+  "unlockPausedState": "一時停止中",
+  "cancelUnlock": "ロック解除をキャンセル",
+  "keepGoing": "続ける",
+  "cancelUnlockAskTitle": "%@ のロック解除をキャンセルしますか?",
+  "cancelUnlockAskDetail": "これまでの作業は失われます。今止めて後で続けるには、代わりに一時停止してください。",
+  "quitUnlocksTitle": "ゲームのロック解除中に終了しますか?",
+  "quitRemovingTitle": "ゲームの削除中に終了しますか?",
+  "quitGoBack": "戻る",
+  "quitCancelAndQuit": "キャンセルして終了",
+  "quitAnyway": "それでも終了",
+  "quitUnlocksDetail": "キャンセルして終了すると作業は破棄されます。止めて後で続けるには、戻って一時停止を使い、ランチャーを開いたままにしてください。",
+  "quitRemovingNote": "ゲームの削除は一時停止もキャンセルもできません。"
 }

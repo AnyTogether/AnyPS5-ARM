@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "%@ চালু করা যায়নি",
   "retroEmulatorExited": "%@ এক্সিট কোড %d দিয়ে বন্ধ হয়েছে",
   "retroLibrary": "এমুলেটর গেম",
-  "retroLibraryDetail": "আপনার গেম ফোল্ডারের PS1, PS2 ও PS3 গেম দেখায় এবং আপনার ইনস্টল করা এমুলেটরে সেগুলো চালায়।"
+  "retroLibraryDetail": "আপনার গেম ফোল্ডারের PS1, PS2 ও PS3 গেম দেখায় এবং আপনার ইনস্টল করা এমুলেটরে সেগুলো চালায়।",
+  "unlockPause": "বিরতি",
+  "unlockResume": "আবার শুরু",
+  "unlockCancelling": "বাতিল হচ্ছে…",
+  "unlockPausedState": "বিরতিতে",
+  "cancelUnlock": "আনলক বাতিল করুন",
+  "keepGoing": "চালিয়ে যান",
+  "cancelUnlockAskTitle": "%@ এর আনলক বাতিল করবেন?",
+  "cancelUnlockAskDetail": "এখন পর্যন্ত করা কাজ হারিয়ে যাবে। এখন থেমে পরে চালিয়ে যেতে বরং বিরতি দিন।",
+  "quitUnlocksTitle": "গেম আনলক হওয়ার সময় প্রস্থান করবেন?",
+  "quitRemovingTitle": "গেম সরানোর সময় প্রস্থান করবেন?",
+  "quitGoBack": "ফিরে যান",
+  "quitCancelAndQuit": "বাতিল করে প্রস্থান",
+  "quitAnyway": "তবুও প্রস্থান",
+  "quitUnlocksDetail": "বাতিল করে প্রস্থান কাজটি ফেলে দেয়। থেমে পরে চালিয়ে যেতে ফিরে যান, বিরতি ব্যবহার করুন এবং লঞ্চার খোলা রাখুন।",
+  "quitRemovingNote": "গেম সরানো বিরতি দেওয়া বা বাতিল করা যায় না।"
 }

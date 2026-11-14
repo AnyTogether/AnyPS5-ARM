@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "%@ शुरू नहीं हो सका",
   "retroEmulatorExited": "%@ एग्ज़िट कोड %d के साथ बंद हुआ",
   "retroLibrary": "एमुलेटर गेम",
-  "retroLibraryDetail": "आपके गेम फ़ोल्डरों में PS1, PS2 और PS3 गेम दिखाता है और उन्हें आपके इंस्टॉल किए गए एमुलेटर में चलाता है।"
+  "retroLibraryDetail": "आपके गेम फ़ोल्डरों में PS1, PS2 और PS3 गेम दिखाता है और उन्हें आपके इंस्टॉल किए गए एमुलेटर में चलाता है।",
+  "unlockPause": "रोकें",
+  "unlockResume": "फिर शुरू करें",
+  "unlockCancelling": "रद्द हो रहा है…",
+  "unlockPausedState": "रुका हुआ",
+  "cancelUnlock": "अनलॉक रद्द करें",
+  "keepGoing": "जारी रखें",
+  "cancelUnlockAskTitle": "%@ का अनलॉक रद्द करें?",
+  "cancelUnlockAskDetail": "अब तक किया गया काम खो जाएगा। अभी रुककर बाद में जारी रखने के लिए इसके बजाय रोकें।",
+  "quitUnlocksTitle": "गेम अनलॉक होते समय बाहर निकलें?",
+  "quitRemovingTitle": "गेम हटाए जाते समय बाहर निकलें?",
+  "quitGoBack": "वापस जाएँ",
+  "quitCancelAndQuit": "रद्द करें और बाहर निकलें",
+  "quitAnyway": "फिर भी बाहर निकलें",
+  "quitUnlocksDetail": "रद्द करें और बाहर निकलें काम को फेंक देता है। रुककर बाद में जारी रखने के लिए वापस जाएँ, रोकें का उपयोग करें और लॉन्चर खुला रखें।",
+  "quitRemovingNote": "गेम हटाने को न रोका जा सकता है, न रद्द किया जा सकता है।"
 }

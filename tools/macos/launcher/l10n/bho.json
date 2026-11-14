@@ -2201,5 +2201,6 @@
   "retroEmulatorStartFailed": "%@ शुरू ना हो पावल",
   "retroEmulatorExited": "%@ एग्जिट कोड %d के साथे बंद हो गइल",
   "retroLibrary": "एमुलेटर गेम",
-  "retroLibraryDetail": "राउर गेम फोल्डर में PS1, PS2 आ PS3 गेम देखावेला आ ओह के राउर इंस्टॉल कइल एमुलेटर में चलावेला।"
+  "retroLibraryDetail": "राउर गेम फोल्डर में PS1, PS2 आ PS3 गेम देखावेला आ ओह के राउर इंस्टॉल कइल एमुलेटर में चलावेला।",
+  "cancelUnlock": "अनलॉक रद्द करीं"
 }

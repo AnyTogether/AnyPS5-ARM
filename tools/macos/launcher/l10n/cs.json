@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "%@ se nepodařilo spustit",
   "retroEmulatorExited": "%@ se ukončil s návratovým kódem %d",
   "retroLibrary": "Hry pro emulátory",
-  "retroLibraryDetail": "Zobrazí hry pro PS1, PS2 a PS3 ze složek s hrami a spustí je v nainstalovaném emulátoru."
+  "retroLibraryDetail": "Zobrazí hry pro PS1, PS2 a PS3 ze složek s hrami a spustí je v nainstalovaném emulátoru.",
+  "unlockPause": "Pozastavit",
+  "unlockResume": "Pokračovat",
+  "unlockCancelling": "Ruší se…",
+  "unlockPausedState": "Pozastaveno",
+  "cancelUnlock": "Zrušit odemknutí",
+  "keepGoing": "Pokračovat dál",
+  "cancelUnlockAskTitle": "Zrušit odemknutí hry %@?",
+  "cancelUnlockAskDetail": "Dosavadní práce se ztratí. Raději pozastavte, abyste teď skončili a pokračovali později.",
+  "quitUnlocksTitle": "Ukončit, zatímco se hry odemykají?",
+  "quitRemovingTitle": "Ukončit, zatímco se hry odstraňují?",
+  "quitGoBack": "Zpět",
+  "quitCancelAndQuit": "Zrušit a ukončit",
+  "quitAnyway": "Přesto ukončit",
+  "quitUnlocksDetail": "Zrušit a ukončit zahodí práci. Chcete-li skončit a pokračovat později, vraťte se, použijte Pozastavit a nechte launcher otevřený.",
+  "quitRemovingNote": "Odstraňování her nelze pozastavit ani zrušit."
 }
