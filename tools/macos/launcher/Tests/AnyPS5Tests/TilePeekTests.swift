@@ -4,8 +4,8 @@ import AppKit
 import XCTest
 
 /// The home tile row as on Windows and Linux: the previous game stays in view at the left edge,
-/// the next tiles follow right after the selected one, and the name sits beside it with the
-/// state as an icon.
+/// a little dimmer, the next tiles follow right after the selected one, and the name sits beside
+/// it, under the next tiles and on the selected tile's bottom edge, with the state as an icon.
 @MainActor
 final class TilePeekTests: XCTestCase {
     let small: CGFloat = 118, large: CGFloat = 176, gap: CGFloat = 16, leading: CGFloat = 64
@@ -26,6 +26,12 @@ final class TilePeekTests: XCTestCase {
         XCTAssertEqual(x(0), leading)
         XCTAssertEqual(x(1), leading + large + gap, "no room for the name between them any more")
         XCTAssertEqual(x(2), leading + large + gap + small + gap)
+    }
+
+    func testTheNameStartsWhereTheNextTileStarts() {
+        for peek in [0, TilePeek.shift] {
+            XCTAssertEqual(TileRow.labelStart(leading: leading + peek, large: large, gap: gap), x(1, peek: peek))
+        }
     }
 
     func testFromTheSecondGameOnTheRowMovesRightSoThePreviousTilePeeksIn() {

@@ -82,8 +82,9 @@ enum Motion {
 }
 
 /// The game right before the selected one stays on the home tile row, partly past the window's
-/// edge and almost at full brightness, as on Windows and Linux. A shift of 0 keeps the selected
-/// tile in line with the hero title and shows a thinner strip of the previous tile.
+/// edge and a little dimmer than the other tiles (at `opacity`), as on Windows and Linux. Both
+/// values tune that look: a shift of 0 keeps the selected tile in line with the hero title and
+/// shows a thinner strip of the previous tile.
 enum TilePeek {
     static let shift: CGFloat = 48
     static let opacity = 0.85

@@ -382,7 +382,8 @@ struct TileRow: View {
         let leading = 64 * scale
         let tiles = folderContents ? model.homeFolderTiles : model.homeTiles
         let at = preview ? 0 : model.homeTileIndex(tiles, folderContents: folderContents)
-        // From the second game on the row moves right, so the previous tile stays in view.
+        // From the second game on the row moves right, so the previous tile (a little dimmer, at
+        // TilePeek.opacity) stays in view.
         let peek = !preview && at > 0 ? TilePeek.shift * scale : 0
         GeometryReader { _ in
             ZStack(alignment: .topLeading) {
@@ -428,8 +429,10 @@ struct TileRow: View {
                             if tile.folder == nil { StateLabel(state: model.state(of: game), game: game, iconOnly: true) }
                         }
                         .legible(12)
-                        .frame(width: label, alignment: .leading)
-                        .offset(x: leading + peek + large + gap * 0.75, y: large - 28 * scale)
+                        // Where the next tile starts, and the name's bottom edge on the selected
+                        // tile's, whatever the text's height and the row's tile size.
+                        .frame(width: label, height: large, alignment: .bottomLeading)
+                        .offset(x: TileRow.labelStart(leading: leading + peek, large: large, gap: gap), y: 0)
                         .transition(.opacity)
                     }
                 }
@@ -449,7 +452,12 @@ struct TileRow: View {
         return leading + large + gap + CGFloat(offset - 1) * (small + gap)
     }
 
-    /// The game right before the selected one stays almost at full brightness, the ones before it fade out.
+    /// Where the selected game's name starts: where the next tile starts.
+    static func labelStart(leading: CGFloat, large: CGFloat, gap: CGFloat) -> CGFloat {
+        leading + large + gap
+    }
+
+    /// The game right before the selected one stays in view, a little dimmer, the ones before it fade out.
     static func opacity(offset: Int) -> Double {
         offset == -1 ? TilePeek.opacity : offset < 0 ? 0 : 1
     }
@@ -564,6 +572,7 @@ struct StateLabel: View {
             }
         }()
         if iconOnly {
+            // The words stay reachable: a screen reader reads them and the pointer gets them as a hint.
             if !StateLabel.iconOnlyHidden(state, waitingToPrepare: model.prepare.pending.contains(game?.id ?? "")) {
                 Image(systemName: symbol)
                     .font(.system(size: 18 * scale, weight: .medium))
