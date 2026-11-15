@@ -2225,12 +2225,12 @@
   "cancelUnlock": "Anulare deblocare",
   "keepGoing": "Continuă",
   "cancelUnlockAskTitle": "Anulezi deblocarea pentru %@?",
-  "cancelUnlockAskDetail": "Munca făcută până acum se pierde. Folosește mai bine Pauză ca să te oprești acum și să continui mai târziu.",
-  "quitUnlocksTitle": "Închizi în timp ce jocuri sunt deblocate?",
-  "quitRemovingTitle": "Închizi în timp ce jocuri sunt eliminate?",
+  "cancelUnlockAskDetail": "Munca făcută până acum se pierde. Pune pe pauză, ca să te oprești acum și să continui mai târziu.",
+  "quitUnlocksTitle": "Ieși în timp ce se deblochează jocuri?",
+  "quitRemovingTitle": "Ieși în timp ce se elimină jocuri?",
   "quitGoBack": "Înapoi",
-  "quitCancelAndQuit": "Anulează și închide",
-  "quitAnyway": "Închide oricum",
-  "quitUnlocksDetail": "Anulează și închide aruncă munca. Ca să te oprești și să continui mai târziu, întoarce-te, folosește Pauză și lasă launcherul deschis.",
-  "quitRemovingNote": "Eliminarea jocurilor nu poate fi nici pusă pe pauză, nici anulată."
+  "quitCancelAndQuit": "Anulează și ieși",
+  "quitAnyway": "Ieși oricum",
+  "quitUnlocksDetail": "Anulează și ieși aruncă munca făcută. Ca să te oprești și să continui mai târziu, întoarce-te, folosește Pauză și ține launcherul deschis.",
+  "quitRemovingNote": "Eliminarea jocurilor nu poate fi pusă pe pauză și nici anulată."
 }

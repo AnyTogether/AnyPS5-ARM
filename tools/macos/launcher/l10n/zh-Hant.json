@@ -2223,14 +2223,14 @@
   "unlockCancelling": "正在取消…",
   "unlockPausedState": "已暫停",
   "cancelUnlock": "取消解鎖",
-  "keepGoing": "繼續解鎖",
+  "keepGoing": "繼續進行",
   "cancelUnlockAskTitle": "要取消 %@ 的解鎖嗎？",
-  "cancelUnlockAskDetail": "目前完成的工作會遺失。想現在停下、之後再繼續，請改用暫停。",
-  "quitUnlocksTitle": "要在解鎖遊戲時結束嗎？",
-  "quitRemovingTitle": "要在移除遊戲時結束嗎？",
+  "cancelUnlockAskDetail": "已完成的工作將會遺失。可以改為暫停，先停下，稍後再繼續。",
+  "quitUnlocksTitle": "遊戲正在解鎖，要結束嗎？",
+  "quitRemovingTitle": "遊戲正在移除，要結束嗎？",
   "quitGoBack": "返回",
   "quitCancelAndQuit": "取消並結束",
   "quitAnyway": "仍然結束",
-  "quitUnlocksDetail": "取消並結束會捨棄已完成的工作。想停下之後再繼續，請返回並使用暫停，並保持啟動器開啟。",
-  "quitRemovingNote": "移除遊戲既無法暫停也無法取消。"
+  "quitUnlocksDetail": "「取消並結束」會捨棄已完成的工作。若想先停下之後再繼續，請返回並使用「暫停」，同時保持啟動器開啟。",
+  "quitRemovingNote": "移除遊戲無法暫停，也無法取消。"
 }

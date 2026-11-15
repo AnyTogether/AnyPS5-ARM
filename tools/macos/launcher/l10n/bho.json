@@ -2202,5 +2202,19 @@
   "retroEmulatorExited": "%@ एग्जिट कोड %d के साथे बंद हो गइल",
   "retroLibrary": "एमुलेटर गेम",
   "retroLibraryDetail": "राउर गेम फोल्डर में PS1, PS2 आ PS3 गेम देखावेला आ ओह के राउर इंस्टॉल कइल एमुलेटर में चलावेला।",
-  "cancelUnlock": "अनलॉक रद्द करीं"
+  "cancelUnlock": "अनलॉक रद्द करीं",
+  "unlockPause": "रोकीं",
+  "unlockResume": "फेर से चालू करीं",
+  "unlockCancelling": "रद्द हो रहल बा…",
+  "unlockPausedState": "रुकल बा",
+  "keepGoing": "जारी रखीं",
+  "cancelUnlockAskTitle": "%@ के अनलॉक रद्द करीं?",
+  "cancelUnlockAskDetail": "अब तक कइल काम चल जाई। अभी रोके आ बाद में आगे बढ़े खातिर एकरा बदले रोकीं चुनीं।",
+  "quitUnlocksTitle": "गेम अनलॉक होत घरी बंद करीं?",
+  "quitRemovingTitle": "गेम हटावल जात घरी बंद करीं?",
+  "quitGoBack": "पीछे जाईं",
+  "quitCancelAndQuit": "रद्द करीं आ बंद करीं",
+  "quitAnyway": "तबो बंद करीं",
+  "quitUnlocksDetail": "रद्द करीं आ बंद करीं से कइल काम बेकार हो जाला। रोक के बाद में आगे बढ़े खातिर पीछे जाईं, रोकीं चुनीं, आ लॉन्चर खुलल रहे दीं।",
+  "quitRemovingNote": "गेम हटावे के काम ना रोकल जा सकेला, ना रद्द कइल जा सकेला।"
 }

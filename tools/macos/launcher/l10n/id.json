@@ -2224,13 +2224,13 @@
   "unlockPausedState": "Dijeda",
   "cancelUnlock": "Batalkan Buka Kunci",
   "keepGoing": "Teruskan",
-  "cancelUnlockAskTitle": "Batalkan buka kunci %@?",
-  "cancelUnlockAskDetail": "Pekerjaan sejauh ini akan hilang. Jeda saja untuk berhenti sekarang dan lanjut nanti.",
+  "cancelUnlockAskTitle": "Batalkan pembukaan kunci %@?",
+  "cancelUnlockAskDetail": "Pekerjaan yang sudah dilakukan akan hilang. Jeda saja untuk berhenti sekarang dan melanjutkan nanti.",
   "quitUnlocksTitle": "Keluar saat game sedang dibuka kuncinya?",
   "quitRemovingTitle": "Keluar saat game sedang dihapus?",
   "quitGoBack": "Kembali",
   "quitCancelAndQuit": "Batalkan dan keluar",
   "quitAnyway": "Tetap keluar",
-  "quitUnlocksDetail": "Batalkan dan keluar membuang pekerjaannya. Untuk berhenti dan lanjut nanti, kembali dan gunakan Jeda, lalu biarkan launcher tetap terbuka.",
-  "quitRemovingNote": "Penghapusan game tidak bisa dijeda maupun dibatalkan."
+  "quitUnlocksDetail": "Batalkan dan keluar membuang pekerjaan yang sudah ada. Untuk berhenti dan melanjutkan nanti, kembali lalu gunakan Jeda, dan biarkan launcher tetap terbuka.",
+  "quitRemovingNote": "Penghapusan game tidak dapat dijeda maupun dibatalkan."
 }
