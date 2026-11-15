@@ -179,6 +179,23 @@ final class UnlockPauseTests: XCTestCase {
         XCTAssertFalse(model.terminateAsks(), "the terminate that follows goes through")
     }
 
+    func testAQuitNobodyIsAskedAboutCancelsTheUnlocksFirst() throws {
+        // A Steam shortcut's game ended, or the update's Restart Now: no question, the unlocks
+        // (the paused one too) are cancelled and the terminate that follows goes through.
+        let (model, games) = try model()
+        model.previewQueueUnlock(games[0])
+        model.previewQueueUnlock(games[1])
+        model.pauseUnlock(games[0])
+        model.terminateWithoutAsking()
+        XCTAssertNil(model.overlay, "the question does not open")
+        XCTAssertEqual(terminated, 1)
+        XCTAssertEqual(works[games[0].id]?.cancelled, 1, "the paused one is cancelled too")
+        XCTAssertEqual(works[games[1].id]?.cancelled, 1)
+        XCTAssertTrue(model.queue.isEmpty)
+        XCTAssertFalse(model.terminateAsks(), "the app delegate lets it through")
+        XCTAssertNil(model.overlay)
+    }
+
     func testQuittingWithNothingUnlockedAsksNothing() throws {
         let (model, _) = try model()
         XCTAssertFalse(model.quitAsks)

@@ -1082,7 +1082,7 @@ final class AppModel: ObservableObject {
         case .now:
             restartAfterGame = false
             guard placeUpdate(relaunch: true) else { return }
-            NSApp.terminate(nil)
+            terminateWithoutAsking()
         }
     }
 
@@ -2085,6 +2085,15 @@ final class AppModel: ObservableObject {
             }
             self?.quitApp()
         }
+    }
+
+    /// A quit the launcher decides on its own, with nobody to ask (the Steam shortcut's game ended,
+    /// the update's Restart Now): the unlocks are cancelled as Cancel and quit does, and the app
+    /// delegate lets the terminate through instead of opening the question, as on Windows and Linux.
+    func terminateWithoutAsking() {
+        quitConfirmed = true
+        cancelAllUnlocks()
+        terminateApp()
     }
 
     /// Every unlock stops: the queue is emptied, and each installer (a paused one is let go on so
@@ -3591,7 +3600,7 @@ final class AppModel: ObservableObject {
                 // Steam sees the game end; a crash keeps it open on the report.
                 if self.steamQuitAfter == game.id {
                     self.steamQuitAfter = nil
-                    if found == nil && !withoutWindow { NSApp.terminate(nil) }
+                    if found == nil && !withoutWindow { self.terminateWithoutAsking() }
                 }
             }
         }
