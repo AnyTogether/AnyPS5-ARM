@@ -110,6 +110,20 @@ final class UnlockPauseTests: XCTestCase {
         XCTAssertNil(model.unlockControl(games[0]))
     }
 
+    func testAFocusAfterTheSmallCancelStaysOnItsButtonWhenTheCancelGoes() throws {
+        let (model, games) = try model()
+        model.previewQueueUnlock(games[0])
+        XCTAssertTrue(model.showsCancelUnlock(games[0]))
+        XCTAssertEqual(model.actionCount, 3)
+        // The settings button, after the small Cancel.
+        model.focus = .actions(model.actionCount - 1)
+        XCTAssertEqual(model.focus, .actions(2))
+        works[games[0].id]?.finish()
+        XCTAssertFalse(model.showsCancelUnlock(games[0]))
+        XCTAssertEqual(model.actionCount, 2)
+        XCTAssertEqual(model.focus, .actions(model.actionCount - 1), "still the settings button, one place further left")
+    }
+
     func testAPausedUnlockCanBeCancelledAndAQueuedOneIsDroppedAtOnce() throws {
         let (model, games) = try model()
         model.previewQueueUnlock(games[0])

@@ -1738,6 +1738,7 @@ final class AppModel: ObservableObject {
     /// the one that runs now; then the next one goes on.
     private func unlockEnded(_ game: Game, _ result: Result<URL, Error>) {
         let id = game.id
+        let hadCancel = showsCancelUnlock(game)
         if parked.removeValue(forKey: id) == nil, installerID == id || installerID == nil {
             installer = nil
             installerID = nil
@@ -1746,7 +1747,7 @@ final class AppModel: ObservableObject {
         handPaused.remove(id)
         cancelling.remove(id)
         resumeWaiting.removeAll { $0 == id }
-        focusMainActionIfCancelWent(id)
+        focusAfterCancelWent(id, hadCancel: hadCancel)
         switch result {
         case .success:
             Sounds.shared.play(.unlocked)
@@ -1913,11 +1914,12 @@ final class AppModel: ObservableObject {
         if let index = queue.firstIndex(of: game.id) { queue.remove(at: index); stepPrepare(); return }
         if progress[game.id] != nil {
             if let work = work(of: game.id) {
+                let hadCancel = showsCancelUnlock(game)
                 // The button waits until the work has ended (unlockEnded).
                 if unlockControl(game) != nil { cancelling.insert(game.id) }
                 handPaused.remove(game.id)
                 resumeWaiting.removeAll { $0 == game.id }
-                focusMainActionIfCancelWent(game.id)
+                focusAfterCancelWent(game.id, hadCancel: hadCancel)
                 work.cancel()
             } else {
                 installer?.cancel()
@@ -2038,11 +2040,12 @@ final class AppModel: ObservableObject {
         closeOverlay()
     }
 
-    /// The small Cancel button went (the unlock ended or is being cancelled): the focus goes back
-    /// to the main button, so it does not land on another one.
-    private func focusMainActionIfCancelWent(_ id: String) {
-        guard selectedGame?.id == id, case .actions(let index) = focus, index > 0 else { return }
-        focus = .actions(0)
+    /// The small Cancel button went (the unlock ended or is being cancelled): a focus on it goes
+    /// back to the main button, and one on a button after it stays on that button, which is
+    /// one place further left now. Nothing lands on another button or on none.
+    private func focusAfterCancelWent(_ id: String, hadCancel: Bool) {
+        guard hadCancel, selectedGame?.id == id, case .actions(let index) = focus, index >= cancelAction else { return }
+        focus = .actions(index == cancelAction ? 0 : index - 1)
     }
 
     // MARK: Quitting while games are unlocked or removed
