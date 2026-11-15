@@ -8,8 +8,9 @@
 
 namespace Codegen {
 
-// The x86 host the code is converted for. Rosetta (macOS on Apple silicon) runs AVX2, FMA, BMI1/2 and
-// F16C but, unlike Intel hosts, not RDSEED, RDPID or CLWB, which are lowered as well.
+// The x86 host the code is converted for. Both turn CLFLUSHOPT into CLFLUSH: Intel CPUs before Skylake
+// lack it (#127). Rosetta (macOS on Apple silicon) runs AVX2, FMA, BMI1/2 and F16C but, unlike recent
+// Intel hosts, not RDSEED, RDPID or CLWB, which are lowered as well.
 enum class Amd64OnlyTarget : std::uint8_t {
     Intel,
     Rosetta

@@ -6,6 +6,7 @@
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include "prx/libc/include/HostFault.hpp"
+#include "prx/libc/include/CacheFlushEmulation.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Pthread/include/Pthread.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
@@ -1396,6 +1397,11 @@ void ChainFault(int hostSignal, siginfo_t* info, void* context) {
 
 void DeliverFault(int hostSignal, siginfo_t* info, void* context) {
     auto& host = static_cast<ucontext_t*>(context)->uc_mcontext;
+#if defined(__linux__) && defined(__x86_64__)
+    // CLFLUSHOPT or CLWB on a host without them runs as CLFLUSH before any guest handler sees it (#127),
+    // as libc's own SIGILL handler does when no guest handler is installed.
+    if (hostSignal == SIGILL && info->si_code > 0 && cache_flush::EmulateContext(host)) return;
+#endif
     Fault fault{};
 #ifdef __APPLE__
     const bool deliverable = info->si_code > 0 && Classify(hostSignal, *info, host, fault);
