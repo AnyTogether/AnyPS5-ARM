@@ -493,7 +493,7 @@ struct GameTile: View {
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .shadow(color: look.glass ? Ice.scrim.opacity(0.7) : .black.opacity(0.45), radius: focused ? 22 * scale : 10 * scale, y: 8 * scale)
-        .focusRing(focused, radius: radius)
+        .focusRing(focused, radius: radius, animated: model.homeTileGlints(focused))
         .animation(Motion.focus, value: focused)
         .animation(Motion.layout, value: size)
     }
