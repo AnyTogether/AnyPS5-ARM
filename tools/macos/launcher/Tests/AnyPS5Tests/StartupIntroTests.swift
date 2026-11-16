@@ -6,7 +6,7 @@ import XCTest
 /// The home screen's start animation as on Windows and Linux: 2.6 seconds, the curtain fading
 /// first, the tiles one after the other, then the top bar, the game's details and the hints. It
 /// plays once per run, when the home screen is first seen with nothing over it, and not with
-/// reduced motion or a game starting or running.
+/// reduced motion or a game starting or running. A key, a button or a click finishes it at once.
 @MainActor
 final class StartupIntroTests: XCTestCase {
     func testTheTimingsAreTheSameAsOnWindowsAndLinux() {
@@ -87,6 +87,14 @@ final class StartupIntroTests: XCTestCase {
         XCTAssertEqual(decide(covered: true, reduceMotion: true), .wait, "the picked profile's setting counts")
         XCTAssertEqual(decide(reduceMotion: true), .skip)
         XCTAssertEqual(decide(gameBusy: true), .skip, "a Steam shortcut goes straight into its game")
+    }
+
+    func testAKeyOrAButtonFinishesTheIntroAndStillDoesItsWork() throws {
+        let model = try LauncherFixture.model()
+        var finished = 0
+        model.onInput = { finished += 1 }
+        XCTAssertTrue(model.handle(.right), "the key still does what it was for")
+        XCTAssertEqual(finished, 1, "a key, a button or a click finishes the animation at once")
     }
 
     func testOnlyTheLauncherTurnsItOn() {

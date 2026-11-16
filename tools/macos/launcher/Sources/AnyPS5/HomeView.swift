@@ -162,8 +162,14 @@ struct HomeView: View {
         .task(id: introStart) {
             guard introStart != nil else { return }
             try? await Task.sleep(for: .seconds(StartupIntro.duration))
-            introStart = nil
+            finishIntro()
         }
+    }
+
+    /// The animation is over, or a key, a button or a click finished it at once.
+    private func finishIntro() {
+        model.onInput = nil
+        introStart = nil
     }
 
     private func startIntro() {
@@ -175,6 +181,8 @@ struct HomeView: View {
         case .play:
             StartupIntro.played = true
             introStart = Date()
+            // A key, a button or a click finishes it at once.
+            model.onInput = { finishIntro() }
         }
     }
 
@@ -1007,6 +1015,7 @@ extension AppModel {
 
     /// Home screen and library navigation; panels go through panelCommand.
     func handle(_ command: Command) -> Bool {
+        onInput?()
         // Mirrored screens (Arabic, Urdu): → moves to what is drawn on the right.
         let command = T.language.isRightToLeft ? command.mirrored : command
         if pairing != nil {
