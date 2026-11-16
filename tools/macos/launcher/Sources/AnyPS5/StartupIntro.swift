@@ -72,7 +72,10 @@ struct CubicCurve {
     let a: Double, b: Double, c: Double, d: Double
 
     init(_ a: Double, _ b: Double, _ c: Double, _ d: Double) {
-        (self.a, self.b, self.c, self.d) = (a, b, c, d)
+        self.a = a
+        self.b = b
+        self.c = c
+        self.d = d
     }
 
     private static func point(_ p1: Double, _ p2: Double, _ m: Double) -> Double {
