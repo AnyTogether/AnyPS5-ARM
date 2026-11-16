@@ -8,6 +8,7 @@
 #include "prx/libc/include/LogFile.hpp"
 #include "prx/libc/include/Shutdown.hpp"
 #include "prx/libc/include/CrashText.hpp"
+#include "prx/libc/include/CacheFlushEmulation.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -232,6 +233,31 @@ void TraceSse4a(std::uint64_t rip, const sse4a::Instruction& instruction, const 
     Report("[sse4a] #%llu %s %s (length %u, index %u, %u bytes) at %s on thread %lu\n", count, mnemonic, operands, field.length, field.index, static_cast<unsigned>(instruction.size), line, GetCurrentThreadId());
 }
 
+// CLFLUSHOPT and CLWB are missing before Skylake (CLWB on desktop parts before Ice Lake) while the PS5's
+// Zen 2 has both; on such a host each one is run as CLFLUSH on the same operand (#127).
+// APS5_NO_CACHE_FLUSH_EMULATION=1 disables this and APS5_TRACE_CACHE_FLUSH=1 prints each emulated
+// instruction once per rip.
+bool g_cacheFlushEmulation = true;
+bool g_cacheFlushTrace = false;
+std::atomic<unsigned long long> g_cacheFlushEmulated{0};
+
+void TraceCacheFlush(std::uint64_t rip, const cache_flush::Instruction& instruction, std::uint64_t address, unsigned long long count) {
+    static std::mutex mutex;
+    static std::uint64_t seen[128];
+    static std::size_t seenCount = 0;
+    {
+        std::lock_guard lock(mutex);
+        for (std::size_t i = 0; i < seenCount; ++i) {
+            if (seen[i] == rip) return;
+        }
+        if (seenCount < sizeof(seen) / sizeof(seen[0])) seen[seenCount++] = rip;
+    }
+    char line[MAX_PATH + 64];
+    DescribeAddress(rip, line, sizeof(line));
+    const char* mnemonic = instruction.op == cache_flush::Op::Clflushopt ? "clflushopt" : "clwb";
+    Report("[cache flush] #%llu %s [0x%llx] as clflush (%u bytes) at %s on thread %lu\n", count, mnemonic, static_cast<unsigned long long>(address), static_cast<unsigned>(instruction.size), line, GetCurrentThreadId());
+}
+
 constexpr DWORD GccExceptionMask = 0x20ffffffu;
 constexpr DWORD GccException = 0x20474343u;
 constexpr std::uint64_t GccExceptionClass = 0x474e5543432b2b00ull;
@@ -359,6 +385,21 @@ bool HandleSse4a(EXCEPTION_POINTERS* info) {
     return true;
 }
 
+bool HandleCacheFlush(EXCEPTION_POINTERS* info) {
+    if (!g_cacheFlushEmulation) return false;
+    if (info->ExceptionRecord->ExceptionCode != EXCEPTION_ILLEGAL_INSTRUCTION) return false;
+    auto* context = info->ContextRecord;
+    const auto rip = context->Rip;
+    std::uint8_t bytes[cache_flush::kMaxInstructionSize];
+    const std::size_t available = ReadCode(rip, bytes, sizeof(bytes));
+    cache_flush::Instruction instruction;
+    std::uint64_t address = 0;
+    if (!cache_flush::EmulateContext(bytes, available, *context, &instruction, &address)) return false;
+    const auto count = ++g_cacheFlushEmulated;
+    if (g_cacheFlushTrace) TraceCacheFlush(rip, instruction, address, count);
+    return true;
+}
+
 LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     static std::atomic<bool> reported{false};
     if (GuestArena::GuestArenaRecoverRead_nid_no_patch(info)) return EXCEPTION_CONTINUE_EXECUTION;
@@ -367,6 +408,7 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
     if (fault->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && fault->NumberParameters >= 2 && fault->ExceptionInformation[0] == 0 && GuestArena::GuestArenaHandleRead_nid_postfix(fault->ExceptionInformation[1])) return EXCEPTION_CONTINUE_EXECUTION;
     if (HandleWatch(info)) return EXCEPTION_CONTINUE_EXECUTION;
     if (HandleSse4a(info)) return EXCEPTION_CONTINUE_EXECUTION;
+    if (HandleCacheFlush(info)) return EXCEPTION_CONTINUE_EXECUTION;
     if (HandleHostFault(info)) return EXCEPTION_CONTINUE_EXECUTION;
     const auto* record = info->ExceptionRecord;
     if ((record->ExceptionCode & GccExceptionMask) == GccException) {
@@ -394,7 +436,7 @@ LONG WINAPI ReportCrash(EXCEPTION_POINTERS* info) {
         const std::size_t available = ReadCode(context->Rip, bytes, sizeof(bytes));
         char hex[3 * sizeof(bytes) + 1] = "";
         for (std::size_t i = 0; i < available; ++i) std::snprintf(hex + 3 * i, sizeof(hex) - 3 * i, "%02x ", bytes[i]);
-        Report("  bytes %s(sse4a emulation %s, %llu emulated so far)\n", hex, g_sse4aEmulation ? "on" : "off", g_sse4aEmulated.load());
+        Report("  bytes %s(sse4a emulation %s, %llu emulated so far; clflushopt/clwb emulation %s, %llu emulated so far)\n", hex, g_sse4aEmulation ? "on" : "off", g_sse4aEmulated.load(), g_cacheFlushEmulation ? "on" : "off", g_cacheFlushEmulated.load());
     }
     if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record->NumberParameters >= 2) {
         const char* kind = record->ExceptionInformation[0] == 0 ? "read" : record->ExceptionInformation[0] == 1 ? "write" : "execute";
@@ -685,6 +727,8 @@ struct ExitReporter {
 const bool g_crashReportInstalled = [] {
     g_sse4aEmulation = !IsEnvironmentSet("APS5_NO_SSE4A_EMULATION");
     g_sse4aTrace = IsEnvironmentSet("APS5_TRACE_SSE4A");
+    g_cacheFlushEmulation = !IsEnvironmentSet("APS5_NO_CACHE_FLUSH_EMULATION");
+    g_cacheFlushTrace = IsEnvironmentSet("APS5_TRACE_CACHE_FLUSH");
     AddVectoredExceptionHandler(1, ReportCrash);
     std::signal(SIGABRT, AbortSignalHandler);
     _set_invalid_parameter_handler(InvalidParameterHandler);

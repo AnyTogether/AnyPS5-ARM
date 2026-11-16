@@ -23,7 +23,8 @@ struct DecodedInstruction {
     [[nodiscard]] bool IsMcommit() const;
     [[nodiscard]] bool IsMovntss() const;
     [[nodiscard]] bool IsMovntsd() const;
-    // Instructions Intel hosts have and Rosetta does not.
+    [[nodiscard]] bool IsClflushopt() const;
+    // Instructions recent Intel hosts have and Rosetta does not.
     [[nodiscard]] bool IsRdseed() const;
     [[nodiscard]] bool IsRdpid() const;
     [[nodiscard]] bool IsRdtscp() const;

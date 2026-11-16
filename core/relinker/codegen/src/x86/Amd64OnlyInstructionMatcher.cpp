@@ -157,6 +157,30 @@ std::vector<std::uint8_t> _rdtscpReplacement(const DecodedInstruction& instr) {
     return bytes;
 }
 
+// CLFLUSHOPT becomes CLFLUSH on the same operand (#127). The 66 prefixes that select it go, and so does
+// a REX prefix that does not immediately precede 0F (the CPU ignores one there; without the 66 it could
+// become the instruction's REX). NOPs in front keep the length and the end of the instruction, so a
+// RIP-relative displacement still reaches the same byte.
+std::vector<std::uint8_t> _clflushReplacement(const DecodedInstruction& instr) {
+    using namespace X64OpcodeConstants;
+    const auto opcode = instr.OpcodeOffset();
+    std::vector<std::uint8_t> clflush;
+    for (std::size_t i = 0; i < opcode; ++i) {
+        const auto byte = instr.Data[i];
+        if (byte == PrefixOperandSize || (byte >= RexMin && byte <= RexMax && i + 1 != opcode))
+            continue;
+        clflush.push_back(byte);
+    }
+    clflush.insert(clflush.end(), instr.Data + opcode, instr.Data + instr.Length);
+    std::vector<std::uint8_t> bytes;
+    while (bytes.size() + clflush.size() < instr.Length) {
+        const auto& nop = kNops[std::min<std::size_t>(instr.Length - clflush.size() - bytes.size(), std::size(kNops)) - 1];
+        bytes.insert(bytes.end(), nop.Bytes, nop.Bytes + nop.Size);
+    }
+    bytes.insert(bytes.end(), clflush.begin(), clflush.end());
+    return bytes;
+}
+
 bool _validWait(const DecodedInstruction& instr) {
     const auto opcode = instr.Data + instr.OpcodeOffset();
     return instr.Length <= kMaxInstructionLength && std::find(instr.Data, opcode, X64OpcodeConstants::PrefixLock) == opcode;
@@ -378,7 +402,7 @@ const char* Amd64OnlyInstructionMatcher::_emitOutOfLine(StubBodyBuilder& body, c
 
 const char* Amd64OnlyInstructionMatcher::_emitInPlace(StubBodyBuilder& body, const DecodedInstruction& instr) const {
     if (const auto inPlace = Match(instr.Data, instr.Length); inPlace && inPlace->Lowering == Amd64OnlyLowering::InPlace) {
-        for (const auto* entry : {&kMovntss, &kMovntsd, &kMonitorx, &kMwaitx, &kRdseed, &kClwb}) {
+        for (const auto* entry : {&kMovntss, &kMovntsd, &kMonitorx, &kMwaitx, &kRdseed, &kClwb, &kClflushopt}) {
             if (inPlace->InstructionName != entry->Name)
                 continue;
             const X64InstructionDecoder decoder;
@@ -484,6 +508,9 @@ std::optional<Amd64OnlyMatch> Amd64OnlyInstructionMatcher::Match(
 
     if (instr.IsMcommit())
         return _matchMcommit(instr);
+
+    if (instr.IsClflushopt())
+        return _inPlace(kClflushopt, length, _clflushReplacement(instr));
 
     return _matchRosetta(instr, trailing);
 }

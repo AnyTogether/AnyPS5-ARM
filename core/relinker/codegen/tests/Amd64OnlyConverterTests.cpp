@@ -784,7 +784,8 @@ void rosettaSubstitutions() {
     const auto clwb = match(rosetta, {0x66, 0x0F, 0xAE, 0x74, 0x24, 0x08});
     require(clwb && clwb->Lowering == Amd64OnlyLowering::InPlace && clwb->ReplacementBytes == Bytes{0x66, 0x0F, 0x1F, 0x44, 0x00, 0x00} && clwb->InstructionName == "CLWB", "CLWB was not replaced by a NOP");
     require(!match(rosetta, {0x66, 0x0F, 0xAE, 0xF1}).has_value(), "TPAUSE (the register form of 66 0F AE /6) was taken for CLWB");
-    require(!match(rosetta, {0x66, 0x0F, 0xAE, 0x38}).has_value(), "CLFLUSHOPT was taken for CLWB");
+    const auto clflushoptNotClwb = match(rosetta, {0x66, 0x0F, 0xAE, 0x38});
+    require(clflushoptNotClwb && clflushoptNotClwb->InstructionName == "CLFLUSHOPT", "CLFLUSHOPT was taken for CLWB");
     const auto xsaveopt = match(rosetta, {0x0F, 0xAE, 0x37});
     require(xsaveopt && xsaveopt->Lowering == Amd64OnlyLowering::InPlace && xsaveopt->ReplacementBytes == Bytes{0x0F, 0xAE, 0x27} && xsaveopt->InstructionName == "XSAVEOPT", "XSAVEOPT was not rewritten to XSAVE");
     const auto xsaveopt64 = match(rosetta, {0x48, 0x0F, 0xAE, 0x74, 0x24, 0x40});
@@ -1191,6 +1192,58 @@ void converterJumpTableTargets() {
     require(placedAt(convert(leaTable, {{0x300, table(0x3000, {0x1010})}, {0x380, table(0x3000, {0x1018})}}, {code, data, {0x61000000, 4, 0x380, 0x3000, 0, 0x10, 0x10, 16}}), 0x214), "A jump table was read from a segment that is not loaded");
     require(placedAt(convert(leaTable, {{0x300, table(0x3000, {0x1010, 0x1018})}, {0x3A0, store}}, {code, data, {2, 5, 0x3A0, 0x2000, 0, 4, 4, 16}}), 0x210), "A segment that is not loaded was converted");
     requireFailure([&] { (void)convert(leaTable, {{0x300, table(0x3000, {0x1010, 0x1018})}}, {code, {1, 4, 0x300, 0x3000, 0, 0x1000, 0x1000, 16}}); }, "A jump table was read from a segment that exceeds the file");
+}
+
+void clflushoptSubstitutions() {
+    using Codegen::Amd64OnlyLowering;
+    const auto intel = Codegen::MakeAmd64OnlyInstructionMatcher();
+    const auto rosetta = Codegen::MakeAmd64OnlyInstructionMatcher(Codegen::Amd64OnlyTarget::Rosetta);
+    struct Case {
+        Bytes Site;
+        Bytes Clflush;
+        const char* Form;
+    };
+    const Case cases[] = {
+        {{0x66, 0x0F, 0xAE, 0x3F}, {0x90, 0x0F, 0xAE, 0x3F}, "[rdi] (#127)"},
+        {{0x66, 0x0F, 0xAE, 0x38}, {0x90, 0x0F, 0xAE, 0x38}, "[rax]"},
+        {{0x66, 0x41, 0x0F, 0xAE, 0x3F}, {0x90, 0x41, 0x0F, 0xAE, 0x3F}, "[r15]"},
+        {{0x66, 0x0F, 0xAE, 0x7C, 0x24, 0x08}, {0x90, 0x0F, 0xAE, 0x7C, 0x24, 0x08}, "[rsp+8]"},
+        {{0x66, 0x41, 0x0F, 0xAE, 0x7C, 0x24, 0xF8}, {0x90, 0x41, 0x0F, 0xAE, 0x7C, 0x24, 0xF8}, "[r12-8]"},
+        {{0x66, 0x42, 0x0F, 0xAE, 0xBC, 0xA0, 0x00, 0x01, 0x00, 0x00}, {0x90, 0x42, 0x0F, 0xAE, 0xBC, 0xA0, 0x00, 0x01, 0x00, 0x00}, "[rax+r12*4+0x100]"},
+        {{0x66, 0x41, 0x0F, 0xAE, 0x7D, 0x00}, {0x90, 0x41, 0x0F, 0xAE, 0x7D, 0x00}, "[r13+0]"},
+        {{0x66, 0x0F, 0xAE, 0x3D, 0x00, 0x01, 0x00, 0x00}, {0x90, 0x0F, 0xAE, 0x3D, 0x00, 0x01, 0x00, 0x00}, "[rip+0x100]"},
+        {{0x66, 0x0F, 0xAE, 0x3C, 0x25, 0x40, 0x00, 0x00, 0x00}, {0x90, 0x0F, 0xAE, 0x3C, 0x25, 0x40, 0x00, 0x00, 0x00}, "[0x40]"},
+        {{0x64, 0x66, 0x0F, 0xAE, 0x3C, 0x25, 0x40, 0x00, 0x00, 0x00}, {0x90, 0x64, 0x0F, 0xAE, 0x3C, 0x25, 0x40, 0x00, 0x00, 0x00}, "fs:[0x40]"},
+        {{0x67, 0x66, 0x0F, 0xAE, 0x3F}, {0x90, 0x67, 0x0F, 0xAE, 0x3F}, "[edi]"},
+        {{0x66, 0x66, 0x0F, 0xAE, 0x38}, {0x66, 0x90, 0x0F, 0xAE, 0x38}, "a repeated 66 prefix"},
+        {{0x41, 0x66, 0x0F, 0xAE, 0x38}, {0x66, 0x90, 0x0F, 0xAE, 0x38}, "a REX prefix the CPU ignores"},
+    };
+    for (const auto* matcher : {intel.get(), rosetta.get()}) {
+        for (const auto& item : cases) {
+            const auto lowered = matcher->Match(item.Site.data(), item.Site.size());
+            require(lowered && lowered->Lowering == Amd64OnlyLowering::InPlace && lowered->InstructionName == "CLFLUSHOPT", (std::string("CLFLUSHOPT ") + item.Form + " was not rewritten in place").c_str());
+            require(lowered->ReplacementBytes == item.Clflush, (std::string("CLFLUSHOPT ") + item.Form + " was not rewritten to CLFLUSH on the same operand").c_str());
+        }
+        for (const auto& other : {Bytes{0x66, 0x0F, 0xAE, 0xF8}, Bytes{0x0F, 0xAE, 0x38}, Bytes{0xF3, 0x66, 0x0F, 0xAE, 0x38}, Bytes{0xF2, 0x66, 0x0F, 0xAE, 0x38}, Bytes{0x66, 0x0F, 0xAE, 0x28}})
+            require(!matcher->Match(other.data(), other.size()).has_value(), "The register form of 66 0F AE /7, CLFLUSH, a REP-prefixed form or 66 0F AE /5 was taken for CLFLUSHOPT");
+    }
+    const Bytes clwb = {0x66, 0x0F, 0xAE, 0x37};
+    require(!intel->Match(clwb.data(), clwb.size()).has_value(), "CLWB was rewritten for an Intel host");
+
+    const auto converter = Codegen::MakeAmd64OnlyConverter();
+    Bytes file(0x300, 0xCC);
+    const Bytes text = {
+        0x66, 0x0F, 0xAE, 0x3F,
+        0x48, 0x83, 0xC7, 0x40,
+        0x66, 0x0F, 0xAE, 0x3D, 0xF0, 0xFF, 0xFF, 0xFF,
+        0xC3};
+    std::copy(text.begin(), text.end(), file.begin() + 0x200);
+    const auto result = converter->Convert(file, {segmentHeader(text.size())});
+    require(result.ReplacedCount == 2 && result.Trampolines.empty() && result.Reports.size() == 2 && result.Reports[0].InstructionName == "CLFLUSHOPT" && result.Reports[1].Offset == 0x208, "The CLFLUSHOPT sites were not rewritten in place");
+    auto expected = file;
+    const Bytes clflush = {0x90, 0x0F, 0xAE, 0x3F, 0x48, 0x83, 0xC7, 0x40, 0x90, 0x0F, 0xAE, 0x3D, 0xF0, 0xFF, 0xFF, 0xFF};
+    std::copy(clflush.begin(), clflush.end(), expected.begin() + 0x200);
+    require(result.Bytes == expected, "CLFLUSHOPT was rewritten with the wrong bytes or a neighbour changed");
 }
 
 void converterRosetta() {
@@ -2339,6 +2392,39 @@ void clwbExecution() {
     require(kept == 0x5A5A5A5A5A5A5A5Aull, "CLWB replacement changed an unrelated register");
     require(carry == 1, "CLWB replacement changed the flags");
 }
+
+void clflushoptExecution() {
+    const auto matcher = Codegen::MakeAmd64OnlyInstructionMatcher();
+    const Bytes site = {0x66, 0x0F, 0xAE, 0x3F, 0x66, 0x0F, 0xAE, 0x3D, 0x00, 0x01, 0x00, 0x00};
+    const auto first = matcher->Match(site.data(), 4);
+    const auto second = matcher->Match(site.data() + 4, 8);
+    require(first && second && first->ReplacementBytes.size() == 4 && second->ReplacementBytes.size() == 8, "CLFLUSHOPT replacements were not produced at the original lengths");
+    auto body = first->ReplacementBytes;
+    body.insert(body.end(), second->ReplacementBytes.begin(), second->ReplacementBytes.end());
+    body.push_back(0xC3);
+    void* code = mmap(nullptr, 4096, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    require(code != MAP_FAILED, "cannot map executable memory for the replacement");
+    std::memcpy(code, body.data(), body.size());
+    alignas(64) std::uint8_t line[64] = {};
+    line[5] = 0xA5;
+    std::uint64_t address = reinterpret_cast<std::uint64_t>(line);
+    std::uint64_t kept = 0x5A5A5A5A5A5A5A5Aull;
+    std::uint8_t carry = 0;
+    asm volatile(
+        "sub $128, %%rsp\n\t"
+        "stc\n\t"
+        "call *%[code]\n\t"
+        "setc %[carry]\n\t"
+        "add $128, %%rsp\n\t"
+        : "+D"(address), "+b"(kept), [carry] "=&q"(carry)
+        : [code] "r"(code)
+        : "memory", "cc");
+    munmap(code, 4096);
+    require(address == reinterpret_cast<std::uint64_t>(line), "CLFLUSH replacement changed its address register");
+    require(kept == 0x5A5A5A5A5A5A5A5Aull, "CLFLUSH replacement changed an unrelated register");
+    require(carry == 1, "CLFLUSH replacement changed the flags");
+    require(line[5] == 0xA5, "CLFLUSH replacement changed the flushed line");
+}
 #else
 void reciprocalExecution() {}
 void registerFormExecution() {}
@@ -2389,6 +2475,7 @@ void scalarCompareExecution() {}
 void rdpidExecution() {}
 void rdseedExecution() {}
 void clwbExecution() {}
+void clflushoptExecution() {}
 #endif
 
 void scannerZeroTail() {
@@ -2444,6 +2531,7 @@ int main() {
         converterInPlaceFollower();
         converterClzero();
         rosettaSubstitutions();
+        clflushoptSubstitutions();
         xsaveoptExecution();
         converterRosetta();
         rosettaScalarCompares();
@@ -2456,6 +2544,7 @@ int main() {
         rdpidExecution();
         rdseedExecution();
         clwbExecution();
+        clflushoptExecution();
         wideStoreSplit();
         converterWideStoreWindows();
         converterWideStoreIslandAcrossInt64Max();
