@@ -3,10 +3,10 @@ import AnyPS5Core
 import AppKit
 import XCTest
 
-/// The focus ring as on Windows and Linux: a white ring as easy to see as before, a glint that
-/// goes round once every 4.8 seconds, a halo that breathes twice per turn and never goes out, a
-/// short settle from slightly outside, and only a focused home tile moving, never under a layer
-/// or while a game starts or runs.
+/// The focus ring as on Windows and Linux: a white ring at full width and never under 92 %, a
+/// glint that goes round once every 4.8 seconds, a halo whose opacity breathes twice per turn
+/// under a fixed blur and never goes out, a settle from twice the ring's width outside, and only a
+/// focused home tile moving, never under a layer or while a game starts or runs.
 @MainActor
 final class FocusGlintTests: XCTestCase {
     /// How far apart two moments of a turn are, the short way round.
@@ -33,14 +33,15 @@ final class FocusGlintTests: XCTestCase {
         XCTAssertEqual(FocusGlint.breath(0.25), 1, accuracy: 0.0001)
         XCTAssertEqual(FocusGlint.breath(0.5), 0, accuracy: 0.0001)
         XCTAssertEqual(FocusGlint.breath(0.75), 1, accuracy: 0.0001)
-        XCTAssertEqual(FocusGlint.haloOpacity(0), 0.16, accuracy: 0.0001)
-        XCTAssertEqual(FocusGlint.haloOpacity(1), 0.32, accuracy: 0.0001)
-        XCTAssertEqual(FocusGlint.haloBlur(0), 9)
-        XCTAssertEqual(FocusGlint.haloBlur(1), 14)
+        XCTAssertEqual(FocusGlint.breath(nil), 0.5, accuracy: 0.0001, "a ring standing still sits halfway")
+        XCTAssertEqual(FocusGlint.haloOpacity(0), 0.24, accuracy: 0.0001)
+        XCTAssertEqual(FocusGlint.haloOpacity(1), 0.38, accuracy: 0.0001)
+        XCTAssertEqual(FocusGlint.haloBlur, 9, "only the opacity breathes, the blur stays fixed")
+        XCTAssertEqual(FocusGlint.haloWidth, 2.5)
     }
 
     func testTheRingStaysAsEasyToSeeAndTheGlintBrightensIt() {
-        XCTAssertGreaterThanOrEqual(FocusGlint.ringOpacity, 0.9)
+        XCTAssertEqual(FocusGlint.ringOpacity, 0.92)
         XCTAssertEqual(FocusGlint.ringStops.map { $0.opacity }.min(), FocusGlint.ringOpacity)
         let peak = FocusGlint.ringStops.max { $0.opacity < $1.opacity }
         XCTAssertEqual(peak?.opacity, 1)
@@ -50,8 +51,9 @@ final class FocusGlintTests: XCTestCase {
         XCTAssertEqual(FocusGlint.glowStops.last?.opacity, 0)
     }
 
-    func testTheRingClosesInFromItsWidthOutsideButNotWithReducedMotion() {
-        XCTAssertEqual(FocusGlint.settle(width: 3, focused: false, reduceMotion: false), 3)
+    func testTheRingClosesInFromTwiceItsWidthOutsideButNotWithReducedMotion() {
+        XCTAssertEqual(FocusGlint.settle(width: 3, focused: false, reduceMotion: false), 6)
+        XCTAssertEqual(FocusGlint.settle(width: 5, focused: false, reduceMotion: false), 10, "a fixed distance, not a scale")
         XCTAssertEqual(FocusGlint.settle(width: 3, focused: true, reduceMotion: false), 0)
         XCTAssertEqual(FocusGlint.settle(width: 3, focused: false, reduceMotion: true), 0)
     }
@@ -64,13 +66,17 @@ final class FocusGlintTests: XCTestCase {
         XCTAssertFalse(FocusGlint.moves(focused: true, covered: false, gameBusy: false, active: false), "behind another window it rests")
     }
 
-    func testTheHomeTileRingStopsUnderALayer() throws {
+    func testTheHomeTileRingStopsUnderALayerWhileAGameStartsAndBehindAnotherWindow() throws {
         let model = try LauncherFixture.model()
         XCTAssertTrue(model.homeTileGlints(true))
         XCTAssertFalse(model.homeTileGlints(false))
         model.open(.settings)
         XCTAssertFalse(model.homeTileGlints(true))
         model.overlay = nil
+        XCTAssertTrue(model.homeTileGlints(true))
+        model.fontWait = model.games.first
+        XCTAssertFalse(model.homeTileGlints(true), "a game waiting to start has the GPU")
+        model.fontWait = nil
         model.active = false
         XCTAssertFalse(model.homeTileGlints(true))
     }

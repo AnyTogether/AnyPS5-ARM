@@ -78,7 +78,7 @@ struct FocusRing: ViewModifier {
                         if focused {
                             let moving = animated && !look.reduceMotion && stillBackground == nil
                             TimelineView(.animation(paused: !moving)) { context in
-                                GlintRing(radius: radius + width, width: width, phase: moving ? FocusGlint.phase(at: context.date) : 0)
+                                GlintRing(radius: radius + width, width: width, phase: moving ? FocusGlint.phase(at: context.date) : nil)
                             }
                             .padding(-width * 1.6)
                             .transition(AnyTransition.opacity.combined(with: AnyTransition.modifier(
@@ -98,8 +98,9 @@ struct FocusRing: ViewModifier {
 enum FocusGlint {
     /// One full turn of the glint around the edge; the halo breathes twice per turn.
     static let period: TimeInterval = 4.8
-    /// The ring at its dimmest: as easy to see as the still ring was, the glint brightens it.
-    static let ringOpacity = 0.9
+    /// The ring at its dimmest, in white: it is the only way to see where you are, over any
+    /// picture. The glint brightens it to full white.
+    static let ringOpacity = 0.92
 
     /// Where the glint is at `date`, 0 to 1 of a turn.
     static func phase(at date: Date) -> Double {
@@ -107,14 +108,22 @@ enum FocusGlint {
         return turns - turns.rounded(.down)
     }
 
-    /// The halo's breath at `phase`: 0 at rest, 1 at its widest, twice per turn.
-    static func breath(_ phase: Double) -> Double { 0.5 - 0.5 * cos(phase * 2 * .pi * 2) }
-    static func haloOpacity(_ breath: Double) -> Double { 0.16 + 0.16 * breath }
-    static func haloBlur(_ breath: Double) -> CGFloat { 9 + 5 * breath }
+    /// The halo's breath at `phase`: 0 at its faintest, 1 at its brightest, twice per turn. A
+    /// ring standing still (no phase) sits halfway.
+    static func breath(_ phase: Double?) -> Double {
+        guard let phase else { return 0.5 }
+        return 0.5 - 0.5 * cos(phase * 2 * .pi * 2)
+    }
+    /// Only the halo's opacity breathes. Its blur stays fixed, which keeps it cheap for the GPU.
+    static func haloOpacity(_ breath: Double) -> Double { 0.24 + 0.14 * breath }
+    static let haloBlur: CGFloat = 9
+    /// The halo's stroke, in ring widths.
+    static let haloWidth: CGFloat = 2.5
 
-    /// Where the ring starts before it closes in: `width` further out, none with reduced motion.
+    /// Where the ring starts before it closes in: twice its width further out on every side, the
+    /// same for every size, none with reduced motion.
     static func settle(width: CGFloat, focused: Bool, reduceMotion: Bool) -> CGFloat {
-        focused || reduceMotion ? 0 : width
+        focused || reduceMotion ? 0 : width * 2
     }
 
     /// A home tile's ring moves only when it is focused on the home screen with nothing over it,
@@ -149,23 +158,27 @@ private struct RingSettle: ViewModifier {
     func body(content: Content) -> some View { content.padding(-outset) }
 }
 
-/// The non-Glass ring at one moment of its turn: the halo, the ring with its glint, the glint's glow.
+/// The non-Glass ring at one moment of its turn: the halo, the ring with its glint, the glint's
+/// glow. Standing still (no phase) it is the plain ring in its halo, with no glint.
 private struct GlintRing: View {
     let radius: CGFloat
     let width: CGFloat
-    let phase: Double
+    let phase: Double?
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
-        let breath = FocusGlint.breath(phase)
         ZStack {
             shape.inset(by: width / 2)
-                .stroke(Color.white.opacity(FocusGlint.haloOpacity(breath)), lineWidth: width * 3)
-                .blur(radius: FocusGlint.haloBlur(breath))
-            shape.strokeBorder(FocusGlint.gradient(FocusGlint.ringStops, phase: phase), lineWidth: width)
-            shape.inset(by: width / 2)
-                .stroke(FocusGlint.gradient(FocusGlint.glowStops, phase: phase), lineWidth: width * 2)
-                .blur(radius: 6)
+                .stroke(Color.white.opacity(FocusGlint.haloOpacity(FocusGlint.breath(phase))), lineWidth: width * FocusGlint.haloWidth)
+                .blur(radius: FocusGlint.haloBlur)
+            if let phase {
+                shape.strokeBorder(FocusGlint.gradient(FocusGlint.ringStops, phase: phase), lineWidth: width)
+                shape.inset(by: width / 2)
+                    .stroke(FocusGlint.gradient(FocusGlint.glowStops, phase: phase), lineWidth: width * 2)
+                    .blur(radius: 6)
+            } else {
+                shape.strokeBorder(Color.white.opacity(FocusGlint.ringOpacity), lineWidth: width)
+            }
         }
     }
 }
