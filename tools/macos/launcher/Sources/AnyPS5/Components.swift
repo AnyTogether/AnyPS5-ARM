@@ -81,7 +81,7 @@ struct FocusRing: ViewModifier {
                                 GlintRing(radius: radius + width, width: width, phase: moving ? FocusGlint.phase(at: context.date) : 0)
                             }
                             .padding(-width * 1.6)
-                            .transition(.opacity.combined(with: .modifier(
+                            .transition(AnyTransition.opacity.combined(with: AnyTransition.modifier(
                                 active: RingSettle(outset: FocusGlint.settle(width: width, focused: false, reduceMotion: look.reduceMotion)),
                                 identity: RingSettle(outset: 0))))
                         }

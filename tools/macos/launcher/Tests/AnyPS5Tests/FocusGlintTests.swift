@@ -41,7 +41,7 @@ final class FocusGlintTests: XCTestCase {
 
     func testTheRingStaysAsEasyToSeeAndTheGlintBrightensIt() {
         XCTAssertGreaterThanOrEqual(FocusGlint.ringOpacity, 0.9)
-        XCTAssertEqual(FocusGlint.ringStops.map(\.opacity).min(), FocusGlint.ringOpacity)
+        XCTAssertEqual(FocusGlint.ringStops.map { $0.opacity }.min(), FocusGlint.ringOpacity)
         let peak = FocusGlint.ringStops.max { $0.opacity < $1.opacity }
         XCTAssertEqual(peak?.opacity, 1)
         XCTAssertEqual(peak?.location, 0.8)
