@@ -34,6 +34,11 @@ public final class MemoryVault: SecretVault, @unchecked Sendable {
 /// for the Mac's password after every update. Each item's decrypt rule therefore lets any app of
 /// this user read it, as the file only this user could read did before, while the secret itself
 /// is sealed in the login keychain and locked with it.
+///
+/// macOS still checks each item's partition list, which names an ad hoc build by its cdhash: the
+/// first read of an item by a new build waits until the person answers macOS's password prompt.
+/// So an item is read from the Keychain once a run and kept in memory after that, and the
+/// launcher makes that first read off the main thread (AppModel.readSession).
 public final class KeychainVault: SecretVault, @unchecked Sendable {
     public let service: String
     /// A keychain file of its own (tests); nil is the user's default keychain.
@@ -41,6 +46,10 @@ public final class KeychainVault: SecretVault, @unchecked Sendable {
     /// Items made for this Mac only: readable after the first unlock, never synchronised to iCloud
     /// Keychain nor moved to another Mac (end-to-end encryption's device keys).
     public let thisDeviceOnly: Bool
+    /// What this run read, by account (nil inside: no such item). A write forgets its account, so
+    /// the read after it comes from the Keychain and shows what the Keychain really kept.
+    private var known: [String: Data?] = [:]
+    private let lock = NSLock()
 
     public init(service: String = "AnyPS5 AnyTogether", keychain: SecKeychain? = nil, thisDeviceOnly: Bool = false) {
         self.service = service
@@ -55,15 +64,24 @@ public final class KeychainVault: SecretVault, @unchecked Sendable {
     }
 
     public func read(_ account: String) -> Data? {
+        if let kept = lock.withLock({ known[account] }) { return kept }
         var query = query(account)
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
+        let data: Data?
+        switch SecItemCopyMatching(query as CFDictionary, &result) {
+        case errSecSuccess: data = result as? Data
+        case errSecItemNotFound: data = nil
+        // Refused or cancelled at the prompt: asked again next time.
+        default: return nil
+        }
+        lock.withLock { _ = known.updateValue(data, forKey: account) }
+        return data
     }
 
     public func write(_ data: Data?, for account: String) -> Bool {
+        defer { lock.withLock { _ = known.removeValue(forKey: account) } }
         guard let data else {
             let status = SecItemDelete(query(account) as CFDictionary)
             return status == errSecSuccess || status == errSecItemNotFound

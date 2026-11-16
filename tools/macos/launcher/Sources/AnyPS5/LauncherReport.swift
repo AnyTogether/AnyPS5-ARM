@@ -113,7 +113,7 @@ extension AppModel {
     func launcherProblemFound(_ problem: LauncherProblem, forget: @escaping () -> Void) {
         launcherReport = LauncherReportState(problem: problem, forget: forget)
         let names = [SCDynamicStoreCopyComputerName(nil, nil) as String?, togetherUser?.handle, togetherUser?.displayName].compactMap { $0 }
-        let secrets = allSecrets
+        let privacy = reportPrivacy(names: names)
         let display = NSScreen.main?.maximumFramesPerSecond
         let health = LauncherWatch.shared.health
         Task.detached(priority: .utility) {
@@ -125,7 +125,7 @@ extension AppModel {
                 if wait > 0 { try? await Task.sleep(for: .seconds(min(wait, LauncherHealth.reportGrace))) }
                 told = health.lookAgain(told)
             }
-            let issue = IssueDraft.launcherProblem(told, system: .current(displayHz: display), privacy: .current(names: names, secrets: secrets))
+            let issue = IssueDraft.launcherProblem(told, system: .current(displayHz: display), privacy: privacy())
             await MainActor.run {
                 self.launcherReport?.issue = issue
                 self.offerLauncherReport()

@@ -21,7 +21,7 @@ enum LauncherFixture {
         return root
     }
 
-    static func model(games count: Int = 3, configure: (inout Preferences) -> Void = { _ in }) throws -> AppModel {
+    static func model(games count: Int = 3, vault: SecretVault? = nil, configure: (inout Preferences) -> Void = { _ in }) throws -> AppModel {
         _ = NSApplication.shared
         T.texts = T.load([T.sourceFolder])
         let root = try folder(games: count)
@@ -30,7 +30,7 @@ enum LauncherFixture {
         preferences.sounds = false
         preferences.libraryFolders = [root.path]
         configure(&preferences)
-        let model = AppModel(preferences: preferences)
+        let model = AppModel(preferences: preferences, vault: vault)
         model.preview(games: GameLibrary.scan(root), root: root)
         return model
     }
