@@ -2204,5 +2204,20 @@
   "retroEmulatorStartFailed": "ບໍ່ສາມາດເລີ່ມ %@ ໄດ້",
   "retroEmulatorExited": "%@ ປິດດ້ວຍລະຫັດອອກ %d",
   "retroLibrary": "ເກມອີມູເລເຕີ",
-  "retroLibraryDetail": "ສະແດງເກມ PS1, PS2 ແລະ PS3 ໃນໂຟນເດີເກມຂອງທ່ານ ແລະ ຫຼິ້ນມັນໃນອີມູເລເຕີທີ່ທ່ານຕິດຕັ້ງໄວ້."
+  "retroLibraryDetail": "ສະແດງເກມ PS1, PS2 ແລະ PS3 ໃນໂຟນເດີເກມຂອງທ່ານ ແລະ ຫຼິ້ນມັນໃນອີມູເລເຕີທີ່ທ່ານຕິດຕັ້ງໄວ້.",
+  "cancelUnlock": "ຍົກເລີກການປົດລັອກ",
+  "unlockPause": "ຢຸດຊົ່ວຄາວ",
+  "unlockResume": "ສືບຕໍ່",
+  "unlockCancelling": "ກຳລັງຍົກເລີກ…",
+  "unlockPausedState": "ຢຸດຊົ່ວຄາວແລ້ວ",
+  "keepGoing": "ສືບຕໍ່ໄປ",
+  "cancelUnlockAskTitle": "ຍົກເລີກການປົດລັອກ %@ ບໍ?",
+  "cancelUnlockAskDetail": "ວຽກທີ່ເຮັດມາແລ້ວຈະເສຍໄປ. ໃຊ້ ຢຸດຊົ່ວຄາວ ແທນ ເພື່ອຢຸດຕອນນີ້ ແລະ ສືບຕໍ່ພາຍຫຼັງ.",
+  "quitUnlocksTitle": "ອອກໃນຂະນະທີ່ກຳລັງປົດລັອກເກມບໍ?",
+  "quitRemovingTitle": "ອອກໃນຂະນະທີ່ກຳລັງລຶບເກມບໍ?",
+  "quitGoBack": "ກັບຄືນ",
+  "quitCancelAndQuit": "ຍົກເລີກ ແລະ ອອກ",
+  "quitAnyway": "ອອກເລີຍ",
+  "quitUnlocksDetail": "ຍົກເລີກ ແລະ ອອກ ຈະຖິ້ມວຽກທີ່ເຮັດມາ. ເພື່ອຢຸດ ແລະ ສືບຕໍ່ພາຍຫຼັງ, ໃຫ້ກັບຄືນ, ໃຊ້ ຢຸດຊົ່ວຄາວ ແລະ ເປີດໂປຣແກຣມເປີດເກມໄວ້.",
+  "quitRemovingNote": "ການລຶບເກມບໍ່ສາມາດຢຸດຊົ່ວຄາວ ຫຼື ຍົກເລີກໄດ້."
 }

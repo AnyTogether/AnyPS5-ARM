@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "Hindi masimulan ang %@",
   "retroEmulatorExited": "Nagsara ang %@ na may exit code na %d",
   "retroLibrary": "Mga laro sa emulator",
-  "retroLibraryDetail": "Ipinapakita ang mga larong PS1, PS2 at PS3 sa iyong mga folder ng laro at nilalaro ang mga ito sa emulator na na-install mo."
+  "retroLibraryDetail": "Ipinapakita ang mga larong PS1, PS2 at PS3 sa iyong mga folder ng laro at nilalaro ang mga ito sa emulator na na-install mo.",
+  "unlockPause": "I-pause",
+  "unlockResume": "Ituloy",
+  "unlockCancelling": "Kinakansela…",
+  "unlockPausedState": "Naka-pause",
+  "cancelUnlock": "Kanselahin ang Unlock",
+  "keepGoing": "Ipagpatuloy",
+  "cancelUnlockAskTitle": "Kanselahin ang pag-unlock ng %@?",
+  "cancelUnlockAskDetail": "Mawawala ang nagawa na. Gamitin na lang ang I-pause para huminto ngayon at ituloy mamaya.",
+  "quitUnlocksTitle": "Isara habang may mga larong ina-unlock?",
+  "quitRemovingTitle": "Isara habang may mga larong inaalis?",
+  "quitGoBack": "Bumalik",
+  "quitCancelAndQuit": "Kanselahin at isara",
+  "quitAnyway": "Isara pa rin",
+  "quitUnlocksDetail": "Itinatapon ng Kanselahin at isara ang nagawa na. Para huminto at ituloy mamaya, bumalik, gamitin ang I-pause, at panatilihing bukas ang launcher.",
+  "quitRemovingNote": "Hindi maaaring i-pause o kanselahin ang pag-alis ng mga laro."
 }

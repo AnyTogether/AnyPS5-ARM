@@ -121,6 +121,7 @@ enum T {
             PT.Key.allCases.map(\.rawValue),
             TPow.Key.allCases.map(\.rawValue),
             TPrep.Key.allCases.map(\.rawValue),
+            TUnlock.Key.allCases.map(\.rawValue),
             TRetro.Key.allCases.map(\.rawValue),
             TPro.Key.allCases.map(\.rawValue),
             TC.Key.allCases.map(\.rawValue),

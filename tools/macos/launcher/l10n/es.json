@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "No se pudo iniciar %@",
   "retroEmulatorExited": "%@ se cerró con el código de salida %d",
   "retroLibrary": "Juegos de emulador",
-  "retroLibraryDetail": "Muestra los juegos de PS1, PS2 y PS3 de tus carpetas de juegos y los abre en un emulador que tengas instalado."
+  "retroLibraryDetail": "Muestra los juegos de PS1, PS2 y PS3 de tus carpetas de juegos y los abre en un emulador que tengas instalado.",
+  "unlockPause": "Pausar",
+  "unlockResume": "Reanudar",
+  "unlockCancelling": "Cancelando…",
+  "unlockPausedState": "En pausa",
+  "cancelUnlock": "Cancelar desbloqueo",
+  "keepGoing": "Seguir",
+  "cancelUnlockAskTitle": "¿Cancelar el desbloqueo de %@?",
+  "cancelUnlockAskDetail": "Se pierde el trabajo hecho hasta ahora. Pausa en su lugar para parar ahora y seguir más tarde.",
+  "quitUnlocksTitle": "¿Salir mientras se desbloquean juegos?",
+  "quitRemovingTitle": "¿Salir mientras se eliminan juegos?",
+  "quitGoBack": "Volver",
+  "quitCancelAndQuit": "Cancelar y salir",
+  "quitAnyway": "Salir igualmente",
+  "quitUnlocksDetail": "Cancelar y salir tira el trabajo. Para parar y seguir más tarde, vuelve y usa Pausar, y deja el launcher abierto.",
+  "quitRemovingNote": "Eliminar juegos no se puede pausar ni cancelar."
 }

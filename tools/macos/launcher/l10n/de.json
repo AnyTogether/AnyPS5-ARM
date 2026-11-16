@@ -2217,5 +2217,20 @@
   "retroEmulatorStartFailed": "%@ konnte nicht gestartet werden",
   "retroEmulatorExited": "%@ wurde mit Exitcode %d beendet",
   "retroLibrary": "Emulator-Spiele",
-  "retroLibraryDetail": "Zeigt die PS1-, PS2- und PS3-Spiele in deinen Spieleordnern an und startet sie in einem installierten Emulator."
+  "retroLibraryDetail": "Zeigt die PS1-, PS2- und PS3-Spiele in deinen Spieleordnern an und startet sie in einem installierten Emulator.",
+  "unlockPause": "Pausieren",
+  "unlockResume": "Fortsetzen",
+  "unlockCancelling": "Wird abgebrochen…",
+  "unlockPausedState": "Pausiert",
+  "cancelUnlock": "Entsperren abbrechen",
+  "keepGoing": "Weitermachen",
+  "cancelUnlockAskTitle": "Freischalten von %@ abbrechen?",
+  "cancelUnlockAskDetail": "Die bisherige Arbeit geht verloren. Pausiere stattdessen, um jetzt zu stoppen und später weiterzumachen.",
+  "quitUnlocksTitle": "Beenden, während Spiele freigeschaltet werden?",
+  "quitRemovingTitle": "Beenden, während Spiele entfernt werden?",
+  "quitGoBack": "Zurück",
+  "quitCancelAndQuit": "Abbrechen und beenden",
+  "quitAnyway": "Trotzdem beenden",
+  "quitUnlocksDetail": "Abbrechen und beenden verwirft die Arbeit. Um später weiterzumachen, geh zurück und nutze Pausieren, und lass den Launcher geöffnet.",
+  "quitRemovingNote": "Das Entfernen von Spielen lässt sich weder pausieren noch abbrechen."
 }

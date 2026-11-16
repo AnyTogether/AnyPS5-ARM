@@ -2202,5 +2202,20 @@
   "retroEmulatorStartFailed": "%@ን ማስጀመር አልተቻለም",
   "retroEmulatorExited": "%@ በመውጫ ኮድ %d ተዘግቷል",
   "retroLibrary": "የኢሙሌተር ጨዋታዎች",
-  "retroLibraryDetail": "በጨዋታ አቃፊዎችዎ ውስጥ ያሉትን የPS1፣ PS2 እና PS3 ጨዋታዎች ያሳያል እና በጫኑት ኢሙሌተር ያጫውታቸዋል።"
+  "retroLibraryDetail": "በጨዋታ አቃፊዎችዎ ውስጥ ያሉትን የPS1፣ PS2 እና PS3 ጨዋታዎች ያሳያል እና በጫኑት ኢሙሌተር ያጫውታቸዋል።",
+  "cancelUnlock": "ክፈትን (unlock) ሰርዝ",
+  "unlockPause": "ለአፍታ አቁም",
+  "unlockResume": "ቀጥል",
+  "unlockCancelling": "በመሰረዝ ላይ…",
+  "unlockPausedState": "ለአፍታ ቆሟል",
+  "keepGoing": "መክፈቱን ቀጥል",
+  "cancelUnlockAskTitle": "የ%@ መክፈት ይሰረዝ?",
+  "cancelUnlockAskDetail": "እስካሁን የተሰራው ሥራ ይጠፋል። አሁን አቁመው በኋላ ለመቀጠል በምትኩ ለአፍታ አቁምን ይጠቀሙ።",
+  "quitUnlocksTitle": "ጨዋታዎች እየተከፈቱ ሳሉ ይውጡ?",
+  "quitRemovingTitle": "ጨዋታዎች እየተወገዱ ሳሉ ይውጡ?",
+  "quitGoBack": "ተመለስ",
+  "quitCancelAndQuit": "ሰርዝና ውጣ",
+  "quitAnyway": "ቢሆንም ውጣ",
+  "quitUnlocksDetail": "ሰርዝና ውጣ የተሰራውን ሥራ ያጠፋል። አቁመው በኋላ ለመቀጠል ይመለሱ፣ ለአፍታ አቁምን ይጠቀሙ እና ማስጀመሪያውን ክፍት ይተዉት።",
+  "quitRemovingNote": "ጨዋታዎችን ማስወገድ ለአፍታ ማቆምም ሆነ መሰረዝ አይቻልም።"
 }
