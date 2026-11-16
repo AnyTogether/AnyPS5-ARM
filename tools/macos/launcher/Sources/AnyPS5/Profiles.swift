@@ -70,9 +70,45 @@ extension AppModel {
 
     func profilesChanged() { profileBook = profiles.book }
 
-    /// Every profile's tokens, for a crash report to take out.
-    var allSecrets: [String] {
-        ProfileSessions.secrets(in: vault, accounts: profiles.book.profiles.map { ProfileSessions.account(for: $0.id) }) + together.secrets
+    /// What a report takes out: `names`, the account's names and every profile's tokens. Called
+    /// off the main thread, as each Keychain read may wait on macOS's prompt (readSession).
+    func reportPrivacy(names: [String]) -> @Sendable () -> ReportPrivacy {
+        let vault = vault, accounts = profiles.book.profiles.map { ProfileSessions.account(for: $0.id) }, client = together
+        return {
+            let user = client.user
+            return .current(names: names + [user?.handle, user?.displayName].compactMap { $0 }, secrets: ProfileSessions.secrets(in: vault, accounts: accounts) + client.secrets)
+        }
+    }
+
+    /// The session of the profile playing, read from the Keychain off the main thread with its
+    /// end-to-end encryption keys: the first read of an item after an update waits on macOS's
+    /// password prompt (KeychainVault), and the launcher keeps answering meanwhile; later reads
+    /// come from memory. `done` gets the user on the main thread, unless another profile or
+    /// server took over before the answer.
+    func readSession(then done: @escaping @MainActor (TogetherUser?) -> Void) {
+        let client = together, profile = sessionProfileID, keys: SecretVault? = persists ? Self.e2eeKeychain : nil
+        Task { [weak self] in
+            let user = await Task.detached(priority: .userInitiated) { () -> TogetherUser? in
+                let user = client.user
+                if let keys, let user { _ = keys.read(TogetherE2EEKeys.account(profile: profile, userId: user.id)) }
+                return user
+            }.value
+            guard let self, self.together === client else { return }
+            done(user)
+        }
+    }
+
+    /// The online profile playing goes online once its session is read (readSession), or signs
+    /// in again when it has none (signed out elsewhere, or for too long).
+    func connectProfile(trophiesAgain: Bool) {
+        let id = currentProfile?.id
+        readSession { [weak self] user in
+            guard let self, let profile = self.currentProfile, profile.id == id, profile.mode == .online, self.togetherUser == nil else { return }
+            guard let user else { return self.beginSignIn(.signingInAgain) }
+            self.togetherUser = user
+            self.startTogetherSocket()
+            if trophiesAgain { for game in self.games { self.loadTrophies(game, again: true) } }
+        }
     }
 
     // MARK: Saves
@@ -122,10 +158,7 @@ extension AppModel {
         withAnimation(Motion.overlay) { overlay = nil }
         Sounds.shared.play(.select)
         show(TPro.format(.welcomeBack, next.name), symbol: "person.crop.circle.badge.checkmark")
-        if next.mode == .online && togetherUser == nil {
-            // Its session ended (signed out elsewhere, or for too long): it signs in again.
-            beginSignIn(.signingInAgain)
-        }
+        if next.mode == .online { connectProfile(trophiesAgain: true) }
     }
 
     /// The picker's choice was the profile already in use: in it goes.
@@ -134,8 +167,7 @@ extension AppModel {
         Sounds.shared.play(.select)
         profileFlow.atLaunch = false
         if let profile = currentProfile, profile.mode == .online {
-            if togetherUser == nil { togetherUser = together.user }
-            if togetherUser != nil { startTogetherSocket() } else { beginSignIn(.signingInAgain) }
+            if togetherUser != nil { startTogetherSocket() } else { connectProfile(trophiesAgain: false) }
         }
     }
 
@@ -145,7 +177,8 @@ extension AppModel {
         profiles.setSettings(current.id, ProfileSettings.pick(Self.personalKeys, from: data))
     }
 
-    /// Settings, client, picture and saves of `profile`, the one now in the book as current.
+    /// Settings, client, picture and saves of `profile`, the one now in the book as current; its
+    /// account goes online after (connectProfile).
     private func useProfile(_ profile: LauncherProfile) {
         applyProfileSettings(profile)
         profileFlow.atLaunch = false
@@ -156,8 +189,7 @@ extension AppModel {
         cloud.overview = nil
         if persists { ProfilePicture.file = profiles.pictureFile(for: profile.id) }
         loadProfilePicture()
-        togetherUser = profile.mode == .online ? together.user : nil
-        if togetherUser != nil { startTogetherSocket() }
+        togetherUser = nil
         // The profile's saves and trophies in every game's folder, and its trophies shown.
         if persists, let owner = profiles.book.legacyOwner {
             for game in games {
@@ -167,7 +199,6 @@ extension AppModel {
         }
         forgetTrophies()
         if let game = selectedGame { loadTrophies(game) }
-        if togetherUser != nil { for game in games { loadTrophies(game, again: true) } }
         objectWillChange.send()
     }
 
@@ -185,12 +216,15 @@ extension AppModel {
             profilesChanged()
             Sounds.shared.play(.select)
             show(TPro.text(.nowOffline), symbol: "wifi.slash")
-        } else if let user = together.user {
-            profiles.setMode(profile.id, .online)
-            profilesChanged()
-            signedIn(user)
         } else {
-            beginSignIn(.goingOnline)
+            // The session it kept, read off the main thread (readSession).
+            readSession { [weak self] user in
+                guard let self, let current = self.currentProfile, current.id == profile.id, current.mode == .offline, self.togetherUser == nil else { return }
+                guard let user else { return self.beginSignIn(.goingOnline) }
+                self.profiles.setMode(profile.id, .online)
+                self.profilesChanged()
+                self.signedIn(user)
+            }
         }
     }
 
@@ -296,8 +330,11 @@ extension AppModel {
             together = wireTogether(AppModel.makeTogetherClient(base: together.base, store: sessionStore(for: sessionProfileID)))
             togetherSync = TogetherSync(client: together, deviceName: Host.current().localizedName ?? "Mac", model: AppModel.machineModel)
             if let back, back.mode == .online {
-                togetherUser = together.user
-                if togetherUser != nil { startTogetherSocket() }
+                readSession { [weak self] user in
+                    guard let self, self.currentProfile?.id == back.id, self.togetherUser == nil, let user else { return }
+                    self.togetherUser = user
+                    self.startTogetherSocket()
+                }
             }
         }
         withAnimation(Motion.overlay) { overlay = profileFlow.origin == .adding ? .addProfile : nil }

@@ -103,4 +103,39 @@ final class ProfileSessionTests: XCTestCase {
         XCTAssertNil(vault.read("p1"))
         XCTAssertEqual(vault.read("p2"), Data("two".utf8), "the other profile's item stays")
     }
+
+    /// macOS checks an item's partition list on every read from the Keychain, so a new build
+    /// waits on its password prompt there: each item is read from the Keychain once a run, and
+    /// what this run writes is read back from the Keychain.
+    func testTheKeychainIsReadOnceARunForEachItem() throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let path = folder.appendingPathComponent("once.keychain").path
+        var keychain: SecKeychain?
+        SecKeychainSetUserInteractionAllowed(false)
+        defer { SecKeychainSetUserInteractionAllowed(true) }
+        guard SecKeychainCreate(path, 4, "test", false, nil, &keychain) == errSecSuccess, let keychain else { throw XCTSkip("no keychain can be made here") }
+        defer { SecKeychainDelete(keychain) }
+        let service = "AnyPS5 test \(UUID().uuidString)"
+        let vault = KeychainVault(service: service, keychain: keychain)
+        // Another copy of the launcher changes the items behind this one's back.
+        let other = KeychainVault(service: service, keychain: keychain)
+
+        XCTAssertTrue(vault.write(Data("one".utf8), for: "p1"))
+        XCTAssertEqual(vault.read("p1"), Data("one".utf8), "read back from the Keychain after the write")
+        XCTAssertTrue(other.write(nil, for: "p1"))
+        XCTAssertNil(other.read("p1"))
+        XCTAssertEqual(vault.read("p1"), Data("one".utf8), "kept from the first read, the Keychain not asked again")
+
+        XCTAssertNil(vault.read("p2"))
+        XCTAssertTrue(other.write(Data("two".utf8), for: "p2"))
+        XCTAssertNil(vault.read("p2"), "an item found missing stays missing for this run")
+
+        XCTAssertTrue(vault.write(Data("three".utf8), for: "p1"))
+        XCTAssertEqual(vault.read("p1"), Data("three".utf8), "what this run writes it reads")
+        XCTAssertNil(other.read("p1"), "the other copy keeps what it read")
+        XCTAssertTrue(vault.write(nil, for: "p1"))
+        XCTAssertNil(vault.read("p1"))
+        XCTAssertTrue(vault.write(Data("four".utf8), for: "p2"))
+        XCTAssertEqual(vault.read("p2"), Data("four".utf8))
+    }
 }
