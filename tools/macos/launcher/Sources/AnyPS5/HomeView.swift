@@ -148,26 +148,57 @@ struct LightStreak: View {
 struct HomeView: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
+    @Environment(\.stillBackground) private var stillBackground
+    /// When the start animation (StartupIntro) began; nil when it is not playing.
+    @State private var introStart: Date?
 
     var body: some View {
+        TimelineView(.animation(paused: introStart == nil)) { context in
+            home(intro: StartupIntro.progress(since: introStart, now: context.date))
+        }
+        // On the next turn of the main queue: the profile picker at launch opens on it first.
+        .onAppear { DispatchQueue.main.async { startIntro() } }
+        .onChange(of: model.overlay == nil) { _, _ in startIntro() }
+        .task(id: introStart) {
+            guard introStart != nil else { return }
+            try? await Task.sleep(for: .seconds(StartupIntro.duration))
+            introStart = nil
+        }
+    }
+
+    private func startIntro() {
+        let reduceMotion = model.preferences.reducedMotion || model.powerDimmed || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        switch StartupIntro.decide(enabled: StartupIntro.enabled, played: StartupIntro.played, offscreen: stillBackground != nil, covered: model.overlay != nil,
+                                   gameBusy: model.starting != nil || model.playingGame != nil || model.fontWait != nil, reduceMotion: reduceMotion) {
+        case .none, .wait: return
+        case .skip: StartupIntro.played = true
+        case .play:
+            StartupIntro.played = true
+            introStart = Date()
+        }
+    }
+
+    private func home(intro: Double) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             TopBar()
+                .introReveal(intro, span: StartupIntro.topBar, slide: -0.4)
                 .padding(.horizontal, 64 * scale)
                 .padding(.top, 34 * scale)
             if model.games.isEmpty {
                 EmptyLibrary()
             } else {
-                TileRow()
+                TileRow(intro: intro)
                     .padding(.top, 34 * scale)
                 // A console's folder: its games in a row under Home's (RetroHomeFolders.swift).
                 if model.homeFolderPlatform != nil {
-                    TileRow(folderContents: true)
+                    TileRow(folderContents: true, intro: intro)
                         .padding(.top, 24 * scale)
                         .transition(.opacity.combined(with: .offset(y: -10 * scale)))
                 }
                 Spacer(minLength: 0)
                 if let game = model.homePreviewGame {
                     HeroInfo(game: game)
+                        .introReveal(intro, span: StartupIntro.hero, slide: 0.06)
                         .id(game.id)
                         .transition(.asymmetric(insertion: .opacity.combined(with: .offset(y: 14 * scale)), removal: .opacity))
                         .padding(.horizontal, 72 * scale)
@@ -176,6 +207,7 @@ struct HomeView: View {
                     Spacer()
                     // A folder has no settings of its own: no △ for them on it.
                     HintBar(options: model.selectedHomeFolder == nil)
+                        .introReveal(intro, span: StartupIntro.hints)
                 }
                 .padding(.horizontal, 64 * scale)
                 .padding(.vertical, 28 * scale)
@@ -183,6 +215,8 @@ struct HomeView: View {
         }
         .animation(Motion.layout, value: model.homePreviewGame?.id)
         .animation(Motion.layout, value: model.homeFolderPlatform)
+        // The start animation's curtain, over the whole home screen.
+        .overlay { if intro < 1 { IntroCurtain(progress: intro, deep: Color(rgb: (model.activeDesign?.palette ?? model.lookStyle.palette).0)) } }
         // Over the tiles and the game's words, under the top bar's own picture.
         .overlayPreferenceValue(ProfileSwitcherAnchor.self) { anchor in
             ProfileSwitcherLayer(anchor: anchor)
@@ -369,6 +403,8 @@ private struct NoticeCapsule: ViewModifier {
 /// Down goes into it.
 struct TileRow: View {
     var folderContents = false
+    /// The start animation's progress (StartupIntro): each tile pops in on its turn.
+    var intro: Double = 1
     @EnvironmentObject private var model: AppModel
     @Environment(\.scale) private var scale
 
@@ -414,6 +450,7 @@ struct TileRow: View {
                                 .onTapGesture { model.selectHomeTile(index, folderContents: folderContents) }
                         }
                     }
+                    .introReveal(intro, span: StartupIntro.tile(index), slide: 0.12, scaleFrom: 0.82)
                     .offset(x: x, y: 0)
                     .opacity(preview ? 1 : TileRow.opacity(offset: offset))
                     .hoverTick("tile-\(tile.id)")

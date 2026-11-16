@@ -39,6 +39,8 @@ enum Entry {
                 if let play = launch.play { AppModel.received([DeepLink.play(play).url]) }
             }
         }
+        // The home screen's start animation plays in the launcher only, never in the previews or tests.
+        StartupIntro.enabled = true
         AnyPS5App.main()
     }
 }
