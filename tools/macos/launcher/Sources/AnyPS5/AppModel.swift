@@ -806,11 +806,13 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated { self?.active = false }
         }
         // Unlocks going on stop with the launcher; a relinker paused for a game would otherwise
-        // stay stopped.
+        // stay stopped. An engine build's git, CMake and Ninja end with it too, as on Windows and
+        // Linux.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.preparer?.cancel()
                 self?.installer?.cancel()
+                ChildProcesses.endAll()
                 // Quit as it should: no crash to offer next time.
                 LauncherWatch.shared.quitting()
             }
