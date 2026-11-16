@@ -624,6 +624,8 @@ final class AppModel: ObservableObject {
     @Published var cjkInstalled = false
     /// The game waiting for those fonts before it starts.
     @Published var fontWait: Game?
+    /// Something to do at the next key, button or click, once (the start animation finishing).
+    var onInput: (@MainActor () -> Void)?
     var cjkWaiters: [@MainActor (Bool) -> Void] = []
     /// The oldest macOS each unlocked game's libraries need, by bundle and engine (requiredSystem(of:bundle:)).
     private var bundleSystems: [String: SystemMinimum.Version?] = [:]

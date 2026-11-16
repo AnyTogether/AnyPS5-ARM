@@ -39,6 +39,8 @@ enum Entry {
                 if let play = launch.play { AppModel.received([DeepLink.play(play).url]) }
             }
         }
+        // The home screen's start animation plays in the launcher only, never in the previews or tests.
+        StartupIntro.enabled = true
         AnyPS5App.main()
     }
 }
@@ -190,6 +192,7 @@ struct RootView: View {
             Input.shared.shortcutHandler = { [weak model] action, hold in model?.shortcut(action, hold: hold) }
             Input.shared.activity = { [weak model] in (model?.changeCount ?? 0) &+ Sounds.shared.requests }
             Input.shared.rightClickHandler = { [weak model] in model?.homeRightClick() ?? false }
+            Input.shared.pointerDownHandler = { [weak model] in model?.onInput?() }
             Input.shared.menuHandler = { [weak model] in model?.homeRightClick() ?? false }
             Input.shared.escapeHandler = { [weak model] in model?.escape() ?? false }
             Input.shared.sideButtonHandler = { [weak model] button in
