@@ -8,6 +8,9 @@ public enum RetroProtocol {
     public static let version = 1
     /// The capability every method of version 1 needs.
     public static let ps1Capability = "ps1"
+    /// The capability that plays PS2 games on LRPS2: `start.console` and `status.console`
+    /// (protocol.md "Capabilities", anyps5-retro-host docs/ps2.md).
+    public static let ps2Capability = "ps2"
     /// The largest call and ping id.
     public static let maxID = 2_147_483_647
     public static let maxUInt32 = 4_294_967_295
@@ -151,6 +154,14 @@ public struct RetroOption: Equatable, Sendable {
     }
 }
 
+/// The consoles `start.console` names and `status.console` gives (capability `ps2`).
+public enum RetroConsole {
+    public static let ps1 = "ps1"
+    public static let ps2 = "ps2"
+
+    public static let all: Set<String> = [ps1, ps2]
+}
+
 /// The discs of a multi-disc game.
 public struct RetroDiscs: Equatable, Sendable {
     public let labels: [String]
@@ -187,6 +198,9 @@ public struct RetroStatus: Equatable, Sendable {
     /// and this game's saves are not written anywhere. False from a status without the field.
     public var cardUnreadable = false
     public var discs: RetroDiscs?
+    /// The console the game was started as (`RetroConsole`); nil from a host without the `ps2`
+    /// capability.
+    public var console: String?
 
     /// The most discs `status.discs.labels` may list.
     public static let maxDiscs = 128
@@ -213,6 +227,7 @@ public struct RetroStatus: Equatable, Sendable {
         map["options"] = .object(options.mapValues(\.json))
         map["cardUnreadable"] = .bool(cardUnreadable)
         if let discs { map["discs"] = discs.json }
+        if let console { map["console"] = .string(console) }
         return .object(map)
     }
 
@@ -225,8 +240,10 @@ public struct RetroStatus: Equatable, Sendable {
 
     /// Reads a `status` result, throwing `RetroProtocolError` for a field outside what protocol.md
     /// allows. Unknown fields are ignored. A host's `errorCode` of `hostExited` or `hostHung`, which
-    /// only the client may report, is read as `other` (protocol.md "status").
-    public static func parse(_ value: RetroJSON) throws -> RetroStatus {
+    /// only the client may report, is read as `other` (protocol.md "status"). A host that lists the
+    /// `ps2` capability (`ps2`) sends `console` in every status, `"ps1"` or `"ps2"`; any other host's
+    /// `console` is ignored.
+    public static func parse(_ value: RetroJSON, ps2: Bool = false) throws -> RetroStatus {
         let f = try RetroFields(value, "status")
         var options: [String: RetroOption] = [:]
         let optionFields = try f.object("options")
@@ -279,6 +296,11 @@ public struct RetroStatus: Equatable, Sendable {
         status.options = options
         status.cardUnreadable = try f.has("cardUnreadable") ? f.boolean("cardUnreadable") : false
         status.discs = discs
+        if ps2 {
+            let console = try f.string("console")
+            guard RetroConsole.all.contains(console) else { throw RetroProtocolError("status.console \(console) is unknown.") }
+            status.console = console
+        }
         return status
     }
 }

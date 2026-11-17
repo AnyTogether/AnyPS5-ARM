@@ -142,4 +142,44 @@ final class RetroStatusTests: XCTestCase {
         }
         XCTAssertGreaterThan(read, 2)
     }
+
+    /// A host that lists `ps2` names the console in every status, `ps1` or `ps2`; any other host's
+    /// `console` is ignored, and so are `core` and `timing`, which this client does not read yet.
+    func testTheConsoleIsReadOnlyFromAHostThatListsPs2() throws {
+        XCTAssertEqual(try RetroStatus.parse(status(["console": .string("ps2")]), ps2: true).console, RetroConsole.ps2)
+        XCTAssertEqual(try RetroStatus.parse(status(["console": .string("ps1")]), ps2: true).console, RetroConsole.ps1)
+        XCTAssertThrowsError(try RetroStatus.parse(status(), ps2: true))
+        XCTAssertThrowsError(try RetroStatus.parse(status(["console": .string("ps3")]), ps2: true))
+        XCTAssertThrowsError(try RetroStatus.parse(status(["console": .int(2)]), ps2: true))
+        XCTAssertNil(try RetroStatus.parse(status(["console": .string("ps3")])).console)
+        let extra = status(["core": .object(["name": .string("SwanStation"), "version": .string("1")]),
+                            "timing": .object(["fps": .number(59.8), "region": .string("ntsc")])])
+        XCTAssertNoThrow(try RetroStatus.parse(extra, ps2: false))
+    }
+
+    func testTheConsoleIsWrittenBackWhenItWasRead() throws {
+        let read = try RetroStatus.parse(status(["console": .string("ps2")]), ps2: true)
+        XCTAssertEqual(read.json.objectValue?["console"], .string("ps2"))
+        XCTAssertEqual(try RetroStatus.parse(read.json, ps2: true), read)
+        XCTAssertNil(try RetroStatus.parse(status()).json.objectValue?["console"])
+    }
+
+    /// The host's PS2 status fixture, from LRPS2 without a BIOS, reads with the console it names, as on
+    /// Windows and Linux.
+    func testThePs2StatusFixtureReads() throws {
+        guard let checkout = RetroHostFixtures.checkout else { throw XCTSkip("ANYPS5_RETRO_HOST_CHECKOUT is not set") }
+        let file = try RetroHostFixtures.read(checkout.appendingPathComponent("fixtures/v1/messages/call-status-ps2-no-bios.json"))
+        let result = file.objectValue?["reply"]?.objectValue?["result"] ?? .null
+        let read = try RetroStatus.parse(result, ps2: true)
+        XCTAssertEqual(read.ended, true)
+        XCTAssertEqual(read.errorCode, RetroErrorCode.bios)
+        XCTAssertEqual(read.console, RetroConsole.ps2)
+        XCTAssertFalse(read.options.isEmpty)
+        XCTAssertTrue(read.options.keys.allSatisfy { $0.hasPrefix("pcsx2_") }, "\(read.options.keys)")
+        for name in ["call-status.json", "call-status-pal.json", "call-status-no-bios.json"] {
+            let fixture = try RetroHostFixtures.read(checkout.appendingPathComponent("fixtures/v1/messages/\(name)"))
+            let status = fixture.objectValue?["reply"]?.objectValue?["result"] ?? .null
+            XCTAssertEqual(try RetroStatus.parse(status, ps2: true).console, RetroConsole.ps1, name)
+        }
+    }
 }

@@ -26,6 +26,10 @@ public enum RetroHostClientError: Error, Equatable {
     case notWelcomed
     /// The host did not list the `ps1` capability, which every method but `volume` needs.
     case noPs1Capability
+    /// `start` named a `console`, which needs the `ps2` capability the host did not list.
+    case noPs2Capability
+    /// A PS2 game has no playlist, so its `start` takes no `initialDisc` (protocol.md "start").
+    case ps2HasNoPlaylist
     /// This host has used every call id; start a new one for the next game.
     case idsUsedUp
     /// `stop` goes through `stopGame()`, which enforces its time limit.
@@ -226,6 +230,10 @@ public final class RetroHostClient: @unchecked Sendable {
     public var pid: pid_t { onQueue { processID } }
     public var hostVersion: String { onQueue { hostRelease } }
     public var capabilities: [String] { onQueue { hostCapabilities } }
+    /// Whether the host lists `ps2`, so it takes `start.console` and plays PS2 games on LRPS2, and
+    /// each `status` names the console.
+    public var canPlayPs2: Bool { onQueue { hostListsPs2 } }
+    private var hostListsPs2: Bool { hostCapabilities.contains(RetroProtocol.ps2Capability) }
     public var pixelFormat: RetroPixelFormat? { onQueue { agreedFormat } }
     /// The reason the client gave up on the host, for logs.
     public var failureReason: String? { onQueue { reason } }
@@ -289,7 +297,7 @@ public final class RetroHostClient: @unchecked Sendable {
         if RetroStatus.isFailureReport(result), let map = result.objectValue {
             return .failed(error: map["error"]?.stringValue ?? "", errorCode: map["errorCode"]?.stringValue ?? "")
         }
-        return try RetroStatus.parse(result)
+        return try RetroStatus.parse(result, ps2: canPlayPs2)
     }
 
     /// `stop`, then `status` until the game has ended, which it gives. The host is killed if the game
@@ -371,6 +379,12 @@ public final class RetroHostClient: @unchecked Sendable {
         guard greeted else { return done(.failure(RetroHostClientError.notWelcomed)) }
         if method != "volume", !hostCapabilities.contains(RetroProtocol.ps1Capability) {
             return done(.failure(RetroHostClientError.noPs1Capability))
+        }
+        if method == "start", let map = args.objectValue, let console = map["console"] {
+            guard hostListsPs2 else { return done(.failure(RetroHostClientError.noPs2Capability)) }
+            if console == .string(RetroConsole.ps2), map["initialDisc"] != nil {
+                return done(.failure(RetroHostClientError.ps2HasNoPlaylist))
+            }
         }
         guard nextCallID <= RetroProtocol.maxID else { return done(.failure(RetroHostClientError.idsUsedUp)) }
         let body: [UInt8]
@@ -571,7 +585,7 @@ public final class RetroHostClient: @unchecked Sendable {
                 lastStatusEnded = false
                 if afterStop { stopDeadline = nil }
             } else {
-                let status = try RetroStatus.parse(result)
+                let status = try RetroStatus.parse(result, ps2: hostListsPs2)
                 if status.ended, !lastStatusEnded { zeroRumble() }
                 lastStatusEnded = status.ended
                 if status.ended, afterStop { stopDeadline = nil }

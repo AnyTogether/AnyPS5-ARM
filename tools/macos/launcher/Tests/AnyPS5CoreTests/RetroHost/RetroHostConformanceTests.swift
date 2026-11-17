@@ -71,6 +71,65 @@ final class RetroHostConformanceTests: XCTestCase {
         ])
     }
 
+    func testAPs2GameGoesOnlyToAHostThatListsPs2() async throws {
+        try await playOwn("A host without ps2 is sent no start.console: the client refuses it before it is sent, and the "
+                          + "next call is answered in order.", outcome: "clean", steps: [
+                              .object(["from": .string("launcher"), "message": Self.callMessage(2, "status", .null),
+                                       "anyValueFor": .array([.string("id")])]),
+                              .object(["from": .string("host"), "message": Self.replyMessage(2, .null),
+                                       "anyValueFor": .array([.string("id")])]),
+                          ], afterReady: { client in
+                              XCTAssertFalse(client.canPlayPs2)
+                              for console in [RetroConsole.ps2, RetroConsole.ps1] {
+                                  do {
+                                      _ = try await client.call("start", Self.ps2Start(console: console))
+                                      XCTFail("a start with console \(console) went to a host without ps2")
+                                  } catch {
+                                      XCTAssertEqual(error as? RetroHostClientError, .noPs2Capability)
+                                  }
+                              }
+                          })
+    }
+
+    func testAPs2GamesStartAndItsMissingBiosPassTheClientsChecks() async throws {
+        let checkout = try Self.checkout()
+        func message(_ name: String, _ key: String, id: Int) throws -> RetroJSON {
+            let file = try RetroHostFixtures.read(checkout.appendingPathComponent("fixtures/v1/messages/\(name)"))
+            guard var map = file.objectValue?[key]?.objectValue else { throw XCTSkip("\(name) has changed") }
+            map["id"] = .int(id)
+            return .object(map)
+        }
+        func step(_ from: String, _ message: RetroJSON) -> RetroJSON {
+            .object(["from": .string(from), "message": message, "anyValueFor": .array([.string("id")])])
+        }
+        try await playOwn("A host that lists ps2: start with console ps2, the status LRPS2 gives without a BIOS, "
+                          + "then release.", outcome: "clean", steps: [
+                              step("launcher", Self.callMessage(2, "start", Self.ps2Start(console: RetroConsole.ps2))),
+                              step("host", try message("call-start-ps2.json", "reply", id: 2)),
+                              step("launcher", Self.callMessage(3, "status", .null)),
+                              step("host", try message("call-status-ps2-no-bios.json", "reply", id: 3)),
+                              step("launcher", Self.callMessage(4, "release", .null)),
+                              step("host", Self.replyMessage(4, .null)),
+                          ], capabilities: [RetroProtocol.ps1Capability, "coreIdentity", "gameTiming", RetroProtocol.ps2Capability],
+                          afterReady: { client in
+                              XCTAssertTrue(client.canPlayPs2)
+                              var withPlaylist = Self.ps2Start(console: RetroConsole.ps2).objectValue ?? [:]
+                              withPlaylist["initialDisc"] = .int(0)
+                              do {
+                                  _ = try await client.call("start", .object(withPlaylist))
+                                  XCTFail("a PS2 start with initialDisc was sent")
+                              } catch {
+                                  XCTAssertEqual(error as? RetroHostClientError, .ps2HasNoPlaylist)
+                              }
+                          })
+    }
+
+    /// A `start` naming `console`, with the session's placeholder paths.
+    static func ps2Start(console: String) -> RetroJSON {
+        .object(["console": .string(console), "core": .string("${core}"), "disc": .string("${disc}"),
+                 "system": .string("${system}"), "saves": .string("${saves}")])
+    }
+
     func testAFrameOfAnotherGameTakesAwayTheFrameShown() async throws {
         let checkout = try Self.checkout()
         try await playOwn("A drawn frame, then a frame of another epoch in the same ring.", outcome: "clean",
@@ -162,20 +221,20 @@ final class RetroHostConformanceTests: XCTestCase {
         return Array(steps[4...7])
     }
 
-    /// The start of a session: hello, welcome and the first volume call.
-    static let greeting: [RetroJSON] = [
+    /// The start of a session: hello, welcome (listing `capabilities`) and the first volume call.
+    static func greeting(capabilities: [String]) -> [RetroJSON] { [
         .object(["from": .string("launcher"), "message": .object([
             "type": .string("hello"), "minVersion": .int(1), "maxVersion": .int(1),
             "pixelFormats": .array([.string("rgba8"), .string("bgra8")]),
         ]), "anyValueFor": .array([.string("pixelFormats")])]),
         .object(["from": .string("host"), "message": .object([
             "type": .string("welcome"), "version": .int(1), "pid": .int(1), "hostVersion": .string("1.0.0"),
-            "capabilities": .array([.string("ps1")]), "pixelFormat": .string("rgba8"),
+            "capabilities": .array(capabilities.map { .string($0) }), "pixelFormat": .string("rgba8"),
         ]), "anyValueFor": .array([.string("pid"), .string("hostVersion"), .string("pixelFormat")])]),
         .object(["from": .string("launcher"), "message": callMessage(1, "volume", .object(["level": .int(1), "muted": .bool(false)])),
                  "anyValueFor": .array([.string("id"), .string("args")])]),
         .object(["from": .string("host"), "message": replyMessage(1, .null), "anyValueFor": .array([.string("id")])]),
-    ]
+    ] }
 
     private func play(_ name: String) async throws {
         let checkout = try Self.checkout()
@@ -187,6 +246,8 @@ final class RetroHostConformanceTests: XCTestCase {
     }
 
     private func playOwn(_ description: String, outcome: String, steps: [RetroJSON],
+                         capabilities: [String] = [RetroProtocol.ps1Capability],
+                         afterReady: ((RetroHostClient) async throws -> Void)? = nil,
                          check: ((RetroSessionPlayer) async throws -> Void)? = nil) async throws {
         let checkout = try Self.checkout()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("retro-host-own-\(UUID().uuidString)")
@@ -194,12 +255,12 @@ final class RetroHostConformanceTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: folder) }
         let session: RetroJSON = .object([
             "description": .string(description), "tests": .array([.string("launcher")]), "outcome": .string(outcome),
-            "steps": .array(Self.greeting + steps),
+            "steps": .array(Self.greeting(capabilities: capabilities) + steps),
         ])
         let file = folder.appendingPathComponent("own.json")
         try Data(try session.encoded()).write(to: file)
         try await RetroSessionPlayer(checkout: checkout, python: try Self.python(), file: file, session: session,
-                                     check: check).play()
+                                     afterReady: afterReady, check: check).play()
     }
 }
 
@@ -264,6 +325,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
     let python: String
     let file: URL
     let session: [String: RetroJSON]
+    let afterReady: ((RetroHostClient) async throws -> Void)?
     let check: ((RetroSessionPlayer) async throws -> Void)?
     private(set) var client: RetroHostClient!
     private var work: URL!
@@ -271,16 +333,22 @@ final class RetroSessionPlayer: @unchecked Sendable {
     private var resume: URL!
     private var report: URL!
     private var calls: [RetroWaiter<RetroJSON>] = []
+    /// The calls answered by a status the client made itself from the host's (`stopGame()`): it has
+    /// only the fields this client reads, so `core` and `timing` (capabilities `coreIdentity` and
+    /// `gameTiming`, which it does not read yet) are not compared, as on Windows and Linux.
+    private var clientStatuses: Set<ObjectIdentifier> = []
     private let lock = NSLock()
     private var drawnFlags: [Bool] = []
     private var rumbleLog: [RetroRumble] = []
 
     init(checkout: URL, python: String, file: URL, session: RetroJSON,
+         afterReady: ((RetroHostClient) async throws -> Void)? = nil,
          check: ((RetroSessionPlayer) async throws -> Void)? = nil) {
         self.checkout = checkout
         self.python = python
         self.file = file
         self.session = session.objectValue ?? [:]
+        self.afterReady = afterReady
         self.check = check
     }
 
@@ -396,9 +464,11 @@ final class RetroSessionPlayer: @unchecked Sendable {
                     if method == "volume", !welcomed {
                         welcomed = true
                         let client = self.client!
+                        let afterReady = self.afterReady
                         Task {
                             do {
                                 try await client.ready()
+                                try await afterReady?(client)
                                 waiter.finish(.success(.null))
                             } catch {
                                 waiter.finish(.failure(error))
@@ -414,6 +484,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
                         waiter.finish(.success(.null))
                     } else if method == "status", let stop = stopping {
                         stopping = nil
+                        clientStatuses.insert(ObjectIdentifier(waiter))
                         Task {
                             do {
                                 let status = try await stop.value(within: 30, "stopGame")
@@ -441,7 +512,9 @@ final class RetroSessionPlayer: @unchecked Sendable {
                 case "reply":
                     guard !calls.isEmpty else { return XCTFail("step \(index): a reply with no call waiting") }
                     let pending = calls.removeFirst()
-                    try await checkReply(pending, message, step["anyValueFor"]?.arrayValue?.compactMap(\.stringValue) ?? [])
+                    var anyValueFor = step["anyValueFor"]?.arrayValue?.compactMap(\.stringValue) ?? []
+                    if clientStatuses.remove(ObjectIdentifier(pending)) != nil { anyValueFor += ["result.core", "result.timing"] }
+                    try await checkReply(pending, message, anyValueFor)
                 case "frame":
                     frameSteps += 1
                     let wanted = frameSteps

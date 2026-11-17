@@ -25,7 +25,7 @@ env:
   # Tests/AnyPS5CoreTests/RetroHost plays against its client (anyps5-retro-host docs/protocol.md
   # "Fixtures"), as AnyPS5 Desktop's CI does. The commit is AnyTogether/anyps5-retro-host main.
   RETRO_HOST_REPOSITORY: https://github.com/AnyTogether/anyps5-retro-host.git
-  RETRO_HOST_COMMIT: 431a265474280b2bb09aa55d66fdce374e5259c6
+  RETRO_HOST_COMMIT: 1b5793221f904743f5891b41cf436482e59241f4
 
 jobs:
   # Named eligibility for upstream's ci-gate convention (tools/check_conventions.py, run by ctest):
