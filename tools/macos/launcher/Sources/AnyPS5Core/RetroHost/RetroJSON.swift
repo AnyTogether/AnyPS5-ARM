@@ -135,7 +135,7 @@ public enum RetroJSON: Equatable, Sendable {
         }
 
         mutating func word(_ text: StaticString) throws {
-            let length = text.utf8CodeUnitsCount
+            let length = text.utf8CodeUnitCount
             guard at + length <= bytes.count else { throw ParseError("The body is not JSON.") }
             let start = text.utf8Start
             for offset in 0..<length where bytes[at + offset] != start[offset] {
