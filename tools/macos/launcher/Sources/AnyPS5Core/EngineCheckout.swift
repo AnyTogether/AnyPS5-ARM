@@ -241,8 +241,14 @@ public protocol CommandRunner: Sendable {
 }
 
 /// Foundation's processes, stopped with their children (Ninja leaves the compilers to their own).
+/// They end with the launcher too (ChildProcesses), unless `endsWithLauncher` is off.
 public struct SystemCommands: CommandRunner {
-    public init() {}
+    /// Off for a program left to finish when the launcher quits (Homebrew installing a tool).
+    public let endsWithLauncher: Bool
+
+    public init(endsWithLauncher: Bool = true) {
+        self.endsWithLauncher = endsWithLauncher
+    }
 
     public func run(_ executable: URL, _ arguments: [String], in directory: URL, environment: [String: String], cancel: UnpackCancel?, onLine: @escaping (String) -> Void) throws -> Int32 {
         let process = Process()
@@ -255,6 +261,8 @@ public struct SystemCommands: CommandRunner {
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
+        if endsWithLauncher { ChildProcesses.remember(process) }
+        defer { ChildProcesses.forget(process) }
         let reader = pipe.fileHandleForReading
         let watch = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
         watch.schedule(deadline: .now() + 0.3, repeating: 0.3)

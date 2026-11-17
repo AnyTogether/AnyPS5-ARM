@@ -53,6 +53,36 @@ final class StopGameTests: XCTestCase {
         XCTAssertEqual(ended, 0, "ended only when still running after the grace")
     }
 
+    func testQuittingAsksTheGameToCloseAsCloseGameDoesAndEndsItOnlyAfterTheGrace() async throws {
+        let (model, game) = try model()
+        model.gameStopGrace = .milliseconds(300)
+        answersAsk = true
+        let steps = model.quitSteps()
+        XCTAssertEqual(steps.count, 1, "the game's close, no call to leave")
+        XCTAssertEqual(asked, 1, "asked to close, as Close Game does")
+        XCTAssertEqual(model.state(of: game), .stopping)
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(ended, 0, "not ended within the grace")
+        for step in steps { await step.value }
+        XCTAssertEqual(ended, 1, "a game that ignores the close is ended after the grace, once")
+    }
+
+    func testAQuitWithNothingPlayingHasNothingToWaitFor() throws {
+        let model = try LauncherFixture.model()
+        XCTAssertNil(model.closeGameOnQuit())
+        XCTAssertTrue(model.quitSteps().isEmpty, "the app delegate terminates at once")
+    }
+
+    func testQuitAnyPS5LeavesTheGameToTheQuitItself() throws {
+        let (model, _) = try model()
+        var terminated = 0
+        model.terminateApp = { terminated += 1 }
+        model.quitApp()
+        XCTAssertEqual(terminated, 1)
+        XCTAssertEqual(ended, 0, "not ended at once: the quit asks it to close first")
+        XCTAssertEqual(asked, 0, "the app delegate's quitSteps asks it")
+    }
+
     func testAskingTwiceAsksOnce() throws {
         let (model, _) = try model()
         model.stopRunningGame()

@@ -91,16 +91,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    /// A call is left on the server before the app goes (waiting two seconds at most), so friends
-    /// do not keep a silent member.
+    /// Every quit comes through here (Cmd-Q, the window's close, Quit AnyPS5, an update's Restart
+    /// Now). As on Windows and Linux, the game playing is asked to close as Close Game does and
+    /// has its grace to save before it is ended, and a call is left on the server (three seconds
+    /// at most, the media server's close included), so friends do not keep a silent member. The
+    /// app goes once both are done, twenty seconds after the quit at the latest.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            // Games being unlocked or removed: the question first (Cmd-Q, the window's close,
-            // Quit AnyPS5). Otherwise a paused relinker is cancelled, so none is left stopped.
+            // Games being unlocked or removed: the question first. Otherwise a paused relinker is
+            // cancelled, so none is left stopped.
             if AppModel.terminateAsks?() == true { return .terminateCancel }
-            guard let leaving = AppModel.beforeQuit?() else { return .terminateNow }
-            Task { @MainActor in
-                await leaving.value
+            let steps = AppModel.beforeQuit?() ?? []
+            guard !steps.isEmpty else { return .terminateNow }
+            QuitWait.reply(afterAll: steps) {
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater

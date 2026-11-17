@@ -300,6 +300,55 @@ final class EmulatorGamesTests: XCTestCase {
         XCTAssertNil(model.toast, "an emulator Stop ended says no exit code")
     }
 
+    // MARK: Quitting the launcher while it plays, as on Windows and Linux
+
+    private func playingEmulator(_ run: FakeEmulatorRun, grace: Duration) async throws -> AppModel {
+        let (model, root) = try model(games: 1)
+        let folder = root.appendingPathComponent("Retro game")
+        try write(Data(), folder.appendingPathComponent("game.cue"))
+        try retroJSON(["platform": "ps1", "titleId": "TEST12345", "name": "Retro game", "disc": "game.cue"], in: folder)
+        model.setRetroLibrary(true)
+        let game = try XCTUnwrap(model.games.first { $0.retro != nil })
+        model.preferences.retroEmulators = ["ps1": try write(Data(), try scratch().appendingPathComponent("emulator")).path]
+        model.gameStopGrace = grace
+        let starts = FakeEmulatorStarts(immediate: run)
+        model.startEmulator = { program, arguments, _ in await starts.start(program, arguments) }
+        model.play(game)
+        try await settle({ model.emulator != nil })
+        return model
+    }
+
+    func testAQuitGivesASlowEmulatorItsWholeGraceToSave() async throws {
+        let run = FakeEmulatorRun(ignoresTerm: true)
+        let model = try await playingEmulator(run, grace: .milliseconds(600))
+        let steps = model.quitSteps()
+        XCTAssertEqual(steps.count, 1, "the game's close, no call to leave")
+        var replied = false
+        QuitWait.reply(afterAll: steps, within: .seconds(5)) { replied = true }
+        XCTAssertEqual(run.signals, [SIGTERM], "asked to close as Close Game does")
+        XCTAssertTrue(model.stopping, "its tile reads Closing the game")
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertFalse(replied, "the quit waits while it saves")
+        // It saved and closed by itself before the grace was over.
+        run.quit()
+        try await settle({ replied }, "the quit goes on once it closed")
+        XCTAssertEqual(run.signals, [SIGTERM], "never ended")
+        XCTAssertNil(model.emulator)
+    }
+
+    func testAQuitEndsAnEmulatorThatIgnoresTheCloseOnlyAfterTheGrace() async throws {
+        let run = FakeEmulatorRun(ignoresTerm: true)
+        let model = try await playingEmulator(run, grace: .milliseconds(300))
+        var replied = false
+        QuitWait.reply(afterAll: model.quitSteps(), within: .seconds(5)) { replied = true }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(run.signals, [SIGTERM], "not ended within the grace")
+        XCTAssertFalse(replied)
+        try await settle({ replied })
+        XCTAssertEqual(run.signals, [SIGTERM, SIGKILL], "ended once the grace was over, once")
+        XCTAssertNil(model.emulator)
+    }
+
     func testAFailedFilePanelLeavesTheEmulatorsAlone() throws {
         let (model, _) = try model()
         struct Unavailable: Error {}

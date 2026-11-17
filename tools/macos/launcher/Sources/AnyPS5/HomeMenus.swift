@@ -111,22 +111,15 @@ extension AppModel {
         stopRunningGame()
     }
 
-    /// Quit AnyPS5 from the home menu: a game playing closes first.
+    /// Quit AnyPS5 from the home menu: a game playing closes first, asked to as Close Game does
+    /// and given its time to save (the app delegate's quitSteps, which every quit goes through).
     func quitApp() {
         // Games being unlocked or removed: the question first, before a game playing is closed.
         if quitAsks {
             menuIndex = 0
             return open(.confirmQuitUnlocks)
         }
-        if let running {
-            running.app.forceTerminate()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.terminateApp() }
-        } else if emulator != nil {
-            endEmulatorNow()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.terminateApp() }
-        } else {
-            terminateApp()
-        }
+        terminateApp()
     }
 
     /// One row of the quick menu.

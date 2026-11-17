@@ -786,7 +786,7 @@ final class AppModel: ObservableObject {
             AppModel.beforeQuit = { [weak self] in
                 // A ready update goes in as the launcher quits: the next launch is the new version.
                 self?.placeUpdate(relaunch: false)
-                return self?.leaveTogetherOnQuit()
+                return self?.quitSteps() ?? []
             }
             let waiting = AppModel.pending
             AppModel.pending = []
@@ -813,11 +813,13 @@ final class AppModel: ObservableObject {
             MainActor.assumeIsolated { self?.active = false }
         }
         // Unlocks going on stop with the launcher; a relinker paused for a game would otherwise
-        // stay stopped.
+        // stay stopped. An engine build's git, CMake and Ninja end with it too, as on Windows and
+        // Linux: after the game, which the app delegate's quitSteps closed first.
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.preparer?.cancel()
                 self?.installer?.cancel()
+                ChildProcesses.endAll()
                 // Quit as it should: no crash to offer next time.
                 LauncherWatch.shared.quitting()
             }
@@ -2553,8 +2555,8 @@ final class AppModel: ObservableObject {
     /// What macOS hands the app before the model is there, and where it goes once it is.
     private static var pending: [URL] = []
     private static var opener: (([URL]) -> Void)?
-    /// What has to reach a server before the app quits (leaving a call), when there is any.
-    static var beforeQuit: (() -> Task<Void, Never>?)?
+    /// What the app finishes before it quits (quitSteps): the game playing closing, a call left.
+    static var beforeQuit: (() -> [Task<Void, Never>])?
     /// Whether quitting asks first (terminateAsks), from the app delegate.
     static var terminateAsks: (() -> Bool)?
 
