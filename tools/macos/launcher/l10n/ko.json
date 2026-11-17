@@ -61,6 +61,8 @@
   "followDefault": "기본값 (%@)",
   "useDisplayDefaults": "기본 디스플레이 설정 사용",
   "useDisplayDefaultsDetail": "디스플레이, 창 크기 및 수직 동기화 설정을 '설정 › 기본 디스플레이' 상태로 되돌립니다",
+  "startAnimation": "시작 애니메이션",
+  "startAnimationDetail": "게임이 로드되는 동안 커버가 유지됩니다. 전체 화면에서는 게임 위로 페이드되고, 창 모드에서는 홈 화면에서 사라집니다. 끔: 커버 없음",
   "overlay": "성능 오버레이",
   "overlayOff": "끄기",
   "overlayTopLeft": "왼쪽 상단",

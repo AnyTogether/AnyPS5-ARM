@@ -61,6 +61,8 @@
   "followDefault": "ነባሪ (%@)",
   "useDisplayDefaults": "ነባሪ ማሳያን (Default Display) ይጠቀሙ።",
   "useDisplayDefaultsDetail": "ማሳያ፣ የመስኮት መጠን እና ቨርቲካል ሲንክ (vertical sync) ወደ \"ቅንብሮች › ነባሪ ማሳያ\" ይመለሳሉ",
+  "startAnimation": "የመጀመሪያ እነማ",
+  "startAnimationDetail": "ጨዋታ በሚጫንበት ጊዜ ሽፋኑ ይቆያል። ሙሉ ማያ ገጽ ላይ በጨዋታው ላይ ይጠፋል፣ በመስኮት በመነሻ ማያ ላይ። ጠፍቷል፡ ሽፋን የለም",
   "overlay": "የአፈጻጸም ማሳያ (Performance Overlay)",
   "overlayOff": "ጠፍቷል",
   "overlayTopLeft": "ከላይ በግራ በኩል",

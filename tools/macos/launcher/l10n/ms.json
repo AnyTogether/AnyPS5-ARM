@@ -61,6 +61,8 @@
   "followDefault": "Lalai (%@)",
   "useDisplayDefaults": "Gunakan Paparan Lalai",
   "useDisplayDefaultsDetail": "Paparan, saiz tetingkap, dan penyegerakan menegak (vertical sync) dikembalikan kepada Tetapan › Paparan Lalai",
+  "startAnimation": "Animasi permulaan",
+  "startAnimationDetail": "Semasa permainan dimuatkan, kulit kekal. Skrin penuh pudar di atas permainan, tetingkap di skrin utama. Mati: tiada kulit",
   "overlay": "Paparan Tindanan Prestasi",
   "overlayOff": "Mati",
   "overlayTopLeft": "Kiri Atas",

@@ -61,6 +61,8 @@
   "followDefault": "Varsayılan (%@)",
   "useDisplayDefaults": "Varsayılan görüntüyü kullan",
   "useDisplayDefaultsDetail": "Pencere ya da tam ekran, pencere boyutu ve dikey senkronizasyon yeniden Ayarlar › Varsayılan görüntü ayarını izler",
+  "startAnimation": "Başlangıç animasyonu",
+  "startAnimationDetail": "Oyun yüklenirken kapağı ekranda kalır. Tam ekranda kapak oyunun üzerinde, pencerede ana ekranda solar. Kapalıysa kapak gösterilmez",
   "overlay": "Performans göstergesi",
   "overlayOff": "Kapalı",
   "overlayTopLeft": "Sol üst",

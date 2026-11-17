@@ -8,13 +8,17 @@ public struct DisplayDefaults: Codable, Equatable, Sendable {
     /// The share of the display the window takes, in percent.
     public var windowSize: Int
     public var vsync: Bool
+    /// Whether a game opens from its cover while it loads (StartCover): in full screen the cover
+    /// fades over the game, in a window it goes on the launcher's home once the window settled.
+    public var startAnimation: Bool
 
     public static let minimumWindowSize = 30
 
-    public init(fullscreen: Bool = false, windowSize: Int = 75, vsync: Bool = true) {
+    public init(fullscreen: Bool = false, windowSize: Int = 75, vsync: Bool = true, startAnimation: Bool = true) {
         self.fullscreen = fullscreen
         self.windowSize = windowSize
         self.vsync = vsync
+        self.startAnimation = startAnimation
     }
 
     public var isBuiltIn: Bool { self == DisplayDefaults() }
@@ -26,6 +30,20 @@ public struct DisplayDefaults: Codable, Equatable, Sendable {
         fullscreen = (try? container.decodeIfPresent(Bool.self, forKey: .fullscreen)) ?? builtIn.fullscreen
         windowSize = ((try? container.decodeIfPresent(Int.self, forKey: .windowSize)) ?? nil).map { min(100, max(Self.minimumWindowSize, $0)) } ?? builtIn.windowSize
         vsync = (try? container.decodeIfPresent(Bool.self, forKey: .vsync)) ?? builtIn.vsync
+        startAnimation = (try? container.decodeIfPresent(Bool.self, forKey: .startAnimation)) ?? builtIn.startAnimation
+    }
+
+    /// The start animation is written only when it is off, as on Windows and Linux.
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fullscreen, forKey: .fullscreen)
+        try container.encode(windowSize, forKey: .windowSize)
+        try container.encode(vsync, forKey: .vsync)
+        if !startAnimation { try container.encode(false, forKey: .startAnimation) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case fullscreen, windowSize, vsync, startAnimation
     }
 }
 
@@ -63,6 +81,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
     /// The share of the display the window takes, in percent.
     public var ownWindowSize: Int?
     public var ownVsync: Bool?
+    /// Whether the game opens from its cover (StartCover); nil follows Settings › Default Display.
+    public var ownStartAnimation: Bool?
 
     /// The display as the game starts: its own choice, else the built-in default. A game is
     /// started with withDefaults applied, so these are the user's defaults there. Setting one
@@ -79,9 +99,17 @@ public struct GameSettings: Codable, Equatable, Sendable {
         get { ownVsync ?? DisplayDefaults().vsync }
         set { ownVsync = newValue }
     }
+    public var startAnimation: Bool {
+        get { ownStartAnimation ?? DisplayDefaults().startAnimation }
+        set { ownStartAnimation = newValue }
+    }
+
+    /// Whether the cover fades away over the game: it starts in full screen and wants its cover.
+    /// In a window the cover stays on the launcher's home and goes there.
+    public var fadesCover: Bool { fullscreen && startAnimation }
 
     /// Whether the game made no display choice of its own.
-    public var followsDisplayDefaults: Bool { ownFullscreen == nil && ownWindowSize == nil && ownVsync == nil }
+    public var followsDisplayDefaults: Bool { ownFullscreen == nil && ownWindowSize == nil && ownVsync == nil && ownStartAnimation == nil }
 
     /// These settings with `defaults` in place of the display choices the game did not make.
     public func withDefaults(_ defaults: DisplayDefaults) -> GameSettings {
@@ -89,6 +117,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         settings.ownFullscreen = ownFullscreen ?? defaults.fullscreen
         settings.ownWindowSize = ownWindowSize ?? defaults.windowSize
         settings.ownVsync = ownVsync ?? defaults.vsync
+        settings.ownStartAnimation = ownStartAnimation ?? defaults.startAnimation
         return settings
     }
 
@@ -98,6 +127,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         settings.ownFullscreen = nil
         settings.ownWindowSize = nil
         settings.ownVsync = nil
+        settings.ownStartAnimation = nil
         return settings
     }
     public var overlay = Overlay.off
@@ -156,7 +186,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case settingsVersion, ownDisplay
-        case resolution, ownFullscreen = "fullscreen", ownWindowSize = "windowSize", ownVsync = "vsync"
+        case resolution, ownFullscreen = "fullscreen", ownWindowSize = "windowSize", ownVsync = "vsync", ownStartAnimation = "startAnimation"
         case overlay, overlayStyle, frameGeneration, upscaler, fsrSharpness, language, controls, tuning, shaderCache, phoneLayout, engine, trace, gyro, relinkerFlags, customRelinkerOptions, launchOptions
     }
 
@@ -188,6 +218,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
         ownFullscreen = fullscreen
         ownWindowSize = windowSize
         ownVsync = vsync
+        ownStartAnimation = (try? container.decodeIfPresent(Bool.self, forKey: .ownStartAnimation)) ?? nil
         overlay = try container.decodeIfPresent(Overlay.self, forKey: .overlay) ?? .off
         overlayStyle = try container.decodeIfPresent(OverlayStyle.self, forKey: .overlayStyle)
         frameGeneration = try container.decodeIfPresent(Bool.self, forKey: .frameGeneration)
@@ -222,6 +253,7 @@ public struct GameSettings: Codable, Equatable, Sendable {
             try container.encodeIfPresent(ownWindowSize, forKey: .ownWindowSize)
             try container.encodeIfPresent(ownVsync, forKey: .ownVsync)
         }
+        try container.encodeIfPresent(ownStartAnimation, forKey: .ownStartAnimation)
         try container.encodeIfPresent(resolution, forKey: .resolution)
         try container.encode(overlay, forKey: .overlay)
         try container.encodeIfPresent(overlayStyle, forKey: .overlayStyle)

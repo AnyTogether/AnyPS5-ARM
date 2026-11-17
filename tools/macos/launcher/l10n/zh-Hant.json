@@ -61,6 +61,8 @@
   "followDefault": "預設（%@）",
   "useDisplayDefaults": "使用預設顯示設定",
   "useDisplayDefaultsDetail": "將顯示器、視窗大小和垂直同步還原為「設定 › 預設顯示」",
+  "startAnimation": "啟動動畫",
+  "startAnimationDetail": "遊戲載入時封面會保持顯示。全螢幕時在遊戲上方淡出，視窗模式下在主畫面淡出。關閉：不顯示封面",
   "overlay": "效能監控層",
   "overlayOff": "關閉",
   "overlayTopLeft": "左上角",

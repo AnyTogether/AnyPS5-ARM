@@ -61,6 +61,8 @@
   "followDefault": "លំនាំដើម (%@)",
   "useDisplayDefaults": "ប្រើការកំណត់បង្ហាញលំនាំដើម (Default Display)",
   "useDisplayDefaultsDetail": "កំណត់ការបង្ហាញ ទំហំបង្អួច និងការធ្វើសមកាលកម្មបញ្ឈរ (vertical sync) ត្រឡប់ទៅរកការកំណត់ដើមវិញនៅក្នុងផ្នែក Settings › Default Display",
+  "startAnimation": "ចលនាចាប់ផ្តើម",
+  "startAnimationDetail": "ខណៈពេលហ្គេមកំពុងផ្ទុក គម្របនៅតែបង្ហាញ។ អេក្រង់ពេញ បាត់លើហ្គេម ក្នុងបង្អួចនៅអេក្រង់ដើម។ បិទ៖ គ្មានគម្រប",
   "overlay": "ការបង្ហាញព័ត៌មានដំណើរការ (Performance Overlay)",
   "overlayOff": "បិទ",
   "overlayTopLeft": "ខាងលើ ខាងឆ្វេង",

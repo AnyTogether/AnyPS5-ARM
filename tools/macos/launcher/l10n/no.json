@@ -61,6 +61,8 @@
   "followDefault": "Standard (%@)",
   "useDisplayDefaults": "Bruk standard skjerminnstillinger",
   "useDisplayDefaultsDetail": "Skjerm, vindusstørrelse og vertikal synkronisering (V-Sync) tilbakestilles til Innstillinger › Standard skjerminnstillinger",
+  "startAnimation": "Startanimasjon",
+  "startAnimationDetail": "Mens et spill lastes, blir omslaget stående. I fullskjerm fades det ut over spillet, i vindu på startskjermen. Av: ingen omslag",
   "overlay": "Ytelsesoverlegg",
   "overlayOff": "Av",
   "overlayTopLeft": "Øverst til venstre",

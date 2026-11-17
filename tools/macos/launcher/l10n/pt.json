@@ -61,6 +61,8 @@
   "followDefault": "Padrão (%@)",
   "useDisplayDefaults": "Usar configurações padrão de tela",
   "useDisplayDefaultsDetail": "Tela, tamanho da janela e sincronização vertical voltarão para Configurações › Tela padrão",
+  "startAnimation": "Animação de início",
+  "startAnimationDetail": "Enquanto um jogo carrega, a capa permanece. Em ecrã inteiro desvanece-se sobre o jogo, em janela no ecrã inicial. Desligado: sem capa",
   "overlay": "Sobreposição de desempenho",
   "overlayOff": "Desativada",
   "overlayTopLeft": "Superior esquerdo",

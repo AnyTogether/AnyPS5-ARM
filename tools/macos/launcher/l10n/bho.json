@@ -61,6 +61,8 @@
   "followDefault": "डिफॉल्ट (%@)",
   "useDisplayDefaults": "डिफ़ॉल्ट डिस्प्ले के इस्तेमाल करीं",
   "useDisplayDefaultsDetail": "Display, window size आ vertical sync के Settings › Default Display पर फेर से सेट करीं",
+  "startAnimation": "शुरुआती एनिमेशन",
+  "startAnimationDetail": "खेल लोड होखत कवर रहेल. फुल स्क्रीन में खेल के ऊपर फेड होला, विंडो में होम स्क्रीन पर. बंद: कवर नाहीं",
   "overlay": "परफॉर्मेंस ओवरले",
   "overlayOff": "बंद",
   "overlayTopLeft": "बाएं से बाएं",

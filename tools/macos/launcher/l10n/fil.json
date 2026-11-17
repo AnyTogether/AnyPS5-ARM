@@ -61,6 +61,8 @@
   "followDefault": "Default (%@)",
   "useDisplayDefaults": "Gamitin ang Default na Display",
   "useDisplayDefaultsDetail": "Display, laki ng window at patayong pag-sync pabalik sa Mga Setting › Default na Display",
+  "startAnimation": "Animasyon sa pagsisimula",
+  "startAnimationDetail": "Habang naglo-load ang laro, nananatili ang cover. Sa full screen ito ay pumapawi sa ibabaw ng laro, sa window sa home screen. Off: walang cover",
   "overlay": "Pagganap ng Overlay",
   "overlayOff": "Sarado",
   "overlayTopLeft": "Itaas Kaliwa",

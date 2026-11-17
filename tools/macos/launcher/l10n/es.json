@@ -61,6 +61,8 @@
   "followDefault": "Predeterminado (%@)",
   "useDisplayDefaults": "Usar ajustes de pantalla predeterminados",
   "useDisplayDefaultsDetail": "La pantalla, el tamaño de ventana y la sincronización vertical volverán a Ajustes › Pantalla predeterminada",
+  "startAnimation": "Animación de inicio",
+  "startAnimationDetail": "Mientras un juego carga, su carátula permanece. A pantalla completa se desvanece sobre el juego, en ventana en la pantalla de inicio. Desactivado: sin carátula",
   "overlay": "Superposición de rendimiento",
   "overlayOff": "Desactivada",
   "overlayTopLeft": "Arriba a la izquierda",

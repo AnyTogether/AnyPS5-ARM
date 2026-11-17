@@ -61,6 +61,8 @@
   "followDefault": "Alapértelmezett (%@)",
   "useDisplayDefaults": "Alapértelmezett kijelző használata",
   "useDisplayDefaultsDetail": "A kijelző, az ablakméret és a függőleges szinkronizálás visszaállítása a Beállítások › Alapértelmezett kijelző menüpontban",
+  "startAnimation": "Indítási animáció",
+  "startAnimationDetail": "Amíg a játék betölt, a borító látható marad. Teljes képernyőn a játék felett, ablakban a kezdőképernyőn tűnik el. Ki: nincs borító",
   "overlay": "Teljesítmény-átfedés",
   "overlayOff": "Ki",
   "overlayTopLeft": "Bal felső",

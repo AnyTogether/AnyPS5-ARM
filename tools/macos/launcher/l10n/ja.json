@@ -61,6 +61,8 @@
   "followDefault": "デフォルト (%@)",
   "useDisplayDefaults": "デフォルトの表示を使用",
   "useDisplayDefaultsDetail": "ディスプレイ、ウィンドウ サイズ、垂直同期は、[設定] › [デフォルトのディスプレイ] に戻ります",
+  "startAnimation": "開始アニメーション",
+  "startAnimationDetail": "ゲームの読み込み中はカバーが表示されたままになります。フルスクリーンではゲームの上でフェードアウトし、ウィンドウではホーム画面で消えます。オフ：カバーは表示されません",
   "overlay": "パフォーマンス オーバーレイ",
   "overlayOff": "オフ",
   "overlayTopLeft": "左上",

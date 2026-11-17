@@ -2,8 +2,9 @@ import AnyPS5Core
 import AppKit
 import SwiftUI
 
-// Settings › Default Display and the display rows of a game's settings: Display, Window Size and
-// Vertical Sync default for every game, and a game's own choice wins (as AnyPS5 Desktop does).
+// Settings › Default Display and the display rows of a game's settings: Display, Start animation,
+// Window Size and Vertical Sync default for every game, and a game's own choice wins (as AnyPS5
+// Desktop does).
 
 extension AppModel {
     static let windowSizes = 40...100
@@ -16,6 +17,11 @@ extension AppModel {
             PanelRow(id: "defaultDisplay", title: T.text(.display), symbol: "macwindow",
                      kind: .choice(options: [T.text(.windowed), T.text(.fullscreen)], selected: defaults.fullscreen ? 1 : 0) { [weak self] index in
                          self?.updateDisplayDefaults { $0.fullscreen = index == 1 }
+                     }),
+            // The cover while a game opens (StartCover.swift), on by default as on Windows and Linux.
+            PanelRow(id: "defaultStartAnimation", title: T.text(.startAnimation), detail: T.text(.startAnimationDetail), symbol: "play.rectangle",
+                     kind: .toggle(defaults.startAnimation) { [weak self] value in
+                         self?.updateDisplayDefaults { $0.startAnimation = value }
                      }),
         ]
         if !defaults.fullscreen {
@@ -30,8 +36,8 @@ extension AppModel {
         return rows
     }
 
-    /// A game's Display, Window Size and Vertical Sync: "Default (…)" follows Settings › Default
-    /// Display, and Use Default Display puts all three back on it.
+    /// A game's Display, Window Size, Start animation and Vertical Sync: "Default (…)" follows
+    /// Settings › Default Display, and Use Default Display puts them all back on it.
     func gameDisplayRows(_ game: Game, _ settings: GameSettings) -> [PanelRow] {
         let defaults = displayDefaults
         let started = settings.withDefaults(defaults)
@@ -53,6 +59,12 @@ extension AppModel {
                                      self?.update(game) { $0.windowSize = value }
                                  }))
         }
+        // Its cover while it opens: over the game in full screen, on the home screen in a window.
+        rows.append(PanelRow(id: "startAnimation", title: T.text(.startAnimation), detail: T.text(.startAnimationDetail), symbol: "play.rectangle",
+                             kind: .choice(options: [followed(T.text(defaults.startAnimation ? .on : .off)), T.text(.on), T.text(.off)],
+                                           selected: settings.ownStartAnimation.map { $0 ? 1 : 2 } ?? 0) { [weak self] index in
+                                 self?.update(game) { $0.ownStartAnimation = index == 0 ? nil : index == 1 }
+                             }))
         // Frame generation needs vertical sync: on whatever is chosen while it is on.
         let vsync = settings.frameGeneration == true ? 1 : settings.ownVsync.map { $0 ? 1 : 2 } ?? 0
         rows.append(PanelRow(id: "vsync", title: T.text(.vsync), symbol: "waveform.path",

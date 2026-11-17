@@ -61,6 +61,8 @@
   "followDefault": "默认（%@）",
   "useDisplayDefaults": "使用默认显示设置",
   "useDisplayDefaultsDetail": "将显示器、窗口大小和垂直同步恢复为“设置 › 默认显示”",
+  "startAnimation": "启动动画",
+  "startAnimationDetail": "游戏加载时封面会保持显示。全屏时在游戏上方淡出，窗口模式下在主屏幕上淡出。关闭：不显示封面",
   "overlay": "性能监控层",
   "overlayOff": "关闭",
   "overlayTopLeft": "左上角",
