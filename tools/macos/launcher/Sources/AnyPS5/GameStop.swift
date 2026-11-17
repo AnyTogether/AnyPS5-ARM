@@ -39,6 +39,37 @@ extension AppModel {
         if !run.stop() { run.kill() }
     }
 
+    /// What the app delegate finishes before the launcher quits (Cmd-Q, the window's close, Quit
+    /// AnyPS5, an update's Restart Now), as on Windows and Linux: the game playing closes
+    /// (closeGameOnQuit) and a call is left, three seconds at most. ChildProcesses ends the rest
+    /// once they are done, as the app terminates.
+    func quitSteps() -> [Task<Void, Never>] {
+        [closeGameOnQuit(), leaveTogetherOnQuit().map { QuitWait.bounded($0) }].compactMap { $0 }
+    }
+
+    /// The launcher is quitting: the game or emulator playing is asked to close exactly as Close
+    /// Game does, has `gameStopGrace` to save, and is ended only then. nil when nothing plays.
+    func closeGameOnQuit() -> Task<Void, Never>? {
+        guard running != nil || emulator != nil else { return nil }
+        let app = running?.app
+        let run = emulator?.run
+        let grace = gameStopGrace
+        stopRunningGame()
+        // The quit ends it after the grace itself, and waits for that.
+        gameStopWatch?.cancel()
+        gameStopWatch = nil
+        return Task { @MainActor [weak self] in
+            await QuitWait.endAfterGrace(grace, gone: {
+                guard let self else { return true }
+                return (app == nil || self.running?.app != app) && (run == nil || self.emulator?.run !== run)
+            }, end: {
+                guard let self else { return }
+                if let app { self.endGame(app) }
+                run?.kill()
+            })
+        }
+    }
+
     /// The game is gone: nothing is left to stop.
     func gameStopped() {
         gameStopWatch?.cancel()

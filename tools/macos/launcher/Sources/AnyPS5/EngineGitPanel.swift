@@ -101,8 +101,8 @@ extension AppModel {
 
     /// Install now: `fix`'s command run here as the user, its lines shown as an update's are. It
     /// never runs as administrator and nothing is typed into it; when it ends the tools are looked
-    /// for again.
-    func installEngineTools(_ fix: DevToolFix, runner: CommandRunner = SystemCommands()) {
+    /// for again. A quit leaves it to finish: an install cut halfway would leave a broken tool.
+    func installEngineTools(_ fix: DevToolFix, runner: CommandRunner = SystemCommands(endsWithLauncher: false)) {
         guard let program = fix.program, let checkout = engineCheckout, engineGit.step == nil, engineGit.installing == nil else { return }
         let cancel = UnpackCancel()
         engineGitCancel = cancel
