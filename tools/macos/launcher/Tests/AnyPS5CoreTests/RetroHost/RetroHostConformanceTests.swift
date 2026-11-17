@@ -29,6 +29,7 @@ final class RetroHostConformanceTests: XCTestCase {
     func testMissedPong() async throws { try await play("missed-pong") }
     func testNoWelcome() async throws { try await play("no-welcome") }
     func testOldEpochFrame() async throws { try await play("old-epoch-frame") }
+    func testOlderHostWithoutCore() async throws { try await play("older-host-without-core") }
     func testOversizedFrame() async throws { try await play("oversized-frame") }
     func testOversizedMessage() async throws { try await play("oversized-message") }
     func testPlayAndQuit() async throws { try await play("play-and-quit") }
@@ -117,8 +118,8 @@ final class RetroHostConformanceTests: XCTestCase {
     static let played = [
         "body-duplicate-key", "body-lone-surrogate", "body-not-json", "body-not-object", "body-not-utf8", "body-too-short",
         "body-without-type", "exit-during-call", "first-message-not-welcome", "frame-before-ring", "frame-larger-than-slot",
-        "host-unsupported", "hung-call", "missed-pong", "no-welcome", "old-epoch-frame", "oversized-frame",
-        "oversized-message", "play-and-quit", "pong-wrong-id", "reply-wrong-id", "ring-bad-geometry", "ring-grows",
+        "host-unsupported", "hung-call", "missed-pong", "no-welcome", "old-epoch-frame", "older-host-without-core",
+        "oversized-frame", "oversized-message", "play-and-quit", "pong-wrong-id", "reply-wrong-id", "ring-bad-geometry", "ring-grows",
         "ring-not-grown", "ring-size-mismatch", "ring-unsealed", "ring-without-descriptor", "shutdown-deadline",
         "stop-deadline", "stray-descriptor", "unknown-from-host", "unknown-values-from-host", "welcome-not-offered",
         "welcome-wrong-pid",

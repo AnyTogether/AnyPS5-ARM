@@ -10,7 +10,9 @@ final class RetroHostFramingTests: XCTestCase {
     private var hostEnd: Int32 = -1
     private let lock = NSLock()
     private var events: [RetroHostConnectionEvent] = []
-    private var done: XCTestExpectation!
+    /// Left once the reader has returned. A group rather than an expectation: a test that never
+    /// reads (the pure framing ones at the end) would leave an expectation unwaited, which fails it.
+    private let reading = DispatchGroup()
 
     override func setUpWithError() throws {
         var ends: [Int32] = [-1, -1]
@@ -20,22 +22,25 @@ final class RetroHostFramingTests: XCTestCase {
         var on: Int32 = 1
         setsockopt(hostEnd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
         events = []
-        done = expectation(description: "the reader ends")
         let reader = RetroHostReader(socket: launcherEnd) { [weak self] event in
             guard let self else { return }
             self.lock.lock()
             self.events.append(event)
             self.lock.unlock()
         }
-        let finished = done!
+        let group = reading
+        group.enter()
         Thread {
             reader.run()
-            finished.fulfill()
+            group.leave()
         }.start()
     }
 
+    /// Ends the host's side and lets the reader return before its socket is closed, so the reader is
+    /// never left reading a descriptor that is closed (and maybe reused) under it.
     override func tearDown() {
         if hostEnd >= 0 { close(hostEnd) }
+        XCTAssertEqual(reading.wait(timeout: .now() + 10), .success, "the reader ends")
         if launcherEnd >= 0 { close(launcherEnd) }
         hostEnd = -1
         launcherEnd = -1
@@ -58,7 +63,7 @@ final class RetroHostFramingTests: XCTestCase {
     }
 
     private func finish() -> [RetroHostConnectionEvent] {
-        wait(for: [done], timeout: 10)
+        XCTAssertEqual(reading.wait(timeout: .now() + 10), .success, "the reader ends")
         lock.lock()
         defer { lock.unlock() }
         return events

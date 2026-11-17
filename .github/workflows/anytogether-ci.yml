@@ -21,6 +21,11 @@ env:
   WINLIBS_RELEASE: 15.2.0posix-14.0.0-ucrt-r7
   WINLIBS_ZIP: winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-14.0.0-r7.zip
   KNOWN_FAILURES: .github/anytogether-ci/ctest-known-failures.txt
+  # The emulator host's fixture sessions and fake host, which the Mac launcher's
+  # Tests/AnyPS5CoreTests/RetroHost plays against its client (anyps5-retro-host docs/protocol.md
+  # "Fixtures"), as AnyPS5 Desktop's CI does. The commit is AnyTogether/anyps5-retro-host main.
+  RETRO_HOST_REPOSITORY: https://github.com/AnyTogether/anyps5-retro-host.git
+  RETRO_HOST_COMMIT: ea85bf3a96dbbdd1fe0f987bc2a8bd62116c989c
 
 jobs:
   # Named eligibility for upstream's ci-gate convention (tools/check_conventions.py, run by ctest):
@@ -357,6 +362,15 @@ jobs:
           path: tools/macos/launcher/.build
           key: launcher-spm-${{ runner.os }}-${{ hashFiles('tools/macos/launcher/Package.resolved') }}-${{ github.sha }}
           restore-keys: launcher-spm-${{ runner.os }}-${{ hashFiles('tools/macos/launcher/Package.resolved') }}-
+      # The emulator host client's conformance test plays every launcher session of the pinned commit
+      # against its fake host (tests/fake_host.py, run with this runner's python3).
+      - name: Fetch the emulator host's fixtures and fake host
+        run: |
+          git init -q "$RUNNER_TEMP/retro-host"
+          git -C "$RUNNER_TEMP/retro-host" fetch -q --depth 1 "$RETRO_HOST_REPOSITORY" "$RETRO_HOST_COMMIT"
+          git -C "$RUNNER_TEMP/retro-host" checkout -q FETCH_HEAD
+          echo "ANYPS5_RETRO_HOST_CHECKOUT=$RUNNER_TEMP/retro-host" >> "$GITHUB_ENV"
+          python3 --version
       - name: swift test (without the runner-dependent tests in .github/anytogether-ci/swift-test-skips.txt)
         run: |
           skips=()
