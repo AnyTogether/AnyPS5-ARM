@@ -52,13 +52,17 @@ struct Glass: ViewModifier {
     }
 }
 
-/// The white ring and glow a focused element wears; in the Glass theme an ice rim with a cold
-/// glow.
+/// The ring and glow a focused element wears, as on Windows and Linux: a white ring with a brighter
+/// glint travelling around it and a soft halo that breathes slowly and never fully goes out. It
+/// closes in from slightly outside as it lands. Only a focused home tile moves (FocusGlint.moves),
+/// everywhere else the same ring stands still. In the Glass theme an ice rim with a cold glow.
 struct FocusRing: ViewModifier {
     let focused: Bool
     let radius: CGFloat
     let width: CGFloat
+    var animated = false
     @Environment(\.look) private var look
+    @Environment(\.stillBackground) private var stillBackground
 
     func body(content: Content) -> some View {
         content.overlay(
@@ -70,22 +74,122 @@ struct FocusRing: ViewModifier {
                         .opacity(focused ? 1 : 0)
                         .shadow(color: Ice.cyan.opacity(focused ? 0.55 : 0), radius: 14)
                 } else {
-                    RoundedRectangle(cornerRadius: radius + width, style: .continuous)
-                        .strokeBorder(Color.white.opacity(focused ? 0.95 : 0), lineWidth: width)
-                        .padding(-width * 1.6)
-                        .shadow(color: .white.opacity(focused ? 0.45 : 0), radius: 10)
+                    ZStack {
+                        if focused {
+                            let moving = animated && !look.reduceMotion && stillBackground == nil
+                            TimelineView(.animation(paused: !moving)) { context in
+                                GlintRing(radius: radius + width, width: width, phase: moving ? FocusGlint.phase(at: context.date) : nil)
+                            }
+                            .padding(-width * 1.6)
+                            .transition(AnyTransition.opacity.combined(with: AnyTransition.modifier(
+                                active: RingSettle(outset: FocusGlint.settle(width: width, focused: false, reduceMotion: look.reduceMotion)),
+                                identity: RingSettle(outset: 0))))
+                        }
+                    }
+                    .animation(Motion.focus, value: focused)
                 }
             }
+            .allowsHitTesting(false)
         )
+    }
+}
+
+/// The non-Glass focus ring's numbers, the same as Windows and Linux (FocusRing in components.dart).
+enum FocusGlint {
+    /// One full turn of the glint around the edge; the halo breathes twice per turn.
+    static let period: TimeInterval = 4.8
+    /// The ring at its dimmest, in white: it is the only way to see where you are, over any
+    /// picture. The glint brightens it to full white.
+    static let ringOpacity = 0.92
+
+    /// Where the glint is at `date`, 0 to 1 of a turn.
+    static func phase(at date: Date) -> Double {
+        let turns = date.timeIntervalSinceReferenceDate / period
+        return turns - turns.rounded(.down)
+    }
+
+    /// The halo's breath at `phase`: 0 at its faintest, 1 at its brightest, twice per turn. A
+    /// ring standing still (no phase) sits halfway.
+    static func breath(_ phase: Double?) -> Double {
+        guard let phase else { return 0.5 }
+        return 0.5 - 0.5 * cos(phase * 2 * .pi * 2)
+    }
+    /// Only the halo's opacity breathes. Its blur stays fixed, which keeps it cheap for the GPU.
+    static func haloOpacity(_ breath: Double) -> Double { 0.24 + 0.14 * breath }
+    static let haloBlur: CGFloat = 9
+    /// The halo's stroke, in ring widths.
+    static let haloWidth: CGFloat = 2.5
+
+    /// Where the ring starts before it closes in: twice its width further out on every side, the
+    /// same for every size, none with reduced motion.
+    static func settle(width: CGFloat, focused: Bool, reduceMotion: Bool) -> CGFloat {
+        focused || reduceMotion ? 0 : width * 2
+    }
+
+    /// A home tile's ring moves only when it is focused on the home screen with nothing over it,
+    /// no game is starting or running (the GPU is the game's, as for the background) and the
+    /// launcher is in front. FocusRing also keeps it still with reduced motion (the launcher's,
+    /// the system's or Battery & Heat's), in the Glass theme and in the previews.
+    static func moves(focused: Bool, covered: Bool, gameBusy: Bool, active: Bool) -> Bool {
+        focused && !covered && !gameBusy && active
+    }
+
+    /// The ring: its base white with the glint at 0.8 of a turn from the start.
+    static let ringStops: [(location: Double, opacity: Double)] = [(0, ringOpacity), (0.62, ringOpacity), (0.8, 1), (0.98, ringOpacity), (1, ringOpacity)]
+    /// The glint's own glow, a tighter pass that lights the halo where it goes by.
+    static let glowStops: [(location: Double, opacity: Double)] = [(0, 0), (0.62, 0), (0.8, 0.38), (0.98, 0), (1, 0)]
+
+    static func gradient(_ stops: [(location: Double, opacity: Double)], phase: Double) -> AngularGradient {
+        AngularGradient(stops: stops.map { Gradient.Stop(color: .white.opacity($0.opacity), location: $0.location) },
+                        center: .center, angle: .degrees(phase * 360))
+    }
+}
+
+extension AppModel {
+    /// Whether a home tile's focus ring moves (FocusGlint.moves).
+    func homeTileGlints(_ focused: Bool) -> Bool {
+        FocusGlint.moves(focused: focused, covered: overlay != nil, gameBusy: starting != nil || playingGame != nil || fontWait != nil, active: active)
+    }
+}
+
+/// The ring a little further out, where it starts before it closes in.
+private struct RingSettle: ViewModifier {
+    let outset: CGFloat
+    func body(content: Content) -> some View { content.padding(-outset) }
+}
+
+/// The non-Glass ring at one moment of its turn: the halo, the ring with its glint, the glint's
+/// glow. Standing still (no phase) it is the plain ring in its halo, with no glint.
+private struct GlintRing: View {
+    let radius: CGFloat
+    let width: CGFloat
+    let phase: Double?
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+        ZStack {
+            shape.inset(by: width / 2)
+                .stroke(Color.white.opacity(FocusGlint.haloOpacity(FocusGlint.breath(phase))), lineWidth: width * FocusGlint.haloWidth)
+                .blur(radius: FocusGlint.haloBlur)
+            if let phase {
+                shape.strokeBorder(FocusGlint.gradient(FocusGlint.ringStops, phase: phase), lineWidth: width)
+                shape.inset(by: width / 2)
+                    .stroke(FocusGlint.gradient(FocusGlint.glowStops, phase: phase), lineWidth: width * 2)
+                    .blur(radius: 6)
+            } else {
+                shape.strokeBorder(Color.white.opacity(FocusGlint.ringOpacity), lineWidth: width)
+            }
+        }
     }
 }
 
 extension View {
     func glass(_ radius: CGFloat, opacity: Double = 0.38) -> some View { modifier(Glass(radius: radius, opacity: opacity)) }
 
-    /// The white ring and glow a focused element wears.
-    func focusRing(_ focused: Bool, radius: CGFloat, width: CGFloat = 3) -> some View {
-        modifier(FocusRing(focused: focused, radius: radius, width: width))
+    /// The ring and glow a focused element wears. `animated` lets it move (a home tile, see
+    /// FocusGlint.moves), otherwise it stands still.
+    func focusRing(_ focused: Bool, radius: CGFloat, width: CGFloat = 3, animated: Bool = false) -> some View {
+        modifier(FocusRing(focused: focused, radius: radius, width: width, animated: animated))
     }
 }
 

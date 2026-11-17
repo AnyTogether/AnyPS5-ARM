@@ -12,6 +12,8 @@ final class Input {
     var handler: ((Command) -> Bool)?
     /// Scroll wheel turns as left and right moves, where the screen wants them.
     var scrollHandler: ((Command) -> Bool)?
+    /// Any mouse button pressed, before anything else looks at the click.
+    var pointerDownHandler: (() -> Void)?
     /// A right click on Home opens the Options menu; true when it took the click.
     var rightClickHandler: (() -> Bool)?
     /// Esc (the key, not Circle): true when the screen took it as more than Back ("Quit AnyPS5?").
@@ -97,6 +99,7 @@ final class Input {
             return self.dispatch(command, repeat: false) ? nil : event
         }
         mouseMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .mouseMoved]) { [weak self] event in
+            if event.type != .mouseMoved { self?.pointerDownHandler?() }
             if event.type == .otherMouseDown, let button = Input.sideButton(event.buttonNumber), !Input.belongsToPanel(event) {
                 Feel.shared.usedKeyboard()
                 InputModeState.shared.usedKeyboard()

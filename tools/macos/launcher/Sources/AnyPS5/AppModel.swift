@@ -624,6 +624,8 @@ final class AppModel: ObservableObject {
     @Published var cjkInstalled = false
     /// The game waiting for those fonts before it starts.
     @Published var fontWait: Game?
+    /// Something to do at the next key, button or click, once (the start animation finishing).
+    var onInput: (@MainActor () -> Void)?
     var cjkWaiters: [@MainActor (Bool) -> Void] = []
     /// The oldest macOS each unlocked game's libraries need, by bundle and engine (requiredSystem(of:bundle:)).
     private var bundleSystems: [String: SystemMinimum.Version?] = [:]
@@ -728,14 +730,15 @@ final class AppModel: ObservableObject {
     /// The Mac's power and the battery and heat profiles in force (PowerWatch.swift).
     let power = PowerWatch()
 
-    init(preferences: Preferences? = nil) {
+    /// `vault` stands in for the Keychain in the tests.
+    init(preferences: Preferences? = nil, vault: SecretVault? = nil) {
         self.persists = preferences == nil
         self.settlesSelection = preferences == nil
         let loaded = preferences ?? Preferences.load()
         self.preferences = loaded
         // Profiles: a launcher set up before them becomes its first profile at once, its session
         // moving from the old file into that profile's Keychain item.
-        let vault: SecretVault = preferences == nil ? KeychainVault() : MemoryVault()
+        let vault: SecretVault = vault ?? (preferences == nil ? KeychainVault() : MemoryVault())
         self.vault = vault
         let legacyUser = preferences == nil ? TokenStore(file: TokenStore.legacyFile).user : nil
         profiles = ProfileStore(folder: preferences == nil ? ProfileStore.defaultFolder : FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-preview-profiles-\(UUID().uuidString)"),
@@ -755,14 +758,18 @@ final class AppModel: ObservableObject {
         // Settings → Game Presets of the profile playing.
         loadGamePresets()
         if persists {
-            // An offline profile keeps its session (if it has one) unused.
-            togetherUser = currentProfile?.mode == .offline ? nil : together.user
             DispatchQueue.main.async { [weak self] in self?.startFamily() }
-            // With the picker up, the socket waits for the profile picked.
+            // With the picker up, the session is read for the profile picked. Else the profile
+            // playing's, off the main thread (readSession), then the socket; an offline profile
+            // keeps its session (if it has one) unused.
             if profiles.launchScreen == .picker && self.preferences.onboarded {
                 DispatchQueue.main.async { [weak self] in self?.openProfilePicker(atLaunch: true) }
-            } else if togetherUser != nil {
-                DispatchQueue.main.async { [weak self] in self?.startTogetherSocket() }
+            } else if currentProfile?.mode != .offline {
+                readSession { [weak self] user in
+                    guard let self, self.togetherUser == nil, let user else { return }
+                    self.togetherUser = user
+                    self.startTogetherSocket()
+                }
             }
         }
         apply()
