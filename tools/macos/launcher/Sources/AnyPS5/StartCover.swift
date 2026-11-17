@@ -240,7 +240,7 @@ struct StartCoverView: View {
     /// The zoom it comes in from.
     static func entranceScale(reducedMotion: Bool) -> CGFloat { reducedMotion ? 1 : 1.04 }
 
-    static func entrance(reducedMotion: Bool) -> Animation {
+    static func entranceAnimation(reducedMotion: Bool) -> Animation {
         reducedMotion ? .easeInOut(duration: 0.15) : .timingCurve(0.22, 1, 0.36, 1, duration: StartCoverTiming.standard.entrance)
     }
 
@@ -275,7 +275,7 @@ struct StartCoverView: View {
         .onAppear {
             since = Date()
             guard entrance else { return }
-            withAnimation(Self.entrance(reducedMotion: reduceMotion)) { shown = true }
+            withAnimation(Self.entranceAnimation(reducedMotion: reduceMotion)) { shown = true }
         }
     }
 
