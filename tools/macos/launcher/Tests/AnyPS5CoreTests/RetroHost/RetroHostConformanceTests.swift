@@ -478,9 +478,12 @@ final class RetroSessionPlayer: @unchecked Sendable {
                         let stop = RetroWaiter<RetroStatus?>()
                         stopping = stop
                         let client = self.client!
-                        Task {
+                        let stopTask = Task {
                             do { stop.finish(.success(try await client.stopGame())) } catch { stop.finish(.failure(error)) }
                         }
+                        // The screen that asked may be gone: a cancelled caller still sees the stop
+                        // through, so the stop deadline is cleared and no hung host is reported.
+                        stopTask.cancel()
                         waiter.finish(.success(.null))
                     } else if method == "status", let stop = stopping {
                         stopping = nil

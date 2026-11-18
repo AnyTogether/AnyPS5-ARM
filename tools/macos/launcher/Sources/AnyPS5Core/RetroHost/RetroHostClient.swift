@@ -241,9 +241,13 @@ public final class RetroHostClient: @unchecked Sendable {
     public var exit: RetroHostExit? { onQueue { exitLatch.value } }
     /// How the connection ended, once it has.
     public var end: RetroHostEnd? { onQueue { endedLatch.value } }
-    /// The newest frame of the current game, pinned; nil before one came. Read it on the client's
-    /// queue (in `onFrame`) to be sure it is not unmapped while it is read.
-    public var frame: RetroPinnedFrame? { onQueue { shownFrame } }
+    /// The newest frame of the current game, pinned; nil before one came. Only on the client's
+    /// queue (in `onFrame`): the queue unmaps a ring when it grows or the game ends, so a pointer
+    /// read anywhere else could be unmapped while it is read.
+    public var frame: RetroPinnedFrame? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        return shownFrame
+    }
 
     /// Returns once `welcome` came and the first `volume` call was answered; throws `RetroHostGone`
     /// when the connection ended first.
@@ -302,7 +306,8 @@ public final class RetroHostClient: @unchecked Sendable {
 
     /// `stop`, then `status` until the game has ended, which it gives. The host is killed if the game
     /// has not ended 10 seconds after `stop` (protocol.md "Timeouts"), and the status then is the
-    /// failure report. Nil when no game was loaded.
+    /// failure report. Nil when no game was loaded. It runs to its end even when the calling task
+    /// is cancelled.
     public func stopGame() async throws -> RetroStatus? {
         _ = try await perform { (done: @escaping (Result<RetroJSON, Error>) -> Void) in
             if self.endedLatch.value == nil {
@@ -320,7 +325,11 @@ public final class RetroHostClient: @unchecked Sendable {
                 queue.async { self.stopDeadline = nil }
                 return current
             }
-            try await Task.sleep(nanoseconds: Self.stopPoll)
+            // Not cancelled with the caller: the stop deadline is only cleared by a status that
+            // saw the game end, so a stop left halfway would get the host killed as hung 10 s on.
+            await withCheckedContinuation { (resume: CheckedContinuation<Void, Never>) in
+                queue.asyncAfter(deadline: .now() + .nanoseconds(Int(Self.stopPoll))) { resume.resume() }
+            }
         }
     }
 
