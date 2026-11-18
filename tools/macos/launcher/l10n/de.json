@@ -61,6 +61,8 @@
   "followDefault": "Standard (%@)",
   "useDisplayDefaults": "Anzeigevorgaben verwenden",
   "useDisplayDefaultsDetail": "Anzeige, Fenstergröße und vertikale Synchronisierung werden auf Einstellungen › Standardanzeige zurückgesetzt",
+  "startAnimation": "Startanimation",
+  "startAnimationDetail": "Während ein Spiel lädt, bleibt sein Cover sichtbar. Im Vollbild blendet es über dem Spiel aus, im Fenster auf dem Startbildschirm. Aus: kein Cover",
   "overlay": "Leistungsanzeige",
   "overlayOff": "Aus",
   "overlayTopLeft": "Oben links",

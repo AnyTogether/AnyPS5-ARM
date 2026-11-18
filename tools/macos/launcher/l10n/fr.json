@@ -61,6 +61,8 @@
   "followDefault": "Par défaut (%@)",
   "useDisplayDefaults": "Utiliser les paramètres d’affichage par défaut",
   "useDisplayDefaultsDetail": "L’affichage, la taille de la fenêtre et la synchronisation verticale seront rétablis dans Réglages › Affichage par défaut",
+  "startAnimation": "Animation de démarrage",
+  "startAnimationDetail": "Pendant le chargement, la jaquette reste affichée. En plein écran elle s'estompe sur le jeu, en fenêtre sur l'écran d'accueil. Désactivé : pas de jaquette",
   "overlay": "Superposition des performances",
   "overlayOff": "Désactivée",
   "overlayTopLeft": "En haut à gauche",

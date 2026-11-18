@@ -61,6 +61,8 @@
   "followDefault": "Standard (%@)",
   "useDisplayDefaults": "Använd standardskärminställningar",
   "useDisplayDefaultsDetail": "Skärm, fönsterstorlek och vertikal synkronisering återställs via Inställningar › Standardskärminställningar",
+  "startAnimation": "Startanimation",
+  "startAnimationDetail": "Medan ett spel laddas stannar omslaget kvar. I helskärm tonas det ut över spelet, i fönster på hemskärmen. Av: inget omslag",
   "overlay": "Prestandaöverlägg",
   "overlayOff": "Av",
   "overlayTopLeft": "Längst upp till vänster",

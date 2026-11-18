@@ -61,6 +61,8 @@
   "followDefault": "Standard (%@)",
   "useDisplayDefaults": "Brug standardvisning",
   "useDisplayDefaultsDetail": "Skærm, vinduesstørrelse og vertikal synkronisering nulstilles til Indstillinger › Standardvisning",
+  "startAnimation": "Startanimation",
+  "startAnimationDetail": "Mens et spil indlæses, bliver coveret vist. I fuldskærm forsvinder det over spillet, i vindue på startskærmen. Fra: intet cover",
   "overlay": "Ydeevne-overlay",
   "overlayOff": "Fra",
   "overlayTopLeft": "Øverst til venstre",

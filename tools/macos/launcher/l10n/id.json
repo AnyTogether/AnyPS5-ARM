@@ -61,6 +61,8 @@
   "followDefault": "Bawaan (%@)",
   "useDisplayDefaults": "Gunakan Tampilan Default",
   "useDisplayDefaultsDetail": "Tampilan, ukuran jendela, dan sinkronisasi vertikal kembali ke Pengaturan › Tampilan Default",
+  "startAnimation": "Animasi mulai",
+  "startAnimationDetail": "Saat game dimuat, sampul tetap tampil. Layar penuh memudar di atas game, jendela di layar beranda. Mati: tanpa sampul",
   "overlay": "Hamparan Kinerja",
   "overlayOff": "Mati",
   "overlayTopLeft": "Kiri Atas",

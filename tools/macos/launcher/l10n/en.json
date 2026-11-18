@@ -61,6 +61,8 @@
   "followDefault": "Default (%@)",
   "useDisplayDefaults": "Use Default Display",
   "useDisplayDefaultsDetail": "Window or full screen, window size and vertical sync back to Settings › Default Display",
+  "startAnimation": "Start animation",
+  "startAnimationDetail": "While a game loads, its cover stays up. In full screen it fades over the game, in a window on the home screen. Off: no cover is shown",
   "overlay": "Performance Overlay",
   "overlayOff": "Off",
   "overlayTopLeft": "Top Left",

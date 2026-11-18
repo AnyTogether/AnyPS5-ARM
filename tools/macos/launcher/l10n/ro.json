@@ -61,6 +61,8 @@
   "followDefault": "Implicit (%@)",
   "useDisplayDefaults": "Folosește afișajul implicit",
   "useDisplayDefaultsDetail": "Afișajul, dimensiunea ferestrei și sincronizarea verticală revin la Setări › Afișaj implicit",
+  "startAnimation": "Animație de pornire",
+  "startAnimationDetail": "În timp ce un joc se încarcă, coperta rămâne. Pe ecran complet dispare peste joc, în fereastră pe ecranul de start. Oprit: fără copertă",
   "overlay": "Suprapunere performanță",
   "overlayOff": "Dezactivat",
   "overlayTopLeft": "Stânga sus",

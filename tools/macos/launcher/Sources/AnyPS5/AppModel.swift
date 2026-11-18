@@ -406,6 +406,9 @@ final class AppModel: ObservableObject {
                 if shortcutCapture != nil { endShortcutCapture() }
                 if capturingTalkKey { endTalkKeyCapture() }
             }
+            // A menu opened over the cover (PS): it goes rather than hide a menu that takes the
+            // presses, and the panel over the game is let go, as on Windows and Linux.
+            if overlay != nil, starting == nil { dropCover() }
             // The controller test takes the pads' buttons: only PS acts while it is open.
             Input.shared.testing = overlay == .controllerTest
         }
@@ -518,6 +521,28 @@ final class AppModel: ObservableObject {
     @Published private(set) var starting: Game? {
         didSet { if (oldValue == nil) != (starting == nil) { prepareSoon() } }
     }
+    /// The game whose cover stays up after its window showed, until the window has settled
+    /// (StartCover.swift), as on Windows and Linux. Apart from `starting`, which means the game
+    /// has no window yet to everything that reads it.
+    @Published var coverGame: Game?
+    /// The cover's panel is over the game: the launcher's own cover went at once, without a fade.
+    @Published var coverHandedOver = false
+    /// The start's Start animation, from the press of Play until the game's window shows.
+    var startCover: StartCoverChoice?
+    /// The hand-off running now: a menu opening over the cover or the game ending lets it go.
+    var coverTurn: StartCoverTurn?
+    /// The cover's timings, Desktop's; shorter in the tests.
+    var coverTiming = StartCoverTiming.standard
+    /// Whether the game's process is still there, where its window is (the screen's top left
+    /// corner is 0, 0) and the game given the front; replaced in tests.
+    var gameAlive: (pid_t) -> Bool = { AppModel.isAlive($0) }
+    var gameWindowFrame: (pid_t) -> CGRect? = { AppModel.windowFrame(of: $0) }
+    var bringGameFront: @MainActor (NSRunningApplication) -> Void = { app in
+        NSApp.yieldActivation(to: app)
+        app.activate()
+    }
+    /// The cover over the game's screen, from its window's frame; nil where it cannot be shown.
+    var makeCoverSurface: @MainActor (Game, Color, CGRect) -> StartCoverSurface? = { StartCoverPanel.make(game: $0, accent: $1, window: $2) }
 
     /// The emulator playing a disc (StandaloneEmulators.swift). Apart from `running`, which is a
     /// PS5 game's own process: what follows that one (AnyTogether's presence and play sessions,
@@ -2522,6 +2547,7 @@ final class AppModel: ObservableObject {
         configuration.environment = launch.environment(under: launcherEnvironment, reserved: Installer.launchScriptVariables)
         configuration.arguments = launch.arguments
         markStart(of: game, traced: trace || settings.trace == true, once: once, launch: AppModel.launchNotes(settings.launchOptions, launch, launcherEnvironment))
+        startCover = StartCoverChoice(animation: settings.startAnimation, overGame: settings.fadesCover)
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = Date()
         withAnimation(Motion.overlay) { starting = game }
@@ -2534,6 +2560,7 @@ final class AppModel: ObservableObject {
                     return
                 }
                 if let app {
+                    self.startCover?.began = Date()
                     self.running = (game, app)
                     self.lastSessions[game.id]?.pid = app.processIdentifier
                     self.sessionStart = Date()
@@ -2543,6 +2570,7 @@ final class AppModel: ObservableObject {
                     self.watchForExit(of: app.processIdentifier)
                     self.watchForWindow(of: app)
                 } else {
+                    self.startCover = nil
                     withAnimation(Motion.overlay) { self.starting = nil }
                     self.show(T.text(.startFailed) + (error.map { ": " + $0.localizedDescription } ?? ""), symbol: "exclamationmark.triangle.fill")
                 }
@@ -2804,7 +2832,7 @@ final class AppModel: ObservableObject {
     }
 
     /// A card over the game that just started when Low Power Mode holds the display at 60 Hz.
-    private func tellLowPower(about game: Game) {
+    func tellLowPower(about game: Game) {
         guard let kind = PowerNotice.kind(lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled, displayMaximumFPS: NSScreen.main?.maximumFramesPerSecond ?? 60,
                                           frameGeneration: settings(for: game).frameGeneration == true),
               toldLowPower.insert(game.id).inserted else { return }
@@ -2828,18 +2856,36 @@ final class AppModel: ObservableObject {
                 applicationEnded(pid)
                 return
             }
-            NSApp.yieldActivation(to: app)
-            app.activate()
             discordSince = Date()
-            if let game = running?.game { tellLowPower(about: game) }
             startClips(for: app)
             gameWindowShown = true
             updateDiscord()
             updateRemotePlay()
             updateTogetherPresence()
+            windowShown(app)
+        }
+    }
+
+    /// The game's window is there. With Start animation on, the start screen's cover stays up and
+    /// the hand-off takes it from here (StartCover.swift); off, the game takes the front at once.
+    private func windowShown(_ app: NSRunningApplication) {
+        let choice = startCover
+        startCover = nil
+        guard let choice, choice.animation, let game = running?.game ?? starting else {
+            bringGameFront(app)
+            if let game = running?.game { tellLowPower(about: game) }
             withAnimation(Motion.overlay) { starting = nil }
             if preferences.hideWhilePlaying { hideWindows() }
+            return
         }
+        // The same cover goes on showing: nothing moves on screen.
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) {
+            coverGame = game
+            starting = nil
+        }
+        Task { await handOff(game, app: app, overGame: choice.overGame, began: choice.began ?? Date()) }
     }
 
     /// A game that dies before it opens a window never checks in with the window server, so
@@ -2855,7 +2901,7 @@ final class AppModel: ObservableObject {
         if !Self.isAlive(pid) { applicationEnded(pid) }
     }
 
-    nonisolated private static func isAlive(_ pid: pid_t) -> Bool {
+    nonisolated static func isAlive(_ pid: pid_t) -> Bool {
         kill(pid, 0) == 0 || errno != ESRCH
     }
 
@@ -2872,6 +2918,7 @@ final class AppModel: ObservableObject {
     func cancelStart() {
         guard starting != nil else { return }
         startWatch?.cancel()
+        startCover = nil
         // An emulator still on its way is given up: it is ended when it comes up after all.
         emulatorTurn += 1
         Sounds.shared.play(.back)
@@ -3010,8 +3057,10 @@ final class AppModel: ObservableObject {
         exitWatch = nil
         if starting != nil {
             startWatch?.cancel()
+            startCover = nil
             withAnimation(Motion.overlay) { starting = nil }
         }
+        endCover()
         showWindows()
         NSApp.activate(ignoringOtherApps: true)
         if let next = launchAfterExit, let game = games.first(where: { $0.id == next }) {
@@ -3516,7 +3565,7 @@ final class AppModel: ObservableObject {
 
     /// The launcher's windows step aside while a game runs. The app itself stays unhidden: a
     /// hidden app's windows, the trophy banner among them, never show.
-    private func hideWindows() {
+    func hideWindows() {
         hiddenWindows = NSApp.windows.filter { $0.isVisible && !($0 is NSPanel) }
         for window in hiddenWindows { window.orderOut(nil) }
     }

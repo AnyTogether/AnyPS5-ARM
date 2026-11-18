@@ -152,9 +152,14 @@ struct RootView: View {
                 if model.share.watching != nil {
                     ShareWatchView().transition(.opacity)
                 }
-                if let game = model.starting ?? model.fontWait {
-                    LaunchSplash(game: game)
-                        .transition(.opacity.combined(with: .scale(scale: 1.04)))
+                if let game = model.starting ?? model.coverGame ?? model.fontWait {
+                    if model.showsCover(game) {
+                        // The console-style cover, as on Windows and Linux (StartCover.swift).
+                        StartCoverLayer(game: game).transition(.opacity)
+                    } else {
+                        LaunchSplash(game: game)
+                            .transition(.opacity.combined(with: .scale(scale: 1.04)))
+                    }
                 }
                 if let call = model.ringing, model.pairing == nil {
                     RingingCard(call: call)
@@ -325,7 +330,8 @@ struct RootView: View {
     }
 }
 
-/// Shown from the press of Play until the game's window appears, like the console's start screen.
+/// Shown from the press of Play until the game's window appears when its Start animation is off
+/// (the cover takes its place when it is on, StartCover.swift).
 struct LaunchSplash: View {
     let game: Game
     @EnvironmentObject private var model: AppModel

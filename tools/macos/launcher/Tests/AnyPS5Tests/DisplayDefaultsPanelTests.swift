@@ -19,7 +19,7 @@ final class DisplayDefaultsPanelTests: XCTestCase {
         let display = try XCTUnwrap(ids.firstIndex(of: "display"))
         XCTAssertEqual(ids[display + 1], "presets")
         let rows = model.displayDefaultRows()
-        XCTAssertEqual(rows.map(\.id), ["displayDefaultsIntro", "defaultDisplay", "defaultSize", "defaultVsync"])
+        XCTAssertEqual(rows.map(\.id), ["displayDefaultsIntro", "defaultDisplay", "defaultStartAnimation", "defaultSize", "defaultVsync"])
         try XCTUnwrap(choice(try row(rows, "defaultDisplay"))).set(1)
         XCTAssertEqual(model.preferences.displayDefaults?.fullscreen, true)
         XCTAssertFalse(model.displayDefaultRows().contains { $0.id == "defaultSize" }, "no window size in full screen")

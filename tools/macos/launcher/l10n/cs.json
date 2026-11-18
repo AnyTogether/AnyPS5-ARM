@@ -61,6 +61,8 @@
   "followDefault": "Výchozí (%@)",
   "useDisplayDefaults": "Použít výchozí zobrazení",
   "useDisplayDefaultsDetail": "Nastavení zobrazení, velikosti okna a vertikální synchronizace se vrátí na hodnoty v části Nastavení › Výchozí zobrazení",
+  "startAnimation": "Úvodní animace",
+  "startAnimationDetail": "Zatímco se hra načítá, obal zůstane. Na celou obrazovku pak zmizí přes hru, v okně na domovské obrazovce. Vypnuto: žádný obal",
   "overlay": "Překryvný panel výkonu",
   "overlayOff": "Vypnuto",
   "overlayTopLeft": "Vlevo nahoře",

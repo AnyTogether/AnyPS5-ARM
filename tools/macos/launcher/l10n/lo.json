@@ -61,6 +61,8 @@
   "followDefault": "ຄ່າເລີ່ມຕົ້ນ (%@)",
   "useDisplayDefaults": "ໃຊ້ການຕັ້ງຄ່າຈໍສະແດງຜົນເລີ່ມຕົ້ນ (Default Display)",
   "useDisplayDefaultsDetail": "ການສະແດງຜົນ, ຂະໜາດໜ້າຕ່າງ ແລະ ການຊິງຄ໌ແນວຕັ້ງ (Vertical Sync) ຖືກຕັ້ງຄ່າກັບຄືນສູ່ ການຕັ້ງຄ່າ › ການສະແດງຜົນເລີ່ມຕົ້ນ",
+  "startAnimation": "ແອນິເມຊັນເລີ່ມຕົ້ນ",
+  "startAnimationDetail": "ໃນຂະນະທີ່ເກມກຳລັງໂຫຼດ ປົກຄອງຍັງຄົງຢູ່. ເຕັມຈໍ ຈະຈາງໄປເທິງເກມ, ໃນໜ້າຕ່າງ ຢູ່ໜ້າຈໍຫຼັກ. ປິດ: ບໍ່ສະແດງປົກຄອງ",
   "overlay": "ການສະແດງຂໍ້ມູນປະສິດທິພາບ (Performance Overlay)",
   "overlayOff": "ປິດ",
   "overlayTopLeft": "ເທິງຊ້າຍ",
