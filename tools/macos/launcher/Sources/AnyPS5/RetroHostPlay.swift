@@ -44,6 +44,10 @@ final class RetroPlay {
     var statePage: RetroStatePage?
     /// The slot Overwrite slot N? asks about (`Overlay.retroOverwriteState`).
     var overwriting: Int?
+    /// A save or load was chosen and has not answered yet: set the moment it is chosen, before its
+    /// task runs, so a second press meanwhile is let go, as on Windows and Linux, where the save
+    /// marks itself under way before anything waits.
+    var stateAsked = false
     /// How many times the menu was opened: a save or load goes back to the game only from the visit
     /// it was asked in, not from the menu opened again while it waited.
     var menuVisits = 0
@@ -755,7 +759,7 @@ extension AppModel {
                 if page == .save {
                     self.chooseRetroSaveSlot(play, slot)
                 } else {
-                    Task { await self.loadRetroState(play, slot.slot) }
+                    self.chooseRetroLoadSlot(play, slot.slot)
                 }
             }
             return PanelRow(id: "state-\(slot.slot)", title: TRetro.format(.retroStateSlot, "\(slot.slot + 1)"), detail: detail, symbol: "square.stack",
@@ -778,8 +782,9 @@ extension AppModel {
     /// A slot chosen on Save state: an empty one is saved into at once; one that holds a state asks
     /// Overwrite slot N? first, in the same two-answer card as Close game, Cancel first.
     private func chooseRetroSaveSlot(_ play: RetroPlay, _ slot: RetroStateSlot) {
-        guard !play.states.busy, retroPlay === play else { return }
+        guard !play.states.busy, !play.stateAsked, retroPlay === play else { return }
         if slot.empty {
+            play.stateAsked = true
             Task { await saveRetroState(play, slot.slot) }
             return
         }
@@ -834,7 +839,17 @@ extension AppModel {
         withAnimation(Motion.overlay) { overlay = .retroMenu }
         menuIndex = slot
         Sounds.shared.play(.select)
+        guard !play.states.busy, !play.stateAsked else { return }
+        play.stateAsked = true
         Task { await saveRetroState(play, slot) }
+    }
+
+    /// A slot chosen on Load state: loaded, unless a save or load already runs, when the press is
+    /// let go.
+    private func chooseRetroLoadSlot(_ play: RetroPlay, _ slot: Int) {
+        guard !play.states.busy, !play.stateAsked, retroPlay === play else { return }
+        play.stateAsked = true
+        Task { await loadRetroState(play, slot) }
     }
 
     /// Saves the game into `slot`: back to the game once it is saved, the slot said; still on Save
@@ -842,6 +857,7 @@ extension AppModel {
     private func saveRetroState(_ play: RetroPlay, _ slot: Int) async {
         let visit = play.menuVisits
         let outcome = await play.states.save(slot)
+        play.stateAsked = false
         guard retroPlay === play else { return }
         NSLog("[anyps5-launcher] emulator host: save state slot %d: %@", slot, outcome.rawValue)
         guard outcome == .done else {
@@ -857,9 +873,9 @@ extension AppModel {
     /// the host refused it (a state of another emulator build or game, or a damaged file), which is
     /// said.
     private func loadRetroState(_ play: RetroPlay, _ slot: Int) async {
-        guard !play.states.busy else { return }
         let visit = play.menuVisits
         let outcome = await play.states.load(slot)
+        play.stateAsked = false
         guard retroPlay === play else { return }
         NSLog("[anyps5-launcher] emulator host: load state slot %d: %@", slot, outcome.rawValue)
         guard outcome == .done else {

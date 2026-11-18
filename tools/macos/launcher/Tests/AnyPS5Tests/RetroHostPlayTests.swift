@@ -852,6 +852,30 @@ final class RetroHostPlayTests: XCTestCase {
         try await settle({ model.toast?.text == "Slot 3 loaded" })
     }
 
+    func testASecondPressOnAnEmptySlotWhileTheFirstSaveRunsIsLetGo() async throws {
+        let (model, game, host) = try await playing()
+        hostWritesStates(host, try folder(model, game))
+        host.answer("saveState", Self.saved)
+        try await openMenu(model, host)
+        try choose(model, "saveState")
+        let gate = PlayGate()
+        host.callGate = gate
+        model.toast = nil
+        // Both presses, and Cross on another empty slot, come before the first save's task has run.
+        try choose(model, "state-2")
+        try choose(model, "state-2")
+        XCTAssertTrue(model.handle(.select))
+        try await settle({ host.methods.contains("saveState") })
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertEqual(saveCalls(host).count, 1, "one save")
+        XCTAssertNil(model.toast, "the press that came meanwhile says nothing")
+        host.callGate = nil
+        gate.open()
+        try await settle({ model.overlay == nil })
+        XCTAssertEqual(model.toast?.text, "Saved in slot 3")
+        XCTAssertEqual(saveCalls(host).count, 1)
+    }
+
     func testASaveThatDoesNotWorkSaysSoAndStaysOnSaveState() async throws {
         let (model, _, host) = try await playing()
         host.refuse("saveState", RetroCallError(code: RetroCallError.fileError, message: "not written"))
