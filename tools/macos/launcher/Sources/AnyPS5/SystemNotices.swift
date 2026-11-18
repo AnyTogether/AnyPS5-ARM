@@ -37,7 +37,7 @@ final class SystemNotices: NSObject, UNUserNotificationCenterDelegate {
         deliver = { request in center.add(request) { _ in } }
         askPermission = { [weak self] in
             center.requestAuthorization(options: [.alert, .sound]) { _, _ in
-                DispatchQueue.main.async { self?.refresh() }
+                DispatchQueue.main.async { MainActor.assumeIsolated { self?.refresh() } }
             }
         }
     }

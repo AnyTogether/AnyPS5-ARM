@@ -16,10 +16,10 @@ final class SystemNoticesTests: XCTestCase {
     func notices(_ permission: SystemNotice.Permission) -> SystemNotices {
         let notices = SystemNotices()
         notices.permission = permission
-        notices.launcherInFront = { [unowned self] in inFront }
-        notices.gamePlaying = { [unowned self] in playing }
-        notices.deliver = { [unowned self] in delivered.append($0) }
-        notices.askPermission = { [unowned self] in asks += 1 }
+        notices.launcherInFront = { [unowned self] in self.inFront }
+        notices.gamePlaying = { [unowned self] in self.playing }
+        notices.deliver = { [unowned self] in self.delivered.append($0) }
+        notices.askPermission = { [unowned self] in self.asks += 1 }
         return notices
     }
 
