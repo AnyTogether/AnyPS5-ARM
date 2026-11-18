@@ -36,6 +36,10 @@ public enum RetroHostClientError: Error, Equatable {
     case useStopGame
     /// A controller value is outside what protocol.md "input" allows.
     case outOfRange(String)
+    /// The check given to `start` was released or used by another start: check again.
+    case checkNotHeld
+    /// The command does not start the executable that was checked.
+    case notTheCheckedHost
 }
 
 /// A `frame` message, after the client pinned and checked the newest frame. `frame` is nil when
@@ -155,6 +159,13 @@ public final class RetroHostClient: @unchecked Sendable {
     private var released = false
     private var releaseWaiters: [() -> Void] = []
 
+    /// The checked files, held until the host has exited: the host loads the core again for every
+    /// game it starts (protocol.md "Finding and checking the host").
+    private var checked: RetroHostChecked?
+    /// The cores of the checked release, SwanStation and LRPS2 when it ships one: the only cores
+    /// `start` may name for a checked host. Nil for a host that was not checked.
+    private var releaseCores: Set<String>?
+
     private init(volume: Double, muted: Bool, pixelFormats: [RetroPixelFormat],
                  onFrame: ((RetroFrameEvent) -> Void)?, onRumble: ((RetroRumble) -> Void)?) {
         self.volume = volume
@@ -169,23 +180,46 @@ public final class RetroHostClient: @unchecked Sendable {
     /// protocol's own; `environment` adds to the launcher's environment for the host. `volume` and
     /// `muted` are sent as the first call after `welcome`. The process is started off the caller's
     /// thread; the client is returned once it exists, with `hello` on its way.
-    public static func start(command: [String], environment: [String: String] = [:], volume: Double = 1,
-                             muted: Bool = false, pixelFormats: [RetroPixelFormat] = [.rgba8, .bgra8],
+    ///
+    /// `checked` is a host whose files were checked (RetroHostRelease.swift), as on Windows and
+    /// Linux: `command` must start its executable, its files stay held until the host has exited
+    /// (`exited()` gives the exit only after they are let go), and for the whole life of the host a
+    /// `start` may name only the release's cores. A start that fails lets them go at once. A check
+    /// is good for one start.
+    public static func start(command: [String], checked: RetroHostChecked? = nil, environment: [String: String] = [:],
+                             volume: Double = 1, muted: Bool = false, pixelFormats: [RetroPixelFormat] = [.rgba8, .bgra8],
                              onFrame: ((RetroFrameEvent) -> Void)? = nil,
                              onRumble: ((RetroRumble) -> Void)? = nil) async throws -> RetroHostClient {
+        if let checked {
+            guard checked.claim() else { throw RetroHostClientError.checkNotHeld }
+            guard command.first == checked.executable else {
+                checked.release()
+                throw RetroHostClientError.notTheCheckedHost
+            }
+        }
         let client = RetroHostClient(volume: volume, muted: muted, pixelFormats: pixelFormats,
                                      onFrame: onFrame, onRumble: onRumble)
+        client.checked = checked
+        client.releaseCores = checked?.cores
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             client.queue.async {
                 do {
                     try client.open(command: command, environment: environment)
                     continuation.resume()
                 } catch {
+                    client.releaseChecked()
                     continuation.resume(throwing: error)
                 }
             }
         }
         return client
+    }
+
+    /// Lets the checked files go, once the host has exited or never started.
+    private func releaseChecked() {
+        let held = checked
+        checked = nil
+        held?.release()
     }
 
     private func open(command: [String], environment: [String: String]) throws {
@@ -386,6 +420,12 @@ public final class RetroHostClient: @unchecked Sendable {
     }
 
     private func send(_ method: String, _ args: RetroJSON, _ done: @escaping (Result<RetroJSON, Error>) -> Void) {
+        if method == "start", let cores = releaseCores, !cores.contains(args.objectValue?["core"]?.stringValue ?? "") {
+            return done(.failure(RetroCallError(
+                code: RetroCallError.argument,
+                message: "A release host only runs the cores it was released with (\(cores.sorted().joined(separator: ", ")))."))
+            )
+        }
         if endedLatch.value != nil { return done(afterFailure(method)) }
         guard greeted else { return done(.failure(RetroHostClientError.notWelcomed)) }
         if method != "volume", !hostCapabilities.contains(RetroProtocol.ps1Capability) {
@@ -476,6 +516,7 @@ public final class RetroHostClient: @unchecked Sendable {
                 finish(.hostFailure, errorCode: RetroErrorCode.hostExited, kill: true, reason: "A write to the host failed.")
             }
         case .exited(let exit):
+            releaseChecked()
             exitLatch.complete(exit)
             unsupportedKill?.cancel()
             if unsupportedSeen {
@@ -818,6 +859,7 @@ public final class RetroHostClient: @unchecked Sendable {
                 self.shownFrame = nil
                 self.shownRing = nil
                 self.released = true
+                self.releaseChecked()
                 if self.exitLatch.value == nil { self.exitLatch.complete(.unknown) }
                 let waiting = self.releaseWaiters
                 self.releaseWaiters = []

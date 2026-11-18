@@ -90,6 +90,7 @@ extension AppModel {
             PanelRow(id: "retro-\(platform.rawValue)", title: platform.emulator, detail: chosenEmulator(platform) ?? TRetro.text(.retroChooseExecutable), symbol: "app.dashed",
                      kind: .action(destructive: false) { [weak self] in self?.chooseStandaloneEmulator(platform) })
         }
+        rows += retroHostSettingsRows()
         rows.append(PanelRow(id: "retro-show-folders", title: TRetro.text(.retroShowFolders), symbol: "folder",
                              kind: .toggle(showsRetroFolders) { [weak self] value in self?.setShowRetroFolders(value) }))
         return PanelCategory(id: "emulators", title: TRetro.text(.retroEmulators), symbol: "opticaldisc", rows: rows)
