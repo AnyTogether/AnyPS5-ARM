@@ -152,6 +152,8 @@ final class RetroHostPlayTests: XCTestCase {
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-retro-play-\(UUID().uuidString)")
         made.append(scratch)
         model.retroHostRoot = scratch.appendingPathComponent("RetroHost")
+        // Releases to read, so the download row is there; none is published.
+        model.retroHostReleases = { [] }
         model.retroFolder = scratch.appendingPathComponent("retro")
         model.retroHostUnchecked = host ? RetroHostInstall(host: "/test/anyps5-retro-host", core: "/test/swanstation_libretro.dylib") : nil
         model.retroStatusEvery = .seconds(3600)
@@ -380,6 +382,41 @@ final class RetroHostPlayTests: XCTestCase {
         model.toast = nil
         model.takeScreenshot()
         XCTAssertEqual(model.toast?.text, "Screenshots and clips are not available yet for PS1 games in the emulator host.")
+
+        // The PS1 emulator is not downloaded while a game plays in it.
+        let row = try XCTUnwrap(model.retroHostDownload.rows(uncheckedHost: false).first)
+        guard case .action(_, let download) = row.kind else { return XCTFail("an action") }
+        model.toast = nil
+        download()
+        XCTAssertFalse(model.retroHostDownload.downloading, "nothing is asked of GitHub")
+        XCTAssertEqual(model.toast?.text, "Close the PS1 game first, then download the emulator")
+    }
+
+    func testAnotherGameStartingWithThePs1TileStillSelectedEndsTheKeptHost() async throws {
+        for running in [false, true] {
+            let (model, game, _) = try launcher()
+            var hosts: [FakePlayHost] = []
+            model.openRetroHost = { _, _, _, _ in
+                let fake = FakePlayHost()
+                hosts.append(fake)
+                return fake
+            }
+            let host = try await play(model, game) { hosts }
+            host.gameStatus = try Self.status(ready: true)
+            await model.retroPlay?.host.refresh()
+            await model.closeRetroGame()
+            XCTAssertTrue(model.retroHostKeeper.holding)
+            let ps5 = try XCTUnwrap(model.games.first { $0.retro == nil })
+            XCTAssertEqual(model.selectedGame, game, "the PS1 tile stays selected")
+            // A PS5 game starts without the selection moving (an unlock that plays after, a phone).
+            if running {
+                model.previewRunning(ps5, app: NSRunningApplication.current)
+            } else {
+                model.previewStarting(ps5)
+            }
+            try await settle({ host.shutdowns == 1 }, "the kept host is shut down (\(running ? "running" : "starting"))")
+            XCTAssertFalse(model.retroHostKeeper.holding)
+        }
     }
 
     func testQuittingShutsTheHostDown() async throws {

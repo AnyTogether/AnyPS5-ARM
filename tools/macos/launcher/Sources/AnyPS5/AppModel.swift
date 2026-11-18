@@ -530,6 +530,7 @@ final class AppModel: ObservableObject {
     var endGame: (NSRunningApplication) -> Void = { $0.forceTerminate() }
     @Published private(set) var running: (game: Game, app: NSRunningApplication)? {
         didSet {
+            scheduleRetroHostCheck()
             guard (oldValue == nil) != (running == nil) else { return }
             prepareSoon()
             // A game takes the phones' pads alone; without one they move around the launcher.
@@ -538,7 +539,11 @@ final class AppModel: ObservableObject {
     }
     /// The game from the press of Play until its first window shows.
     @Published private(set) var starting: Game? {
-        didSet { if (oldValue == nil) != (starting == nil) { prepareSoon() } }
+        didSet {
+            if (oldValue == nil) != (starting == nil) { prepareSoon() }
+            // Another game starting lets the kept emulator host go (RetroHostPlay.swift).
+            scheduleRetroHostCheck()
+        }
     }
     /// The game whose cover stays up after its window showed, until the window has settled
     /// (StartCover.swift), as on Windows and Linux. Apart from `starting`, which means the game
@@ -568,7 +573,10 @@ final class AppModel: ObservableObject {
     /// Discord, Play Together, Remote Play, broadcasts, share play, clips, trophies, save sync)
     /// never sees an emulator game.
     @Published private(set) var emulator: (game: Game, run: EmulatorRun)? {
-        didSet { if (oldValue == nil) != (emulator == nil) { prepareSoon() } }
+        didSet {
+            if (oldValue == nil) != (emulator == nil) { prepareSoon() }
+            scheduleRetroHostCheck()
+        }
     }
     /// Counts the emulator starts and the ones given up: a start whose turn has passed is ended
     /// when its emulator comes up after all.
