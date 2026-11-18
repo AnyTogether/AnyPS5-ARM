@@ -209,7 +209,7 @@ final class RetroHostPlayTests: XCTestCase {
         model.openRetroFolder = { opened.append($0) }
         guard case .action(_, let open) = bios.kind else { return XCTFail("an action") }
         open()
-        XCTAssertEqual(opened, [model.retroFolder.appendingPathComponent("system")])
+        XCTAssertEqual(opened.map(\.path), [model.retroFolder.appendingPathComponent("system").path])
         XCTAssertTrue(FileManager.default.fileExists(atPath: model.retroFolder.appendingPathComponent("system").path), "made when it was not there")
     }
 
@@ -345,7 +345,7 @@ final class RetroHostPlayTests: XCTestCase {
         XCTAssertEqual(TRetro.text(.retroHostBiosDetail),
                        "No PS1 BIOS was found. Put a BIOS file in the PS1 BIOS folder (Settings › Emulators) and start the game again.")
         XCTAssertTrue(model.handle(.options))
-        XCTAssertEqual(opened, [model.retroFolder.appendingPathComponent("system")])
+        XCTAssertEqual(opened.map(\.path), [model.retroFolder.appendingPathComponent("system").path])
         XCTAssertTrue(model.handle(.select))
         try await settle({ model.retroPlay == nil }, "Enter or Cross goes back to the library")
         XCTAssertEqual(AppModel.retroHostErrorKey("somethingNew"), .retroHostOtherDetail, "a code the launcher does not know")
