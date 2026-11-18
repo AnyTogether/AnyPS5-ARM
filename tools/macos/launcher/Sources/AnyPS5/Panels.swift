@@ -30,6 +30,9 @@ struct PanelRow: Identifiable {
     var person: PanelPerson?
     /// A picture (a game's icon) that stands in for the symbol.
     var picture: Data?
+    /// The picture's width to its height when it is not square (a save state's picture of the game);
+    /// a row with one and no `picture` holds the picture's place empty, so a list of them lines up.
+    var pictureAspect: Double?
     /// The detail is advice to read whole (the controller troubleshooter): no line limit.
     var wraps = false
     /// What △ does on this row, with the hint saying so (a Hub theme: Wear on my profile).

@@ -50,6 +50,12 @@ public final class RetroHostGame: ObservableObject {
     public private(set) var failure: String?
     /// The game was a PS2 one and its host does not list `ps2`, so it was never started.
     public private(set) var consoleRefused = false
+    /// Whether the game was started with a states folder on a host that lists `saveStates`, so
+    /// `saveState(_:)` and `loadState(_:)` can be asked for. A start with a folder on an older host
+    /// leaves the folder out, and the game plays without save states.
+    public private(set) var savesStates = false
+    /// How many `saveState` and `loadState` calls have been answered.
+    public private(set) var stateReplies = 0
     /// How the host's connection ended; nil while it is open. `.unsupported` means the host speaks
     /// no protocol version this launcher does: the emulator needs updating.
     public private(set) var hostEnd: RetroHostEnd?
@@ -70,6 +76,21 @@ public final class RetroHostGame: ObservableObject {
     private var starting: Task<Void, Never>?
     private var detaching: Task<Bool, Never>?
     private var closing: Task<Void, Never>?
+    /// `stop()` has begun: the client's `stopGame()` asks `status` until the game has ended, without
+    /// waiting for a state call, so no `saveState` or `loadState` is sent from then on.
+    private var stopping = false
+    /// A `saveState` or `loadState` is under way, until its reply: protocol.md "saveState and
+    /// loadState" says a launcher MUST NOT send another call after one until that reply has come, as
+    /// a call queued behind it in the host could otherwise be answered more than 5 seconds after it
+    /// was sent. Every other call of this game waits for it (`afterStateCall`); pings go on.
+    private var stateCallRunning = false
+    /// This game's other calls that went out through `afterStateCall` and have not been answered: a
+    /// state call waits for them before it is sent, as the session's calls reach the client's queue
+    /// only after a hop off the main actor, so one asked just before it could otherwise go out after.
+    private var callsOut = 0
+    private var turnWaiters: [CheckedContinuation<Void, Never>] = []
+    /// The most state replies there were when a `status` that said the game had not ended was asked.
+    private var playingAfterReplies = -1
 
     public init(session: RetroHostSession, statusEvery: Duration = .milliseconds(500), volume: Double = 1, muted: Bool = false) {
         self.session = session
@@ -150,7 +171,9 @@ public final class RetroHostGame: ObservableObject {
                 finish(failure: "The host does not list the \(RetroProtocol.ps2Capability) capability.")
                 return
             }
-            _ = try await session.startGame(request.args)
+            let states = request.states != nil && session.canSaveStates
+            _ = try await session.startGame((states ? request : request.withoutStates()).args)
+            savesStates = states
         } catch {
             if phase == .starting { finish(failure: "\(error)") }
             return
@@ -189,7 +212,11 @@ public final class RetroHostGame: ObservableObject {
         polling = true
         defer { polling = false }
         do {
-            let current = try await session.status()
+            var asked = 0
+            let current = try await afterStateCall { () async throws -> RetroStatus? in
+                asked = stateReplies
+                return try await session.status()
+            }
             guard loaded else { return }
             guard let current else {
                 finish(failure: "The host has no game loaded.")
@@ -202,6 +229,7 @@ public final class RetroHostGame: ObservableObject {
                 finish()
                 return
             }
+            if asked > playingAfterReplies { playingAfterReplies = asked }
             if current.ready, phase == .loading {
                 setPhase(.playing)
             } else if changed {
@@ -256,7 +284,8 @@ public final class RetroHostGame: ObservableObject {
         do {
             try await session.ready()
             if hostEnded || phase == .closed { return }
-            _ = try await session.call("volume", .object(["level": .number(volume), "muted": .bool(self.muted)]))
+            let args: RetroJSON = .object(["level": .number(volume), "muted": .bool(self.muted)])
+            _ = try await afterStateCall { try await session.call("volume", args) }
         } catch {
             return
         }
@@ -264,7 +293,71 @@ public final class RetroHostGame: ObservableObject {
 
     private func gameCall(_ method: String, _ args: RetroJSON) async -> Bool {
         guard loaded else { return false }
-        return (try? await session.call(method, args)) == .bool(true)
+        return (try? await afterStateCall { try await session.call(method, args) }) == .bool(true)
+    }
+
+    // MARK: Save states
+
+    /// `saveState`: saves the game's state into `slot`, 0 to 7, of the states folder it was started
+    /// with (`savesStates`). The host writes it between two frames, also while paused.
+    public func saveState(_ slot: Int) async -> RetroStateOutcome { await stateCall("saveState", slot) }
+
+    /// `loadState`: loads the state in `slot`, 0 to 7, back into the game; a paused game shows it
+    /// with its next frame once resumed. A state of another game or core build is refused
+    /// (`.otherGame`, `.otherCore`) and the game runs on.
+    public func loadState(_ slot: Int) async -> RetroStateOutcome { await stateCall("loadState", slot) }
+
+    /// Whether a status asked once `replies` state calls had been answered said the game had not
+    /// ended. A load that the core began but did not finish ends the game before the host replies
+    /// `false` (the host's `Game::AwaitStateWork`), so after a `loadState` answered `false` this says
+    /// the load left the game untouched and it plays on.
+    public func playingAfter(_ replies: Int) -> Bool { playingAfterReplies >= replies }
+
+    private func stateCall(_ method: String, _ slot: Int) async -> RetroStateOutcome {
+        guard (0..<RetroStateFolder.slots).contains(slot) else { return .failed }
+        guard loaded, savesStates, !stopping else { return .notNow }
+        while stateCallRunning { await waitTurn() }
+        guard loaded, !stopping else { return .notNow }
+        stateCallRunning = true
+        defer {
+            stateCallRunning = false
+            wakeTurns()
+        }
+        while callsOut > 0 { await waitTurn() }
+        guard loaded, !stopping else { return .notNow }
+        let outcome: RetroStateOutcome
+        do {
+            let result = try await session.call(method, .object(["slot": .int(slot)]))
+            outcome = result.objectValue != nil ? .done : .notNow
+        } catch let error as RetroCallError {
+            outcome = RetroStateOutcome(errorCode: error.code)
+        } catch {
+            outcome = .failed
+        }
+        stateReplies += 1
+        return outcome
+    }
+
+    /// Sends `send` once no `saveState` or `loadState` is under way, and counts it as out until its
+    /// reply, so a state call asked meanwhile waits for it.
+    private func afterStateCall<T>(_ send: () async throws -> T) async rethrows -> T {
+        while stateCallRunning { await waitTurn() }
+        callsOut += 1
+        defer {
+            callsOut -= 1
+            if callsOut == 0 { wakeTurns() }
+        }
+        return try await send()
+    }
+
+    private func waitTurn() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in turnWaiters.append(continuation) }
+    }
+
+    private func wakeTurns() {
+        let waiting = turnWaiters
+        turnWaiters = []
+        for waiter in waiting { waiter.resume() }
     }
 
     // MARK: Pausing
@@ -305,7 +398,7 @@ public final class RetroHostGame: ObservableObject {
         notify()
         guard now != wasPaused else { return }
         do {
-            _ = try await session.call("pause", .bool(now))
+            _ = try await afterStateCall { try await session.call("pause", .bool(now)) }
         } catch {
             if loaded { finish(failure: "\(error)") }
         }
@@ -326,6 +419,7 @@ public final class RetroHostGame: ObservableObject {
         guard loaded else { return endStatus }
         pollTask?.cancel()
         picture.accepting = false
+        stopping = true
         let ended = await stopAndRelease()
         if phase == .closed { return ended }
         if let ended { status = ended }
@@ -335,8 +429,8 @@ public final class RetroHostGame: ObservableObject {
 
     private func stopAndRelease() async -> RetroStatus? {
         do {
-            let ended = try await session.stopGame()
-            _ = try await session.call("release", .null)
+            let ended = try await afterStateCall { try await session.stopGame() }
+            _ = try await afterStateCall { try await session.call("release", .null) }
             return ended
         } catch {
             failure = "\(error)"
@@ -368,8 +462,8 @@ public final class RetroHostGame: ObservableObject {
         var free = false
         if !hostEnded, closing == nil {
             do {
-                _ = try await session.call("release", .null)
-                let left = try await session.status()
+                _ = try await afterStateCall { try await session.call("release", .null) }
+                let left = try await afterStateCall { try await session.status() }
                 free = left == nil && !hostEnded && closing == nil
             } catch {
                 if failure == nil { failure = "\(error)" }

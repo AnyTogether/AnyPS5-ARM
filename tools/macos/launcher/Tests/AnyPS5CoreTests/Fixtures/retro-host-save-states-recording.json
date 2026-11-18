@@ -1,0 +1,563 @@
+{
+ "scenarios": {
+  "welcome": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"hello\",\"minVersion\":1,\"maxVersion\":1,\"pixelFormats\":[\"rgba8\",\"bgra8\"]}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"welcome\",\"version\":1,\"pid\":67140,\"hostVersion\":\"1.0.0\",\"capabilities\":[\"ps1\",\"coreIdentity\",\"gameTiming\",\"ps2\",\"ps1Lockstep\",\"saveStates\"],\"pixelFormat\":\"rgba8\"}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":1,\"method\":\"volume\",\"args\":{\"level\":0,\"muted\":true}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":1,\"result\":null}"
+   }
+  ],
+  "no-game": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":2,\"method\":\"saveState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":2,\"result\":false}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":3,\"method\":\"loadState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":3,\"result\":false}"
+   }
+  ],
+  "no-states-folder": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":4,\"method\":\"start\",\"args\":{\"core\":\"C:\\\\build\\\\fake_core.dll\",\"disc\":\"C:\\\\retro-host-test\\\\discs\\\\game.cue\",\"system\":\"C:\\\\retro-host-test\\\\system\",\"saves\":\"C:\\\\retro-host-test\\\\saves\"}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":4,\"result\":{\"epoch\":1}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":5,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":5,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333333333333,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":null,\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":6,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":6,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":7,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"ring\",\"bytes\":3690496,\"handle\":832}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":7,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":8,\"method\":\"saveState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":8,\"error\":{\"code\":\"argument\",\"message\":\"The game was started without start.states.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":9,\"method\":\"stop\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":9,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":10,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":10,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":11,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":11,\"result\":{\"ready\":true,\"ended\":true,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":12,\"method\":\"release\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":12,\"result\":null}"
+   }
+  ],
+  "slots": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":13,\"method\":\"start\",\"args\":{\"core\":\"C:\\\\build\\\\fake_core.dll\",\"disc\":\"C:\\\\retro-host-test\\\\discs\\\\game.cue\",\"system\":\"C:\\\\retro-host-test\\\\system\",\"saves\":\"C:\\\\retro-host-test\\\\saves\",\"states\":\"C:\\\\retro-host-test\\\\states\"}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":13,\"result\":{\"epoch\":2}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":14,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":14,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333333333333,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":null,\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":15,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":15,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":16,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":16,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":17,\"method\":\"loadState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":17,\"error\":{\"code\":\"noState\",\"message\":\"There is no state file there.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":18,\"method\":\"saveState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":18,\"result\":{\"bytes\":88,\"micros\":15207}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":19,\"method\":\"pause\",\"args\":true}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":19,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":20,\"method\":\"saveState\",\"args\":{\"slot\":3}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":20,\"result\":{\"bytes\":88,\"micros\":18383}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":21,\"method\":\"loadState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":21,\"result\":{\"bytes\":88,\"micros\":3253}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":22,\"method\":\"pause\",\"args\":false}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":22,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":23,\"method\":\"loadState\",\"args\":{\"slot\":7}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":23,\"error\":{\"code\":\"noState\",\"message\":\"There is no state file there.\"}}"
+   }
+  ],
+  "refused": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":24,\"method\":\"loadState\",\"args\":{\"slot\":2}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":24,\"error\":{\"code\":\"badState\",\"message\":\"The file is not a state file this host reads.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":25,\"method\":\"loadState\",\"args\":{\"slot\":6}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":25,\"error\":{\"code\":\"coreRefused\",\"message\":\"The core could not save or load the state.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":26,\"method\":\"saveState\",\"args\":{\"slot\":5}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":26,\"error\":{\"code\":\"fileError\",\"message\":\"The state file could not be written or read.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":27,\"method\":\"loadState\",\"args\":{\"slot\":5}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":27,\"error\":{\"code\":\"fileError\",\"message\":\"The state file could not be written or read.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":28,\"method\":\"stop\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":28,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":29,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":29,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":30,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":30,\"result\":{\"ready\":true,\"ended\":true,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":31,\"method\":\"release\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":31,\"result\":null}"
+   }
+  ],
+  "other-game": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":32,\"method\":\"start\",\"args\":{\"core\":\"C:\\\\build\\\\fake_core.dll\",\"disc\":\"C:\\\\retro-host-test\\\\discs\\\\disc1.cue\",\"system\":\"C:\\\\retro-host-test\\\\system\",\"saves\":\"C:\\\\retro-host-test\\\\saves\",\"states\":\"C:\\\\retro-host-test\\\\states\"}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":32,\"result\":{\"epoch\":3}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":33,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":33,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333333333333,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":null,\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":34,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":34,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":35,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":35,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":36,\"method\":\"loadState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":36,\"error\":{\"code\":\"otherGame\",\"message\":\"The state was saved from another game.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":37,\"method\":\"stop\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":37,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":38,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":38,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":39,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":39,\"result\":{\"ready\":true,\"ended\":true,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":40,\"method\":\"release\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":40,\"result\":null}"
+   }
+  ],
+  "ps2-slot": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":41,\"method\":\"start\",\"args\":{\"core\":\"C:\\\\build\\\\fake_core.dll\",\"disc\":\"C:\\\\retro-host-test\\\\discs\\\\game.iso\",\"system\":\"C:\\\\retro-host-test\\\\system\",\"saves\":\"C:\\\\retro-host-test\\\\saves\",\"console\":\"ps2\",\"states\":\"C:\\\\retro-host-test\\\\states-ps2\"}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":41,\"result\":{\"epoch\":4}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":42,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":42,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333333333333,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{},\"cardUnreadable\":false,\"console\":\"ps2\",\"core\":null,\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":43,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":43,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false},\"pcsx2_bios\":{\"title\":\"System > BIOS\",\"values\":[\"fake-ps2-bios.bin\"],\"labels\":[\"Fake PS2 BIOS\"],\"selected\":0,\"activeValue\":\"fake-ps2-bios.bin\",\"restart\":true}},\"cardUnreadable\":false,\"console\":\"ps2\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":44,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":44,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false},\"pcsx2_bios\":{\"title\":\"System > BIOS\",\"values\":[\"fake-ps2-bios.bin\"],\"labels\":[\"Fake PS2 BIOS\"],\"selected\":0,\"activeValue\":\"fake-ps2-bios.bin\",\"restart\":true}},\"cardUnreadable\":false,\"console\":\"ps2\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":45,\"method\":\"saveState\",\"args\":{\"slot\":1}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":45,\"result\":{\"bytes\":71,\"micros\":13038}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":46,\"method\":\"loadState\",\"args\":{\"slot\":1}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":46,\"result\":{\"bytes\":71,\"micros\":12178}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":47,\"method\":\"loadState\",\"args\":{\"path\":\"C:\\\\retro-host-test\\\\states\\\\game.0.state\"}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":47,\"error\":{\"code\":\"argument\",\"message\":\"loadState.path must name a .state file directly in start.states.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":48,\"method\":\"stop\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":48,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":49,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":49,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false},\"pcsx2_bios\":{\"title\":\"System > BIOS\",\"values\":[\"fake-ps2-bios.bin\"],\"labels\":[\"Fake PS2 BIOS\"],\"selected\":0,\"activeValue\":\"fake-ps2-bios.bin\",\"restart\":true}},\"cardUnreadable\":false,\"console\":\"ps2\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":50,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":50,\"result\":{\"ready\":true,\"ended\":true,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false},\"pcsx2_bios\":{\"title\":\"System > BIOS\",\"values\":[\"fake-ps2-bios.bin\"],\"labels\":[\"Fake PS2 BIOS\"],\"selected\":0,\"activeValue\":\"fake-ps2-bios.bin\",\"restart\":true}},\"cardUnreadable\":false,\"console\":\"ps2\",\"core\":{\"name\":\"fake\",\"version\":\"1\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":51,\"method\":\"release\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":51,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"shutdown\"}"
+   }
+  ],
+  "other-core-welcome": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"hello\",\"minVersion\":1,\"maxVersion\":1,\"pixelFormats\":[\"rgba8\",\"bgra8\"]}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"welcome\",\"version\":1,\"pid\":64332,\"hostVersion\":\"1.0.0\",\"capabilities\":[\"ps1\",\"coreIdentity\",\"gameTiming\",\"ps2\",\"ps1Lockstep\",\"saveStates\"],\"pixelFormat\":\"rgba8\"}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":1,\"method\":\"volume\",\"args\":{\"level\":0,\"muted\":true}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":1,\"result\":null}"
+   }
+  ],
+  "other-core": [
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":2,\"method\":\"start\",\"args\":{\"core\":\"C:\\\\build\\\\fake_core.dll\",\"disc\":\"C:\\\\retro-host-test\\\\discs\\\\game.cue\",\"system\":\"C:\\\\retro-host-test\\\\system\",\"saves\":\"C:\\\\retro-host-test\\\\saves\",\"states\":\"C:\\\\retro-host-test\\\\states\"}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":2,\"result\":{\"epoch\":1}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":3,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":3,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333333333333,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":null,\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":4,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":4,\"result\":{\"ready\":false,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"2\"},\"timing\":null}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":5,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"ring\",\"bytes\":3690496,\"handle\":820}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":5,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"2\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":6,\"method\":\"loadState\",\"args\":{\"slot\":0}}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":6,\"error\":{\"code\":\"otherCore\",\"message\":\"The state was saved by another core or core build.\"}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":7,\"method\":\"stop\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":7,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":8,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":8,\"result\":{\"ready\":true,\"ended\":false,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"2\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":9,\"method\":\"status\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":9,\"result\":{\"ready\":true,\"ended\":true,\"error\":\"\",\"errorCode\":\"\",\"aspect\":1.3333333730697632,\"hardware\":false,\"resolutionError\":\"\",\"graphicsPending\":false,\"progressLabel\":null,\"progressPercent\":null,\"options\":{\"fake_color\":{\"title\":\"Color\",\"values\":[\"blue\",\"green\"],\"labels\":[\"Blue\",\"Green\"],\"selected\":0,\"activeValue\":\"blue\",\"restart\":false},\"fake_size\":{\"title\":\"Frame size\",\"values\":[\"640x480\",\"800x600\",\"1920x1080\"],\"labels\":[\"640 x 480\",\"800 x 600\",\"1920 x 1080\"],\"selected\":0,\"activeValue\":\"640x480\",\"restart\":false},\"fake_region\":{\"title\":\"Region (Restart)\",\"values\":[\"ntsc\",\"pal\"],\"labels\":[\"NTSC\",\"PAL\"],\"selected\":0,\"activeValue\":\"ntsc\",\"restart\":true},\"fake_hang\":{\"title\":\"Hang\",\"values\":[\"no\",\"yes\"],\"labels\":[\"No\",\"Yes\"],\"selected\":0,\"activeValue\":\"no\",\"restart\":false},\"fake_many\":{\"title\":\"Many values\",\"values\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"labels\":[\"v0\",\"v1\",\"v2\",\"v3\",\"v4\",\"v5\",\"v6\",\"v7\",\"v8\",\"v9\",\"v10\",\"v11\",\"v12\",\"v13\",\"v14\",\"v15\",\"v16\",\"v17\",\"v18\",\"v19\",\"v20\",\"v21\",\"v22\",\"v23\",\"v24\",\"v25\",\"v26\",\"v27\",\"v28\",\"v29\",\"v30\",\"v31\",\"v32\",\"v33\",\"v34\",\"v35\",\"v36\",\"v37\",\"v38\",\"v39\",\"v40\",\"v41\",\"v42\",\"v43\",\"v44\",\"v45\",\"v46\",\"v47\",\"v48\",\"v49\",\"v50\",\"v51\",\"v52\",\"v53\",\"v54\",\"v55\",\"v56\",\"v57\",\"v58\",\"v59\",\"v60\",\"v61\",\"v62\",\"v63\",\"v64\",\"v65\",\"v66\",\"v67\",\"v68\",\"v69\",\"v70\",\"v71\",\"v72\",\"v73\",\"v74\",\"v75\",\"v76\",\"v77\",\"v78\",\"v79\",\"v80\",\"v81\",\"v82\",\"v83\",\"v84\",\"v85\",\"v86\",\"v87\",\"v88\",\"v89\",\"v90\",\"v91\",\"v92\",\"v93\",\"v94\",\"v95\",\"v96\",\"v97\",\"v98\",\"v99\",\"v100\",\"v101\",\"v102\",\"v103\",\"v104\",\"v105\",\"v106\",\"v107\",\"v108\",\"v109\",\"v110\",\"v111\",\"v112\",\"v113\",\"v114\",\"v115\",\"v116\",\"v117\",\"v118\",\"v119\",\"v120\",\"v121\",\"v122\",\"v123\",\"v124\",\"v125\",\"v126\",\"v127\"],\"selected\":0,\"activeValue\":\"v0\",\"restart\":false},\"fake_bytes�\":{\"title\":\"Bytes\",\"values\":[\"one\",\"two\"],\"labels\":[\"One\",\"Two\"],\"selected\":0,\"activeValue\":\"one\",\"restart\":false}},\"cardUnreadable\":false,\"console\":\"ps1\",\"core\":{\"name\":\"fake\",\"version\":\"2\"},\"timing\":{\"fps\":60,\"region\":\"ntsc\"}}}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"call\",\"id\":10,\"method\":\"release\"}"
+   },
+   {
+    "from": "host",
+    "raw": "{\"type\":\"reply\",\"id\":10,\"result\":null}"
+   },
+   {
+    "from": "launcher",
+    "raw": "{\"type\":\"shutdown\"}"
+   }
+  ]
+ },
+ "files": {
+  "slots": [
+   "game.0.state",
+   "game.3.state"
+  ],
+  "refused": [
+   "game.0.state",
+   "game.3.state"
+  ],
+  "other-game": [
+   "game.0.state",
+   "game.3.state"
+  ],
+  "ps2-slot": [
+   "game.1.state"
+  ],
+  "other-core": [
+   "game.0.state",
+   "game.3.state"
+  ]
+ }
+}

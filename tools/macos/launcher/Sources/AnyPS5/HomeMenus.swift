@@ -24,7 +24,7 @@ extension AppModel {
             if hold { homeButton(hold: true) } else { _ = handle(.home) }
         case .quickMenu:
             // A PS1 game in the emulator host: its own menu, or back to the game from it.
-            if retroPlay != nil, overlay == nil || overlay == .retroMenu {
+            if retroPlay != nil, overlay == nil || retroMenuShown {
                 return overlay == nil ? openRetroMenu() : resumeRetroGame()
             }
             guard running != nil || emulator != nil, starting == nil, pairing == nil else { return }
@@ -56,7 +56,8 @@ extension AppModel {
         if retroPlay != nil {
             switch overlay {
             case nil: return openRetroMenu()
-            case .retroMenu: return resumeRetroGame()
+            // Held PS on Overwrite slot N? goes back to the game too.
+            case .retroMenu, .retroOverwriteState: return resumeRetroGame()
             default: return closeOverlay()
             }
         }
@@ -152,6 +153,10 @@ extension AppModel {
         var person: PanelPerson?
         /// The Now playing card: ← and → skip, choosing it plays or pauses (NowPlaying.swift).
         var track: NowPlayingTrack?
+        /// A save state's picture of the game, drawn at `pictureAspect` in the symbol's place; with
+        /// an aspect and no picture, its place is kept empty.
+        var picture: Data?
+        var pictureAspect: Double?
     }
 
     /// A share play's row as the quick menu shows it: what the Friends panel has, every control.
@@ -235,7 +240,7 @@ extension AppModel {
     /// The quick menu, "Close game?" and the home menu, from the keys and the pad.
     func gameMenuCommand(_ command: Command) -> Bool {
         // A PS1 game's menu in the emulator host, the clicks on its rows too.
-        if overlay == .retroMenu { return retroCommand(command) }
+        if overlay == .retroMenu || overlay == .retroOverwriteState { return retroCommand(command) }
         func move(_ delta: Int, count: Int) {
             let next = min(count - 1, max(0, menuIndex + delta))
             guard next != menuIndex else { return }
@@ -651,12 +656,14 @@ struct GameMenuCard: View {
         var value: String?
         var person: PanelPerson?
         var track: NowPlayingTrack?
+        var picture: Data?
+        var pictureAspect: Double?
     }
 
     var body: some View {
         let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .confirmQuitUnlocks || model.overlay == .launcherReport ? nil
             : model.overlay == .confirmDeleteGame ? model.deleteAsk?.plan.game : model.overlay == .confirmCancelUnlock ? model.cancelAsking
-            : model.overlay == .retroMenu ? model.retroPlay?.game : (model.selectedGame ?? model.runningGame)
+            : model.overlay == .retroMenu || model.overlay == .retroOverwriteState ? model.retroPlay?.game : (model.selectedGame ?? model.runningGame)
         ZStack {
             FrostFill(opacity: 0.6).ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -776,6 +783,7 @@ struct GameMenuCard: View {
         case .profileMenu: return TPro.text(.menuKicker)
         case .launcherReport: return TC.text(.launcherReportWhen)
         case .confirmDeleteGame: return T.text(.deleteGame)
+        case .retroOverwriteState: return TRetro.text(.retroMenuSaveState)
         default: return TH.text(.quickMenuKicker)
         }
     }
@@ -791,6 +799,7 @@ struct GameMenuCard: View {
         case .confirmDeleteGame: return T.format(model.deleteAsk?.permanent == true ? .deleteGameForeverTitle : .deleteGameTitle, game?.name ?? "")
         // A PS1 game's menu: a section's page is headed with its name.
         case .retroMenu: return model.retroMenuTitle ?? game?.name ?? ""
+        case .retroOverwriteState: return model.retroOverwriteQuestion?.title ?? ""
         default: return game?.name ?? ""
         }
     }
@@ -898,7 +907,14 @@ struct GameMenuCard: View {
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
         case .retroMenu:
-            return model.retroMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value) }
+            return model.retroMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value,
+                                                    picture: $0.picture, pictureAspect: $0.pictureAspect) }
+        case .retroOverwriteState:
+            // Overwrite slot N?: Cancel first, where the focus starts, then Overwrite, which says when
+            // the state it replaces was saved.
+            return [Item(id: 0, title: T.text(.cancel), symbol: "arrow.uturn.backward"),
+                    Item(id: 1, title: TRetro.text(.retroStateOverwrite), detail: model.retroOverwriteQuestion?.detail, symbol: "square.and.arrow.down.fill",
+                         destructive: true)]
         default:
             return model.quickMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value, person: $0.person, track: $0.track) }
         }
@@ -927,6 +943,10 @@ struct GameMenuCard: View {
             HStack(spacing: 14 * scale) {
                 if let person = item.person {
                     ProfileAvatar(url: person.avatar, name: person.name, size: 26 * scale, glow: false, picture: person.picture)
+                } else if let aspect = item.pictureAspect {
+                    // A save state's slot: the game's picture of that moment at its aspect, or its
+                    // place kept, so the titles line up.
+                    RetroStateThumbnail(png: item.picture, aspect: aspect, height: 44 * scale, scale: scale)
                 } else {
                     Image(systemName: item.symbol).font(.system(size: 17 * scale, weight: .semibold)).frame(width: 24 * scale)
                 }
@@ -973,6 +993,7 @@ struct GameMenuCard: View {
     /// answers side by side.
     private var twoChoice: Bool {
         model.overlay == .confirmQuit || model.overlay == .closeGame || model.overlay == .confirmDeleteGame || model.overlay == .confirmCancelUnlock || model.overlay == .confirmQuitUnlocks
+            || model.overlay == .retroOverwriteState
     }
 
     /// What the Delete game card says before its answers: the game's folder as a file strip (its
@@ -1068,7 +1089,7 @@ struct GameMenuCard: View {
             Hint(keys: "↩ / ✕", label: T.text(.hintSelect))
             Spacer(minLength: 0)
             if model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .launcherReport || model.overlay == .confirmDeleteGame
-                || model.overlay == .confirmCancelUnlock || model.overlay == .confirmQuitUnlocks {
+                || model.overlay == .confirmCancelUnlock || model.overlay == .confirmQuitUnlocks || model.overlay == .retroOverwriteState {
                 Hint(keys: "esc / ○", label: T.text(.hintBack))
             } else {
                 Hint(keys: "PS / esc / ○", label: TH.text(.resume))

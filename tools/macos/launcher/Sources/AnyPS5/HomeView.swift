@@ -1040,7 +1040,7 @@ extension AppModel {
         }
         // A PS1 game in the emulator host on its own screen, or its menu: the controller is the
         // game's, PS opens its menu.
-        if retroPlay != nil, overlay == nil || overlay == .retroMenu { return retroCommand(command) }
+        if retroPlay != nil, overlay == nil || retroMenuShown { return retroCommand(command) }
         if command == .home {
             homeButton(hold: false)
             return true
@@ -1179,7 +1179,7 @@ extension AppModel {
             return browserPlayCommand(command)
         case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks:
             return gameMenuCommand(command)
-        case .retroMenu:
+        case .retroMenu, .retroOverwriteState:
             return retroCommand(command)
         case .profilePicker:
             return pickerCommand(command)

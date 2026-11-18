@@ -11,9 +11,14 @@ public enum RetroProtocol {
     /// The capability that plays PS2 games on LRPS2: `start.console` and `status.console`
     /// (protocol.md "Capabilities", anyps5-retro-host docs/ps2.md).
     public static let ps2Capability = "ps2"
+    /// The capability that saves and loads a game's state for one player: `start.states` and the
+    /// methods `saveState` and `loadState` (protocol.md "saveState and loadState").
+    public static let saveStatesCapability = "saveStates"
     /// The largest call and ping id.
     public static let maxID = 2_147_483_647
     public static let maxUInt32 = 4_294_967_295
+    /// The largest integer a JSON number holds exactly (protocol.md "Values").
+    public static let maxSafeInteger = 9_007_199_254_740_991
     /// The longest message body, and the shortest.
     public static let maxBody = 1_048_576
     public static let minBody = 2
@@ -38,6 +43,19 @@ public struct RetroCallError: Error, Equatable, CustomStringConvertible {
     public static let busy = "busy"
     public static let start = "start"
     public static let tooLarge = "tooLarge"
+    /// `loadState`: the slot or file holds no state (protocol.md "saveState and loadState").
+    public static let noState = "noState"
+    /// `loadState`: not a state file of a version the host reads, or one whose header does not
+    /// match its size.
+    public static let badState = "badState"
+    /// `loadState`: the state was saved from another game (another console or disc name).
+    public static let otherGame = "otherGame"
+    /// `loadState`: the state was saved by another core or core build (`status.core` differs).
+    public static let otherCore = "otherCore"
+    /// The core gave no state, or refused the one in the file; the game runs on.
+    public static let coreRefused = "coreRefused"
+    /// The state file could not be written or read, or not in time.
+    public static let fileError = "fileError"
 
     public init(code: String, message: String) {
         self.code = code

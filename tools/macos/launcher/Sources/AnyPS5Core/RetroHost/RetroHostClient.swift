@@ -30,6 +30,9 @@ public enum RetroHostClientError: Error, Equatable {
     case noPs2Capability
     /// A PS2 game has no playlist, so its `start` takes no `initialDisc` (protocol.md "start").
     case ps2HasNoPlaylist
+    /// `saveState`, `loadState` or a `start` naming `states`, which need the `saveStates`
+    /// capability the host did not list.
+    case noSaveStatesCapability
     /// This host has used every call id; start a new one for the next game.
     case idsUsedUp
     /// `stop` goes through `stopGame()`, which enforces its time limit.
@@ -268,6 +271,10 @@ public final class RetroHostClient: @unchecked Sendable {
     /// each `status` names the console.
     public var canPlayPs2: Bool { onQueue { hostListsPs2 } }
     private var hostListsPs2: Bool { hostCapabilities.contains(RetroProtocol.ps2Capability) }
+    /// Whether the host lists `saveStates`, so it takes `start.states` and the methods `saveState`
+    /// and `loadState`.
+    public var canSaveStates: Bool { onQueue { hostListsSaveStates } }
+    private var hostListsSaveStates: Bool { hostCapabilities.contains(RetroProtocol.saveStatesCapability) }
     public var pixelFormat: RetroPixelFormat? { onQueue { agreedFormat } }
     /// The reason the client gave up on the host, for logs.
     public var failureReason: String? { onQueue { reason } }
@@ -437,6 +444,8 @@ public final class RetroHostClient: @unchecked Sendable {
                 return done(.failure(RetroHostClientError.ps2HasNoPlaylist))
             }
         }
+        let states = method == "saveState" || method == "loadState" || (method == "start" && args.objectValue?["states"] != nil)
+        if states, !hostListsSaveStates { return done(.failure(RetroHostClientError.noSaveStatesCapability)) }
         guard nextCallID <= RetroProtocol.maxID else { return done(.failure(RetroHostClientError.idsUsedUp)) }
         let body: [UInt8]
         do {
@@ -483,7 +492,7 @@ public final class RetroHostClient: @unchecked Sendable {
             failedStatus = nil
             gameLoaded = false
             return .success(.null)
-        case "connectedPorts", "changeDisc", "option": return .success(.bool(false))
+        case "connectedPorts", "changeDisc", "option", "saveState", "loadState": return .success(.bool(false))
         case "pause", "stop", "volume": return .success(.null)
         default: return .failure(gone)
         }
@@ -652,6 +661,12 @@ public final class RetroHostClient: @unchecked Sendable {
         case "connectedPorts", "changeDisc", "option":
             guard let accepted = result.boolValue else { throw RetroProtocolError("The result of \(pending.method) must be a boolean.") }
             if pending.method == "connectedPorts", accepted, let count = pending.args.intValue { ports = count }
+        case "saveState", "loadState":
+            if result == .bool(false) { break }
+            guard result.objectValue != nil else { throw RetroProtocolError("The result of \(pending.method) must be false or an object.") }
+            let done = try RetroFields(result, pending.method)
+            _ = try done.integer("bytes", 0...RetroProtocol.maxSafeInteger)
+            _ = try done.integer("micros", 0...RetroProtocol.maxSafeInteger)
         case "pause":
             try Self.expectNull(pending.method, result)
             if gameLoaded, let pause = pending.args.boolValue { paused = pause }

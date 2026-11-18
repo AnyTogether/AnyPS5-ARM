@@ -189,3 +189,27 @@ struct RetroUncheckedMark: View {
         .accessibilityIdentifier("retro-unchecked-mark")
     }
 }
+
+/// A save state slot's picture in the game's menu: the PNG kept of that moment, `height` high and as
+/// wide as the game's display `aspect`, its corners rounded; without one, its place filled faintly,
+/// so a page of slots lines up.
+struct RetroStateThumbnail: View {
+    let png: Data?
+    let aspect: Double
+    let height: CGFloat
+    let scale: CGFloat
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 8 * scale, style: .continuous)
+        let width = height * CGFloat(aspect > 0 && aspect.isFinite ? aspect : 1)
+        ZStack {
+            shape.fill(Color.white.opacity(0.08))
+            if let png, let image = NSImage(data: png) {
+                Image(nsImage: image).resizable().interpolation(.medium).aspectRatio(contentMode: .fill)
+            }
+        }
+        .frame(width: width, height: height)
+        .clipShape(shape)
+        .accessibilityHidden(true)
+    }
+}

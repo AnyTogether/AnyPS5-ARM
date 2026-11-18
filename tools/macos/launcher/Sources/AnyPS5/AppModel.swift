@@ -313,6 +313,8 @@ enum Overlay: Equatable {
     /// PS in a PS1 game playing in the emulator host (RetroHostPlay.swift): the game paused under
     /// Resume, its discs, its options, the volume and Close game.
     case retroMenu
+    /// Save state in that menu on a slot that holds a state: "Overwrite slot N?", Cancel first.
+    case retroOverwriteState
     /// PS held in the launcher: Switch Profile, Quit AnyPS5.
     case homeMenu
     /// Esc on the home screen: "Quit AnyPS5?", Cancel first.

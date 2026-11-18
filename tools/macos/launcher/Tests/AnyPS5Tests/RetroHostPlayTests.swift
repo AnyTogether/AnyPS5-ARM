@@ -3,6 +3,35 @@
 import AppKit
 import XCTest
 
+/// Something a test opens by hand, and every call waiting for it.
+final class PlayGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var opened = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if opened {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiters.append(continuation)
+                lock.unlock()
+            }
+        }
+    }
+
+    func open() {
+        let waiting: [CheckedContinuation<Void, Never>] = lock.withLock {
+            opened = true
+            defer { waiters = [] }
+            return waiters
+        }
+        for waiter in waiting { waiter.resume() }
+    }
+}
+
 /// An emulator host the launcher's tests drive by hand: every call recorded, `status` what the
 /// test set, `start` taken, and a shutdown that ends it cleanly. No process runs.
 final class FakePlayHost: RetroHostSession, @unchecked Sendable {
@@ -49,6 +78,39 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
         set { locked { ps2 = newValue } }
     }
 
+    private var states = false
+    /// Whether the host's welcome lists `saveStates`; false, as for the signed host v1.0.0, unless a
+    /// test says.
+    var canSaveStates: Bool {
+        get { locked { states } }
+        set { locked { states = newValue } }
+    }
+    private var results: [String: RetroJSON] = [:]
+    private var errors: [String: RetroCallError] = [:]
+    private var gate: PlayGate?
+    private var hook: ((String, RetroJSON) -> Void)?
+    private var stopCode: String?
+    /// What `saveState` and `loadState` return, by method; `false` for one not set.
+    func answer(_ method: String, _ result: RetroJSON) { locked { results[method] = result; errors[method] = nil } }
+    /// The `error` reply `saveState` or `loadState` gets instead.
+    func refuse(_ method: String, _ error: RetroCallError?) { locked { errors[method] = error } }
+    /// When set, every call is answered only once it opens.
+    var callGate: PlayGate? {
+        get { locked { gate } }
+        set { locked { gate = newValue } }
+    }
+    /// Runs as each call is taken, before it is answered: what the host does meanwhile (writes a
+    /// state's file).
+    var onCall: ((String, RetroJSON) -> Void)? {
+        get { locked { hook } }
+        set { locked { hook = newValue } }
+    }
+    /// The `errorCode` the game ends with when it is stopped.
+    var stopErrorCode: String? {
+        get { locked { stopCode } }
+        set { locked { stopCode = newValue } }
+    }
+
     func setInputFocus(_ focused: Bool) { locked { focus.append(focused) } }
 
     func startGame(_ args: RetroJSON) async throws -> Int {
@@ -60,16 +122,25 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
     }
 
     func call(_ method: String, _ args: RetroJSON) async throws -> RetroJSON {
-        locked {
+        let (waiting, taken) = locked {
             calls.append((method, args))
+            return (gate, hook)
+        }
+        taken?(method, args)
+        await waiting?.wait()
+        let answer: Result<RetroJSON, Error> = locked {
             switch method {
             case "release":
                 if current?.ended == true { current = nil }
-                return .null
-            case "connectedPorts", "changeDisc", "option": return .bool(true)
-            default: return .null
+                return .success(.null)
+            case "connectedPorts", "changeDisc", "option": return .success(.bool(true))
+            case "saveState", "loadState":
+                if let error = errors[method] { return .failure(error) }
+                return .success(results[method] ?? .bool(false))
+            default: return .success(.null)
             }
         }
+        return try answer.get()
     }
 
     func status() async throws -> RetroStatus? { locked { current } }
@@ -79,6 +150,7 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
             calls.append(("stop", .null))
             guard var status = current else { return nil }
             status.ended = true
+            if let stopCode { status.errorCode = stopCode }
             current = status
             return status
         }
@@ -497,5 +569,431 @@ final class RetroHostPlayTests: XCTestCase {
         let turkish = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: T.sourceFolder.appendingPathComponent("tr.json"))) as? [String: String])
         XCTAssertEqual(turkish["retroMenuController"], "Kontrolcü")
         XCTAssertEqual(turkish["retroHostLoading"], "Oyun yükleniyor…")
+    }
+
+    // MARK: Save states, as on Windows and Linux (Desktop's test/ui/retro_host_save_states_test.dart)
+
+    /// What the recorded host built from the save-states branch answered (AnyPS5CoreTests'
+    /// Fixtures/retro-host-save-states-recording.json, Desktop's recording): a save, a load, and the
+    /// words of its refusals.
+    private static let saved: RetroJSON = .object(["bytes": .int(88), "micros": .int(15207)])
+    private static let loaded: RetroJSON = .object(["bytes": .int(88), "micros": .int(3253)])
+    private static func refusal(_ code: String) -> RetroCallError {
+        let words = [RetroCallError.otherCore: "The state was saved by another core or core build.",
+                     RetroCallError.otherGame: "The state was saved from another game.",
+                     RetroCallError.badState: "The file is not a state file this host reads.",
+                     RetroCallError.coreRefused: "The core could not save or load the state.",
+                     RetroCallError.fileError: "The state file could not be written or read.",
+                     RetroCallError.noState: "There is no state file there."]
+        return RetroCallError(code: code, message: words[code] ?? "")
+    }
+
+    private func ids(_ model: AppModel) -> [String] { model.retroMenuPanelRows().map(\.id) }
+
+    private func row(_ model: AppModel, _ id: String) throws -> PanelRow {
+        try XCTUnwrap(model.retroMenuPanelRows().first { $0.id == id }, "no row \(id)")
+    }
+
+    /// Chooses the row `id`, as Select on it does.
+    private func choose(_ model: AppModel, _ id: String) throws {
+        guard case .action(_, let run) = try row(model, id).kind else { return XCTFail("\(id) cannot be chosen") }
+        run()
+    }
+
+    private func chosen(_ model: AppModel, _ id: String) throws -> Bool {
+        if case .action = try row(model, id).kind { return true }
+        return false
+    }
+
+    /// The game's states folder, as the launcher keeps it, for the disc `start.disc` names.
+    private func folder(_ model: AppModel, _ game: Game, ps2: Bool = false) throws -> RetroStateFolder {
+        RetroStateFolder(folder: model.retroStatesFolder(game, ps2: ps2).standardizedFileURL.path,
+                         disc: try XCTUnwrap(game.retro?.path.standardizedFileURL.path))
+    }
+
+    private func saveCalls(_ host: FakePlayHost) -> [RetroJSON] { host.args("saveState") }
+
+    /// A PS1 game playing on a host that lists `saveStates` (unless `lists` is false), with a state in
+    /// each slot of `slots` (and a picture for each of `pictures`) before it starts, its first frame
+    /// shown unless `ready` is false.
+    private func playing(lists: Bool = true, slots: [Int] = [], pictures: [Int: Data] = [:],
+                         ready: Bool = true) async throws -> (AppModel, Game, FakePlayHost) {
+        let (model, game, _) = try launcher()
+        let states = try folder(model, game)
+        for slot in slots { try write(Data([1]), URL(fileURLWithPath: states.statePath(slot))) }
+        for (slot, png) in pictures { try write(png, URL(fileURLWithPath: states.picturePath(slot))) }
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            fake.canSaveStates = lists
+            hosts.append(fake)
+            return fake
+        }
+        let host = try await play(model, game) { hosts }
+        if ready {
+            host.gameStatus = try Self.status(ready: true)
+            await model.retroPlay?.host.refresh()
+        }
+        await model.retroPlay?.states.refresh()
+        return (model, game, host)
+    }
+
+    /// PS in the game, and the game paused under its menu, so a gate set after it holds only what
+    /// the test asks for.
+    private func openMenu(_ model: AppModel, _ host: FakePlayHost) async throws {
+        XCTAssertTrue(model.handle(.home))
+        XCTAssertEqual(model.overlay, .retroMenu)
+        try await settle({ host.args("pause").last == .bool(true) }, "the game is paused under its menu")
+    }
+
+    /// The host writes a state's file as it saves it, as the recorded host did.
+    private func hostWritesStates(_ host: FakePlayHost, _ states: RetroStateFolder) {
+        host.onCall = { method, args in
+            guard method == "saveState", let slot = args.objectValue?["slot"]?.intValue else { return }
+            let path = states.statePath(slot)
+            try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try? Data([1, 2, 3]).write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    func testAGameStartsWithItsOwnStatesFolderAndItsMenuHasSaveStateAndLoadState() async throws {
+        let (model, game, host) = try await playing()
+        let states = model.retroStatesFolder(game, ps2: false).standardizedFileURL.path
+        XCTAssertEqual(host.started.first?.objectValue?["states"], .string(states))
+        XCTAssertEqual((states as NSString).lastPathComponent, "PS1-SLUS00001", "named by the game's title ID")
+        XCTAssertEqual(((states as NSString).deletingLastPathComponent as NSString).lastPathComponent, "ps1")
+        XCTAssertEqual(TRetro.text(.retroMenuSaveState), "Save state", "sentence case, as every row")
+        XCTAssertEqual(TRetro.text(.retroMenuLoadState), "Load state")
+        XCTAssertTrue(model.handle(.home))
+        XCTAssertEqual(ids(model), ["resume", "saveState", "loadState", "section-audio", "section-console", "section-advanced", "closeGame"],
+                       "after the discs (none here), before the sections")
+        XCTAssertEqual(try row(model, "saveState").detail, "Keep this moment in a slot, to come back to it later.")
+        XCTAssertFalse(try chosen(model, "loadState"), "nothing to load yet")
+        XCTAssertEqual(try row(model, "loadState").detail, "No state of this game is saved yet.")
+        // Focus passes over Load state, which cannot be chosen.
+        model.menuIndex = 1
+        XCTAssertTrue(model.handle(.down))
+        XCTAssertEqual(model.menuIndex, 3)
+    }
+
+    func testAPs2GamesStatesAreKeptApartFromPs1Games() async throws {
+        let (model, game) = try ps2Launcher(lrps2: true)
+        model.setRetroHostPs2(true)
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            fake.canPlayPs2 = true
+            fake.canSaveStates = true
+            hosts.append(fake)
+            return fake
+        }
+        let host = try await play(model, game) { hosts }
+        let states = model.retroStatesFolder(game, ps2: true).standardizedFileURL.path
+        XCTAssertEqual(host.started.first?.objectValue?["states"], .string(states))
+        XCTAssertTrue(states.hasSuffix("/retro/states/ps2/PS2-SLUS20001"), states)
+    }
+
+    func testTwoGamesWhoseDiscsHaveTheSameNameKeepTheirStatesApart() throws {
+        let (model, night, _) = try launcher()
+        let root = try XCTUnwrap(model.libraryRoots.first)
+        let other = root.appendingPathComponent("Day Racer")
+        try write(Data(), other.appendingPathComponent("game.cue"))
+        try write(try JSONSerialization.data(withJSONObject: ["platform": "ps1", "titleId": "SLUS0-0001", "name": "Day Racer", "disc": "game.cue"]),
+                  other.appendingPathComponent("retro.json"))
+        model.scanAtOnce()
+        let day = try XCTUnwrap(model.games.first { $0.name == "Day Racer" })
+        let dayStates = try folder(model, day)
+        let nightStates = try folder(model, night)
+        XCTAssertEqual((dayStates.statePath(0) as NSString).lastPathComponent, (nightStates.statePath(0) as NSString).lastPathComponent,
+                       "the host names both alike")
+        XCTAssertNotEqual(dayStates.statePath(0), nightStates.statePath(0))
+    }
+
+    func testAHostWithoutSaveStatesIsSentNoStatesFolderAndTheMenuHasNoSaveState() async throws {
+        let (model, _, host) = try await playing(lists: false)
+        XCTAssertNil(host.started.first?.objectValue?["states"])
+        XCTAssertTrue(model.handle(.home))
+        XCTAssertFalse(ids(model).contains("saveState"))
+        XCTAssertFalse(ids(model).contains("loadState"))
+    }
+
+    func testSaveStateAnEmptySlotSavesAtOnceAndAUsedOneAsksFirst() async throws {
+        let (model, game, host) = try await playing()
+        hostWritesStates(host, try folder(model, game))
+        host.answer("saveState", Self.saved)
+        try await openMenu(model, host)
+        try choose(model, "saveState")
+        XCTAssertEqual(model.retroMenuTitle, "Save state")
+        XCTAssertEqual(ids(model), (0..<RetroStateFolder.slots).map { "state-\($0)" })
+        XCTAssertEqual(try row(model, "state-0").title, "Slot 1")
+        XCTAssertEqual(try row(model, "state-0").detail, "Empty")
+        XCTAssertEqual(try row(model, "state-0").pictureAspect, model.retroPlay?.host.aspect, "its picture's place is kept")
+        XCTAssertEqual(model.menuIndex, 0)
+
+        try choose(model, "state-0")
+        try await settle({ model.overlay == nil }, "back to the game once it is saved")
+        XCTAssertEqual(saveCalls(host), [.object(["slot": .int(0)])])
+        XCTAssertEqual(model.toast?.text, "Saved in slot 1")
+        try await settle({ host.args("pause").last == .bool(false) }, "the game goes on")
+
+        XCTAssertTrue(model.handle(.home))
+        XCTAssertTrue(try chosen(model, "loadState"))
+        XCTAssertEqual(try row(model, "loadState").detail, "Go back to a moment you saved. The memory card goes back to that moment too.",
+                       "a PS1 card goes back too")
+        try choose(model, "saveState")
+        let when = try XCTUnwrap(try row(model, "state-0").detail)
+        XCTAssertNotNil(when.range(of: #"^\d{4}-\d\d-\d\d \d\d:\d\d$"#, options: .regularExpression), when)
+        model.menuIndex = 0
+        try choose(model, "state-0")
+        XCTAssertEqual(model.overlay, .retroOverwriteState)
+        XCTAssertEqual(model.retroOverwriteQuestion?.title, "Overwrite slot 1?")
+        XCTAssertEqual(model.retroOverwriteQuestion?.detail, "The state saved \(when) is replaced by this moment.")
+        XCTAssertEqual(model.menuIndex, 0, "Cancel first, where the focus starts")
+
+        XCTAssertTrue(model.handle(.back))
+        XCTAssertEqual(model.overlay, .retroMenu, "Back goes back to Save state")
+        XCTAssertEqual(model.retroMenuTitle, "Save state")
+        XCTAssertEqual(saveCalls(host).count, 1)
+        XCTAssertEqual(model.retroPlay?.menu.isOpen, true, "the game stays paused")
+
+        try choose(model, "state-0")
+        XCTAssertTrue(model.handle(.right))
+        XCTAssertEqual(model.menuIndex, 1)
+        XCTAssertTrue(model.handle(.select))
+        try await settle({ model.overlay == nil }, "overwritten, back to the game")
+        XCTAssertEqual(saveCalls(host).count, 2)
+
+        try await openMenu(model, host)
+        try choose(model, "saveState")
+        XCTAssertTrue(model.handle(.back))
+        XCTAssertNil(model.retroPlay?.statePage)
+        XCTAssertEqual(model.menuIndex, 1, "on the Save state row")
+    }
+
+    func testSaveStateAndLoadStateShowOnceTheGameHasShownItsFirstFrameKeepingTheFocus() async throws {
+        let (model, _, host) = try await playing(ready: false)
+        XCTAssertEqual(model.retroPlay?.host.phase, .loading)
+        // PS gives a start up while the game loads; the menu opened all the same.
+        model.openRetroMenu()
+        XCTAssertEqual(model.overlay, .retroMenu)
+        XCTAssertEqual(ids(model), ["resume", "section-audio", "section-console", "section-advanced", "closeGame"], "the host saves nothing yet")
+        model.menuIndex = 4
+        host.gameStatus = try Self.status(ready: true)
+        await model.retroPlay?.host.refresh()
+        XCTAssertEqual(model.retroPlay?.host.phase, .playing)
+        XCTAssertEqual(ids(model), ["resume", "saveState", "loadState", "section-audio", "section-console", "section-advanced", "closeGame"])
+        XCTAssertEqual(ids(model)[model.menuIndex], "closeGame", "the focus stays on the row it was on")
+    }
+
+    func testASlotSaysSavingOrLoadingWhileItsCallRunsAndNothingElseStartsMeanwhile() async throws {
+        let (model, game, host) = try await playing()
+        hostWritesStates(host, try folder(model, game))
+        host.answer("saveState", Self.saved)
+        host.answer("loadState", Self.loaded)
+        try await openMenu(model, host)
+        try choose(model, "saveState")
+        let gate = PlayGate()
+        host.callGate = gate
+        try choose(model, "state-2")
+        try await settle({ (try? self.row(model, "state-2").detail) == "Saving…" })
+        XCTAssertEqual(try row(model, "state-3").detail, "Empty")
+        try choose(model, "state-3")
+        await Task.yield()
+        XCTAssertEqual(saveCalls(host).count, 1, "one at a time")
+        host.callGate = nil
+        gate.open()
+        try await settle({ model.overlay == nil })
+
+        try await openMenu(model, host)
+        try choose(model, "loadState")
+        let loading = PlayGate()
+        host.callGate = loading
+        try choose(model, "state-2")
+        try await settle({ (try? self.row(model, "state-2").detail) == "Loading…" })
+        host.callGate = nil
+        loading.open()
+        try await settle({ model.toast?.text == "Slot 3 loaded" })
+    }
+
+    func testASaveThatDoesNotWorkSaysSoAndStaysOnSaveState() async throws {
+        let (model, _, host) = try await playing()
+        host.refuse("saveState", RetroCallError(code: RetroCallError.fileError, message: "not written"))
+        try await openMenu(model, host)
+        try choose(model, "saveState")
+        try choose(model, "state-3")
+        try await settle({ model.toast != nil })
+        XCTAssertEqual(model.toast?.text, "The state could not be saved.")
+        XCTAssertEqual(model.overlay, .retroMenu)
+        XCTAssertEqual(model.retroPlay?.statePage, .save)
+    }
+
+    func testLoadStateASavedSlotLoadsAndARefusedOneSaysWhyInPlainWords() async throws {
+        let png = Data([137, 80, 78, 71, 13, 10, 26, 10])
+        let (model, _, host) = try await playing(slots: [1, 4], pictures: [1: png])
+        try await openMenu(model, host)
+        try choose(model, "loadState")
+        XCTAssertEqual(model.retroMenuTitle, "Load state")
+        XCTAssertFalse(try chosen(model, "state-0"), "an empty slot cannot be loaded")
+        XCTAssertTrue(try chosen(model, "state-1"))
+        XCTAssertEqual(try row(model, "state-1").picture, png)
+        XCTAssertNil(try row(model, "state-4").picture)
+        XCTAssertEqual(try row(model, "state-4").pictureAspect, model.retroPlay?.host.aspect, "its place is kept")
+        XCTAssertEqual(model.menuIndex, 1, "on the first slot that holds a state")
+
+        for (code, words) in [(RetroCallError.otherCore, "This state was saved by another version of the emulator, so it cannot be loaded."),
+                              (RetroCallError.otherGame, "This state was saved from another game, so it cannot be loaded."),
+                              (RetroCallError.badState, "This state file is damaged or was made by a newer emulator, so it cannot be loaded."),
+                              (RetroCallError.coreRefused, "The state could not be loaded."),
+                              (RetroCallError.fileError, "The state could not be loaded.")] {
+            model.toast = nil
+            host.refuse("loadState", Self.refusal(code))
+            try choose(model, "state-1")
+            try await settle({ model.toast != nil }, code)
+            XCTAssertEqual(model.toast?.text, words, code)
+            XCTAssertEqual(model.overlay, .retroMenu, "\(code): still on Load state")
+            XCTAssertEqual(model.retroPlay?.statePage, .load)
+        }
+
+        host.refuse("loadState", nil)
+        host.answer("loadState", Self.loaded)
+        try choose(model, "state-4")
+        try await settle({ model.overlay == nil }, "back to the game, which goes on from the state")
+        XCTAssertEqual(host.args("loadState").last, .object(["slot": .int(4)]))
+        XCTAssertEqual(model.toast?.text, "Slot 5 loaded")
+    }
+
+    func testALoadThatAnswersAfterTheMenuWasLeftAndOpenedAgainLeavesTheNewVisitAlone() async throws {
+        let (model, _, host) = try await playing(slots: [0])
+        host.answer("loadState", Self.loaded)
+        try await openMenu(model, host)
+        try choose(model, "loadState")
+        let gate = PlayGate()
+        host.callGate = gate
+        try choose(model, "state-0")
+        try await settle({ host.methods.contains("loadState") })
+        model.resumeRetroGame()
+        host.callGate = nil
+        model.openRetroMenu()
+        try choose(model, "loadState")
+        gate.open()
+        try await settle({ model.toast?.text == "Slot 1 loaded" })
+        XCTAssertEqual(model.overlay, .retroMenu, "the menu opened again stays open")
+        XCTAssertEqual(model.retroPlay?.statePage, .load)
+    }
+
+    func testASlotFoundEmptyOnLoadSaysItCouldNotBeLoadedAndShowsAsEmpty() async throws {
+        let (model, game, host) = try await playing(slots: [2])
+        try await openMenu(model, host)
+        try choose(model, "loadState")
+        try FileManager.default.removeItem(atPath: try folder(model, game).statePath(2))
+        host.refuse("loadState", Self.refusal(RetroCallError.noState))
+        try choose(model, "state-2")
+        try await settle({ model.toast != nil })
+        XCTAssertEqual(model.toast?.text, "The state could not be loaded.")
+        try await settle({ (try? self.chosen(model, "state-2")) == false }, "read again, the slot is empty")
+    }
+
+    func testPsOnOverwriteSlotGoesBackToSaveStateAndTheGameEndingClosesBoth() async throws {
+        let (model, _, host) = try await playing(slots: [0])
+        host.answer("saveState", Self.saved)
+        try await openMenu(model, host)
+        try choose(model, "saveState")
+        try choose(model, "state-0")
+        XCTAssertEqual(model.overlay, .retroOverwriteState)
+        XCTAssertTrue(model.handle(.home))
+        XCTAssertEqual(model.overlay, .retroMenu)
+        XCTAssertEqual(model.retroPlay?.statePage, .save)
+        try choose(model, "state-0")
+        XCTAssertTrue(model.handle(.options))
+        XCTAssertEqual(model.overlay, .retroMenu, "Options goes back to Save state too")
+        XCTAssertEqual(model.retroPlay?.statePage, .save)
+        XCTAssertEqual(model.menuIndex, 0, "on that slot")
+        XCTAssertTrue(saveCalls(host).isEmpty)
+        try choose(model, "state-0")
+        model.homeButton(hold: true)
+        XCTAssertNil(model.overlay, "held PS goes back to the game")
+        try await settle({ model.retroPlay?.menu.isOpen == false })
+
+        model.openRetroMenu()
+        try choose(model, "saveState")
+        try choose(model, "state-0")
+        XCTAssertEqual(model.overlay, .retroOverwriteState)
+        host.gameStatus = try Self.status(ready: true, ended: true, errorCode: RetroErrorCode.core)
+        await model.retroPlay?.host.refresh()
+        XCTAssertNil(model.overlay, "the question goes with the game")
+        XCTAssertNil(model.retroPlay?.statePage)
+    }
+
+    func testAPs1LoadAnsweredFalseThatEndedTheGameWithOtherSaysTheCardMayBeBackAtThatMoment() async throws {
+        let (model, _, host) = try await playing(slots: [0])
+        host.answer("loadState", .bool(false))
+        try await openMenu(model, host)
+        try choose(model, "loadState")
+        try choose(model, "state-0")
+        try await settle({ model.toast != nil })
+        XCTAssertEqual(model.toast?.text, "The state could not be loaded.")
+        host.gameStatus = try Self.status(ready: true, ended: true, errorCode: RetroErrorCode.other)
+        await model.retroPlay?.host.refresh()
+        XCTAssertEqual(model.toast?.text, "The game stopped while the state was loading, so the memory card may already be back at that moment.")
+    }
+
+    func testAPs1LoadAnsweredFalseThatLeftTheGamePlayingSaysNothingOfTheCardAtALaterOtherEnding() async throws {
+        let (model, _, host) = try await playing(slots: [0])
+        host.answer("loadState", .bool(false))
+        try await openMenu(model, host)
+        try choose(model, "loadState")
+        try choose(model, "state-0")
+        try await settle({ model.toast != nil })
+        let play = try XCTUnwrap(model.retroPlay)
+        XCTAssertTrue(play.states.loadAnsweredFalse)
+        await play.host.refresh()
+        XCTAssertFalse(play.states.loadAnsweredFalse, "a status after the reply says the game plays on")
+        model.resumeRetroGame()
+        host.gameStatus = try Self.status(ready: true, ended: true, errorCode: RetroErrorCode.other)
+        await play.host.refresh()
+        XCTAssertEqual(play.host.phase, .ended)
+        XCTAssertFalse(play.loadCardWarned)
+        XCTAssertNotEqual(model.toast?.text, TRetro.text(.retroStateCardAfterEnd), "that ending is not the load's")
+    }
+
+    func testClosingAPs1GameWhileALoadRunsThatThenEndsItWithOtherStillSaysSo() async throws {
+        let (model, _, host) = try await playing(slots: [0])
+        host.answer("loadState", .bool(false))
+        try await openMenu(model, host)
+        try choose(model, "loadState")
+        let gate = PlayGate()
+        host.callGate = gate
+        try choose(model, "state-0")
+        try await settle({ host.methods.contains("loadState") })
+        let closing = Task { await model.closeRetroGame() }
+        await Task.yield()
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertFalse(host.methods.contains("stop"), "stop waits for the reply")
+        host.callGate = nil
+        host.stopErrorCode = RetroErrorCode.other
+        gate.open()
+        await closing.value
+        XCTAssertNil(model.retroPlay)
+        XCTAssertEqual(model.toast?.text, TRetro.text(.retroStateCardAfterEnd))
+    }
+
+    func testTheWordsForAStateThatDidNotWork() {
+        XCTAssertEqual(AppModel.retroStateProblem(.otherCore, saving: false), .retroStateOtherCore)
+        XCTAssertEqual(AppModel.retroStateProblem(.otherGame, saving: false), .retroStateOtherGame)
+        XCTAssertEqual(AppModel.retroStateProblem(.badState, saving: false), .retroStateBad)
+        for outcome in [RetroStateOutcome.notNow, .fileError, .failed] {
+            XCTAssertEqual(AppModel.retroStateProblem(outcome, saving: false), .retroStateLoadFailed)
+            XCTAssertEqual(AppModel.retroStateProblem(outcome, saving: true), .retroStateSaveFailed)
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let date = calendar.date(from: DateComponents(year: 2026, month: 11, day: 8, hour: 20, minute: 4))!
+        XCTAssertEqual(AppModel.retroStateTime(date), "2026-11-08 20:04")
+    }
+
+    func testTheSaveStateWordsInTurkish() throws {
+        let turkish = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: T.sourceFolder.appendingPathComponent("tr.json"))) as? [String: String])
+        XCTAssertEqual(turkish["retroMenuSaveState"], "Durumu kaydet")
+        XCTAssertEqual(turkish["retroStateOverwriteTitle"], "%@. yuvanın üzerine yazılsın mı?")
     }
 }
