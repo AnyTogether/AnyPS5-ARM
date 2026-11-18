@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// How a connection to the emulator host ended (anyps5-retro-host docs/protocol.md "Fixtures",
 /// `outcome`).
@@ -145,6 +146,8 @@ public final class RetroHostClient: @unchecked Sendable {
     private var closing = false
     private var agreedFormat: RetroPixelFormat?
     private var hostCapabilities: [String] = []
+    /// A copy of `hostCapabilities` the UI reads from any thread, set once `welcome` came.
+    private let greetedCapabilities = OSAllocatedUnfairLock(initialState: [String]())
     private var hostRelease = ""
     private var endValue: RetroHostEnd?
     private var reason: String?
@@ -269,17 +272,20 @@ public final class RetroHostClient: @unchecked Sendable {
     /// The host's process id, from `posix_spawn`: the one for audio capture, focus and killing.
     public var pid: pid_t { onQueue { processID } }
     public var hostVersion: String { onQueue { hostRelease } }
-    public var capabilities: [String] { onQueue { hostCapabilities } }
+    /// The capabilities the host's `welcome` listed; empty before it. Read from a copy kept
+    /// behind a lock, not on the client's queue, so the UI (the PS menu's rows) never waits behind
+    /// a frame being copied there.
+    public var capabilities: [String] { greetedCapabilities.withLock { $0 } }
     /// Whether the host lists `ps2`, so it takes `start.console` and plays PS2 games on LRPS2, and
     /// each `status` names the console.
-    public var canPlayPs2: Bool { onQueue { hostListsPs2 } }
+    public var canPlayPs2: Bool { capabilities.contains(RetroProtocol.ps2Capability) }
     private var hostListsPs2: Bool { hostCapabilities.contains(RetroProtocol.ps2Capability) }
     /// Whether the host lists `saveStates`, so it takes `start.states` and the methods `saveState`
     /// and `loadState`.
-    public var canSaveStates: Bool { onQueue { hostListsSaveStates } }
+    public var canSaveStates: Bool { capabilities.contains(RetroProtocol.saveStatesCapability) }
     /// Whether the host lists `ps2ResolutionLimits`, so it limits a PS2 game's internal resolution
     /// and may be sent one, in `start.options` or with `option`.
-    public var limitsPs2Resolution: Bool { onQueue { hostCapabilities.contains(RetroProtocol.ps2ResolutionLimitsCapability) } }
+    public var limitsPs2Resolution: Bool { capabilities.contains(RetroProtocol.ps2ResolutionLimitsCapability) }
     private var hostListsSaveStates: Bool { hostCapabilities.contains(RetroProtocol.saveStatesCapability) }
     public var pixelFormat: RetroPixelFormat? { onQueue { agreedFormat } }
     /// The reason the client gave up on the host, for logs.
@@ -579,6 +585,8 @@ public final class RetroHostClient: @unchecked Sendable {
         let hostPid = try f.integer("pid", 1...RetroProtocol.maxUInt32)
         hostRelease = try f.string("hostVersion")
         hostCapabilities = try f.strings("capabilities")
+        let listed = hostCapabilities
+        greetedCapabilities.withLock { $0 = listed }
         let format = try f.string("pixelFormat")
         guard version == RetroProtocol.version, let agreed = RetroPixelFormat(rawValue: format),
               offeredFormats.contains(agreed) else {
