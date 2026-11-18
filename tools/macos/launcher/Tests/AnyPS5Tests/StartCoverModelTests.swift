@@ -119,6 +119,9 @@ final class StartCoverModelTests: XCTestCase {
 
     func testInFullScreenThePanelFadesOverTheGameOnceItSettled() async throws {
         let (model, game) = try model()
+        // A fade long enough that a busy runner's late wake-up cannot step over all of it: the
+        // panel is closed without a fade only when a whole fade passes between two frames.
+        model.coverTiming = StartCoverTiming(fade: 0.8, reducedFade: 0.03, holdLimit: 2, settle: 0.05, windowWait: 3, displayDelay: 0.1, entrance: 0.05)
         let surface = Surface()
         model.makeCoverSurface = { _, _, _ in surface }
         let done = handOff(model, game, overGame: true)
