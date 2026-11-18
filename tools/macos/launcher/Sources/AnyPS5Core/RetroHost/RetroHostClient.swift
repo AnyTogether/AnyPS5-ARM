@@ -248,6 +248,8 @@ public final class RetroHostClient: @unchecked Sendable {
         dispatchPrecondition(condition: .onQueue(queue))
         return shownFrame
     }
+    /// Whether a frame is shown now, from any thread (no pointer is handed out).
+    public var hasFrame: Bool { onQueue { shownFrame != nil } }
 
     /// Returns once `welcome` came and the first `volume` call was answered; throws `RetroHostGone`
     /// when the connection ended first.

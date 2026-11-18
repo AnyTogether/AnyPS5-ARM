@@ -529,7 +529,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
                 let wanted = frameSteps
                 try await until("frame \(wanted)") { $0.frames.count >= wanted }
                 XCTAssertEqual(frames[wanted - 1], draws, "step \(index) launcherDraws")
-                XCTAssertEqual(client.frame != nil, draws, "step \(index) frame")
+                XCTAssertEqual(client.hasFrame, draws, "step \(index) frame")
                 try await resumeFake(past: index)
             } else if let reports = step["launcherReports"]?.objectValue {
                 if !clean { _ = try await wait(30, "the end of the connection") { await $0.ended() } }
