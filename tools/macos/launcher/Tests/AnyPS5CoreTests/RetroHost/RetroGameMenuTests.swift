@@ -7,7 +7,7 @@ import XCTest
 final class RetroGameMenuTests: XCTestCase {
     /// The `status` example of anyps5-retro-host docs/protocol.md "status", with the disc and
     /// option fields the test changes.
-    static func status(inserted: Int? = 0, busy: Bool = false, failed: Bool = false, selected: Int = 2, active: String = "4") -> RetroStatus {
+    nonisolated static func status(inserted: Int? = 0, busy: Bool = false, failed: Bool = false, selected: Int = 2, active: String = "4") -> RetroStatus {
         let text = #"{"ready":true,"ended":false,"error":"","errorCode":"","aspect":1.3333333333333333,"hardware":true,"#
             + #""resolutionError":"","graphicsPending":false,"progressLabel":null,"progressPercent":null,"#
             + #""options":{"swanstation_GPU_ResolutionScale":{"title":"Internal Resolution","values":["1","2","4"],"#
