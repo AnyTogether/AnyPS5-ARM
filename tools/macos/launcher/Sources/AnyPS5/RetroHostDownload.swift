@@ -66,8 +66,9 @@ final class RetroHostDownloads {
     private(set) var progress: Progress?
     private var task: Task<Void, Never>?
     var downloading: Bool { task != nil }
-    /// The new host is being put in place of the old: no host may start until it is.
-    private(set) var installing = false
+    /// The new host is being put in place of the old: no host may start until it is. Set by the
+    /// download; the tests set it by hand.
+    var installing = false
     /// The checked files are being written over the old host's: past the point of stopping, so the
     /// row no longer offers it (`cancel()` does nothing).
     private(set) var placing = false
