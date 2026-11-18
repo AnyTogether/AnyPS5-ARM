@@ -48,8 +48,8 @@ final class RetroHostFakeGitHub: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let address = request.url?.absoluteString ?? ""
         let (body, redirect): (Data?, String?) = Self.lock.withLock {
-            asked.append(address)
-            return (files[address], redirects[address])
+            Self.asked.append(address)
+            return (Self.files[address], Self.redirects[address])
         }
         if let redirect, let target = URL(string: redirect) {
             let response = HTTPURLResponse(url: request.url!, statusCode: 302, httpVersion: nil, headerFields: ["Location": redirect])!
@@ -159,14 +159,16 @@ final class RetroHostStoreTests: XCTestCase {
                                    system: RetroHostSystem(name: "freebsd-x64", executable: "h", core: "c", ps2Core: "p"))
         let signed = RetroHostFakeGitHub.publish(try RetroHostReleaseFixture.files(), tag: "v1.0.0")
         RetroHostFakeGitHub.list([signed])
-        let release = try XCTUnwrap(RetroHostStore.newest(try await releases()))
+        let signedList = try await releases()
+        let release = try XCTUnwrap(RetroHostStore.newest(signedList))
         let notHere = await failure { try await other.fetch(release, configuration: RetroHostFakeGitHub.configuration) }
         XCTAssertEqual(notHere?.kind, .notAvailable)
     }
 
     func testAnOlderReleasePublishedAgainUnderAHigherTagIsRefusedBeforeItsZip() async throws {
         RetroHostFakeGitHub.list([RetroHostFakeGitHub.publish(try RetroHostReleaseFixture.files(), tag: "v2.0.0")])
-        let release = try XCTUnwrap(RetroHostStore.newest(try await releases()))
+        let listed = try await releases()
+        let release = try XCTUnwrap(RetroHostStore.newest(listed))
         let refused = await failure { try await self.fetch(release) }
         XCTAssertEqual(refused?.kind, .signature)
         XCTAssertEqual(refused?.message, "v2.0.0: the release tagged v2.0.0 is signed as host 1.0.0")
@@ -180,7 +182,8 @@ final class RetroHostStoreTests: XCTestCase {
         // GitHub's own digest would be of the changed file: the signed sums still catch it.
         entry["assets"] = (entry["assets"] as! [[String: Any]]).map { asset in asset.filter { $0.key != "digest" } }
         RetroHostFakeGitHub.list([entry])
-        let release = try XCTUnwrap(RetroHostStore.newest(try await releases()))
+        let listed = try await releases()
+        let release = try XCTUnwrap(RetroHostStore.newest(listed))
         let refused = await failure { try await self.fetch(release) }
         XCTAssertEqual(refused?.kind, .signature)
         XCTAssertEqual(refused?.message, "anyps5-retro-host-1.0.0-macos-arm64.zip does not match the signed release")
@@ -192,7 +195,8 @@ final class RetroHostStoreTests: XCTestCase {
         let entry = RetroHostFakeGitHub.publish(try RetroHostReleaseFixture.files(), tag: "v1.0.0")
         RetroHostFakeGitHub.list([entry])
         RetroHostFakeGitHub.redirects["https://github.example/v1.0.0/\(ReleaseSigning.sumsName)"] = "http://github.example/plain/SHA256SUMS"
-        let release = try XCTUnwrap(RetroHostStore.newest(try await releases()))
+        let listed = try await releases()
+        let release = try XCTUnwrap(RetroHostStore.newest(listed))
         let refused = await failure { try await self.fetch(release) }
         XCTAssertEqual(refused?.kind, .network)
         XCTAssertEqual(refused?.message, "SHA256SUMS: the download was redirected from https to http")
@@ -201,7 +205,8 @@ final class RetroHostStoreTests: XCTestCase {
 
     func testAStoppedDownloadSaysSo() async throws {
         RetroHostFakeGitHub.list([RetroHostFakeGitHub.publish(try RetroHostReleaseFixture.files(), tag: "v1.0.0")])
-        let release = try XCTUnwrap(RetroHostStore.newest(try await releases()))
+        let listed = try await releases()
+        let release = try XCTUnwrap(RetroHostStore.newest(listed))
         let store = self.store!
         let task = Task { try await store.fetch(release, configuration: RetroHostFakeGitHub.configuration) }
         task.cancel()

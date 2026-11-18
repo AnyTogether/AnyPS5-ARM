@@ -51,8 +51,8 @@ final class RetroHostTestGitHub: URLProtocol, @unchecked Sendable {
     override func startLoading() {
         let address = request.url?.absoluteString ?? ""
         let body: Data? = Self.lock.withLock {
-            asked.append(address)
-            return files[address]
+            Self.asked.append(address)
+            return Self.files[address]
         }
         let response = HTTPURLResponse(url: request.url!, statusCode: body == nil ? 404 : 200, httpVersion: nil, headerFields: nil)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
