@@ -32,6 +32,8 @@ final class RetroPlay {
     var counted = false
     /// The player was told this game's memory card cannot be read; once per game.
     var cardWarned = false
+    /// The host's last `resolutionError` the log was given, so each one is logged once.
+    var resolutionErrorLogged = ""
     /// The player was told the memory card may be back at a state's moment after a load that ended
     /// the game (`warnRetroCardAfterLoad`); once per game.
     var loadCardWarned = false
@@ -352,6 +354,13 @@ extension AppModel {
             play.cardWarned = true
             show(TRetro.text(.retroHostCardUnreadable), symbol: "sdcard")
         }
+        // The host's English refusal of a saved resolution goes to the log once per change, never to
+        // the screen.
+        let refusal = play.host.status?.resolutionError ?? ""
+        if refusal != play.resolutionErrorLogged {
+            play.resolutionErrorLogged = refusal
+            if !refusal.isEmpty { NSLog("[anyps5-launcher] emulator host: %@", refusal) }
+        }
         let problem = play.problem
         if play.seenPhase == play.host.phase, let seen = play.seenProblem, seen == problem {
             keepRetroMenuRow(play)
@@ -575,13 +584,64 @@ extension AppModel {
                                  kind: .action(destructive: false) { [weak self] in self?.chooseRetroDisc(disc) }))
         }
         rows += retroStateMenuRows(play)
-        for (section, title, detail) in Self.retroMenuSections where !retroSectionRows(play, section).isEmpty {
-            rows.append(PanelRow(id: "section-\(section.rawValue)", title: TRetro.text(title), detail: TRetro.text(detail), symbol: Self.retroSectionSymbol(section),
-                                 kind: .action(destructive: false) { [weak self] in self?.openRetroMenuSection(play, section) }))
+        for (section, title, detail) in Self.retroMenuSections {
+            if !retroSectionRows(play, section).isEmpty {
+                rows.append(PanelRow(id: "section-\(section.rawValue)", title: TRetro.text(title), detail: TRetro.text(detail),
+                                     symbol: Self.retroSectionSymbol(section),
+                                     kind: .action(destructive: false) { [weak self] in self?.openRetroMenuSection(play, section) }))
+            }
+            // The internal resolution after Audio's row, also when Audio has none.
+            if section == .audio, let resolution = retroResolutionRow(play) { rows.append(resolution) }
         }
         rows.append(PanelRow(id: "closeGame", title: TH.text(.closeGame), symbol: "xmark.circle",
                              kind: .action(destructive: true) { [weak self] in Task { await self?.closeRetroGame() } }))
         return rows
+    }
+
+    /// The first page's Internal resolution row: the values the launcher offers that the host
+    /// lists (`RetroResolutionChoice.of`), or nil when the menu offers none.
+    private func retroResolutionRow(_ play: RetroPlay) -> PanelRow? {
+        guard let choice = play.menu.resolution else { return nil }
+        return PanelRow(id: "resolution", title: TRetro.text(.retroResolution), detail: Self.retroResolutionDetail(choice), symbol: "sparkles.tv",
+                        kind: .choice(options: choice.values.map(Self.retroResolutionLabel), selected: choice.selected) { [weak self] index in
+            guard choice.values.indices.contains(index) else { return }
+            self?.chooseRetroResolution(play, choice.values[index].value)
+        })
+    }
+
+    /// An internal resolution chosen in the menu: sent to the game, and kept for every later game
+    /// of its console once the host took it. A PS1 game draws at it in a moment, a PS2 game from
+    /// its next start.
+    private func chooseRetroResolution(_ play: RetroPlay, _ value: String) {
+        guard let key = play.menu.resolution?.key else { return }
+        Task { @MainActor [weak self] in
+            guard await play.menu.chooseResolution(value), let self else { return }
+            var kept = self.preferences.retroHostOptions ?? [:]
+            kept[key] = value
+            self.preferences.retroHostOptions = kept
+        }
+    }
+
+    /// A value's words: Native, a scale ("2x"), or the host's own label for one the launcher does
+    /// not offer.
+    static func retroResolutionLabel(_ value: RetroResolutionValue) -> String {
+        switch value.scale {
+        case nil: return value.label
+        case 1: return TRetro.text(.retroResolutionNative)
+        case let scale?: return TRetro.format(.retroResolutionScale, "\(scale)")
+        }
+    }
+
+    /// The line under the row: the refusal naming the value the game draws at, when the next start
+    /// takes it, that it shows in a moment, or what it does.
+    static func retroResolutionDetail(_ choice: RetroResolutionChoice) -> String {
+        switch choice.note {
+        case .none: return TRetro.text(.retroResolutionDetail)
+        case .applying: return TRetro.text(.retroMenuOptionPendingDetail)
+        case .nextStart: return TRetro.text(.retroMenuOptionRestartDetail)
+        case .changesAtNextStart: return TRetro.text(.retroMenuOptionRestartOnlyDetail)
+        case .refused: return TRetro.format(.retroResolutionRefusedDetail, retroResolutionLabel(choice.active))
+        }
     }
 
     private static func retroSectionSymbol(_ section: RetroOptionSection) -> String {

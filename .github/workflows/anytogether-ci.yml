@@ -24,10 +24,10 @@ env:
   # The emulator host's fixture sessions and fake host, which the Mac launcher's
   # Tests/AnyPS5CoreTests/RetroHost plays against its client (anyps5-retro-host docs/protocol.md
   # "Fixtures"), as AnyPS5 Desktop's CI does. The commit is AnyTogether/anyps5-retro-host main with
-  # save states (#24) merged, whose messages show a start with states, a save, a load and two
-  # refusals; it holds PS2 (#18) too. Desktop pins the same commit.
+  # the PS2 resolution limits (#25) merged, whose messages show a PS2 status at a limited
+  # resolution; it holds save states (#24) and PS2 (#18) too. Desktop pins the same commit.
   RETRO_HOST_REPOSITORY: https://github.com/AnyTogether/anyps5-retro-host.git
-  RETRO_HOST_COMMIT: 1e5c278ff2c9d936c0d252734c3551d7bbed8efa
+  RETRO_HOST_COMMIT: 44060c080daa514049df228f1827f1dced925f6a
 
 jobs:
   # Named eligibility for upstream's ci-gate convention (tools/check_conventions.py, run by ctest):

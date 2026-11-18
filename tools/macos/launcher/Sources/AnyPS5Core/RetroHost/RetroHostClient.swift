@@ -33,6 +33,9 @@ public enum RetroHostClientError: Error, Equatable {
     /// `saveState`, `loadState` or a `start` naming `states`, which need the `saveStates`
     /// capability the host did not list.
     case noSaveStatesCapability
+    /// A PS2 internal resolution, in `start.options` or with `option`, which needs the
+    /// `ps2ResolutionLimits` capability the host did not list.
+    case noPs2ResolutionLimits
     /// This host has used every call id; start a new one for the next game.
     case idsUsedUp
     /// `stop` goes through `stopGame()`, which enforces its time limit.
@@ -274,6 +277,9 @@ public final class RetroHostClient: @unchecked Sendable {
     /// Whether the host lists `saveStates`, so it takes `start.states` and the methods `saveState`
     /// and `loadState`.
     public var canSaveStates: Bool { onQueue { hostListsSaveStates } }
+    /// Whether the host lists `ps2ResolutionLimits`, so it limits a PS2 game's internal resolution
+    /// and may be sent one, in `start.options` or with `option`.
+    public var limitsPs2Resolution: Bool { onQueue { hostCapabilities.contains(RetroProtocol.ps2ResolutionLimitsCapability) } }
     private var hostListsSaveStates: Bool { hostCapabilities.contains(RetroProtocol.saveStatesCapability) }
     public var pixelFormat: RetroPixelFormat? { onQueue { agreedFormat } }
     /// The reason the client gave up on the host, for logs.
@@ -446,6 +452,9 @@ public final class RetroHostClient: @unchecked Sendable {
         }
         let states = method == "saveState" || method == "loadState" || (method == "start" && args.objectValue?["states"] != nil)
         if states, !hostListsSaveStates { return done(.failure(RetroHostClientError.noSaveStatesCapability)) }
+        if !hostCapabilities.contains(RetroProtocol.ps2ResolutionLimitsCapability), Self.sendsPs2Resolution(method, args) {
+            return done(.failure(RetroHostClientError.noPs2ResolutionLimits))
+        }
         guard nextCallID <= RetroProtocol.maxID else { return done(.failure(RetroHostClientError.idsUsedUp)) }
         let body: [UInt8]
         do {
@@ -880,6 +889,16 @@ public final class RetroHostClient: @unchecked Sendable {
                 self.releaseWaiters = []
                 for waiter in waiting { waiter() }
             }
+        }
+    }
+
+    /// Whether a call gives the host a PS2 internal resolution: `start` with it in `options`, or
+    /// `option` for it.
+    static func sendsPs2Resolution(_ method: String, _ args: RetroJSON) -> Bool {
+        switch method {
+        case "start": return args.objectValue?["options"]?.objectValue?[RetroResolution.ps2Key] != nil
+        case "option": return args.objectValue?["key"] == .string(RetroResolution.ps2Key)
+        default: return false
         }
     }
 

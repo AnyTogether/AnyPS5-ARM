@@ -54,6 +54,9 @@ public final class RetroHostGame: ObservableObject {
     /// `saveState(_:)` and `loadState(_:)` can be asked for. A start with a folder on an older host
     /// leaves the folder out, and the game plays without save states.
     public private(set) var savesStates = false
+    /// Whether the host limits a PS2 game's internal resolution (`ps2ResolutionLimits`), so the
+    /// menu may offer it. False until the host has greeted the launcher.
+    public var limitsPs2Resolution: Bool { session.limitsPs2Resolution }
     /// How many `saveState` and `loadState` calls have been answered.
     public private(set) var stateReplies = 0
     /// How the host's connection ended; nil while it is open. `.unsupported` means the host speaks
@@ -172,7 +175,11 @@ public final class RetroHostGame: ObservableObject {
                 return
             }
             let states = request.states != nil && session.canSaveStates
-            _ = try await session.startGame((states ? request : request.withoutStates()).args)
+            // A PS2 game's internal resolution goes only to a host that limits it; an older host
+            // starts the game at LRPS2's own default.
+            let resolution = request.console == RetroConsole.ps2 && !session.limitsPs2Resolution
+                ? request.withoutOption(RetroResolution.ps2Key) : request
+            _ = try await session.startGame((states ? resolution : resolution.withoutStates()).args)
             savesStates = states
         } catch {
             if phase == .starting { finish(failure: "\(error)") }

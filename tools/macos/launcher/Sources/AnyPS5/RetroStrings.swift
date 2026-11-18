@@ -40,5 +40,7 @@ enum TRetro {
         case retroStateSaving, retroStateLoading, retroStateCardAfterEnd, retroStateOverwriteTitle
         case retroStateOverwrite, retroStateOverwriteDetail, retroStateSaved, retroStateLoaded
         case retroStateOtherCore, retroStateOtherGame, retroStateBad, retroStateLoadFailed, retroStateSaveFailed
+        // The internal resolution on the PS menu's first page.
+        case retroResolution, retroResolutionDetail, retroResolutionNative, retroResolutionScale, retroResolutionRefusedDetail
     }
 }

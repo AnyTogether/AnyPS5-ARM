@@ -100,6 +100,9 @@ final class FakeRetroHostSession: RetroHostSession, @unchecked Sendable {
     var canPlayPs2 = true
     /// Whether the host lists `saveStates`; false, as for the signed host v1.0.0, unless a test says.
     var canSaveStates = false
+    /// Whether the host lists `ps2ResolutionLimits`; false, as for the signed host v1.0.0, unless a
+    /// test says.
+    var limitsPs2Resolution = false
     /// Runs as each call is taken, before it is answered: what the host does meanwhile (writes a
     /// state's file).
     var onCall: ((String, RetroJSON) -> Void)?

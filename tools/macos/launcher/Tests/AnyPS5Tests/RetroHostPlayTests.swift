@@ -79,6 +79,12 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
     }
 
     private var states = false
+    private var resolutionLimits = false
+    /// Whether the host's welcome lists `ps2ResolutionLimits`.
+    var limitsPs2Resolution: Bool {
+        get { locked { resolutionLimits } }
+        set { locked { resolutionLimits = newValue } }
+    }
     /// Whether the host's welcome lists `saveStates`; false, as for the signed host v1.0.0, unless a
     /// test says.
     var canSaveStates: Bool {
@@ -314,8 +320,8 @@ final class RetroHostPlayTests: XCTestCase {
                        game.retro?.path.resolvingSymlinksInPath().path)
         XCTAssertEqual(start["system"], .string(model.retroFolder.appendingPathComponent("system").standardizedFileURL.path))
         XCTAssertEqual(start["saves"], .string(model.retroFolder.appendingPathComponent("saves/ps1").standardizedFileURL.path))
-        XCTAssertEqual(start["options"], .object(["swanstation_Console_Region": .string("NTSC-U")]),
-                       "a graphics option, a hidden one and another core's are not sent")
+        XCTAssertEqual(start["options"], .object(["swanstation_Console_Region": .string("NTSC-U"), "swanstation_GPU_ResolutionScale": .string("2")]),
+                       "the internal resolution goes, which the menu offers; a hidden option and another core's are not sent")
         XCTAssertNil(start["console"], "a PS1 start is the same on every host")
         XCTAssertEqual(model.retroPlay?.game, game)
         XCTAssertTrue(model.playing)
@@ -530,7 +536,7 @@ final class RetroHostPlayTests: XCTestCase {
         XCTAssertEqual(start["core"], .string("/test/pcsx2_libretro.dylib"))
         XCTAssertEqual(start["saves"], .string(model.retroFolder.appendingPathComponent("saves/ps2").standardizedFileURL.path))
         XCTAssertEqual(start["options"], .object(["pcsx2_fastboot": .string("enabled")]),
-                       "only LRPS2's options, and not its resolution scale, a graphics option")
+                       "only LRPS2's options, and its resolution not to a host without ps2ResolutionLimits")
         XCTAssertNil(start["initialDisc"])
     }
 
@@ -563,6 +569,38 @@ final class RetroHostPlayTests: XCTestCase {
         model.openRetroFolder = { opened.append($0) }
         XCTAssertTrue(model.handle(.options))
         XCTAssertEqual(opened.map(\.path), [model.retroFolder.appendingPathComponent("system/pcsx2/bios").path])
+    }
+
+    func testTheInternalResolutionRowSitsAfterAudioAndKeepsAChoiceTheHostTook() async throws {
+        let (model, game, _) = try launcher()
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            hosts.append(fake)
+            return fake
+        }
+        let host = try await play(model, game) { hosts }
+        var status = try Self.status(ready: true)
+        status.hardware = true
+        host.gameStatus = status
+        await model.retroPlay?.host.refresh()
+        XCTAssertTrue(model.handle(.home))
+        let rows = model.retroMenuPanelRows()
+        XCTAssertEqual(rows.map(\.id), ["resume", "section-audio", "resolution", "section-console", "section-advanced", "closeGame"])
+        let row = try XCTUnwrap(rows.first { $0.id == "resolution" })
+        XCTAssertEqual(row.title, "Internal resolution")
+        XCTAssertEqual(row.detail, "Draws the game sharper. Higher values need a faster graphics card.")
+        guard case .choice(let options, let selected, let set) = row.kind else { return XCTFail("a choice") }
+        XCTAssertEqual(options, ["Native", "2x"], "the values the launcher offers that the host lists")
+        XCTAssertEqual(selected, 0)
+        set(1)
+        try await settle({ model.preferences.retroHostOptions?["swanstation_GPU_ResolutionScale"] == "2" }, "kept once the host took it")
+        XCTAssertTrue(host.args("option").contains(.object(["key": .string("swanstation_GPU_ResolutionScale"), "value": .string("2")])))
+        XCTAssertEqual(AppModel.retroResolutionDetail(try XCTUnwrap(RetroResolutionChoice.of({
+            var refused = status
+            refused.resolutionError = "too large"
+            return refused
+        }(), limitsPs2: false))), "The emulator can't show the resolution you saved, so the game uses Native.")
     }
 
     func testTheMenuWordsInTurkishSayKontrolcu() throws {

@@ -14,6 +14,9 @@ public enum RetroProtocol {
     /// The capability that saves and loads a game's state for one player: `start.states` and the
     /// methods `saveState` and `loadState` (protocol.md "saveState and loadState").
     public static let saveStatesCapability = "saveStates"
+    /// The capability that limits a PS2 game's internal resolution (`pcsx2_upscale_multiplier`),
+    /// so it may be sent in `start.options` and with `option` (anyps5-retro-host #25).
+    public static let ps2ResolutionLimitsCapability = "ps2ResolutionLimits"
     /// The largest call and ping id.
     public static let maxID = 2_147_483_647
     public static let maxUInt32 = 4_294_967_295
