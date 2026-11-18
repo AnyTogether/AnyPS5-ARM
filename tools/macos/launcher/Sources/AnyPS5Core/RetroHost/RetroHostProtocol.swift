@@ -194,6 +194,9 @@ public struct RetroStatus: Equatable, Sendable {
     public var progressLabel: String?
     public var progressPercent: Int?
     public var options: [String: RetroOption] = [:]
+    /// The keys of `options` in the order the host lists them, which is the order the game's menu
+    /// shows them in, as on Windows and Linux.
+    public var optionOrder: [String] = []
     /// Memory card 1's file is there but the host could not read it as a card, so it is left as it is
     /// and this game's saves are not written anywhere. False from a status without the field.
     public var cardUnreadable = false
@@ -224,11 +227,26 @@ public struct RetroStatus: Equatable, Sendable {
         map["graphicsPending"] = .bool(graphicsPending)
         map["progressLabel"] = progressLabel.map(RetroJSON.string) ?? RetroJSON.null
         map["progressPercent"] = progressPercent.map(RetroJSON.int) ?? RetroJSON.null
-        map["options"] = .object(options.mapValues(\.json))
+        map["options"] = .object(options.mapValues(\.json), keys: orderedOptionKeys)
         map["cardUnreadable"] = .bool(cardUnreadable)
         if let discs { map["discs"] = discs.json }
         if let console { map["console"] = .string(console) }
         return .object(map)
+    }
+
+    /// The keys of `options` in the host's order: `optionOrder` when it names every option, else
+    /// sorted.
+    public var orderedOptionKeys: [String] {
+        optionOrder.count == options.count && Set(optionOrder) == Set(options.keys) ? optionOrder : options.keys.sorted()
+    }
+
+    /// The options in the host's order.
+    public var orderedOptions: [RetroOption] { orderedOptionKeys.compactMap { options[$0] } }
+
+    /// Whether `other` says the same as this status, field by field as protocol.md "status" writes
+    /// it, the order of the options too, which is the menu's order.
+    public func sameAs(_ other: RetroStatus) -> Bool {
+        self == other && orderedOptionKeys == other.orderedOptionKeys
     }
 
     /// Whether `value` is the client's own failure report rather than a host's status, which always
@@ -247,7 +265,8 @@ public struct RetroStatus: Equatable, Sendable {
         let f = try RetroFields(value, "status")
         var options: [String: RetroOption] = [:]
         let optionFields = try f.object("options")
-        for key in optionFields.map.keys {
+        let optionOrder = f.map["options"]?.objectKeys ?? []
+        for key in optionOrder {
             let o = try optionFields.object(key)
             let values = try o.strings("values")
             let labels = try o.strings("labels")
@@ -294,6 +313,7 @@ public struct RetroStatus: Equatable, Sendable {
         status.progressLabel = try f.stringOrNull("progressLabel")
         status.progressPercent = percent
         status.options = options
+        status.optionOrder = optionOrder
         status.cardUnreadable = try f.has("cardUnreadable") ? f.boolean("cardUnreadable") : false
         status.discs = discs
         if ps2 {

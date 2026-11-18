@@ -44,7 +44,8 @@ extension AppModel {
     /// (closeGameOnQuit) and a call is left, three seconds at most. ChildProcesses ends the rest
     /// once they are done, as the app terminates.
     func quitSteps() -> [Task<Void, Never>] {
-        [closeGameOnQuit(), leaveTogetherOnQuit().map { QuitWait.bounded($0) }].compactMap { $0 }
+        // A PS1 game in the emulator host is saved first: its host stops it and exits.
+        [closeGameOnQuit(), shutDownRetroHosts(), leaveTogetherOnQuit().map { QuitWait.bounded($0) }].compactMap { $0 }
     }
 
     /// The launcher is quitting: the game or emulator playing is asked to close exactly as Close

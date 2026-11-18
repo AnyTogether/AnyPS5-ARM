@@ -29,6 +29,12 @@ final class Input {
     }
     /// Settings → Shortcuts: an action from its key or pad chord, pressed or held.
     var shortcutHandler: ((ShortcutAction, Bool) -> Void)?
+    /// A PS1 game in the emulator host on its own screen reads the keyboard itself: true when it
+    /// took the key (pressed, let go, or a modifier). Settings › Shortcuts act before it.
+    var gameKeys: ((NSEvent) -> Bool)?
+    /// A game plays on the launcher's own screen: the controller's presses are the game's, and a
+    /// direction that moved nothing of the launcher does not bump.
+    var gameScreen: (() -> Bool)?
     /// Takes the controllers' buttons while a shortcut waits for a chord: what is held now, when.
     var padCapture: ((Set<PadButton>, TimeInterval) -> Void)? {
         didSet {
@@ -68,6 +74,9 @@ final class Input {
         didSet { if testing { hold(nil) } }
     }
 
+    /// A held direction repeats no more: a game took the screen.
+    func stopRepeating() { hold(nil) }
+
     func start() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
@@ -75,12 +84,15 @@ final class Input {
             if let capture = self.capture { return event.type == .keyUp ? event : (capture(event) ? nil : event) }
             if event.type == .keyUp, event.keyCode == self.heldKey { self.hold(nil) }
             if event.type == .keyUp {
-                return self.keyReleased(event.keyCode) ? nil : event
+                let game = self.gameKeys?(event) == true
+                return self.keyReleased(event.keyCode) || game ? nil : event
             }
+            if event.type == .flagsChanged, self.gameKeys?(event) == true { return nil }
             guard event.type == .keyDown else { return event }
             // Text fields keep their keys.
             if let responder = event.window?.firstResponder as? NSTextView, responder.isEditable { return event }
             if self.keyShortcut(event) { return nil }
+            if self.gameKeys?(event) == true { return nil }
             if event.keyCode == UInt16(kVK_Escape), Input.modifiers(event.modifierFlags).isEmpty, self.escapeHandler?() == true {
                 Feel.shared.usedKeyboard()
                 InputModeState.shared.usedKeyboard()
@@ -533,6 +545,8 @@ final class Input {
     private func dispatch(_ command: Command, repeat isRepeat: Bool) -> Bool {
         let before = activity?()
         let used = handler?(command) == true
+        // A game on the launcher's own screen (the emulator host) took it: no bump for a direction.
+        if used, gameScreen?() == true { return used }
         if used, let before, edge.handled(command, repeat: isRepeat, changed: activity?() != before) {
             Sounds.shared.play(.bump)
         }

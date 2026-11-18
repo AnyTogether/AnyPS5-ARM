@@ -590,7 +590,8 @@ extension AppModel {
         let changes = settings(for: game).controls ?? [:]
         // The game's own actions, when its files name them, under each button.
         let actions = gameControls[game.id] ?? [:]
-        var rows = gyroRows(game)
+        // A disc in the emulator host has no gyro: its keys only.
+        var rows = game.retro == nil ? gyroRows(game) : []
         rows.append(PanelRow(id: "hint", title: T.text(.controlsHint), detail: actions.isEmpty ? nil : T.text(.controlsFromGame), kind: .info("")))
         for action in PadAction.allCases {
             rows.append(PanelRow(id: action.rawValue, title: action.title, detail: actions[action]?.joined(separator: " · "), symbol: action.symbol,

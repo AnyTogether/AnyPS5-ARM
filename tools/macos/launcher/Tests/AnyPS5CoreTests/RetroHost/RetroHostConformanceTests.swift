@@ -436,7 +436,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
             for (name, path) in paths { out = out.replacingOccurrences(of: "${\(name)}", with: path) }
             return .string(out)
         case .array(let items): return .array(items.map(fill))
-        case .object(let map): return .object(map.mapValues(fill))
+        case .object(let map, let keys): return .object(map.mapValues(fill), keys: keys)
         default: return value
         }
     }
@@ -584,7 +584,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
 
     private func compare(_ expected: RetroJSON, _ actual: RetroJSON, _ ignore: Set<String>, _ place: String) {
         if ignore.contains(place) { return }
-        if case .object(let wanted) = expected, case .object(let got) = actual {
+        if case .object(let wanted, _) = expected, case .object(let got, _) = actual {
             for (key, value) in wanted where !ignore.contains("\(place).\(key)") {
                 guard let item = got[key] else {
                     XCTFail("\(place).\(key) is missing")
