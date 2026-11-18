@@ -18,8 +18,11 @@ let package = Package(
                 cSettings: [.unsafeFlags(["-w"])]),
         // macOS's own libarchive (/usr/lib), for games dumped as a zip (GameArchives.swift).
         .systemLibrary(name: "CArchive", path: "Sources/CArchive"),
+        // What the emulator host's client (AnyPS5Core/RetroHost) needs from C: sequentially consistent
+        // atomics on the frame ring's `latest` and `reading`, and the CMSG macros for a ring's descriptor.
+        .target(name: "CRetroHost", path: "Sources/CRetroHost"),
         // Game folders, SELF unwrapping, patches and the conversion into a Mac bundle: no UI.
-        .target(name: "AnyPS5Core", dependencies: ["CAtrac9", "CArchive"], path: "Sources/AnyPS5Core"),
+        .target(name: "AnyPS5Core", dependencies: ["CAtrac9", "CArchive", "CRetroHost"], path: "Sources/AnyPS5Core"),
         // Share play's audio device for WebRTC: the game's sound in, the received sound out.
         .target(name: "CShareAudio", dependencies: [.product(name: "WebRTC", package: "WebRTC")], path: "Sources/CShareAudio"),
         // Share play over WebRTC: the host's stream to each viewer and a viewer's side of it.
@@ -33,8 +36,11 @@ let package = Package(
         .executableTarget(name: "AnyPS5", dependencies: ["AnyPS5Core", "AnyPS5SharePlay", "AnyPS5Online", "AnyPS5MediaServer", .product(name: "WebRTC", package: "WebRTC")], path: "Sources/AnyPS5"),
         // The same pipeline from the command line, for scripted checks.
         .executableTarget(name: "anyps5-tool", dependencies: ["AnyPS5Core"], path: "Sources/anyps5-tool"),
+        // The emulator host's side of the RetroHost tests, where Swift cannot reach: a ring's shared
+        // memory object (shm_open is variadic) and sendmsg with descriptors (the CMSG macros).
+        .target(name: "CRetroHostTesting", path: "Tests/CRetroHostTesting"),
         // Unit tests of the core, run with `swift test`.
-        .testTarget(name: "AnyPS5CoreTests", dependencies: ["AnyPS5Core"], path: "Tests/AnyPS5CoreTests", exclude: ["Fixtures"]),
+        .testTarget(name: "AnyPS5CoreTests", dependencies: ["AnyPS5Core", "CRetroHostTesting"], path: "Tests/AnyPS5CoreTests", exclude: ["Fixtures"]),
         // Share play's WebRTC wiring end to end in one process, with a synthetic picture.
         .testTarget(name: "AnyPS5SharePlayTests", dependencies: ["AnyPS5SharePlay"], path: "Tests/AnyPS5SharePlayTests"),
         // The media server end to end against a LiveKit dev server, when ANYPS5_LIVEKIT_URL names one.
