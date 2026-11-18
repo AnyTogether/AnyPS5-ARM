@@ -47,6 +47,16 @@ final class RetroHostDownloads {
         version = installed == nil ? nil : store.version
     }
 
+    /// `look()` once the model is made: where the host gained or lost LRPS2, the library is scanned
+    /// again, as it lists PS2 cue sheets only while the host plays PS2 discs.
+    private func lookAgain() {
+        let ps2 = installed?.ps2Core != nil
+        look()
+        if (installed?.ps2Core != nil) != ps2, app.listsRetroGames {
+            if app.persists { app.rescan() } else { app.scanAtOnce() }
+        }
+    }
+
     /// The last look found no signed host release yet.
     private(set) var notYet = false
     /// Why the last download failed; a sentence, or nil.
@@ -88,7 +98,7 @@ final class RetroHostDownloads {
     /// it again.
     func failedCheck(_ reason: String) {
         broken = reason
-        look()
+        lookAgain()
         app.objectWillChange.send()
     }
 
@@ -152,10 +162,10 @@ final class RetroHostDownloads {
             do {
                 version = try await store.putInPlace(download)
             } catch {
-                look()
+                lookAgain()
                 throw error
             }
-            look()
+            lookAgain()
             broken = nil
             // The first host installed turns PS1 games in the host on: the player asked for it.
             if before == nil { app.setRetroHostPs1(true) }

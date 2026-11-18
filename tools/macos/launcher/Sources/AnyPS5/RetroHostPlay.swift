@@ -15,8 +15,10 @@ final class RetroPlay {
     let started: Date
     /// The host executable the game runs in, so its host is kept only for games of the same one.
     let program: String
-    /// The core library the game was started with: SwanStation.
+    /// The core library the game was started with: SwanStation, or LRPS2 for a PS2 game.
     let core: String
+    /// Whether the game is a PS2 one, started with `start.console` `ps2`.
+    var ps2: Bool { game.retro?.platform == .ps2 }
     /// The host was started without the checks a signed release's gets (a debug build's
     /// `ANYPS5_RETRO_HOST`): the game is marked as such while it runs (RetroUncheckedMark).
     let unchecked: Bool
@@ -65,7 +67,7 @@ final class RetroPlay {
 
     /// Why the game stopped, as the key of the words to show the player; nil while it plays, and
     /// for a game that ended without an error or that the player closed.
-    var problem: TRetro.Key? { closing ? nil : AppModel.retroHostProblem(host) }
+    var problem: TRetro.Key? { closing ? nil : AppModel.retroHostProblem(host, ps2: ps2) }
 }
 
 extension AppModel {
@@ -76,9 +78,27 @@ extension AppModel {
     var retroHostInstall: RetroHostInstall? { retroHostUnchecked ?? retroHostDownload.installed }
 
     /// Whether `platform`'s discs play in the emulator host: PS1 with its setting on and a host
-    /// found. Otherwise they go to the emulator chosen in Settings › Emulators, as before.
+    /// found, PS2 with its own setting on and a host that has LRPS2 beside it. Otherwise they go to
+    /// the emulator chosen in Settings › Emulators, as before.
     func playsInHost(_ platform: RetroPlatform) -> Bool {
-        platform == .ps1 && preferences.retroHostPs1 == true && retroHostInstall != nil
+        switch platform {
+        case .ps1: return preferences.retroHostPs1 == true && retroHostInstall != nil
+        case .ps2: return preferences.retroHostPs2 == true && retroHostInstall?.ps2Core != nil
+        case .ps3: return false
+        }
+    }
+
+    /// Whether the library lists the PS2 discs only the emulator host plays (PS2 cue sheets):
+    /// while PS2 discs play in the host.
+    var retroHostListsPs2: Bool { listsRetroGames && playsInHost(.ps2) }
+
+    /// Settings › Emulators › Run PS2 games in the separate host; the library is scanned again, as
+    /// it lists PS2 cue sheets only while the host plays PS2 discs.
+    func setRetroHostPs2(_ enabled: Bool) {
+        guard (preferences.retroHostPs2 == true) != enabled else { return }
+        preferences.retroHostPs2 = enabled ? true : nil
+        if persists { rescan() } else { scanAtOnce() }
+        scheduleRetroHostCheck()
     }
 
     /// Whether `platform`'s discs can be played now: in the host, or in the emulator chosen.
@@ -109,6 +129,14 @@ extension AppModel {
             rows.append(PanelRow(id: "retro-host-bios", title: TRetro.text(.retroHostBiosFolder), detail: TRetro.text(.retroHostBiosFolderDetail),
                                  symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.openRetroBiosFolder() }))
         }
+        // PS2 under them, only where the host has LRPS2 beside it.
+        guard retroHostInstall?.ps2Core != nil else { return rows }
+        rows.append(PanelRow(id: "retro-host-ps2", title: TRetro.text(.retroHostPs2), detail: TRetro.text(.retroHostPs2Detail), symbol: "opticaldisc",
+                             kind: .toggle(preferences.retroHostPs2 == true) { [weak self] value in self?.setRetroHostPs2(value) }))
+        if preferences.retroHostPs2 == true {
+            rows.append(PanelRow(id: "retro-host-ps2-bios", title: TRetro.text(.retroHostPs2BiosFolder), detail: TRetro.text(.retroHostPs2BiosFolderDetail),
+                                 symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.openRetroBiosFolder(ps2: true) }))
+        }
         return rows
     }
 
@@ -116,10 +144,16 @@ extension AppModel {
     var retroSystemFolder: URL { retroFolder.appendingPathComponent("system") }
     /// Where the PS1 memory cards are kept: retro/saves/ps1 beside it.
     var retroSavesFolder: URL { retroFolder.appendingPathComponent("saves/ps1") }
+    /// Where LRPS2 looks for the PS2 BIOS: pcsx2/bios in the same system folder.
+    var retroPs2BiosFolder: URL { retroSystemFolder.appendingPathComponent("pcsx2/bios") }
+    /// Where the PS2 memory cards are kept: retro/saves/ps2.
+    var retroPs2SavesFolder: URL { retroFolder.appendingPathComponent("saves/ps2") }
 
-    /// The folder the host looks for the PS1 BIOS in, made if it is not there yet, opened in Finder.
-    func openRetroBiosFolder() {
-        let folder = retroSystemFolder
+    /// The folder the host looks for the PS1 BIOS in, or with `ps2` the one LRPS2 looks for the
+    /// PS2 BIOS in, made if it is not there yet, opened in Finder. The launcher never reads, checks
+    /// or copies a BIOS.
+    func openRetroBiosFolder(ps2: Bool = false) {
+        let folder = ps2 ? retroPs2BiosFolder : retroSystemFolder
         do {
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         } catch {
@@ -135,7 +169,7 @@ extension AppModel {
     func playInHost(_ game: Game, _ disc: RetroDisc) {
         guard !playing, retroPlay == nil else { return }
         if retroHostDownload.installing { return show(TRetro.text(.retroHostUpdating), symbol: "opticaldisc") }
-        guard let install = retroHostInstall else { return }
+        guard let install = retroHostInstall, disc.platform != .ps2 || install.ps2Core != nil else { return }
         familyGate(game) { [weak self] in
             guard let self, !self.playing, self.retroPlay == nil else { return }
             guard StandaloneEmulator.discThere(disc, folder: game.folder) else { return self.show(TRetro.text(.retroDiscMoved), symbol: "opticaldisc") }
@@ -169,6 +203,11 @@ extension AppModel {
             if install.checked {
                 guard let check = await checkRetroHost(install) else { return }
                 checked = check
+                if disc.platform == .ps2, check.ps2Core == nil {
+                    check.release()
+                    NSLog("[anyps5-launcher] emulator host: %@ has no checked PS2 core", install.host)
+                    return show(TRetro.text(.retroHostNoPs2Detail), symbol: "exclamationmark.triangle.fill")
+                }
                 if playing || retroPlay != nil {
                     check.release()
                     return
@@ -197,7 +236,9 @@ extension AppModel {
         controls.deadzonePercent = preferences.stickDeadzone ?? 0
         controls.vibration = preferences.controllerVibration ?? true
         let menu = RetroGameMenu(game: host, controls: controls)
-        let play = RetroPlay(game: game, host: host, controls: controls, menu: menu, started: Date(), program: install.host, core: install.core,
+        let ps2 = disc.platform == .ps2
+        let core = ps2 ? install.ps2Core ?? install.core : install.core
+        let play = RetroPlay(game: game, host: host, controls: controls, menu: menu, started: Date(), program: install.host, core: core,
                              unchecked: !install.checked)
         play.listener = host.addListener { [weak self] in self?.retroChanged() }
         retroKeysHeld = []
@@ -213,9 +254,10 @@ extension AppModel {
         NSLog("[anyps5-launcher] emulator host: %@ plays %@", install.host, disc.path.path)
         await host.setFocused(active)
         await host.start(RetroHostStartRequest(
-            core: install.core, disc: disc.path.standardizedFileURL.path, system: retroSystemFolder.standardizedFileURL.path,
-            saves: retroSavesFolder.standardizedFileURL.path,
-            options: (preferences.retroHostOptions ?? [:]).filter { RetroOptionSection.sent($0.key) }))
+            core: core, disc: disc.path.standardizedFileURL.path, system: retroSystemFolder.standardizedFileURL.path,
+            saves: (ps2 ? retroPs2SavesFolder : retroSavesFolder).standardizedFileURL.path,
+            options: (preferences.retroHostOptions ?? [:]).filter { RetroOptionSection.sent($0.key, ps2: ps2) },
+            console: ps2 ? RetroConsole.ps2 : nil))
     }
 
     /// The checks before a start of a signed release's host (protocol.md "Finding and checking the
@@ -364,9 +406,9 @@ extension AppModel {
             case .select, .back, .home:
                 Sounds.shared.play(.back)
                 Task { await closeRetroGame() }
-            case .options where problem == .retroHostBiosDetail:
+            case .options where Self.retroBiosFolderOf(problem) != nil:
                 Sounds.shared.play(.select)
-                openRetroBiosFolder()
+                openRetroBiosFolder(ps2: problem == .retroHostPs2BiosDetail)
             default:
                 break
             }
@@ -687,20 +729,32 @@ extension AppModel {
     /// Why `host`'s game stopped, as the key of the words to show the player; nil while it plays
     /// or after a clean end. A host that speaks another protocol version needs updating, and one
     /// that never greeted the launcher could not be started.
-    static func retroHostProblem(_ host: RetroHostGame) -> TRetro.Key? {
+    static func retroHostProblem(_ host: RetroHostGame, ps2: Bool = false) -> TRetro.Key? {
         guard host.phase == .ended else { return nil }
         if host.hostEnd == .unsupported { return .retroHostOutdatedDetail }
+        // A PS2 game a host without `ps2` was never given needs a newer host.
+        if host.consoleRefused { return .retroHostNoPs2Detail }
         guard let status = host.endStatus else { return host.failure == nil ? nil : .retroHostNotStartedDetail }
-        return retroHostErrorKey(status.errorCode) ?? (host.failure == nil ? nil : .retroHostOtherDetail)
+        return retroHostErrorKey(status.errorCode, ps2: ps2) ?? (host.failure == nil ? nil : .retroHostOtherDetail)
+    }
+
+    /// The words of the BIOS folder a problem sends the player to, on its error screen's options
+    /// key: the PS1 or the PS2 BIOS folder for a missing BIOS; nil for any other problem.
+    static func retroBiosFolderOf(_ problem: TRetro.Key?) -> TRetro.Key? {
+        switch problem {
+        case .retroHostBiosDetail: return .retroHostBiosFolder
+        case .retroHostPs2BiosDetail: return .retroHostPs2BiosFolder
+        default: return nil
+        }
     }
 
     /// The words for a status's `errorCode` (protocol.md "status" and "Host failure"): nil for "",
     /// a game stopped without an error. A code this launcher does not know is a game that ended
     /// with an error (protocol.md "Compatibility").
-    static func retroHostErrorKey(_ errorCode: String) -> TRetro.Key? {
+    static func retroHostErrorKey(_ errorCode: String, ps2: Bool = false) -> TRetro.Key? {
         switch errorCode {
         case RetroErrorCode.none: return nil
-        case RetroErrorCode.bios: return .retroHostBiosDetail
+        case RetroErrorCode.bios: return ps2 ? .retroHostPs2BiosDetail : .retroHostBiosDetail
         case RetroErrorCode.disc: return .retroHostDiscDetail
         case RetroErrorCode.core: return .retroHostCoreDetail
         case RetroErrorCode.stalled: return .retroHostStalledDetail

@@ -31,5 +31,8 @@ enum TRetro {
         case retroMenuOptionPendingDetail, retroMenuOptionRestartDetail, retroMenuOptionRestartOnlyDetail, retroMenuAudio
         case retroMenuAudioDetail, retroMenuController, retroMenuControllerDetail, retroMenuConsole
         case retroMenuConsoleDetail, retroMenuAdvanced, retroMenuAdvancedDetail
+        // PS2 games in the emulator host, where it has LRPS2 beside it.
+        case retroHostPs2, retroHostPs2Detail, retroHostPs2BiosFolder, retroHostPs2BiosFolderDetail
+        case retroHostPs2BiosDetail, retroHostNoPs2Detail
     }
 }

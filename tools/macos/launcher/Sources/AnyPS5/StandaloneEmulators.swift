@@ -74,7 +74,7 @@ extension AppModel {
     /// watch over the folders (preview(games:root:)).
     func scanAtOnce(cache: RetroScanCache? = nil) {
         guard let first = libraryRoots.first else { return }
-        preview(games: GameLibrary.survey(roots: libraryRoots, includeRetro: listsRetroGames, cache: cache).games, root: first)
+        preview(games: GameLibrary.survey(roots: libraryRoots, includeRetro: listsRetroGames, hostPs2: retroHostListsPs2, cache: cache).games, root: first)
         if selected >= games.count { selected = max(0, games.count - 1) }
     }
 

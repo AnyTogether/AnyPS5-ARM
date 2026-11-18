@@ -42,7 +42,12 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
     }
 
     var end: RetroHostEnd? { locked { endValue } }
-    var canPlayPs2: Bool { false }
+    private var ps2 = false
+    /// Whether the host's welcome lists `ps2`.
+    var canPlayPs2: Bool {
+        get { locked { ps2 } }
+        set { locked { ps2 = newValue } }
+    }
 
     func setInputFocus(_ focused: Bool) { locked { focus.append(focused) } }
 
@@ -394,6 +399,98 @@ final class RetroHostPlayTests: XCTestCase {
         let quit = try XCTUnwrap(model.shutDownRetroHosts(limit: .seconds(2)))
         await quit.value
         XCTAssertEqual(host.shutdowns, 1, "the host is told to shut down, which writes the memory card")
+    }
+
+    // MARK: PS2 games, as on Windows and Linux (Desktop's test/ui/retro_host_ps2_test.dart)
+
+    /// A launcher with one PS2 disc and a debug build's host, with LRPS2 beside it or not.
+    private func ps2Launcher(lrps2: Bool) throws -> (AppModel, Game) {
+        let (model, _, _) = try launcher()
+        let root = try XCTUnwrap(model.libraryRoots.first)
+        let folder = root.appendingPathComponent("Street Kings")
+        try write(Data(), folder.appendingPathComponent("game.iso"))
+        try write(try JSONSerialization.data(withJSONObject: ["platform": "ps2", "titleId": "SLUS20001", "name": "Street Kings", "disc": "game.iso"]),
+                  folder.appendingPathComponent("retro.json"))
+        model.retroHostUnchecked = RetroHostInstall(host: "/test/anyps5-retro-host", core: "/test/swanstation_libretro.dylib",
+                                                    ps2Core: lrps2 ? "/test/pcsx2_libretro.dylib" : nil)
+        model.scanAtOnce()
+        let game = try XCTUnwrap(model.games.first { $0.retro?.platform == .ps2 })
+        model.selected = try XCTUnwrap(model.games.firstIndex(of: game))
+        return (model, game)
+    }
+
+    func testThePs2RowsShowOnlyWhereTheHostHasLrps2AndOpenItsBiosFolder() throws {
+        let (without, _) = try ps2Launcher(lrps2: false)
+        XCTAssertFalse(without.standaloneEmulatorSettings().rows.contains { $0.id.hasPrefix("retro-host-ps2") }, "no LRPS2, no PS2 rows")
+        let (model, game) = try ps2Launcher(lrps2: true)
+        XCTAssertEqual(model.state(of: game), .needsEmulator, "PCSX2 as before while the setting is off")
+        var rows = model.standaloneEmulatorSettings().rows
+        let toggle = try XCTUnwrap(rows.first { $0.id == "retro-host-ps2" })
+        XCTAssertEqual(toggle.title, "Run PS2 games in the separate host")
+        XCTAssertEqual(toggle.detail, "PS2 games play in this window through the AnyPS5 emulator host instead of PCSX2.")
+        XCTAssertFalse(rows.contains { $0.id == "retro-host-ps2-bios" })
+        model.setRetroHostPs2(true)
+        XCTAssertEqual(model.state(of: game), .installed(outdated: false), "a PS2 disc needs no PCSX2 once it plays in the host")
+        rows = model.standaloneEmulatorSettings().rows
+        let bios = try XCTUnwrap(rows.first { $0.id == "retro-host-ps2-bios" })
+        XCTAssertEqual(bios.title, "PS2 BIOS folder")
+        var opened: [URL] = []
+        model.openRetroFolder = { opened.append($0) }
+        guard case .action(_, let open) = bios.kind else { return XCTFail("an action") }
+        open()
+        XCTAssertEqual(opened.map(\.path), [model.retroFolder.appendingPathComponent("system/pcsx2/bios").path])
+    }
+
+    func testAPs2DiscStartsOnLrps2WithItsOwnSavesAndOptions() async throws {
+        let (model, game) = try ps2Launcher(lrps2: true)
+        model.setRetroHostPs2(true)
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            fake.canPlayPs2 = true
+            hosts.append(fake)
+            return fake
+        }
+        model.preferences.retroHostOptions = ["pcsx2_fastboot": "enabled", "swanstation_Console_Region": "NTSC-U", "pcsx2_upscale_multiplier": "2x"]
+        let host = try await play(model, game) { hosts }
+        let start = try XCTUnwrap(host.started.first?.objectValue)
+        XCTAssertEqual(start["console"], .string("ps2"))
+        XCTAssertEqual(start["core"], .string("/test/pcsx2_libretro.dylib"))
+        XCTAssertEqual(start["saves"], .string(model.retroFolder.appendingPathComponent("saves/ps2").standardizedFileURL.path))
+        XCTAssertEqual(start["options"], .object(["pcsx2_fastboot": .string("enabled")]),
+                       "only LRPS2's options, and not its resolution scale, a graphics option")
+        XCTAssertNil(start["initialDisc"])
+    }
+
+    func testAPs2GameOnAHostWithoutPs2SaysItNeedsUpdatingAndAMissingBiosOffersItsFolder() async throws {
+        let (model, game) = try ps2Launcher(lrps2: true)
+        model.setRetroHostPs2(true)
+        var hosts: [FakePlayHost] = []
+        var lists = false
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            fake.canPlayPs2 = lists
+            hosts.append(fake)
+            return fake
+        }
+        model.play(game)
+        try await settle({ model.retroPlay?.host.phase == .ended }, "the game is never sent")
+        XCTAssertEqual(hosts.first?.started.count, 0)
+        XCTAssertEqual(model.retroPlay?.problem, .retroHostNoPs2Detail)
+        XCTAssertEqual(TRetro.text(.retroHostNoPs2Detail), "This emulator host cannot play PS2 games. It needs updating.")
+        await model.closeRetroGame()
+        // That host, kept with no game, plays no PS2 game: a host that lists ps2 comes next.
+        await model.retroHostKeeper.shutdown()
+
+        lists = true
+        let host = try await play(model, game) { hosts }
+        host.gameStatus = try Self.status(ready: false, ended: true, errorCode: RetroErrorCode.bios)
+        await model.retroPlay?.host.refresh()
+        XCTAssertEqual(model.retroPlay?.problem, .retroHostPs2BiosDetail)
+        var opened: [URL] = []
+        model.openRetroFolder = { opened.append($0) }
+        XCTAssertTrue(model.handle(.options))
+        XCTAssertEqual(opened.map(\.path), [model.retroFolder.appendingPathComponent("system/pcsx2/bios").path])
     }
 
     func testTheMenuWordsInTurkishSayKontrolcu() throws {

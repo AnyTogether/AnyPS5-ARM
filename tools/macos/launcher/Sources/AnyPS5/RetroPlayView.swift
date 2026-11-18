@@ -20,7 +20,7 @@ struct RetroPlayView: View {
             if let problem {
                 RetroGameNotice(name: TRetro.format(.retroHostStopped, play.game.name), icon: play.game.icon, text: TRetro.text(problem),
                                 action: TRetro.text(.retroHostBack),
-                                optionsAction: problem == .retroHostBiosDetail ? TRetro.text(.retroHostBiosFolder) : nil)
+                                optionsAction: AppModel.retroBiosFolderOf(problem).map(TRetro.text))
                     .transition(.opacity)
             } else if play.loading && !play.closing {
                 RetroGameNotice(name: play.game.name, icon: play.game.icon, text: AppModel.retroLoadingText(status),

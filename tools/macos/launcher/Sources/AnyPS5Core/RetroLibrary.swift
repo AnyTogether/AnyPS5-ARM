@@ -116,10 +116,12 @@ public final class RetroScanCache: @unchecked Sendable {
     }
 }
 
-/// Where a scan looks for discs: the games folder it started in, and what it keeps of the files.
+/// Where a scan looks for discs: the games folder it started in, what it keeps of the files, and
+/// whether the PS2 discs only the emulator host plays are listed.
 struct RetroScan {
     let root: URL
     let cache: RetroScanCache
+    var hostPs2 = false
 }
 
 /// An extracted PS3 disc: a folder with PS3_DISC.SFB and PS3_GAME, which RPCS3 boots from
@@ -220,10 +222,16 @@ extension GameLibrary {
     static let ps1Folders: Set<String> = ["ps1", "psx", "playstation"]
     static let ps2Folders: Set<String> = ["ps2", "playstation 2"]
 
-    /// The discs among `entries`, all in `folder`: cue sheets whose tracks are all there, PBP
-    /// files, PS2 ISOs, CHDs under a folder named for one console, and the playlists that gather a
-    /// game's discs (the discs they list are not games of their own then). What is read from each
-    /// file comes from the scan's cache while the file is unchanged.
+    /// The discs among `entries`, all in `folder`, as on Windows and Linux: cue sheets whose
+    /// tracks are all there (PS1 discs outside a folder named for PS2, and with `hostPs2` PS2
+    /// discs under a folder named for PS2 alone), PBP files, PS2 ISOs, CHDs under a folder named
+    /// for one console, CSO and ZSO images (compressed ISOs, which PSP games use too) under a
+    /// folder named for PS2 alone, and the playlists that gather a PS1 game's discs (the discs they
+    /// list are not games of their own then). These are the PS2 disc files the emulator host takes
+    /// (anyps5-retro-host docs/protocol.md "start"), but `.elf`, a program rather than a disc,
+    /// which only a game's own retro.json names. PCSX2 boots all of them but the cue sheet, so a
+    /// PS2 cue sheet is listed only while the host plays PS2 discs. What is read from each file
+    /// comes from the scan's cache while the file is unchanged.
     static func retroFiles(in folder: URL, entries: [URL], scan: RetroScan) -> [Game] {
         let cache = scan.cache
         let base = folder.path
@@ -244,11 +252,11 @@ extension GameLibrary {
             switch fileExtension(name) {
             case "m3u":
                 playlists.append(path)
-            case "cue" where !ps2Folder:
+            case "cue" where !ps2Folder || (!ps1Folder && scan.hostPs2):
                 guard let names = try? cache.names(path, { cueFiles(path) }), !names.isEmpty else { continue }
                 let local = names.compactMap { localDiscFile(base, $0) }
                 guard local.count == names.count else { continue }
-                add(path, .ps1)
+                add(path, ps2Folder ? .ps2 : .ps1)
                 tracks[path] = local
             case "pbp":
                 if (try? cache.flag(path) { fileMagic(path, [0x00, 0x50, 0x42, 0x50]) }) == true { add(path, .ps1) }
@@ -256,6 +264,10 @@ extension GameLibrary {
                 if (try? cache.flag(path) { fileMagic(path, Array("MComprHD".utf8)) }) == true { add(path, ps1Folder ? .ps1 : .ps2) }
             case "iso":
                 if (try? cache.flag(path) { ps2ISO(path) }) == true { add(path, .ps2) }
+            case "cso" where ps2Folder && !ps1Folder:
+                if (try? cache.flag(path) { fileMagic(path, Array("CISO".utf8)) }) == true { add(path, .ps2) }
+            case "zso" where ps2Folder && !ps1Folder:
+                if (try? cache.flag(path) { fileMagic(path, Array("ZISO".utf8)) }) == true { add(path, .ps2) }
             default:
                 break
             }
@@ -411,8 +423,9 @@ extension GameLibrary {
 
     /// A PS1 or PS2 game folder its retro.json describes: the console, name, title ID and disc,
     /// and the art and music beside it. Each file is named without a folder and has to be a file
-    /// of the game's folder itself, not a link out of it.
-    static func inspectRetro(_ folder: URL, root: URL?) -> Game? {
+    /// of the game's folder itself, not a link out of it. A PS2 cue sheet only with `hostPs2`, as
+    /// PCSX2 does not boot one.
+    static func inspectRetro(_ folder: URL, root: URL?, hostPs2: Bool = false) -> Game? {
         let manifest = folder.appendingPathComponent("retro.json")
         guard isFile(manifest.path), let data = try? Data(contentsOf: manifest),
               let json = try? JSONSerialization.jsonObject(with: Data(text(data).utf8)) as? [String: Any] else { return nil }
@@ -429,7 +442,7 @@ extension GameLibrary {
             return isOwnFile(url.path) ? url : nil
         }
         let images: Set<String> = ["png", "jpg", "jpeg", "webp"]
-        let discs: Set<String> = platform == .ps1 ? ["cue", "chd", "m3u", "pbp"] : ["iso", "chd"]
+        let discs: Set<String> = platform == .ps1 ? ["cue", "chd", "m3u", "pbp"] : ["iso", "chd", "cso", "zso", "elf"].union(hostPs2 ? ["cue"] : [])
         guard let disc = localFile("disc", discs) else { return nil }
         return Game(folder: folder, titleID: "\(platform.label)-\(titleID)", name: name, version: "", icon: localFile("icon", images), background: localFile("background", images),
                     music: localFile("music", ["wav", "mp3", "m4a"]), executable: .disc, ageLevels: ageLevels(json["ageLevel"]),
