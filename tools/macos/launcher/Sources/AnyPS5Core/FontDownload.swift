@@ -197,10 +197,17 @@ final class ResumableDownload: NSObject, URLSessionDataDelegate, @unchecked Send
     private var failure: Error?
     private var continuation: CheckedContinuation<Void, Error>?
 
-    init(url: URL, file: URL, expected: Int64, progress: @escaping @Sendable (Double) -> Void) {
+    /// A redirect from https to anything else is refused (the emulator host's download, as on
+    /// Windows and Linux): a file asked for over https is never fetched in the clear.
+    let httpsOnly: Bool
+    private var task: URLSessionDataTask?
+    private var cancelled = false
+
+    init(url: URL, file: URL, expected: Int64, httpsOnly: Bool = false, progress: @escaping @Sendable (Double) -> Void) {
         self.url = url
         self.file = file
         self.expected = expected
+        self.httpsOnly = httpsOnly
         self.progress = progress
     }
 
@@ -210,9 +217,24 @@ final class ResumableDownload: NSObject, URLSessionDataDelegate, @unchecked Send
         if !FileManager.default.fileExists(atPath: file.path) { FileManager.default.createFile(atPath: file.path, contents: nil) }
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         defer { session.finishTasksAndInvalidate() }
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            self.continuation = continuation
-            session.dataTask(with: request(url)).resume()
+        // The task that runs this stops the download when it is cancelled.
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let task = session.dataTask(with: request(url))
+                let stopped: Bool = lock.withLock {
+                    self.continuation = continuation
+                    self.task = task
+                    return cancelled
+                }
+                if stopped { task.cancel() }
+                task.resume()
+            }
+        } onCancel: {
+            let task: URLSessionDataTask? = lock.withLock {
+                cancelled = true
+                return self.task
+            }
+            task?.cancel()
         }
     }
 
@@ -225,6 +247,12 @@ final class ResumableDownload: NSObject, URLSessionDataDelegate, @unchecked Send
     /// GitHub sends the download on to its storage: the Range goes along.
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
                     newRequest: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+        if httpsOnly, task.originalRequest?.url?.scheme?.lowercased() == "https", newRequest.url?.scheme?.lowercased() != "https" {
+            lock.withLock { failure = FontDownloadError("the download was redirected from https to \(newRequest.url?.scheme ?? "another scheme")") }
+            completionHandler(nil)
+            task.cancel()
+            return
+        }
         var next = newRequest
         lock.withLock { if offset > 0 { next.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range") } }
         completionHandler(next)
@@ -258,7 +286,7 @@ final class ResumableDownload: NSObject, URLSessionDataDelegate, @unchecked Send
             }
             completionHandler(.allow)
         } catch {
-            failure = error
+            failure = failure ?? error
             completionHandler(.cancel)
         }
     }

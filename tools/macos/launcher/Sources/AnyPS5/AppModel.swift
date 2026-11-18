@@ -563,6 +563,23 @@ final class AppModel: ObservableObject {
     var pickEmulator: ((String) throws -> URL?)?
     /// The program each chosen emulator starts, by the path chosen (StandaloneEmulators.swift).
     var emulatorPrograms: [String: URL] = [:]
+    /// Where the downloaded emulator host lives (RetroHostDownload.swift); the tests give a folder
+    /// of their own before the download is first used.
+    var retroHostRoot = RetroHostStore.defaultRoot
+    /// The keys a host release must be signed with: the built-in ones; the tests give the fixture's.
+    var retroHostKeys: [ReleaseSigning.Key]?
+    /// Where the host's releases are read: GitHub in the running launcher, nothing in the tests
+    /// unless they give one.
+    var retroHostReleases: (@Sendable () async throws -> [RetroHostUpstreamRelease])?
+    /// How the host's files are fetched; the tests answer them from a fake GitHub.
+    var retroHostSession: URLSessionConfiguration = .default
+    /// The PS1 emulator host as a download in Settings › Emulators, made on first use.
+    lazy var retroHostDownload = RetroHostDownloads(
+        app: self, store: RetroHostStore(root: retroHostRoot, keys: retroHostKeys), releases: retroHostReleases,
+        configuration: retroHostSession)
+    /// The unchecked host of a debug build (`ANYPS5_RETRO_HOST`), looked for once, since the
+    /// environment that names it does not change while the launcher runs; always nil in a release.
+    lazy var retroHostUnchecked: RetroHostInstall? = RetroHostLocator.runsUncheckedHosts ? RetroHostInstall.locate() : nil
     /// A game or an emulator plays, or one is starting.
     var playing: Bool { running != nil || emulator != nil || starting != nil }
     /// The game playing, a PS5 game or a disc in its emulator.
@@ -801,6 +818,7 @@ final class AppModel: ObservableObject {
         changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
         startPowerWatch()
         if persists { loadEngines(); loadProfilePicture(); watchFullScreen(); watchLauncher() }
+        if persists { retroHostReleases = { try await RetroHostStore.releases() } }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
             OnlinePlayHost.configure(transport: { OnlinePeerMesh(context: $0) }, signal: { [weak self] to, device, session, kind, data in

@@ -15,5 +15,10 @@ enum TRetro {
         case retroEmulators, retroSelectExecutable, retroChooseExecutable, retroEmulatorPickerFailed, retroShowFolders
         case retroGames, retroChooseEmulator, retroEmulatorNeeded
         case retroDiscMoved, retroEmulatorStartFailed, retroEmulatorExited
+        // The PS1 emulator host (RetroHostDownload.swift), Settings › Emulators.
+        case retroHostUnchecked, retroHostUncheckedDetail, retroHostDownload, retroHostDownloadDetail, retroHostInstalled
+        case retroHostInstalledDetail, retroHostBrokenDetail, retroHostDownloading, retroHostProgress, retroHostLooking
+        case retroHostChecking, retroHostNotYet, retroHostDownloadFailed, retroHostReady, retroHostUpToDate
+        case retroHostDownloadCloseGame
     }
 }
