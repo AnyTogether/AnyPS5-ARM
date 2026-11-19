@@ -10,6 +10,7 @@
 #include "prx/libkernel/KernelErrors.hpp"
 #include "prx/libkernel/Pthread/include/Pthread.hpp"
 #include "prx/libkernel/Time/include/TimedWait.hpp"
+#include "prx/libkernel/System/include/UserContext.hpp"
 #include <vector>
 #include <algorithm>
 #include <array>
@@ -58,65 +59,8 @@ extern "C" [[noreturn]] void Aps5RedirectedExit(CONTEXT* context, const void* ve
 
 namespace {
 
-struct GuestMcontext {
-    std::uint64_t onstack;
-    std::uint64_t rdi;
-    std::uint64_t rsi;
-    std::uint64_t rdx;
-    std::uint64_t rcx;
-    std::uint64_t r8;
-    std::uint64_t r9;
-    std::uint64_t rax;
-    std::uint64_t rbx;
-    std::uint64_t rbp;
-    std::uint64_t r10;
-    std::uint64_t r11;
-    std::uint64_t r12;
-    std::uint64_t r13;
-    std::uint64_t r14;
-    std::uint64_t r15;
-    std::uint32_t trapno;
-    std::uint16_t fs;
-    std::uint16_t gs;
-    std::uint64_t addr;
-    std::uint32_t flags;
-    std::uint16_t es;
-    std::uint16_t ds;
-    std::uint64_t err;
-    std::uint64_t rip;
-    std::uint64_t cs;
-    std::uint64_t rflags;
-    std::uint64_t rsp;
-    std::uint64_t ss;
-    std::uint64_t len;
-    std::uint64_t fpformat;
-    std::uint64_t ownedfp;
-    std::uint64_t lbrfrom;
-    std::uint64_t lbrto;
-    std::uint64_t aux1;
-    std::uint64_t aux2;
-    std::uint64_t fpstate[104];
-    std::uint64_t fsbase;
-    std::uint64_t gsbase;
-    std::uint64_t spare[6];
-};
-
-struct alignas(16) GuestUcontext {
-    std::uint32_t sigmask[4];
-    std::int32_t reserved[12];
-    GuestMcontext mcontext;
-    GuestUcontext* link;
-    void* stackPointer;
-    std::uint64_t stackSize;
-    std::int32_t stackFlags;
-    std::int32_t stackAlign;
-    std::int32_t flags;
-    std::int32_t spare[4];
-    std::int32_t tail[3];
-};
-
-static_assert(offsetof(GuestUcontext, mcontext) == 0x40);
-static_assert(offsetof(GuestUcontext, mcontext) + offsetof(GuestMcontext, rsp) == 0xf8);
+using GuestMcontext = UserMcontext;
+using GuestUcontext = UserUcontext;
 
 using GuestExceptionHandler = void (APS5_VABI *)(int, void*);
 
@@ -1106,6 +1050,13 @@ constexpr std::size_t FxsaveRegisterBytes = 416;
 #ifdef __APPLE__
 // macOS's mcontext_t points at the thread state; __fs starts with two reserved words and then
 // holds the FXSAVE image from __fpu_fcw on.
+using HostFloatState = decltype(std::declval<mcontext_t>()->__fs);
+
+constexpr std::size_t FxsaveImageOffset = offsetof(HostFloatState, __fpu_fcw);
+static_assert(offsetof(HostFloatState, __fpu_mxcsr) - FxsaveImageOffset == 24 && offsetof(HostFloatState, __fpu_xmm0) - FxsaveImageOffset == 160
+    && offsetof(HostFloatState, __fpu_xmm15) + 16 - FxsaveImageOffset == FxsaveRegisterBytes, "the Darwin float state is not an FXSAVE image");
+constexpr std::size_t FxsaveImageBytes = 512;
+
 void FromHost(const mcontext_t& host, GuestMcontext& m) {
     const auto& g = host->__ss;
     m.rdi = g.__rdi;
@@ -1126,12 +1077,11 @@ void FromHost(const mcontext_t& host, GuestMcontext& m) {
     m.rip = g.__rip;
     m.rsp = g.__rsp;
     m.rflags = g.__rflags;
-    m.cs = g.__cs;
+    m.cs = g.__cs & 0xffffu;
     m.ss = 0;
     m.len = sizeof(GuestMcontext);
-    constexpr std::size_t FxsaveBytes = 512;
-    static_assert(FxsaveBytes <= sizeof(m.fpstate) && FxsaveBytes <= sizeof(host->__fs) - offsetof(_STRUCT_X86_FLOAT_STATE64, __fpu_fcw));
-    std::memcpy(m.fpstate, &host->__fs.__fpu_fcw, FxsaveBytes);
+    static_assert(FxsaveImageBytes <= sizeof(m.fpstate));
+    std::memcpy(m.fpstate, reinterpret_cast<const unsigned char*>(&host->__fs) + FxsaveImageOffset, FxsaveImageBytes);
 }
 
 void ToHost(const GuestMcontext& m, mcontext_t& host) {
@@ -1154,7 +1104,7 @@ void ToHost(const GuestMcontext& m, mcontext_t& host) {
     g.__rip = m.rip;
     g.__rsp = m.rsp;
     g.__rflags = m.rflags;
-    std::memcpy(&host->__fs.__fpu_fcw, m.fpstate, FxsaveRegisterBytes);
+    std::memcpy(reinterpret_cast<unsigned char*>(&host->__fs) + FxsaveImageOffset, m.fpstate, FxsaveRegisterBytes);
 }
 #else
 void FromHost(const mcontext_t& host, GuestMcontext& m) {
@@ -1485,6 +1435,8 @@ bool RaiseOn(Pthread thread) {
     InstallDelivery();
     if (thread == scePthreadSelf()) return Send(thread);
     HostSignalBlock block;
+    const auto live = LockLiveGuestThread(thread);
+    if (!live.owns_lock()) return false;
     std::lock_guard lock(thread->_join_mtx);
     if (thread->_finished.load(std::memory_order_acquire)) return false;
     return Send(thread);
@@ -1623,7 +1575,7 @@ void DeliverPendingException_nid_no_patch(PthreadPrivate* thread) {
 
 int APS5_VABI sceKernelRaiseException(Pthread thread, int signum) {
  if (signum != RaisedSignal) return SCE_KERNEL_ERROR_EINVAL;
- if (thread == nullptr || thread->_finished.load(std::memory_order_acquire)) return SCE_KERNEL_ERROR_ESRCH;
+ if (thread == nullptr || !GuestThreadIsLive(thread)) return SCE_KERNEL_ERROR_ESRCH;
  const auto handler = Handler(signum);
  if (handler == nullptr) throw std::runtime_error("sceKernelRaiseException: no handler installed for the signal");
 #ifdef _WIN32

@@ -90,11 +90,6 @@ int APS5_VABI sceFreeTypeOlFtaSupportFormatType42_nid_no_patch() {
 }
 APS5_EXPORT("xqjAbn8VNGo", sceFreeTypeOlFtaSupportFormatType42_nid_no_patch);
 
-int APS5_VABI sceFreeTypeOlFtaSupportModules_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("oM0zMNCfXKM", sceFreeTypeOlFtaSupportModules_nid_no_patch);
-
 int APS5_VABI sceFreeTypeOlFtaSupportRendererRaster5_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
 }
@@ -134,114 +129,9 @@ int APS5_VABI sceFreeTypeOlDoneMemory_nid_no_patch() {
 }
 APS5_EXPORT("UTumVjeIQtg", sceFreeTypeOlDoneMemory_nid_no_patch);
 
-
-int APS5_VABI sceFreeTypeOlFtaAddModule_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("mCIXittfvrw", sceFreeTypeOlFtaAddModule_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleAutofitter_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("bZYqFlUVPCY", sceFreeTypeOlFtaExportModuleAutofitter_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleBdf_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("ZhVdSRyrpUI", sceFreeTypeOlFtaExportModuleBdf_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleCff_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("phi4au-2t04", sceFreeTypeOlFtaExportModuleCff_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModulePcf_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("-qwk1RxUuDA", sceFreeTypeOlFtaExportModulePcf_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModulePfr_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("mQYQAi8B0Yo", sceFreeTypeOlFtaExportModulePfr_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModulePsaux_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("4TJ1qJGXAV8", sceFreeTypeOlFtaExportModulePsaux_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModulePshinter_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("IewcaRR3F8I", sceFreeTypeOlFtaExportModulePshinter_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModulePsnames_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("vuuFugcw5ss", sceFreeTypeOlFtaExportModulePsnames_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleRaster1_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("xaswa+ndZS0", sceFreeTypeOlFtaExportModuleRaster1_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleSfnt_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("5-z1quqcDYo", sceFreeTypeOlFtaExportModuleSfnt_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleSmooth_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("VVfxa65sWF0", sceFreeTypeOlFtaExportModuleSmooth_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleT1cid_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("aX8PI-h3+dE", sceFreeTypeOlFtaExportModuleT1cid_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleTruetype_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("KIKL0rz6o-A", sceFreeTypeOlFtaExportModuleTruetype_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleType1_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("QPh+yb2Y8AQ", sceFreeTypeOlFtaExportModuleType1_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleType42_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("u36SHyuWQCA", sceFreeTypeOlFtaExportModuleType42_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleWinfonts_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("ZHsmiChQLTk", sceFreeTypeOlFtaExportModuleWinfonts_nid_no_patch);
-
-// On macOS this library exports the bundled FreeType's own functions (ld64 has no --exclude-libs),
-// and this NID is one of them (FT_Add_Module): the stub would be a second export of it.
-#ifndef __APPLE__
-int APS5_VABI sceFreeTypeOlAddModule_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("LonHHN98tMI", sceFreeTypeOlAddModule_nid_no_patch);
-#endif
-
 int APS5_VABI sceFreeTypeOlGetModuleInterface_nid_no_patch() {
     NotImplemented_nid_no_patch(__func__);
 }
 APS5_EXPORT("5NYsP564wwY", sceFreeTypeOlGetModuleInterface_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleGxvalid_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("qC+tiGwcW7E", sceFreeTypeOlFtaExportModuleGxvalid_nid_no_patch);
-
-int APS5_VABI sceFreeTypeOlFtaExportModuleOtvalid_nid_no_patch() {
-    NotImplemented_nid_no_patch(__func__);
-}
-APS5_EXPORT("rl7aW17qQb8", sceFreeTypeOlFtaExportModuleOtvalid_nid_no_patch);
 
 }

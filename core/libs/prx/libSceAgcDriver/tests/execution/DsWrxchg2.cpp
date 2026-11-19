@@ -19,7 +19,6 @@ using ShaderRecompiler::ShaderStage;
 constexpr std::uint32_t Threads = 32;
 constexpr std::uint32_t Inputs = 4;
 constexpr std::uint32_t Results = 16;
-constexpr std::uint32_t EqualOffsetResults = 6;
 constexpr std::uint32_t ActiveLanes = 16;
 constexpr std::uint32_t LdsDwords = 256;
 alignas(256) std::array<std::uint32_t, Threads * Inputs> Input{};
@@ -50,22 +49,20 @@ alignas(256) constexpr auto Code = std::to_array<std::uint32_t>({
     0xbf810000,
 });
 
-alignas(256) constexpr auto EqualOffsetsCode = std::to_array<std::uint32_t>({
+alignas(256) constexpr auto CoincidingRun = std::to_array<std::uint32_t>({
     0x34020082, 0x34060084, 0x343c0082,
     0xe0302000, 0x80000401, 0xe0302004, 0x80000501, 0xe0302008, 0x80000601, 0xe030200c, 0x80000701,
     0xbf8c3f70,
-    0xd8340014, 0x0000041e, 0xd8340100, 0x0000051e,
+    0xd8340000, 0x0000041e, 0xd8340200, 0x0000051e,
     0xbf8cc07f,
-    0xd8b80505, 0x0a07061e,
-    0xd8bc0101, 0x0c06071e,
+    0xd8b80000, 0x0a07061e, 0xd8bc0202, 0x0c04061e,
     0xbf8cc07f,
-    0xd8d80014, 0x1400001e, 0xd8d80100, 0x1500001e,
+    0xd8d80000, 0x1400001e, 0xd8d80200, 0x1600001e,
     0xbf8cc07f,
     0xe0702000, 0x80010a03, 0xe0702004, 0x80010b03, 0xe0702008, 0x80010c03, 0xe070200c, 0x80010d03,
-    0xe0702010, 0x80011403, 0xe0702014, 0x80011503,
+    0xe0702010, 0x80011403, 0xe0702014, 0x80011603,
     0xbf810000,
 });
-
 alignas(256) constexpr auto DestinationOverflow = std::to_array<std::uint32_t>({0xd8b82000, 0xff07061e, 0xbf810000});
 
 std::array<std::uint32_t, 4> BufferDescriptor(const void* data, std::uint32_t count) {
@@ -98,15 +95,28 @@ void Translate(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> c
     use(ShaderRecompiler::Recompile(request));
 }
 
-void Run(AgcDriver::VulkanDevice& device, std::span<const std::uint32_t> code) {
+void Run(AgcDriver::VulkanDevice& device) {
     for (std::uint32_t tid = 0; tid < Threads; ++tid) {
         for (std::uint32_t word = 0; word < Inputs; ++word) {
             Input[tid * Inputs + word] = ((word + 1u) << 28u) | (tid * 0x00010203u + word);
         }
     }
     Output.fill(0xdeadbeefu);
-    Translate(device, code, [&](const auto& result) {
-        device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(code.data()));
+    Translate(device, Code, [&](const auto& result) {
+        device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(Code.data()));
+        device.WaitIdle();
+    });
+}
+
+void RunCoinciding(AgcDriver::VulkanDevice& device) {
+    for (std::uint32_t tid = 0; tid < Threads; ++tid) {
+        for (std::uint32_t word = 0; word < Inputs; ++word) {
+            Input[tid * Inputs + word] = ((word + 1u) << 28u) | (tid * 0x00010203u + word);
+        }
+    }
+    Output.fill(0xdeadbeefu);
+    Translate(device, CoincidingRun, [&](const auto& result) {
+        device.Dispatch(result, 1, 1, 1, {}, reinterpret_cast<std::uintptr_t>(CoincidingRun.data()));
         device.WaitIdle();
     });
 }
@@ -153,8 +163,8 @@ void Check() {
     }
 }
 
-void CheckEqualOffsets() {
-    constexpr std::array<const char*, EqualOffsetResults> names{
+void CheckCoinciding() {
+    constexpr std::array<const char*, 6> names{
         "ds_wrxchg2_rtn_b32 first result", "ds_wrxchg2_rtn_b32 second result",
         "ds_wrxchg2st64_rtn_b32 first result", "ds_wrxchg2st64_rtn_b32 second result",
         "ds_wrxchg2_rtn_b32 memory", "ds_wrxchg2st64_rtn_b32 memory",
@@ -164,10 +174,14 @@ void CheckEqualOffsets() {
         const std::uint32_t b = Input[tid * Inputs + 1];
         const std::uint32_t c = Input[tid * Inputs + 2];
         const std::uint32_t d = Input[tid * Inputs + 3];
-        const std::array<std::uint32_t, EqualOffsetResults> expected{a, c, b, d, d, c};
-        for (std::uint32_t j = 0; j < EqualOffsetResults; ++j) {
+        const std::array<std::uint32_t, 6> expected{a, c, b, c, d, a};
+        for (std::uint32_t j = 0; j < expected.size(); ++j) {
             const auto actual = Output[tid * Results + j];
-            Require(actual == expected[j], std::string("ds wrxchg2: lane ") + std::to_string(tid) + " equal offsets " + names[j] + " is " + Hex(actual) + ", expected " + Hex(expected[j]));
+            Require(actual == expected[j], std::string("ds wrxchg2: lane ") + std::to_string(tid) + " " + names[j] + " is " + Hex(actual) + ", expected " + Hex(expected[j]));
+        }
+        for (std::uint32_t j = expected.size(); j < Results; ++j) {
+            const auto actual = Output[tid * Results + j];
+            Require(actual == 0xdeadbeefu, std::string("ds wrxchg2: lane ") + std::to_string(tid) + " unexpected write to result " + std::to_string(j) + " of " + Hex(actual));
         }
     }
 }
@@ -178,10 +192,10 @@ int main() {
     try {
         const auto device = OpenVulkanTestDevice();
         if (!device) return VulkanTestSkipped;
-        Run(*device, Code);
+        Run(*device);
         Check();
-        Run(*device, EqualOffsetsCode);
-        CheckEqualOffsets();
+        RunCoinciding(*device);
+        CheckCoinciding();
         CheckRejections(*device);
         std::puts("ds wrxchg2 tests passed");
         return 0;
