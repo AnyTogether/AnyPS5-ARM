@@ -137,6 +137,9 @@ struct Preferences: Codable, Equatable {
     /// launcher's window through the emulator host (RetroHostPlay.swift); nil means off. It acts
     /// only where a host is found.
     var retroHostPs1: Bool?
+    /// Settings › Emulators › Run PS2 games in the separate host, shown only where the host has
+    /// LRPS2 beside it; nil means off.
+    var retroHostPs2: Bool?
     /// The emulator host's volume in percent and whether it is muted, as the player last set them
     /// in the game's menu; nil for 100 and not muted. Every PS1 game in the host starts with them.
     var retroHostVolume: Int?
@@ -1502,13 +1505,13 @@ final class AppModel: ObservableObject {
             for root in roots where FileManager.default.fileExists(atPath: root.path) { Installer.removeLeftovers(root: root) }
         }
         // Emulator games turned on or off: a new watch, whose first scan announces no game.
-        if let monitor = libraryMonitor, monitor.roots == roots, monitor.includeRetro == listsRetroGames {
+        if let monitor = libraryMonitor, monitor.roots == roots, monitor.includeRetro == listsRetroGames, monitor.hostPs2 == retroHostListsPs2 {
             monitor.rescan()
             return
         }
         libraryMonitor?.stop()
         let stamp = recordsStamp
-        let monitor = LibraryMonitor(roots: roots, includeRetro: listsRetroGames) { [weak self] update in
+        let monitor = LibraryMonitor(roots: roots, includeRetro: listsRetroGames, hostPs2: retroHostListsPs2) { [weak self] update in
             // The records are read off the main thread too; each game's is one small file.
             let generation = stamp.withLock { $0 }
             let records = AppModel.records(of: update.games, roots: update.roots)

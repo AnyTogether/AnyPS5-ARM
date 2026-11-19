@@ -65,17 +65,20 @@ public enum GameLibrary {
     }
 
     /// Finds every game folder under `root`, down to three levels. With `includeRetro`, the PS1,
-    /// PS2 and PS3 discs in them too (RetroLibrary.swift).
-    public static func scan(_ root: URL, includeRetro: Bool = false, cache: RetroScanCache? = nil) -> [Game] {
-        survey(root, includeRetro: includeRetro, cache: cache).games
+    /// PS2 and PS3 discs in them too (RetroLibrary.swift), and with `hostPs2` the PS2 discs only
+    /// the emulator host plays as well.
+    public static func scan(_ root: URL, includeRetro: Bool = false, hostPs2: Bool = false, cache: RetroScanCache? = nil) -> [Game] {
+        survey(root, includeRetro: includeRetro, hostPs2: hostPs2, cache: cache).games
     }
 
     /// The games under `root` and the dumps that are not whole yet. Cheap: a folder listing per
     /// level and each game's param.json. With `includeRetro`, also the discs: what was read from
     /// a disc file is kept in `cache` (the shared `retroCache` by default) until the file changes.
-    public static func survey(_ root: URL, includeRetro: Bool = false, cache: RetroScanCache? = nil) -> Survey {
+    /// With `hostPs2` (the emulator host plays PS2 discs now), PS2 cue sheets too, which PCSX2
+    /// does not boot.
+    public static func survey(_ root: URL, includeRetro: Bool = false, hostPs2: Bool = false, cache: RetroScanCache? = nil) -> Survey {
         var found = Survey()
-        visit(root, depth: 0, into: &found, retro: includeRetro ? RetroScan(root: root, cache: cache ?? retroCache) : nil)
+        visit(root, depth: 0, into: &found, retro: includeRetro ? RetroScan(root: root, cache: cache ?? retroCache, hostPs2: hostPs2) : nil)
         GameAddons.attach(to: &found)
         found.games.sort(by: byName)
         return found
@@ -125,7 +128,7 @@ public enum GameLibrary {
     ///
     /// With `includeRetro`, the discs too; what `cache` holds of files no longer in any folder
     /// is let go.
-    public static func survey(roots: [URL], includeRetro: Bool = false, cache: RetroScanCache? = nil) -> Library {
+    public static func survey(roots: [URL], includeRetro: Bool = false, hostPs2: Bool = false, cache: RetroScanCache? = nil) -> Library {
         let fileManager = FileManager.default
         let retro = cache ?? retroCache
         if includeRetro { retro.begin() }
@@ -133,7 +136,7 @@ public enum GameLibrary {
         return merge(roots.map { root in
             var directory: ObjCBool = false
             let there = fileManager.fileExists(atPath: root.path, isDirectory: &directory) && directory.boolValue
-            return (root, there ? survey(root, includeRetro: includeRetro, cache: retro) : nil)
+            return (root, there ? survey(root, includeRetro: includeRetro, hostPs2: hostPs2, cache: retro) : nil)
         })
     }
 
@@ -171,7 +174,7 @@ public enum GameLibrary {
     }
 
     static func visit(_ folder: URL, depth: Int, into found: inout Survey, retro: RetroScan? = nil) {
-        if let game = inspect(folder, includeRetro: retro != nil, root: retro?.root, cache: retro?.cache) {
+        if let game = inspect(folder, includeRetro: retro != nil, hostPs2: retro?.hostPs2 ?? false, root: retro?.root, cache: retro?.cache) {
             found.games.append(game)
             return
         }
@@ -194,13 +197,15 @@ public enum GameLibrary {
     }
 
     /// The game in `folder`, or nil when it is not a dump. With `includeRetro`, a folder with a
-    /// retro.json or an extracted PS3 disc too, identified inside the games folder `root`.
-    public static func inspect(_ folder: URL, includeRetro: Bool = false, root: URL? = nil, cache: RetroScanCache? = nil) -> Game? {
+    /// retro.json or an extracted PS3 disc too, identified inside the games folder `root`; with
+    /// `hostPs2`, a retro.json may name a PS2 cue sheet (inspectRetro).
+    public static func inspect(_ folder: URL, includeRetro: Bool = false, hostPs2: Bool = false, root: URL? = nil,
+                               cache: RetroScanCache? = nil) -> Game? {
         let fileManager = FileManager.default
         let system = folder.appendingPathComponent("sce_sys")
         let eboot = folder.appendingPathComponent("eboot.bin")
         if includeRetro, !fileManager.fileExists(atPath: eboot.path) {
-            return inspectRetro(folder, root: root) ?? inspectPS3(folder, root: root, cache: cache ?? retroCache)
+            return inspectRetro(folder, root: root, hostPs2: hostPs2) ?? inspectPS3(folder, root: root, cache: cache ?? retroCache)
         }
         guard fileManager.fileExists(atPath: eboot.path),
               let data = try? Data(contentsOf: system.appendingPathComponent("param.json")),
