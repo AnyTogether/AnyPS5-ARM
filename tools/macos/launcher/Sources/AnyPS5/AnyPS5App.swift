@@ -326,7 +326,7 @@ struct RootView: View {
             if let game = model.selectedGame {
                 Gallery(game: game, shots: model.galleryShots).transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks, .retroMenu:
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks, .retroMenu, .retroOverwriteState:
             GameMenuCard().id(model.overlay == .homeMenu ? "home" : model.overlay == .profileMenu ? "options" : model.overlay == .confirmQuit ? "quit" : model.overlay == .launcherReport ? "report" : model.overlay == .confirmDeleteGame ? "delete"
                 : model.overlay == .confirmCancelUnlock ? "cancel-unlock" : model.overlay == .confirmQuitUnlocks ? "quit-unlocks" : "game").transition(.opacity)
         case .profilePicker:

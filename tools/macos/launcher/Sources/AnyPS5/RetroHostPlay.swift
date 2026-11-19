@@ -32,8 +32,30 @@ final class RetroPlay {
     var counted = false
     /// The player was told this game's memory card cannot be read; once per game.
     var cardWarned = false
+    /// The host's last `resolutionError` the log was given, so each one is logged once.
+    var resolutionErrorLogged = ""
+    /// The player was told the memory card may be back at a state's moment after a load that ended
+    /// the game (`warnRetroCardAfterLoad`); once per game.
+    var loadCardWarned = false
     /// The section of the menu shown, or nil for the menu's first page.
     var menuSection: RetroOptionSection?
+    /// The game's save states, in its menu's Save state and Load state where its host saves states
+    /// (`RetroSaveStates.available`).
+    let states: RetroSaveStates
+    /// The menu's Save state or Load state page shown, or nil.
+    var statePage: RetroStatePage?
+    /// The slot Overwrite slot N? asks about (`Overlay.retroOverwriteState`).
+    var overwriting: Int?
+    /// A save or load was chosen and has not answered yet: set the moment it is chosen, before its
+    /// task runs, so a second press meanwhile is let go, as on Windows and Linux, where the save
+    /// marks itself under way before anything waits.
+    var stateAsked = false
+    /// How many times the menu was opened: a save or load goes back to the game only from the visit
+    /// it was asked in, not from the menu opened again while it waited.
+    var menuVisits = 0
+    /// The ids of the menu's first page as last built: the rows it gains or loses as the status
+    /// changes leave the focus on the row it was on (`keepRetroMenuRow`).
+    var firstPageRows: [String] = []
     /// The phase and the problem the launcher last acted on (`retroChanged`).
     var seenPhase: RetroHostGamePhase?
     var seenProblem: TRetro.Key??
@@ -41,7 +63,8 @@ final class RetroPlay {
     private var released = false
 
     init(game: Game, host: RetroHostGame, controls: RetroHostControls, menu: RetroGameMenu, started: Date, program: String, core: String,
-         unchecked: Bool) {
+         unchecked: Bool, states: RetroSaveStates) {
+        self.states = states
         self.game = game
         self.host = host
         self.controls = controls
@@ -57,8 +80,10 @@ final class RetroPlay {
         guard !released else { return }
         released = true
         if let listener { host.removeListener(listener) }
+        states.onChange = nil
         controls.dispose()
         menu.dispose()
+        states.dispose()
         host.dispose()
     }
 
@@ -68,6 +93,11 @@ final class RetroPlay {
     /// Why the game stopped, as the key of the words to show the player; nil while it plays, and
     /// for a game that ended without an error or that the player closed.
     var problem: TRetro.Key? { closing ? nil : AppModel.retroHostProblem(host, ps2: ps2) }
+}
+
+/// The pages of the game's menu that list its save state slots.
+enum RetroStatePage {
+    case save, load
 }
 
 extension AppModel {
@@ -109,6 +139,9 @@ extension AppModel {
     /// Whether the game's own screen is in front: a game in the host and no layer over it.
     var retroInGame: Bool { retroPlay != nil && overlay == nil }
 
+    /// Whether the game's menu is shown, or the question one of its rows asks (Overwrite slot N?).
+    var retroMenuShown: Bool { overlay == .retroMenu || overlay == .retroOverwriteState }
+
     /// Shuts down the host kept for the next game and waits until it has exited, so its files are
     /// no longer held: before the host is replaced by a download.
     func stopKeptRetroHost() async { await retroHostKeeper.shutdown() }
@@ -148,6 +181,14 @@ extension AppModel {
     var retroPs2BiosFolder: URL { retroSystemFolder.appendingPathComponent("pcsx2/bios") }
     /// Where the PS2 memory cards are kept: retro/saves/ps2.
     var retroPs2SavesFolder: URL { retroFolder.appendingPathComponent("saves/ps2") }
+    /// Where the host keeps the save states of `game`, a PS1 one or with `ps2` a PS2 one, beside
+    /// their memory cards: retro/states/<ps1|ps2>/<title ID>, the folder `start.states` names
+    /// (anyps5-retro-host docs/protocol.md "saveState and loadState"), one per game, as the host
+    /// names a slot only after its disc and checks a state's game only by that name. The title ID
+    /// keeps its hyphens, so two games whose IDs differ only by one stay apart.
+    func retroStatesFolder(_ game: Game, ps2: Bool) -> URL {
+        retroFolder.appendingPathComponent("states/\(ps2 ? "ps2" : "ps1")/\(game.titleID)")
+    }
 
     /// The folder the host looks for the PS1 BIOS in, or with `ps2` the one LRPS2 looks for the
     /// PS2 BIOS in, made if it is not there yet, opened in Finder. The launcher never reads, checks
@@ -238,9 +279,15 @@ extension AppModel {
         let menu = RetroGameMenu(game: host, controls: controls)
         let ps2 = disc.platform == .ps2
         let core = ps2 ? install.ps2Core ?? install.core : install.core
+        let discPath = disc.path.standardizedFileURL.path
+        let statesPath = retroStatesFolder(game, ps2: ps2).standardizedFileURL.path
+        let saveStates = RetroSaveStates(game: host, folder: RetroStateFolder(folder: statesPath, disc: discPath))
+        saveStates.log = { NSLog("[anyps5-launcher] %@", $0) }
         let play = RetroPlay(game: game, host: host, controls: controls, menu: menu, started: Date(), program: install.host, core: core,
-                             unchecked: !install.checked)
+                             unchecked: !install.checked, states: saveStates)
         play.listener = host.addListener { [weak self] in self?.retroChanged() }
+        saveStates.onChange = { [weak self] in self?.retroChanged() }
+        Task { await saveStates.refresh() }
         retroKeysHeld = []
         Input.shared.stopRepeating()
         withAnimation(Motion.overlay) {
@@ -254,10 +301,10 @@ extension AppModel {
         NSLog("[anyps5-launcher] emulator host: %@ plays %@", install.host, disc.path.path)
         await host.setFocused(active)
         await host.start(RetroHostStartRequest(
-            core: core, disc: disc.path.standardizedFileURL.path, system: retroSystemFolder.standardizedFileURL.path,
+            core: core, disc: discPath, system: retroSystemFolder.standardizedFileURL.path,
             saves: (ps2 ? retroPs2SavesFolder : retroSavesFolder).standardizedFileURL.path,
             options: (preferences.retroHostOptions ?? [:]).filter { RetroOptionSection.sent($0.key, ps2: ps2) },
-            console: ps2 ? RetroConsole.ps2 : nil))
+            console: ps2 ? RetroConsole.ps2 : nil, states: statesPath))
     }
 
     /// The checks before a start of a signed release's host (protocol.md "Finding and checking the
@@ -311,23 +358,33 @@ extension AppModel {
             play.cardWarned = true
             show(TRetro.text(.retroHostCardUnreadable), symbol: "sdcard")
         }
+        // The host's English refusal of a saved resolution goes to the log once per change, never to
+        // the screen.
+        let refusal = play.host.status?.resolutionError ?? ""
+        if refusal != play.resolutionErrorLogged {
+            play.resolutionErrorLogged = refusal
+            if !refusal.isEmpty { NSLog("[anyps5-launcher] emulator host: %@", refusal) }
+        }
         let problem = play.problem
         if play.seenPhase == play.host.phase, let seen = play.seenProblem, seen == problem {
-            if overlay == .retroMenu { objectWillChange.send() }
+            keepRetroMenuRow(play)
+            if retroMenuShown { objectWillChange.send() }
             return
         }
         play.seenPhase = play.host.phase
         play.seenProblem = .some(problem)
+        keepRetroMenuRow(play)
         if play.host.phase == .ended, !play.closing {
             if !play.over {
                 play.endedAt = Date()
                 countRetroPlay(play)
             }
-            if play.menu.isOpen || overlay == .retroMenu {
-                if overlay == .retroMenu { withAnimation(Motion.overlay) { overlay = nil } }
-                play.menuSection = nil
+            if play.menu.isOpen || retroMenuShown {
+                if retroMenuShown { withAnimation(Motion.overlay) { overlay = nil } }
+                leaveRetroPages(play)
                 Task { await play.menu.close() }
             }
+            warnRetroCardAfterLoad(play)
             NSLog("[anyps5-launcher] emulator host: the game ended (%@)", play.host.endStatus?.error ?? play.host.failure ?? "no error")
             if problem == nil {
                 Task { await closeRetroGame() }
@@ -337,10 +394,23 @@ extension AppModel {
         objectWillChange.send()
     }
 
+    /// A PS1 game that ended with `errorCode` `other` after a load the host answered `false`: the
+    /// core may have finished that load after the reply, and the host writes the card when the game
+    /// ends, so protocol.md "The memory card" asks the launcher to say the card may now be the
+    /// state's. Also when the player closed the game while that load ran, as Close game waits for its
+    /// reply and its stop then reports that ending.
+    private func warnRetroCardAfterLoad(_ play: RetroPlay) {
+        guard !play.ps2, !play.loadCardWarned, play.states.loadAnsweredFalse else { return }
+        guard let status = play.host.status, status.ended, status.errorCode == RetroErrorCode.other else { return }
+        play.loadCardWarned = true
+        show(TRetro.text(.retroStateCardAfterEnd), symbol: "sdcard")
+    }
+
     /// PS in the game: its menu, the game paused and the controllers kept out of it.
     func openRetroMenu() {
-        guard let play = retroPlay, !play.closing, play.host.loaded, overlay != .retroMenu else { return }
-        play.menuSection = nil
+        guard let play = retroPlay, !play.closing, play.host.loaded, !retroMenuShown else { return }
+        leaveRetroPages(play)
+        play.menuVisits += 1
         menuIndex = 0
         withAnimation(Motion.overlay) { overlay = .retroMenu }
         Sounds.shared.play(.select)
@@ -361,8 +431,8 @@ extension AppModel {
     /// Back to the game from its menu.
     func resumeRetroGame() {
         guard let play = retroPlay else { return }
-        play.menuSection = nil
-        if overlay == .retroMenu {
+        leaveRetroPages(play)
+        if retroMenuShown {
             withAnimation(Motion.overlay) { overlay = nil }
             Sounds.shared.play(.back)
         }
@@ -375,19 +445,20 @@ extension AppModel {
     func closeRetroGame() async {
         guard let play = retroPlay, !play.closing else { return }
         play.closing = true
-        play.menuSection = nil
+        leaveRetroPages(play)
         countRetroPlay(play)
-        if overlay == .retroMenu { withAnimation(Motion.overlay) { overlay = nil } }
+        if retroMenuShown { withAnimation(Motion.overlay) { overlay = nil } }
         objectWillChange.send()
         if await play.host.detach() {
             retroHostKeeper.keep(play.host.session, program: play.program)
             NSLog("[anyps5-launcher] emulator host: kept for the next game")
         }
+        warnRetroCardAfterLoad(play)
         play.release()
         if retroPlay === play {
             withAnimation(Motion.overlay) { retroPlay = nil }
         }
-        if overlay == .retroMenu { overlay = nil }
+        if retroMenuShown { overlay = nil }
         retroKeysHeld = []
         scheduleRetroHostCheck()
     }
@@ -400,6 +471,7 @@ extension AppModel {
         // Create (Share): screenshots and clips take nothing of a game in the host yet.
         if command == .capture { return noRetroCapture() }
         if overlay == .retroMenu { return retroMenuCommand(command) }
+        if overlay == .retroOverwriteState { return retroOverwriteCommand(command) }
         if overlay != nil { return false }
         if let problem = play.problem {
             switch command {
@@ -482,19 +554,29 @@ extension AppModel {
         (.advanced, .retroMenuAdvanced, .retroMenuAdvancedDetail),
     ]
 
-    /// The heading of the menu: the section's name on its page, else the game's name.
+    /// The heading of the menu: the section's name on its page, Save state or Load state on theirs,
+    /// else the game's name.
     var retroMenuTitle: String? {
         guard let play = retroPlay else { return nil }
+        if let page = play.statePage { return TRetro.text(page == .save ? .retroMenuSaveState : .retroMenuLoadState) }
         guard let section = play.menuSection, let words = Self.retroMenuSections.first(where: { $0.0 == section }) else { return play.game.name }
         return TRetro.text(words.1)
     }
 
     /// The game's menu, as on Windows and Linux. Its first page: Resume, the discs of a multi-disc
-    /// game, a row for each section that has rows, and Close game. A section's page: its options in
-    /// the order the host lists them, with Volume and Mute first in Audio.
+    /// game, Save state and Load state where its host saves states, a row for each section that has
+    /// rows, and Close game. A section's page: its options in the order the host lists them, with
+    /// Volume and Mute first in Audio. Save state's and Load state's pages: the game's slots.
     func retroMenuPanelRows() -> [PanelRow] {
         guard let play = retroPlay else { return [] }
+        if let page = play.statePage { return retroStateRows(play, page) }
         if let section = play.menuSection { return retroSectionRows(play, section) }
+        let rows = retroFirstPageRows(play)
+        play.firstPageRows = rows.map(\.id)
+        return rows
+    }
+
+    private func retroFirstPageRows(_ play: RetroPlay) -> [PanelRow] {
         let menu = play.menu
         var rows = [PanelRow(id: "resume", title: TH.text(.resume), symbol: "play.fill",
                              kind: .action(destructive: false) { [weak self] in self?.resumeRetroGame() })]
@@ -505,13 +587,65 @@ extension AppModel {
             rows.append(PanelRow(id: "disc-\(disc.index)", title: disc.label, detail: detail, symbol: disc.inserted ? "opticaldisc.fill" : "opticaldisc",
                                  kind: .action(destructive: false) { [weak self] in self?.chooseRetroDisc(disc) }))
         }
-        for (section, title, detail) in Self.retroMenuSections where !retroSectionRows(play, section).isEmpty {
-            rows.append(PanelRow(id: "section-\(section.rawValue)", title: TRetro.text(title), detail: TRetro.text(detail), symbol: Self.retroSectionSymbol(section),
-                                 kind: .action(destructive: false) { [weak self] in self?.openRetroMenuSection(play, section) }))
+        rows += retroStateMenuRows(play)
+        for (section, title, detail) in Self.retroMenuSections {
+            if !retroSectionRows(play, section).isEmpty {
+                rows.append(PanelRow(id: "section-\(section.rawValue)", title: TRetro.text(title), detail: TRetro.text(detail),
+                                     symbol: Self.retroSectionSymbol(section),
+                                     kind: .action(destructive: false) { [weak self] in self?.openRetroMenuSection(play, section) }))
+            }
+            // The internal resolution after Audio's row, also when Audio has none.
+            if section == .audio, let resolution = retroResolutionRow(play) { rows.append(resolution) }
         }
         rows.append(PanelRow(id: "closeGame", title: TH.text(.closeGame), symbol: "xmark.circle",
                              kind: .action(destructive: true) { [weak self] in Task { await self?.closeRetroGame() } }))
         return rows
+    }
+
+    /// The first page's Internal resolution row: the values the launcher offers that the host
+    /// lists (`RetroResolutionChoice.of`), or nil when the menu offers none.
+    private func retroResolutionRow(_ play: RetroPlay) -> PanelRow? {
+        guard let choice = play.menu.resolution else { return nil }
+        return PanelRow(id: "resolution", title: TRetro.text(.retroResolution), detail: Self.retroResolutionDetail(choice), symbol: "sparkles.tv",
+                        kind: .choice(options: choice.values.map(Self.retroResolutionLabel), selected: choice.selected) { [weak self] index in
+            guard choice.values.indices.contains(index) else { return }
+            self?.chooseRetroResolution(play, choice.values[index].value)
+        })
+    }
+
+    /// An internal resolution chosen in the menu: sent to the game, and kept for every later game
+    /// of its console once the host took it. A PS1 game draws at it in a moment, a PS2 game from
+    /// its next start.
+    private func chooseRetroResolution(_ play: RetroPlay, _ value: String) {
+        guard let key = play.menu.resolution?.key else { return }
+        Task { @MainActor [weak self] in
+            guard await play.menu.chooseResolution(value), let self else { return }
+            var kept = self.preferences.retroHostOptions ?? [:]
+            kept[key] = value
+            self.preferences.retroHostOptions = kept
+        }
+    }
+
+    /// A value's words: Native, a scale ("2x"), or the host's own label for one the launcher does
+    /// not offer.
+    static func retroResolutionLabel(_ value: RetroResolutionValue) -> String {
+        switch value.scale {
+        case nil: return value.label
+        case 1: return TRetro.text(.retroResolutionNative)
+        case let scale?: return TRetro.format(.retroResolutionScale, "\(scale)")
+        }
+    }
+
+    /// The line under the row: the refusal naming the value the game draws at, when the next start
+    /// takes it, that it shows in a moment, or what it does.
+    static func retroResolutionDetail(_ choice: RetroResolutionChoice) -> String {
+        switch choice.note {
+        case .none: return TRetro.text(.retroResolutionDetail)
+        case .applying: return TRetro.text(.retroMenuOptionPendingDetail)
+        case .nextStart: return TRetro.text(.retroMenuOptionRestartDetail)
+        case .changesAtNextStart: return TRetro.text(.retroMenuOptionRestartOnlyDetail)
+        case .refused: return TRetro.format(.retroResolutionRefusedDetail, retroResolutionLabel(choice.active))
+        }
     }
 
     private static func retroSectionSymbol(_ section: RetroOptionSection) -> String {
@@ -551,6 +685,8 @@ extension AppModel {
     func retroMenuRows() -> [QuickMenuRow] {
         retroMenuPanelRows().enumerated().map { index, row in
             var item = QuickMenuRow(id: index, title: row.title, detail: row.detail, symbol: row.symbol ?? "circle", key: row.id)
+            item.picture = row.picture
+            item.pictureAspect = row.pictureAspect
             switch row.kind {
             case .action(let destructive, let run):
                 item.destructive = destructive
@@ -580,9 +716,12 @@ extension AppModel {
         guard let play = retroPlay else { return false }
         let rows = retroMenuRows()
         if menuIndex >= rows.count, !rows.isEmpty { menuIndex = rows.count - 1 }
+        // A row that cannot be chosen (Load state with nothing saved, an empty slot on its page) is
+        // passed over, as on Windows and Linux.
         func move(_ delta: Int) {
-            let next = min(rows.count - 1, max(0, menuIndex + delta))
-            guard next != menuIndex else { return Sounds.shared.play(.bump) }
+            var next = menuIndex + delta
+            while rows.indices.contains(next), rows[next].run == nil { next += delta }
+            guard rows.indices.contains(next), next != menuIndex else { return Sounds.shared.play(.bump) }
             withAnimation(Motion.focus) { menuIndex = next }
             Sounds.shared.play(.move)
         }
@@ -595,7 +734,7 @@ extension AppModel {
             }
         case .select:
             if rows.indices.contains(menuIndex) { rows[menuIndex].run?() }
-        case .back where play.menuSection != nil:
+        case .back where play.menuSection != nil || play.statePage != nil:
             leaveRetroMenuSection(play)
         case .back, .home, .options:
             resumeRetroGame()
@@ -613,14 +752,223 @@ extension AppModel {
         objectWillChange.send()
     }
 
-    /// Back from a section's page to the first page, on the section's row.
+    /// Back from a section's or a state page to the first page, on the row that opened it.
     private func leaveRetroMenuSection(_ play: RetroPlay) {
-        let section = play.menuSection
-        play.menuSection = nil
-        let index = retroMenuPanelRows().firstIndex { $0.id == "section-\(section?.rawValue ?? "")" }
+        let id = play.menuSection.map { "section-\($0.rawValue)" } ?? play.statePage.map { $0 == .save ? "saveState" : "loadState" }
+        leaveRetroPages(play)
+        let index = retroMenuPanelRows().firstIndex { $0.id == id }
         menuIndex = index ?? 0
         Sounds.shared.play(.back)
         objectWillChange.send()
+    }
+
+    /// The menu opens, or is left, on its first page.
+    private func leaveRetroPages(_ play: RetroPlay) {
+        play.menuSection = nil
+        play.statePage = nil
+        play.overwriting = nil
+    }
+
+    /// The menu's first page gained or lost rows as the game's status changed (Save state and Load
+    /// state once the first frame is up, the discs and sections once the status lists them): the
+    /// focus stays on the row it was on, wherever that row now is.
+    private func keepRetroMenuRow(_ play: RetroPlay) {
+        guard overlay == .retroMenu, play.menuSection == nil, play.statePage == nil else { return }
+        let before = play.firstPageRows
+        guard before.indices.contains(menuIndex) else { return }
+        let focused = before[menuIndex]
+        let now = retroFirstPageRows(play).map(\.id)
+        play.firstPageRows = now
+        if let index = now.firstIndex(of: focused) { menuIndex = index }
+    }
+
+    // MARK: Save states
+
+    /// Save state and Load state on the menu's first page, where the game's host saves states and
+    /// once the game has shown its first frame (`status.ready`), before which the host saves and
+    /// loads nothing. Load state says what a load takes back with it (a PS1 game's memory card), or
+    /// that nothing is saved yet, when it cannot be chosen.
+    private func retroStateMenuRows(_ play: RetroPlay) -> [PanelRow] {
+        let states = play.states
+        guard states.available, play.host.phase == .playing else { return [] }
+        let loadDetail: TRetro.Key = !states.anySaved ? .retroMenuNoStatesDetail : (play.ps2 ? .retroMenuLoadStateDetail : .retroMenuLoadStatePs1Detail)
+        return [
+            PanelRow(id: "saveState", title: TRetro.text(.retroMenuSaveState), detail: TRetro.text(.retroMenuSaveStateDetail), symbol: "square.and.arrow.down",
+                     kind: .action(destructive: false) { [weak self] in self?.openRetroStatePage(play, .save) }),
+            PanelRow(id: "loadState", title: TRetro.text(.retroMenuLoadState), detail: TRetro.text(loadDetail), symbol: "clock.arrow.circlepath",
+                     kind: states.anySaved ? .action(destructive: false) { [weak self] in self?.openRetroStatePage(play, .load) } : .info("")),
+        ]
+    }
+
+    /// A state page's rows: every slot, from 1, with when its state was saved and its picture at the
+    /// game's aspect (its place kept empty without one), or Saving… or Loading… while that is under
+    /// way. On Save state each slot can be chosen; on Load state only a slot that holds a state.
+    private func retroStateRows(_ play: RetroPlay, _ page: RetroStatePage) -> [PanelRow] {
+        let running = play.states.running
+        return play.states.slots.map { slot in
+            let detail: String
+            if let running, running.slot == slot.slot {
+                detail = TRetro.text(running.saving ? .retroStateSaving : .retroStateLoading)
+            } else if let savedAt = slot.savedAt {
+                detail = Self.retroStateTime(savedAt)
+            } else {
+                detail = TRetro.text(.retroStateEmpty)
+            }
+            let kind: PanelRow.Kind = page == .load && slot.empty ? .info("") : .action(destructive: false) { [weak self] in
+                guard let self else { return }
+                if page == .save {
+                    self.chooseRetroSaveSlot(play, slot)
+                } else {
+                    self.chooseRetroLoadSlot(play, slot.slot)
+                }
+            }
+            return PanelRow(id: "state-\(slot.slot)", title: TRetro.format(.retroStateSlot, "\(slot.slot + 1)"), detail: detail, symbol: "square.stack",
+                            kind: kind, picture: slot.picture, pictureAspect: play.host.aspect)
+        }
+    }
+
+    private func openRetroStatePage(_ play: RetroPlay, _ page: RetroStatePage) {
+        guard retroPlay === play, overlay == .retroMenu else { return }
+        play.statePage = page
+        let rows = retroStateRows(play, page)
+        menuIndex = rows.firstIndex { row in
+            if case .info = row.kind { return false }
+            return true
+        } ?? 0
+        Sounds.shared.play(.select)
+        objectWillChange.send()
+    }
+
+    /// A slot chosen on Save state: an empty one is saved into at once; one that holds a state asks
+    /// Overwrite slot N? first, in the same two-answer card as Close game, Cancel first.
+    private func chooseRetroSaveSlot(_ play: RetroPlay, _ slot: RetroStateSlot) {
+        guard !play.states.busy, !play.stateAsked, retroPlay === play else { return }
+        if slot.empty {
+            play.stateAsked = true
+            Task { await saveRetroState(play, slot.slot) }
+            return
+        }
+        play.overwriting = slot.slot
+        menuIndex = 0
+        withAnimation(Motion.overlay) { overlay = .retroOverwriteState }
+        Sounds.shared.play(.select)
+    }
+
+    /// Overwrite slot N?: its question, and the detail of Overwrite, which says when the state it
+    /// replaces was saved.
+    var retroOverwriteQuestion: (title: String, detail: String?)? {
+        guard let play = retroPlay, let slot = play.overwriting else { return nil }
+        let savedAt = play.states.slot(slot).savedAt
+        return (TRetro.format(.retroStateOverwriteTitle, "\(slot + 1)"),
+                savedAt.map { TRetro.format(.retroStateOverwriteDetail, Self.retroStateTime($0)) })
+    }
+
+    /// Overwrite slot N? from the keys and the pad: its two answers take the arrows and Select;
+    /// Back, PS and Options go back to Save state on that slot.
+    private func retroOverwriteCommand(_ command: Command) -> Bool {
+        guard let play = retroPlay else { return false }
+        func move(_ delta: Int) {
+            let next = min(1, max(0, menuIndex + delta))
+            guard next != menuIndex else { return }
+            withAnimation(Motion.focus) { menuIndex = next }
+            Sounds.shared.play(.move)
+        }
+        switch command {
+        case .up, .left: move(-1)
+        case .down, .right: move(1)
+        case .back, .home, .options: cancelRetroOverwrite(play)
+        case .select: if menuIndex == 1 { confirmRetroOverwrite(play) } else { cancelRetroOverwrite(play) }
+        default: break
+        }
+        return true
+    }
+
+    /// Back from Overwrite slot N? to Save state, on that slot.
+    private func cancelRetroOverwrite(_ play: RetroPlay) {
+        let slot = play.overwriting
+        play.overwriting = nil
+        guard overlay == .retroOverwriteState else { return }
+        withAnimation(Motion.overlay) { overlay = .retroMenu }
+        menuIndex = slot ?? 0
+        Sounds.shared.play(.back)
+    }
+
+    private func confirmRetroOverwrite(_ play: RetroPlay) {
+        guard let slot = play.overwriting, overlay == .retroOverwriteState else { return }
+        play.overwriting = nil
+        withAnimation(Motion.overlay) { overlay = .retroMenu }
+        menuIndex = slot
+        Sounds.shared.play(.select)
+        guard !play.states.busy, !play.stateAsked else { return }
+        play.stateAsked = true
+        Task { await saveRetroState(play, slot) }
+    }
+
+    /// A slot chosen on Load state: loaded, unless a save or load already runs, when the press is
+    /// let go.
+    private func chooseRetroLoadSlot(_ play: RetroPlay, _ slot: Int) {
+        guard !play.states.busy, !play.stateAsked, retroPlay === play else { return }
+        play.stateAsked = true
+        Task { await loadRetroState(play, slot) }
+    }
+
+    /// Saves the game into `slot`: back to the game once it is saved, the slot said; still on Save
+    /// state when it did not work, which is said.
+    private func saveRetroState(_ play: RetroPlay, _ slot: Int) async {
+        let visit = play.menuVisits
+        let outcome = await play.states.save(slot)
+        play.stateAsked = false
+        guard retroPlay === play else { return }
+        NSLog("[anyps5-launcher] emulator host: save state slot %d: %@", slot, outcome.rawValue)
+        guard outcome == .done else {
+            show(TRetro.text(Self.retroStateProblem(outcome, saving: true)), symbol: "exclamationmark.triangle.fill")
+            objectWillChange.send()
+            return
+        }
+        show(TRetro.format(.retroStateSaved, "\(slot + 1)"), symbol: "square.and.arrow.down")
+        if onRetroStatePage(play, .save, visit) { resumeRetroGame() }
+    }
+
+    /// Loads the state in `slot`: back to the game, which goes on from it; still on Load state when
+    /// the host refused it (a state of another emulator build or game, or a damaged file), which is
+    /// said.
+    private func loadRetroState(_ play: RetroPlay, _ slot: Int) async {
+        let visit = play.menuVisits
+        let outcome = await play.states.load(slot)
+        play.stateAsked = false
+        guard retroPlay === play else { return }
+        NSLog("[anyps5-launcher] emulator host: load state slot %d: %@", slot, outcome.rawValue)
+        guard outcome == .done else {
+            show(TRetro.text(Self.retroStateProblem(outcome, saving: false)), symbol: "exclamationmark.triangle.fill")
+            objectWillChange.send()
+            return
+        }
+        show(TRetro.format(.retroStateLoaded, "\(slot + 1)"), symbol: "clock.arrow.circlepath")
+        if onRetroStatePage(play, .load, visit) { resumeRetroGame() }
+    }
+
+    /// Whether the menu still shows `page` of the visit `visit` a save or load was asked in.
+    private func onRetroStatePage(_ play: RetroPlay, _ page: RetroStatePage, _ visit: Int) -> Bool {
+        overlay == .retroMenu && play.statePage == page && play.menuVisits == visit
+    }
+
+    /// The words for a save or load of a state that did not work: a load the host refused for a
+    /// state of another emulator build, of another game or damaged says so; anything else says only
+    /// that it did not work.
+    static func retroStateProblem(_ outcome: RetroStateOutcome, saving: Bool) -> TRetro.Key {
+        switch outcome {
+        case .otherCore where !saving: return .retroStateOtherCore
+        case .otherGame where !saving: return .retroStateOtherGame
+        case .badState where !saving: return .retroStateBad
+        default: return saving ? .retroStateSaveFailed : .retroStateLoadFailed
+        }
+    }
+
+    /// "2026-11-18 14:03": when a slot's state was saved, in local time, as the cloud saves show
+    /// theirs.
+    static func retroStateTime(_ date: Date) -> String {
+        let parts = Calendar(identifier: .gregorian).dateComponents(in: TimeZone.current, from: date)
+        return String(format: "%04d-%02d-%02d %02d:%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0, parts.hour ?? 0, parts.minute ?? 0)
     }
 
     private func chooseRetroDisc(_ disc: RetroDiscRow) {

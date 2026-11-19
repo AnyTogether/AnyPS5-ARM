@@ -39,7 +39,10 @@ public enum RetroOptionSection: String, CaseIterable, Sendable {
     /// option of a PS2 game is (`pcsx2_...`), but its resolution scale, which is `graphics`.
     public static func of(_ key: String) -> RetroOptionSection? {
         let prefix = "swanstation_"
-        if key == "pcsx2_upscale_multiplier" { return .graphics }
+        if key == RetroResolution.ps2Key { return .graphics }
+        // LRPS2's VR (pcsx2_vr_mode and its pcsx2_vr_depth): a picture for each eye side by side
+        // for a VR headset or a 3D display, which AnyPS5 has none of.
+        if key.hasPrefix("pcsx2_vr_") { return nil }
         guard key.hasPrefix(prefix) else { return .advanced }
         let name = String(key.dropFirst(prefix.count))
         if hidden.contains(name) || name.hasPrefix("TextureReplacements_") { return nil }
@@ -61,7 +64,11 @@ public enum RetroOptionSection: String, CaseIterable, Sendable {
     /// see or change it. The two cores' options share one list of values the player chose, so
     /// LRPS2's (`pcsx2_...`) go to a `ps2` game only and every other to a PS1 game only.
     public static func sent(_ key: String, ps2: Bool = false) -> Bool {
-        guard key.hasPrefix("pcsx2_") == ps2, let section = of(key) else { return false }
+        guard key.hasPrefix("pcsx2_") == ps2 else { return false }
+        // The console's internal resolution, which the menu's first page offers. A PS2 one still
+        // goes only to a host that limits it (RetroHostGame.start).
+        if key == RetroResolution.key(ps2: ps2) { return true }
+        guard let section = of(key) else { return false }
         return section != .graphics
     }
 

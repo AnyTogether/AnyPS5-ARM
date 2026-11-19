@@ -24,6 +24,12 @@ public protocol RetroHostSession: AnyObject, Sendable {
     func input(port: Int, buttons: Int, leftX: Int, leftY: Int, rightX: Int, rightY: Int)
     /// Whether the host lists `ps2`, so a PS2 game can be started on it.
     var canPlayPs2: Bool { get }
+    /// Whether the host lists `saveStates`, so a game can be started with a states folder
+    /// (`RetroHostStartRequest.states`) and saved and loaded with `saveState` and `loadState`.
+    var canSaveStates: Bool { get }
+    /// Whether the host lists `ps2ResolutionLimits`, so a PS2 game's internal resolution is
+    /// limited by the host and may be sent to it.
+    var limitsPs2Resolution: Bool { get }
     /// Asks the host to stop its game and exit.
     func shutdown()
     /// Kills the host if it still runs and frees the connection.
@@ -84,6 +90,8 @@ public final class RetroHostClientSession: RetroHostSession, @unchecked Sendable
     }
 
     public var canPlayPs2: Bool { client.canPlayPs2 }
+    public var canSaveStates: Bool { client.canSaveStates }
+    public var limitsPs2Resolution: Bool { client.limitsPs2Resolution }
     public func shutdown() { client.shutdown() }
     public func close() async { await client.close() }
 
@@ -110,9 +118,12 @@ public struct RetroHostStartRequest: Equatable, Sendable {
     /// `RetroConsole.ps2` for a PS2 game, which only a host that lists `ps2` takes; nil for a PS1
     /// game, the host's default, so a PS1 start is the same on every host.
     public var console: String?
+    /// The folder for this game's save states, which only a host that lists `saveStates` takes; nil
+    /// for a game without save states.
+    public var states: String?
 
     public init(core: String, disc: String, system: String, saves: String, options: [String: String] = [:],
-                initialDisc: Int? = nil, console: String? = nil) {
+                initialDisc: Int? = nil, console: String? = nil, states: String? = nil) {
         self.core = core
         self.disc = disc
         self.system = system
@@ -120,9 +131,24 @@ public struct RetroHostStartRequest: Equatable, Sendable {
         self.options = options
         self.initialDisc = initialDisc
         self.console = console
+        self.states = states
     }
 
-    /// The `start` arguments: `console`, `options` and `initialDisc` only when given.
+    /// The same start without the option at `key`, for a host that must not be sent it.
+    public func withoutOption(_ key: String) -> RetroHostStartRequest {
+        var request = self
+        request.options[key] = nil
+        return request
+    }
+
+    /// The same start without `states`, for a host that does not list `saveStates`.
+    public func withoutStates() -> RetroHostStartRequest {
+        var request = self
+        request.states = nil
+        return request
+    }
+
+    /// The `start` arguments: `console`, `options`, `initialDisc` and `states` only when given.
     public var args: RetroJSON {
         var map: [String: RetroJSON] = [
             "core": .string(core), "disc": .string(disc), "system": .string(system), "saves": .string(saves),
@@ -130,6 +156,7 @@ public struct RetroHostStartRequest: Equatable, Sendable {
         if let console { map["console"] = .string(console) }
         if !options.isEmpty { map["options"] = .object(options.mapValues { .string($0) }) }
         if let initialDisc { map["initialDisc"] = .int(initialDisc) }
+        if let states { map["states"] = .string(states) }
         return .object(map)
     }
 }

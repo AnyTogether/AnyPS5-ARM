@@ -135,6 +135,19 @@ public final class RetroGameMenu {
         return await game.setOption(key: key, value: option.values[next])
     }
 
+    /// The game's internal resolution as the menu offers it, or nil when it offers none
+    /// (`RetroResolutionChoice.of`).
+    public var resolution: RetroResolutionChoice? { RetroResolutionChoice.of(game.status, limitsPs2: game.limitsPs2Resolution) }
+
+    /// Chooses the internal resolution `value`; false when the menu does not offer it now, it is
+    /// already chosen, or the host refused.
+    @discardableResult
+    public func chooseResolution(_ value: String) async -> Bool {
+        guard let choice = resolution, choice.values.contains(where: { $0.value == value }),
+              choice.values[choice.selected].value != value else { return false }
+        return await game.setOption(key: choice.key, value: value)
+    }
+
     /// Moves the volume `steps` of `volumeStep` up (down when negative), from 0 to 1. Turning it up
     /// unmutes. The level is counted in whole steps and divided last, so three tenths is 0.3.
     public func stepVolume(_ steps: Int) async {

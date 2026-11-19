@@ -98,6 +98,14 @@ final class FakeRetroHostSession: RetroHostSession, @unchecked Sendable {
     /// Focus was set after the session was closed.
     var focusAfterClose = false
     var canPlayPs2 = true
+    /// Whether the host lists `saveStates`; false, as for the signed host v1.0.0, unless a test says.
+    var canSaveStates = false
+    /// Whether the host lists `ps2ResolutionLimits`; false, as for the signed host v1.0.0, unless a
+    /// test says.
+    var limitsPs2Resolution = false
+    /// Runs as each call is taken, before it is answered: what the host does meanwhile (writes a
+    /// state's file).
+    var onCall: ((String, RetroJSON) -> Void)?
 
     var calls: [(String, RetroJSON)] { locked { calledStore } }
     var methods: [String] { calls.map(\.0) }
@@ -133,6 +141,7 @@ final class FakeRetroHostSession: RetroHostSession, @unchecked Sendable {
     /// `release` forgets an ended game, as protocol.md "release" says: `status` is then null.
     func call(_ method: String, _ args: RetroJSON) async throws -> RetroJSON {
         locked { calledStore.append((method, args)) }
+        onCall?(method, args)
         await callGate?.wait()
         if let error = callErrors[method] { throw error }
         if method == "release", nextStatus?.ended ?? true { nextStatus = nil }
