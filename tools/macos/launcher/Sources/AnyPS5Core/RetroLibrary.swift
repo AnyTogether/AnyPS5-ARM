@@ -442,7 +442,8 @@ extension GameLibrary {
             return isOwnFile(url.path) ? url : nil
         }
         let images: Set<String> = ["png", "jpg", "jpeg", "webp"]
-        let discs: Set<String> = platform == .ps1 ? ["cue", "chd", "m3u", "pbp"] : ["iso", "chd", "cso", "zso", "elf"].union(hostPs2 ? ["cue"] : [])
+        let ps2Discs: Set<String> = hostPs2 ? ["iso", "chd", "cso", "zso", "elf", "cue"] : ["iso", "chd", "cso", "zso", "elf"]
+        let discs: Set<String> = platform == .ps1 ? ["cue", "chd", "m3u", "pbp"] : ps2Discs
         guard let disc = localFile("disc", discs) else { return nil }
         return Game(folder: folder, titleID: "\(platform.label)-\(titleID)", name: name, version: "", icon: localFile("icon", images), background: localFile("background", images),
                     music: localFile("music", ["wav", "mp3", "m4a"]), executable: .disc, ageLevels: ageLevels(json["ageLevel"]),
