@@ -829,7 +829,9 @@ final class RetroHostPlayTests: XCTestCase {
         XCTAssertEqual(model.overlay, .retroMenu, "Back goes back to Save state")
         XCTAssertEqual(model.retroMenuTitle, "Save state")
         XCTAssertEqual(saveCalls(host).count, 1)
-        XCTAssertEqual(model.retroPlay?.menu.isOpen, true, "the game stays paused")
+        // The menu opens on a task of its own: once it ran, the question has not closed it.
+        try await settle({ model.retroPlay?.menu.isOpen == true }, "the game stays paused")
+        XCTAssertEqual(host.args("pause").last, .bool(true))
 
         try choose(model, "state-0")
         XCTAssertTrue(model.handle(.right))
