@@ -41,6 +41,9 @@ final class Controllers: ObservableObject {
     private var hid: [(name: String, vendor: Int, product: Int, transport: String?)] = []
 
     var pads: [PadInfo] { roster.pads }
+    /// The GameController framework's controller behind `id`, for its motors (a PS1 game in the
+    /// emulator host); nil for one the launcher reads itself (a DualShock 3).
+    func gameController(_ id: String) -> GCController? { controllers[id] }
     var playerOne: PadInfo? { roster.playerOne.flatMap(roster.pad) }
 
     func start() {

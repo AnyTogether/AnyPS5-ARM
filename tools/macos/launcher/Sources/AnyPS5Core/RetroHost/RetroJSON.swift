@@ -7,13 +7,31 @@ import Foundation
 /// so the body is parsed here by hand. A number keeps its value as a double: the protocol judges
 /// integers by value (`1.0` and `1e0` are 1), and no range in version 1 goes past what a double
 /// holds exactly.
+///
+/// An object read from a body keeps its keys in the order they came (`objectKeys`), since the
+/// host lists a status's options in the order the menu shows them. Two values are equal whatever
+/// the order of their keys.
 public enum RetroJSON: Equatable, Sendable {
     case null
     case bool(Bool)
     case number(Double)
     case string(String)
     case array([RetroJSON])
-    case object([String: RetroJSON])
+    /// The members, and their keys in the order they were read; `keys` is empty for an object made
+    /// in code.
+    case object([String: RetroJSON], keys: [String] = [])
+
+    public static func == (lhs: RetroJSON, rhs: RetroJSON) -> Bool {
+        switch (lhs, rhs) {
+        case (.null, .null): return true
+        case (.bool(let a), .bool(let b)): return a == b
+        case (.number(let a), .number(let b)): return a == b
+        case (.string(let a), .string(let b)): return a == b
+        case (.array(let a), .array(let b)): return a == b
+        case (.object(let a, _), .object(let b, _)): return a == b
+        default: return false
+        }
+    }
 
     /// The deepest nesting of arrays and objects a body may have. No message comes near it; it
     /// keeps a hostile body of a million brackets from running the reader's stack out.
@@ -37,8 +55,14 @@ public enum RetroJSON: Equatable, Sendable {
     }
 
     public var objectValue: [String: RetroJSON]? {
-        if case .object(let value) = self { return value }
+        if case .object(let value, _) = self { return value }
         return nil
+    }
+
+    /// An object's keys in the order they were read, or sorted for an object made in code.
+    public var objectKeys: [String]? {
+        guard case .object(let value, let keys) = self else { return nil }
+        return keys.count == value.count ? keys : value.keys.sorted()
     }
 
     public var arrayValue: [RetroJSON]? {
@@ -148,6 +172,7 @@ public enum RetroJSON: Equatable, Sendable {
             guard depth <= RetroJSON.maxDepth else { throw ParseError("The JSON is nested too deeply.") }
             at += 1
             var members: [String: RetroJSON] = [:]
+            var keys: [String] = []
             skipSpace()
             if at < bytes.count, bytes[at] == UInt8(ascii: "}") {
                 at += 1
@@ -162,6 +187,7 @@ public enum RetroJSON: Equatable, Sendable {
                 at += 1
                 skipSpace()
                 let item = try value(depth: depth)
+                keys.append(key)
                 guard members.updateValue(item, forKey: key) == nil else {
                     throw ParseError("The key \(key) appears twice in one object.")
                 }
@@ -173,7 +199,7 @@ public enum RetroJSON: Equatable, Sendable {
                 }
                 guard bytes[at] == UInt8(ascii: "}") else { throw ParseError("An object is not closed.") }
                 at += 1
-                return .object(members)
+                return .object(members, keys: keys)
             }
         }
 
@@ -338,7 +364,7 @@ public enum RetroJSON: Equatable, Sendable {
                 try item.write(into: &out, depth: depth + 1)
             }
             out.append(UInt8(ascii: "]"))
-        case .object(let members):
+        case .object(let members, _):
             out.append(UInt8(ascii: "{"))
             for (index, key) in members.keys.sorted().enumerated() {
                 if index > 0 { out.append(UInt8(ascii: ",")) }

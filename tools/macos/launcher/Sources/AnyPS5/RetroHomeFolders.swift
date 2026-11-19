@@ -22,7 +22,7 @@ struct HomeTile: Equatable, Identifiable {
 /// the setting off, or no disc in the library, Home's row is the games as ever.
 extension AppModel {
     private func groupsHomePlatform(_ platform: RetroPlatform) -> Bool {
-        showsRetroFolders && standaloneEmulator(platform) != nil
+        showsRetroFolders && retroPlayable(platform)
     }
 
     /// The folder whose row of games has the selection.

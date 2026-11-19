@@ -22,6 +22,8 @@ extension AppModel {
     /// nothing open, "Quit AnyPS5?" with Cancel first; on that question, Cancel. False everywhere
     /// else, where Esc is Back as before.
     func escape() -> Bool {
+        // Over a PS1 game in the emulator host Esc is Back: its error screen goes back to the library.
+        if retroPlay != nil, overlay == nil { return false }
         if overlay == .confirmQuit || overlay == .confirmQuitUnlocks || overlay == .confirmCancelUnlock { return gameMenuCommand(.back) }
         // The list under the profile picture is open: Esc closes it before it asks anything.
         if profileSwitcherShown {
@@ -39,6 +41,8 @@ extension AppModel {
 
     /// The mouse's Back button: Circle.
     func mouseBack() {
+        // Over a PS1 game in the emulator host the Back button opens its menu.
+        if retroPointerBack() { return }
         forwardStep = nil
         let from = overlay, game = selected
         _ = handle(.back)

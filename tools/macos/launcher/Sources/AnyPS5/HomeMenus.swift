@@ -23,6 +23,10 @@ extension AppModel {
         case .home:
             if hold { homeButton(hold: true) } else { _ = handle(.home) }
         case .quickMenu:
+            // A PS1 game in the emulator host: its own menu, or back to the game from it.
+            if retroPlay != nil, overlay == nil || overlay == .retroMenu {
+                return overlay == nil ? openRetroMenu() : resumeRetroGame()
+            }
             guard running != nil || emulator != nil, starting == nil, pairing == nil else { return }
             if NSApp.isActive && overlay == .quickMenu { resumeGame() } else if !NSApp.isActive { openGameMenu(.quickMenu) }
         case .screenshot:
@@ -46,6 +50,15 @@ extension AppModel {
         if hold {
             guard pairing == nil, preferences.onboarded, starting == nil, fontWait == nil else { return }
             if watchCommand(.home) != nil { return }
+        }
+        // A PS1 game in the emulator host: PS, held or not, is its menu or back to the game; over
+        // any other layer, back to the game.
+        if retroPlay != nil {
+            switch overlay {
+            case nil: return openRetroMenu()
+            case .retroMenu: return resumeRetroGame()
+            default: return closeOverlay()
+            }
         }
         let now = Date()
         if let last = lastHome, now.timeIntervalSince(last) < Self.toggleDebounce, now >= last { return }
@@ -221,6 +234,8 @@ extension AppModel {
 
     /// The quick menu, "Close game?" and the home menu, from the keys and the pad.
     func gameMenuCommand(_ command: Command) -> Bool {
+        // A PS1 game's menu in the emulator host, the clicks on its rows too.
+        if overlay == .retroMenu { return retroCommand(command) }
         func move(_ delta: Int, count: Int) {
             let next = min(count - 1, max(0, menuIndex + delta))
             guard next != menuIndex else { return }
@@ -404,6 +419,7 @@ extension AppModel {
     /// Create held (or Screenshot's shortcut): the game's picture as it is now, beside its clips
     /// in the gallery.
     func takeScreenshot() {
+        if noRetroCapture() { return }
         guard let game = running?.game, let pid = running?.app.processIdentifier else { return }
         guard familyAllows(.mediaSharing) else { return TrophyBanner.shared.notice(FS.refusal(.mediaSharing), detail: "", symbol: "hand.raised.fill", sounds: preferences.sounds) }
         let file = Screenshots.shotFile(in: screenshotsFolder, gameName: game.name, titleID: game.titleID, stamp: Self.captureStamp())
@@ -639,7 +655,8 @@ struct GameMenuCard: View {
 
     var body: some View {
         let game = model.overlay == .homeMenu || model.overlay == .profileMenu || model.overlay == .confirmQuit || model.overlay == .confirmQuitUnlocks || model.overlay == .launcherReport ? nil
-            : model.overlay == .confirmDeleteGame ? model.deleteAsk?.plan.game : model.overlay == .confirmCancelUnlock ? model.cancelAsking : (model.selectedGame ?? model.runningGame)
+            : model.overlay == .confirmDeleteGame ? model.deleteAsk?.plan.game : model.overlay == .confirmCancelUnlock ? model.cancelAsking
+            : model.overlay == .retroMenu ? model.retroPlay?.game : (model.selectedGame ?? model.runningGame)
         ZStack {
             FrostFill(opacity: 0.6).ignoresSafeArea()
                 .contentShape(Rectangle())
@@ -772,15 +789,18 @@ struct GameMenuCard: View {
         case .confirmCancelUnlock: return TUnlock.format(.cancelUnlockAskTitle, game?.name ?? "")
         case .launcherReport: return model.launcherReport?.headline ?? ""
         case .confirmDeleteGame: return T.format(model.deleteAsk?.permanent == true ? .deleteGameForeverTitle : .deleteGameTitle, game?.name ?? "")
+        // A PS1 game's menu: a section's page is headed with its name.
+        case .retroMenu: return model.retroMenuTitle ?? game?.name ?? ""
         default: return game?.name ?? ""
         }
     }
 
     @ViewBuilder private func status(_ game: Game?) -> some View {
         switch model.overlay {
-        case .quickMenu:
+        case .quickMenu, .retroMenu:
             HStack(spacing: 8 * scale) {
-                if model.pausedGame {
+                // A PS1 game in the emulator host is paused while its menu is open.
+                if model.pausedGame || model.overlay == .retroMenu {
                     Label(TH.text(.paused), systemImage: "pause.fill")
                         .labelStyle(.titleAndIcon)
                         .font(.display(12 * scale, .semibold))
@@ -877,6 +897,8 @@ struct GameMenuCard: View {
                     Item(id: 1, title: T.text(permanent ? .deleteGameForever : .deleteGame), symbol: permanent ? "trash.slash.fill" : "trash.fill", destructive: true)]
         case .profileMenu:
             return model.profileMenuItems().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol) }
+        case .retroMenu:
+            return model.retroMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value) }
         default:
             return model.quickMenuRows().map { Item(id: $0.id, title: $0.title, detail: $0.detail, symbol: $0.symbol, destructive: $0.destructive, disabled: $0.run == nil, value: $0.value, person: $0.person, track: $0.track) }
         }

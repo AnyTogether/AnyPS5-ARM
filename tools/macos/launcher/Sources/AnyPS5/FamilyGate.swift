@@ -252,12 +252,15 @@ extension AppModel {
             case .quit:
                 if let running {
                     running.app.terminate()
+                } else if retroPlay != nil {
+                    // A PS1 game in the emulator host closes as Close game does.
+                    Task { await closeRetroGame() }
                 } else if let run = emulator?.run {
                     emulatorStopped = true
                     _ = run.stop()
                 }
             case .forceQuit:
-                if let running { running.app.forceTerminate() } else { endEmulatorNow() }
+                if let running { running.app.forceTerminate() } else if retroPlay != nil { Task { await closeRetroGame() } } else { endEmulatorNow() }
             case .resumed:
                 FamilyNotice.shared.hide()
                 if let remaining { TrophyBanner.shared.notice(FS.format(.moreTime, FS.duration(remaining)), detail: "", symbol: "hourglass", sounds: preferences.sounds) }

@@ -20,5 +20,16 @@ enum TRetro {
         case retroHostInstalledDetail, retroHostBrokenDetail, retroHostDownloading, retroHostProgress, retroHostLooking
         case retroHostChecking, retroHostNotYet, retroHostDownloadFailed, retroHostReady, retroHostUpToDate
         case retroHostDownloadCloseGame
+        // A PS1 game in the emulator host (RetroHostPlay.swift): its setting, screens and menu.
+        case retroHostPs1, retroHostPs1Detail, retroHostUpdating, retroHostCheckFailed
+        case retroHostBiosFolder, retroHostBiosFolderDetail, retroHostControlsDetail, retroHostLoading
+        case retroHostStopped, retroHostBack, retroHostBiosDetail, retroHostDiscDetail
+        case retroHostCoreDetail, retroHostStalledDetail, retroHostDidNotStartDetail, retroHostFrameTooLargeDetail
+        case retroHostExitedDetail, retroHostHungDetail, retroHostOtherDetail, retroHostOutdatedDetail
+        case retroHostNotStartedDetail, retroHostCardUnreadable, retroHostNoCapture, retroMenuVolume
+        case retroMenuMute, retroMenuDiscInsertedDetail, retroMenuDiscChangingDetail, retroMenuDiscFailedDetail
+        case retroMenuOptionPendingDetail, retroMenuOptionRestartDetail, retroMenuOptionRestartOnlyDetail, retroMenuAudio
+        case retroMenuAudioDetail, retroMenuController, retroMenuControllerDetail, retroMenuConsole
+        case retroMenuConsoleDetail, retroMenuAdvanced, retroMenuAdvancedDetail
     }
 }

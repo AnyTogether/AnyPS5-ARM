@@ -148,10 +148,19 @@ struct RootView: View {
                 // Offscreen there is no material to frost what a full-screen panel covers: the
                 // Glass look's renders blur it here instead, as the window's material does live.
                 .blur(radius: stillBackground != nil && look.glass && (model.overlay?.coversScreen == true || model.starting != nil) ? 30 * scale : 0)
+                // A PS1 game in the emulator host: over the home screen, under its menu and every
+                // other layer (RetroPlayView.swift).
+                if let play = model.retroPlay {
+                    RetroPlayView(play: play, host: play.host).id(ObjectIdentifier(play)).transition(.opacity)
+                }
                 overlays
                 if model.share.watching != nil {
                     ShareWatchView().transition(.opacity)
                 }
+                #if DEBUG
+                // A debug build's unchecked host says so where the game plays, over every layer.
+                if let play = model.retroPlay, play.unchecked { RetroUncheckedMark() }
+                #endif
                 if let game = model.starting ?? model.coverGame ?? model.fontWait {
                     if model.showsCover(game) {
                         // The console-style cover, as on Windows and Linux (StartCover.swift).
@@ -203,6 +212,8 @@ struct RootView: View {
             Input.shared.pointerDownHandler = { [weak model] in model?.onInput?() }
             Input.shared.menuHandler = { [weak model] in model?.homeRightClick() ?? false }
             Input.shared.escapeHandler = { [weak model] in model?.escape() ?? false }
+            Input.shared.gameKeys = { [weak model] event in model?.retroKey(event) ?? false }
+            Input.shared.gameScreen = { [weak model] in model?.retroInGame ?? false }
             Input.shared.sideButtonHandler = { [weak model] button in
                 switch button {
                 case .back: model?.mouseBack()
@@ -315,7 +326,7 @@ struct RootView: View {
             if let game = model.selectedGame {
                 Gallery(game: game, shots: model.galleryShots).transition(.opacity.combined(with: .scale(scale: 1.03)))
             }
-        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks:
+        case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks, .retroMenu:
             GameMenuCard().id(model.overlay == .homeMenu ? "home" : model.overlay == .profileMenu ? "options" : model.overlay == .confirmQuit ? "quit" : model.overlay == .launcherReport ? "report" : model.overlay == .confirmDeleteGame ? "delete"
                 : model.overlay == .confirmCancelUnlock ? "cancel-unlock" : model.overlay == .confirmQuitUnlocks ? "quit-unlocks" : "game").transition(.opacity)
         case .profilePicker:
