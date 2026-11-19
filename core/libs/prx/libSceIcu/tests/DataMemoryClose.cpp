@@ -32,6 +32,12 @@ static_assert(offsetof(UDataMemory, length) == 48);
 
 namespace {
 
+#if defined(__APPLE__)
+using MincoreVector = char;  // macOS declares mincore with char *, Linux with unsigned char *
+#else
+using MincoreVector = unsigned char;
+#endif
+
 struct GuardedData {
     std::array<std::uint8_t, 32> before;
     UDataMemory data;
@@ -119,7 +125,7 @@ void Mapping() {
     guarded.data.length = static_cast<std::int32_t>(pageSize);
     udata_close_nid_postfix(&guarded.data);
 
-    unsigned char residency = 0;
+    MincoreVector residency = 0;
     errno = 0;
     Require(mincore(mapping, pageSize, &residency) == -1);
     Require(errno == ENOMEM);
@@ -159,7 +165,7 @@ void Heap() {
     data->length = static_cast<std::int32_t>(pageSize);
     udata_close_nid_postfix(data);
 
-    unsigned char residency = 0;
+    MincoreVector residency = 0;
     errno = 0;
     Require(mincore(mapping, pageSize, &residency) == -1);
     Require(errno == ENOMEM);

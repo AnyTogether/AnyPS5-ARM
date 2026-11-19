@@ -1,6 +1,7 @@
 #ifndef CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_UPSCALEMODE_HPP
 #define CORE_LIBS_PRX_LIBSCEAGCDRIVER_EXECUTION_INCLUDE_UPSCALEMODE_HPP
 
+#include "FloatChars.hpp"
 #include <charconv>
 #include <cmath>
 #include <stdexcept>
@@ -22,7 +23,7 @@ inline UpscaleMode SelectUpscaleMode(const char* upscale, const char* sharpness)
     if (sharpness != nullptr && *sharpness != '\0') {
         const std::string_view text(sharpness);
         float value = 0.0f;
-        const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+        const auto [end, error] = Aps5::FloatFromChars(text.data(), text.data() + text.size(), value);
         if (error != std::errc{} || end != text.data() + text.size() || !std::isfinite(value) || value < 0.0f || value > 2.0f) throw std::runtime_error("Vulkan presentation: ANYPS5_FSR_SHARPNESS must be a number from 0.0 to 2.0");
         mode.sharpness = value;
     }

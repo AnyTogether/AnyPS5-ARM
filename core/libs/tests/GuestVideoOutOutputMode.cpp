@@ -105,7 +105,7 @@ int main() {
     Require(sceVideoOutConfigureOutput(handle, 1, &options, nullptr, 0) == 0);
     Require(sceVideoOutVrrPegToFixedRate(handle, 0, 0) == 0);
     Require(sceVideoOutVrrUnpegFromFixedRate(handle) == 0);
-    thrown = false;
+    bool thrown = false;
     try {
         sceVideoOutVrrPegToFixedRate(handle + 1, 0, 0);
     } catch (const std::runtime_error&) {

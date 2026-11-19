@@ -346,7 +346,7 @@ void testMarkerSpans() {
     expectFailure([&] { sceAgcDcbPushMarkerSpan(&dcb.buffer, nullptr, 4, 0); });
 }
 
-void testPacketSizes() {
+void testQueryPacketSizes() {
     check(sceAgcDcbBeginOcclusionQueryGetSize(0) == 16 && sceAgcDcbBeginOcclusionQueryGetSize(1) == 288, "occlusion query begin size mismatch");
     check(sceAgcDcbBeginOcclusionQueryGetSize(0x101) == 288 && sceAgcDcbBeginOcclusionQueryGetSize(2) == 0, "occlusion query type is not read from its low byte");
     check(sceAgcDcbEndOcclusionQueryGetSize() == 16, "occlusion query end size mismatch");
@@ -1410,7 +1410,7 @@ int main(int argc, char** argv) {
         testMarkers();
         testJumpTargetPatch();
         testMarkerSpans();
-        testPacketSizes();
+        testQueryPacketSizes();
         testWorkloads();
         testEndOfPipeAddressPatch();
         testWorkloadStreams();

@@ -58,6 +58,13 @@ endforeach()
 if(CMAKE_TOOLCHAIN_FILE)
     list(APPEND curlBackendOptions -DCMAKE_TOOLCHAIN_FILE:FILEPATH=${CMAKE_TOOLCHAIN_FILE})
 endif()
+if(APPLE)
+    # The backend is a separate CMake build: on macOS it gets the engine's architecture (x86-64 for
+    # Rosetta on an arm64 host) and deployment target, or the prx finds none of its symbols.
+    list(APPEND curlBackendOptions
+        -DCMAKE_OSX_ARCHITECTURES:STRING=${CMAKE_OSX_ARCHITECTURES}
+        -DCMAKE_OSX_DEPLOYMENT_TARGET:STRING=${CMAKE_OSX_DEPLOYMENT_TARGET})
+endif()
 
 ExternalProject_Add(anyps5_curl_build
     SOURCE_DIR ${curlSourceDir}
@@ -96,6 +103,15 @@ target_include_directories(libcurl PUBLIC ${curlSourceDir}/include PRIVATE ${LIB
 target_link_libraries(libcurl PRIVATE libc libkernel anyps5_curl_backend)
 if(MINGW OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(libcurl PRIVATE LINKER:--exclude-libs,ALL)
+elseif(APPLE)
+    # ld64 has no --exclude-libs: export only the prx's own symbols, not the backend's curl_*,
+    # whose names (and so NIDs) are those of the prx's exports (as libSceFreeTypeOt does). The
+    # prx's plain-named exports are the ones the backend is built to call host_curl_*.
+    target_link_options(libcurl PRIVATE "LINKER:-exported_symbol,*_nid_*")
+    foreach(plainExport curl_easy_escape curl_easy_unescape curl_escape curl_free curl_slist_append
+            curl_slist_free_all curl_strequal curl_strnequal curl_unescape)
+        target_link_options(libcurl PRIVATE "LINKER:-exported_symbol,_${plainExport}")
+    endforeach()
 endif()
 configure_windows_unwind(libcurl)
 install(FILES ${curlSourceDir}/COPYING DESTINATION licenses/curl)
