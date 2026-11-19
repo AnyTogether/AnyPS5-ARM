@@ -89,6 +89,9 @@ if(WIN32)
     set_property(TARGET anyps5_curl_backend APPEND PROPERTY INTERFACE_LINK_LIBRARIES ws2_32 winmm crypt32 bcrypt)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set_property(TARGET anyps5_curl_backend APPEND PROPERTY INTERFACE_LINK_LIBRARIES pthread)
+elseif(APPLE)
+    # curl's own build links these on Darwin for its system proxy lookup (SCDynamicStoreCopyProxies).
+    set_property(TARGET anyps5_curl_backend APPEND PROPERTY INTERFACE_LINK_LIBRARIES "-framework CoreFoundation" "-framework SystemConfiguration")
 endif()
 
 add_library(libcurl SHARED EXCLUDE_FROM_ALL
