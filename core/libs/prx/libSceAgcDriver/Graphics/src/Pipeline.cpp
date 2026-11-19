@@ -973,7 +973,7 @@ void Pipeline::Abandon() noexcept {
 
 void Pipeline::DispatchMesh(VkCommandBuffer commands, std::uint32_t groups, std::uint32_t instances) const {
     Require(computePipeline != VK_NULL_HANDLE, "the pipeline does not emulate a mesh stage");
-    context.Resolved(&DeviceFunctions::cmdBindPipeline, "vkCmdBindPipeline")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, computePipeline);
+    context.BindComputePipeline(commands, computePipeline);
     context.Resolved(&DeviceFunctions::cmdDispatch, "vkCmdDispatch")(commands, groups, instances, 1);
 }
 
