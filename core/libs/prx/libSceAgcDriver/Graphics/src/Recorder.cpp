@@ -4087,6 +4087,8 @@ bool Recorder::WrittenSince(std::uint64_t address, std::size_t bytes, std::uint6
         if (write.begin < end && address < write.end) return true;
     }
     return false;
+}
+
 void Recorder::OnWriteComplete(std::uint64_t address, std::size_t bytes, std::function<void()> action) {
     const auto end = address + bytes;
     Batch* holder = open != nullptr && overlaps(*open, address, end) ? open.get() : nullptr;

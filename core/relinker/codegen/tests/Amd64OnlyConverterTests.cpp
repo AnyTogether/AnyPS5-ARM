@@ -1329,6 +1329,8 @@ void clflushoptSubstitutions() {
     const Bytes clflush = {0x90, 0x0F, 0xAE, 0x3F, 0x48, 0x83, 0xC7, 0x40, 0x90, 0x0F, 0xAE, 0x3D, 0xF0, 0xFF, 0xFF, 0xFF};
     std::copy(clflush.begin(), clflush.end(), expected.begin() + 0x200);
     require(result.Bytes == expected, "CLFLUSHOPT was rewritten with the wrong bytes or a neighbour changed");
+}
+
 void converterAvxShortSites() {
     const auto avx = Codegen::MakeAmd64OnlyConverter(Codegen::Amd64OnlyTarget::Avx);
     const auto convert = [](const std::unique_ptr<Codegen::IAmd64OnlyConverter>& converter, const Bytes& text) {
