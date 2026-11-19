@@ -1342,8 +1342,6 @@ std::uint64_t _ZNSt8__sce_v27num_getIwNS_19istreambuf_iteratorIwNS_11char_traits
 std::uint64_t _ZNSt8__sce_v27num_putIwNS_19ostreambuf_iteratorIwNS_11char_traitsIwEEEEE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v28numpunctIwE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v27codecvtIcc9_MbstatetE2idE_nid_postfix = 0;
-std::uint64_t _ZNSt8__sce_v27collateIcE2idE_nid_postfix = 0;
-std::uint64_t _ZNSt8__sce_v27collateIwE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v28messagesIcE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v28messagesIwE2idE_nid_postfix = 0;
 std::uint64_t _ZNSt8__sce_v210moneypunctIcLb0EE2idE_nid_postfix = 0;
