@@ -183,6 +183,15 @@ static void TestApply() {
     Require(sceNgs2GeomCalcListener(&param, &listener, 0) == SCE_NGS2_OK);
     Ngs2GeomSourceParam source{};
     Require(sceNgs2GeomResetSourceParam(&source) == SCE_NGS2_OK);
+    // The console's reset (TestResetSourceParam) is a 7.1 layout with a narrow cone and clamped rolloff:
+    // the cases below start from a stereo source with no cone and plain inverse rolloff, as before.
+    source.direction = {0.0f, 0.0f, 1.0f};
+    source.cone = {1.0f, 360.0f, 1.0f, 360.0f};
+    source.rolloff = {0, 1000000.0f, 1.0f, 1.0f};
+    source.lfe_level = 1.0f;
+    source.radius = 0.0f;
+    source.num_speakers = 2;
+    source.matrix_format = 2;
 
     // A source straight ahead, 10 away.
     source.position = {0.0f, 0.0f, 10.0f};

@@ -109,6 +109,10 @@ downloads/
 !/docs/run-report-fixtures/*.json
 !tools/titles.json
 !tools/input-mapper/package.json
+# The fork's tracked JSON: the iOS app's asset catalogs and the phone app's and launcher's test fixtures.
+!mobile/ios/Runner/Assets.xcassets/**/Contents.json
+!mobile/test/fixtures/*.json
+!tools/macos/launcher/Tests/AnyPS5CoreTests/Fixtures/**/*.json
 
 !/assets/*.jpg
 !/assets/*.png

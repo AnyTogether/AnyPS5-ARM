@@ -853,9 +853,10 @@ int main(int argc, char** argv) {
     CheckPoolStatsRejected(newContext, invalidId);
     Require(sceHttpTerm_nid_postfix(emptyPoolContext) == 0);
 
-    Require(sceHttpSetCookieEnabled(1, 0) == beforeInit);
-    Require(sceHttpSetCookieEnabled(1, 1) == beforeInit);
-    Require(sceHttpSetCookieEnabled(1, 2) == invalidValue);
+    // Upstream's measured PS5 behaviour (e55c862b7c): the id is checked first and any value is stored.
+    Require(sceHttpSetCookieEnabled(1, 0) == invalidId);
+    Require(sceHttpSetCookieEnabled(1, 1) == invalidId);
+    Require(sceHttpSetCookieEnabled(1, 2) == invalidId);
     Require(sceHttpSetRequestStatusCallback(1, nullptr, nullptr) == 0);
 
     char data[16];

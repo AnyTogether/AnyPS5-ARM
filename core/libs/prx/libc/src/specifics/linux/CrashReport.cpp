@@ -1,4 +1,5 @@
 #if defined(__linux__) && defined(__x86_64__)
+#include "prx/libc/include/CacheFlushEmulation.hpp"
 #include "prx/libc/include/CallTrace.hpp"
 #include "prx/libc/include/CrashText.hpp"
 #include "prx/libc/include/LogFile.hpp"
@@ -283,6 +284,8 @@ void ReportCallTrace() {
 
 void OnFatalSignal(int signal, siginfo_t* info, void* context) {
     if (GuestFaultCopy::Resume(info, context)) return;
+    // The fork's CLFLUSHOPT/CLWB emulation (CacheFlushEmulation.cpp) runs here, not as a second handler.
+    if (cache_flush::EmulateSignal(signal, info, context)) return;
     const int savedErrno = errno;
     if (!g_reporting.exchange(true, std::memory_order_acq_rel)) {
         Report(signal, info, static_cast<const ucontext_t*>(context));
