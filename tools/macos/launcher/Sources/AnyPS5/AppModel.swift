@@ -159,6 +159,9 @@ struct Preferences: Codable, Equatable {
     /// Settings › Default Display, for every game that leaves its display at Default; nil until
     /// changed (the built-in values). Machine-wide, like the game settings.
     var displayDefaults: DisplayDefaults?
+    /// The file's format (DisplayDefaults.preferencesVersion), written by every save. nil in a
+    /// file an older launcher wrote, whose Default Display read(_:) takes by the older rule.
+    var preferencesVersion: Int?
     var lastPlayed: [String: Date] = [:]
 
     var accentColor: Color { (accent ?? theme.defaultAccent).color }
@@ -173,11 +176,21 @@ struct Preferences: Codable, Equatable {
     }
 
     static let key = "AnyPS5.preferences.v1"
+    static let version = DisplayDefaults.preferencesVersion
 
     static func load() -> Preferences {
-        guard let data = UserDefaults.standard.data(forKey: key), var saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return firstStart() }
+        guard let data = UserDefaults.standard.data(forKey: key), let saved = read(data) else { return firstStart() }
+        return saved
+    }
+
+    /// A saved file as the launcher uses it, nil when it does not decode.
+    static func read(_ data: Data) -> Preferences? {
+        guard var saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return nil }
         // One games folder from an older launcher becomes a list of one.
         saved.libraryFolders = saved.libraryFolders
+        // A file from before Full Screen was built in follows it unless Window was chosen.
+        saved.displayDefaults = DisplayDefaults.fromPreferences(saved.displayDefaults, version: saved.preferencesVersion)
+        saved.preferencesVersion = version
         return saved
     }
 
@@ -186,17 +199,25 @@ struct Preferences: Codable, Equatable {
     /// English when it has none of them.
     static func firstStart(preferred: [String] = Locale.preferredLanguages) -> Preferences {
         var preferences = Preferences()
+        preferences.preferencesVersion = version
         if let code = LanguageFiles.match(preferred, codes: Language.allCases.map(\.code)), let language = Language(rawValue: code) {
             preferences.language = language
         }
         return preferences
     }
 
-    func save() {
-        // Every game's display keys as before, so an older launcher still reads the file.
+    /// The file save() writes: the current format, and every game's display keys as before, so
+    /// an older launcher still reads it.
+    func encoded() -> Data? {
+        var current = self
+        current.preferencesVersion = Self.version
         let encoder = JSONEncoder()
         encoder.userInfo[GameSettings.legacyDisplayKeys] = true
-        if let data = try? encoder.encode(self) { UserDefaults.standard.set(data, forKey: Preferences.key) }
+        return try? encoder.encode(current)
+    }
+
+    func save() {
+        if let data = encoded() { UserDefaults.standard.set(data, forKey: Preferences.key) }
     }
 }
 

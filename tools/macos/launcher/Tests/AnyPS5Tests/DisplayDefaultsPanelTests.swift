@@ -19,18 +19,19 @@ final class DisplayDefaultsPanelTests: XCTestCase {
         let display = try XCTUnwrap(ids.firstIndex(of: "display"))
         XCTAssertEqual(ids[display + 1], "presets")
         let rows = model.displayDefaultRows()
-        XCTAssertEqual(rows.map(\.id), ["displayDefaultsIntro", "defaultDisplay", "defaultStartAnimation", "defaultSize", "defaultVsync"])
-        try XCTUnwrap(choice(try row(rows, "defaultDisplay"))).set(1)
-        XCTAssertEqual(model.preferences.displayDefaults?.fullscreen, true)
-        XCTAssertFalse(model.displayDefaultRows().contains { $0.id == "defaultSize" }, "no window size in full screen")
-        try XCTUnwrap(choice(try row(model.displayDefaultRows(), "defaultDisplay"))).set(0)
+        XCTAssertEqual(rows.map(\.id), ["displayDefaultsIntro", "defaultDisplay", "defaultStartAnimation", "defaultVsync"], "Full Screen by default: no window size")
+        XCTAssertEqual(try XCTUnwrap(choice(try row(rows, "defaultDisplay"))).selected, 1)
+        try XCTUnwrap(choice(try row(rows, "defaultDisplay"))).set(0)
+        XCTAssertEqual(model.preferences.displayDefaults?.fullscreen, false)
+        XCTAssertEqual(model.displayDefaultRows().map(\.id), ["displayDefaultsIntro", "defaultDisplay", "defaultStartAnimation", "defaultSize", "defaultVsync"])
+        try XCTUnwrap(choice(try row(model.displayDefaultRows(), "defaultDisplay"))).set(1)
         XCTAssertNil(model.preferences.displayDefaults, "back to the built-in values: nothing kept")
     }
 
     func testAGameShowsTheDefaultAndFollowsIt() throws {
         let model = try LauncherFixture.model()
         let game = try XCTUnwrap(model.selectedGame)
-        model.updateDisplayDefaults { $0.fullscreen = true }
+        XCTAssertNil(model.preferences.displayDefaults, "the built-in defaults")
         let display = try XCTUnwrap(choice(try row(model.gameDisplayRows(game, model.settings(for: game)), "display")))
         XCTAssertEqual(display.options, ["Default (Full Screen)", "Window", "Full Screen"])
         XCTAssertEqual(display.selected, 0)
@@ -66,6 +67,7 @@ final class DisplayDefaultsPanelTests: XCTestCase {
     func testTheWindowSizeReadsDefaultUntilTheGamePicksOne() throws {
         let model = try LauncherFixture.model()
         let game = try XCTUnwrap(model.selectedGame)
+        model.updateDisplayDefaults { $0.fullscreen = false }
         guard case .stepper(let value, _, _, let format, let set) = try row(model.gameDisplayRows(game, model.settings(for: game)), "size").kind else { return XCTFail("not a stepper") }
         XCTAssertEqual(format(value), "Default (75%)")
         set(80)
@@ -94,5 +96,53 @@ final class DisplayDefaultsPanelTests: XCTestCase {
         let started = model.launchSettings(for: game)
         XCTAssertTrue(started.fullscreen, "full screen was chosen")
         XCTAssertFalse(started.vsync, "vertical sync on was the old default: it follows")
+    }
+
+    /// A preferences file as an older launcher wrote it: no preferencesVersion, and Default
+    /// Display only when changed.
+    func olderFile(_ displayDefaults: [String: Any]?) throws -> Data {
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(Preferences())) as? [String: Any])
+        json["preferencesVersion"] = nil
+        json["displayDefaults"] = displayDefaults
+        return try JSONSerialization.data(withJSONObject: json)
+    }
+
+    /// Lenny4250gh's AnyTogether/AnyPS5-Desktop#179, on the Mac: games start in Full Screen unless
+    /// Window was chosen, in Default Display or for the game.
+    func testAnOlderLaunchersPreferencesFollowFullScreenUnlessWindowWasChosen() throws {
+        let untouched = try XCTUnwrap(Preferences.read(try olderFile(nil)))
+        XCTAssertNil(untouched.displayDefaults, "never changed: the built-in Full Screen")
+        XCTAssertEqual(untouched.preferencesVersion, Preferences.version)
+        let tearing = try XCTUnwrap(Preferences.read(try olderFile(["fullscreen": false, "windowSize": 75, "vsync": false, "startAnimation": false])))
+        XCTAssertEqual(tearing.displayDefaults, DisplayDefaults(fullscreen: true, windowSize: 75, vsync: false, startAnimation: false),
+                       "Window at 75 % was the old default: Full Screen, vsync and the start animation stay off")
+        let window = try XCTUnwrap(Preferences.read(try olderFile(["fullscreen": false, "windowSize": 60, "vsync": true])))
+        XCTAssertEqual(window.displayDefaults, DisplayDefaults(fullscreen: false, windowSize: 60), "Window at 60 % was chosen and stays")
+
+        let model = try LauncherFixture.model { $0.displayDefaults = untouched.displayDefaults; $0.preferencesVersion = untouched.preferencesVersion }
+        let game = try XCTUnwrap(model.selectedGame)
+        let other = try XCTUnwrap(model.games.first { $0.id != game.id })
+        XCTAssertEqual(model.launchSettings(for: game).environment(launcherLanguage: 1)["ANYPS5_FULLSCREEN"], "1")
+        XCTAssertTrue(model.launchSettings(for: game).fadesCover, "the cover fades over the game")
+        model.update(game) { $0.ownFullscreen = false }
+        XCTAssertEqual(model.launchSettings(for: game).environment(launcherLanguage: 1)["ANYPS5_FULLSCREEN"], "0", "the game's own Window wins")
+        XCTAssertTrue(model.launchSettings(for: other).fullscreen)
+    }
+
+    func testTheFirstSaveKeepsWhatTheOlderFileMeant() throws {
+        let untouched = try XCTUnwrap(Preferences.read(try olderFile(nil)))
+        let saved = try XCTUnwrap(untouched.encoded())
+        let json = try XCTUnwrap(JSONSerialization.jsonObject(with: saved) as? [String: Any])
+        XCTAssertEqual(json["preferencesVersion"] as? Int, Preferences.version)
+        XCTAssertNil(json["displayDefaults"], "no Default Display written for the built-in one")
+        let again = try XCTUnwrap(Preferences.read(saved))
+        XCTAssertNil(again.displayDefaults, "still Full Screen")
+        XCTAssertNil(try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(again.encoded())) as? [String: Any])["displayDefaults"])
+
+        var chosen = Preferences()
+        chosen.displayDefaults = DisplayDefaults.formerBuiltIn
+        let read = try XCTUnwrap(Preferences.read(try XCTUnwrap(chosen.encoded())))
+        XCTAssertEqual(read.displayDefaults, DisplayDefaults.formerBuiltIn, "Window at 75 % chosen in this launcher is read as written")
+        XCTAssertEqual(Preferences.firstStart(preferred: []).preferencesVersion, Preferences.version)
     }
 }
