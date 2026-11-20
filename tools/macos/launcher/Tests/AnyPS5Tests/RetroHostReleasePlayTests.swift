@@ -72,6 +72,12 @@ final class RetroHostReleasePlayTests: XCTestCase {
         XCTAssertTrue(condition(), message)
     }
 
+    /// Waits for the first `status` the game's start asks: a `refresh()` asked while it is out is
+    /// let go (`RetroHostGame.refresh`), so the status a test sets would not be taken.
+    private func loaded(_ model: AppModel) async throws {
+        try await settle({ model.retroPlay?.host.loaded == true && model.retroPlay?.host.status != nil }, "the game is loading, its first status in")
+    }
+
     func testTheSignedHostStartsWithACheckWhoseFilesAreHeldAndItsOwnSwanStation() async throws {
         let (model, game, opened) = try await launcher()
         let folder = model.retroHostRoot.appendingPathComponent("host")
@@ -106,6 +112,7 @@ final class RetroHostReleasePlayTests: XCTestCase {
         let (model, game, opened) = try await launcher()
         model.play(game)
         try await settle({ opened().first?.0.started.isEmpty == false })
+        try await loaded(model)
         let (fake, _) = try XCTUnwrap(opened().first)
         fake.gameStatus = try RetroHostPlayTests.status(ready: true)
         await model.retroPlay?.host.refresh()
@@ -115,6 +122,7 @@ final class RetroHostReleasePlayTests: XCTestCase {
         // Whole, it plays the next game after a second check.
         model.play(game)
         try await settle({ fake.started.count == 2 }, "the kept host plays the next game")
+        try await loaded(model)
         XCTAssertEqual(opened().count, 1)
         fake.gameStatus = try RetroHostPlayTests.status(ready: true)
         await model.retroPlay?.host.refresh()
@@ -155,6 +163,7 @@ final class RetroHostReleasePlayTests: XCTestCase {
         let (model, game, opened) = try await launcher()
         model.play(game)
         try await settle({ opened().first?.0.started.isEmpty == false })
+        try await loaded(model)
         let (fake, _) = try XCTUnwrap(opened().first)
         fake.gameStatus = try RetroHostPlayTests.status(ready: true)
         await model.retroPlay?.host.refresh()
