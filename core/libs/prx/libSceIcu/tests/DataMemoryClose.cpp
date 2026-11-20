@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <type_traits>
 #include <udatamem.h>
@@ -139,9 +140,10 @@ void Mapping() {
     guarded.data.length = static_cast<std::int32_t>(pageSize);
     udata_close_nid_postfix(&guarded.data);
 
-    MincoreVector residency = 0;
+    MincoreVector residency[16] = {};  // one entry per host page of the mapping (16 KiB in 4 KiB pages on macOS)
     errno = 0;
-    Require(mincore(mapping, pageSize, &residency) == -1);
+    Require(mincore(mapping, pageSize, residency) == -1);
+    if (errno != ENOMEM) std::fprintf(stderr, "mincore after udata_close failed with errno %d, not ENOMEM\n", errno);
     Require(errno == ENOMEM);
     RequireInitialized(guarded.data);
     RequireGuards(guarded);
@@ -179,9 +181,10 @@ void Heap() {
     data->length = static_cast<std::int32_t>(pageSize);
     udata_close_nid_postfix(data);
 
-    MincoreVector residency = 0;
+    MincoreVector residency[16] = {};  // one entry per host page of the mapping (16 KiB in 4 KiB pages on macOS)
     errno = 0;
-    Require(mincore(mapping, pageSize, &residency) == -1);
+    Require(mincore(mapping, pageSize, residency) == -1);
+    if (errno != ENOMEM) std::fprintf(stderr, "mincore after udata_close failed with errno %d, not ENOMEM\n", errno);
     Require(errno == ENOMEM);
 #endif
 }

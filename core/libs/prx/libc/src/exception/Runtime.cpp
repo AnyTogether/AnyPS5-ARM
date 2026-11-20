@@ -201,29 +201,8 @@ static void APS5_VABI Cleanup(_Unwind_Reason_Code reason, _Unwind_Exception* exc
     } else Release(header + 1);
 }
 
-#ifdef __APPLE__
-// libc++ puts some standard classes in its versioned namespace: std::__1::future_error is
-// "NSt3__112future_errorE", where the console's library (and libstdc++) name it "St12future_error".
-// Host code built against libc++ that catches one of them from the guest's runtime names the same
-// type, as it does on Linux, where both spell it the console's way.
-static bool SameUnversioned(const char* versioned, const char* plain) {
-    constexpr std::string_view prefix = "NSt3__1";
-    std::string_view name(versioned);
-    if (!name.starts_with(prefix) || !name.ends_with('E') || std::strncmp(plain, "St", 2) != 0) return false;
-    name = name.substr(prefix.size(), name.size() - prefix.size() - 1);
-    return name == std::string_view(plain + 2);
-}
-#endif
-
 bool Equal(const std::type_info* a, const std::type_info* b) {
-    if (a == b) return true;
-    if (!a || !b) return false;
-    if (std::strcmp(a->name(), b->name()) == 0) return true;
-#ifdef __APPLE__
-    return SameUnversioned(a->name(), b->name()) || SameUnversioned(b->name(), a->name());
-#else
-    return false;
-#endif
+    return a == b || (a && b && std::strcmp(a->name(), b->name()) == 0);
 }
 
 static const std::type_info* TypeOfTypeInfo(const std::type_info* type) {
