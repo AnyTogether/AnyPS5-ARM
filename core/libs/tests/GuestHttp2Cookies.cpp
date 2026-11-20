@@ -15,7 +15,13 @@
 #include <unistd.h>
 #endif
 
-static void Require(bool value) { if (!value) std::abort(); }
+static void Check(bool value, int line) {
+    if (!value) {
+        std::fprintf(stderr, "http2 cookie check failed at line %d\n", line);
+        std::abort();
+    }
+}
+#define Require(value) Check((value), __LINE__)
 
 static constexpr int NotFound = static_cast<int>(0x817B1025);
 static constexpr int InvalidId = static_cast<int>(0x817B1100);

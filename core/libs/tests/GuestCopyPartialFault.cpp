@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <sys/mman.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 // A checked guest copy that crosses from a readable page into one it may not use stops there:
@@ -105,11 +106,69 @@ void WholeCopiesStillWork(const Pages& pages) {
 
 }
 
+// The host's own 4 KiB pages (sysconf), whatever the kernel's are: a read-only or inaccessible
+// 4 KiB page next to writable ones in one 16 KiB kernel page, as a game's mprotect makes them under
+// Rosetta. The checked copies must still refuse it. The probe line says how plain stores and a
+// `rep movsb` behave there, from children, for the record.
+int ChildDiesOnStore(unsigned char* target, bool repMovsb) {
+    std::fflush(nullptr);
+    const pid_t child = fork();
+    Require(child >= 0);
+    if (child == 0) {
+        alarm(10);
+        if (repMovsb) {
+#if defined(__x86_64__)
+            unsigned char source[8] = {Written, Written, Written, Written, Written, Written, Written, Written};
+            void* to = target;
+            const void* from = source;
+            std::size_t count = sizeof(source);
+            __asm__ volatile("rep movsb" : "+D"(to), "+S"(from), "+c"(count) : : "memory");
+#else
+            _exit(3);
+#endif
+        } else {
+            *reinterpret_cast<volatile unsigned char*>(target) = Written;
+        }
+        _exit(0);
+    }
+    int status = 0;
+    Require(waitpid(child, &status, 0) == child);
+    return WIFSIGNALED(status) ? WTERMSIG(status) : -WEXITSTATUS(status);
+}
+
+void SmallPagesAreRefused() {
+    const auto small = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    const auto kernel = ProtectionPage();
+    if (small >= kernel) return;
+    auto* mapping = static_cast<unsigned char*>(mmap(nullptr, kernel * 2, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+    Require(mapping != MAP_FAILED);
+    auto* page = reinterpret_cast<unsigned char*>((reinterpret_cast<std::uintptr_t>(mapping) + kernel - 1) / kernel * kernel);
+    std::memset(page, Pattern, kernel);
+    unsigned char* readOnly = page + small;
+    unsigned char* none = page + small * 2;
+    Require(mprotect(readOnly, small, PROT_READ) == 0);
+    Require(mprotect(none, small, PROT_NONE) == 0);
+    std::fprintf(stderr, "probe: %zu-byte pages in %zu-byte kernel pages: store into read-only %d, rep movsb into read-only %d, store into no-access %d (signal number, or minus the exit code)\n",
+                 small, kernel, ChildDiesOnStore(readOnly, false), ChildDiesOnStore(readOnly, true), ChildDiesOnStore(none, false));
+    std::array<unsigned char, 64> buffer{};
+    buffer.fill(Written);
+    const bool outRo = GuestCopyOut_nid_no_patch(readOnly, buffer.data(), buffer.size());
+    const bool outNone = GuestCopyOut_nid_no_patch(none, buffer.data(), buffer.size());
+    buffer.fill(Untouched);
+    const bool inNone = GuestCopyIn_nid_no_patch(buffer.data(), none, buffer.size());
+    std::fprintf(stderr, "probe: GuestCopyOut into read-only %d, into no-access %d; GuestCopyIn from no-access %d\n", outRo, outNone, inNone);
+    Require(!outRo && !outNone && !inNone);
+    Require(mprotect(page, kernel, PROT_READ) == 0);
+    for (std::size_t index = small; index < small * 3; ++index) Require(page[index] == Pattern);
+    munmap(mapping, kernel * 2);
+}
+
 int main() {
     const Pages pages(ProtectionPage());
     CopyInStopsAtTheFault(pages);
     CopyOutStopsAtTheFault(pages);
     WholeCopiesStillWork(pages);
+    SmallPagesAreRefused();
     // Many in a row: the resume leaves the copy usable for the next one.
     for (int round = 0; round < 1000; ++round) {
         unsigned char byte = Untouched;
