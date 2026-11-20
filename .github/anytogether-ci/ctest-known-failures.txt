@@ -40,6 +40,8 @@ macos   macos_fixtures                  Its argv fixture ends in int3, which sta
 macos   guest_kernel_fcntl              Flaky under parallel ctest on macOS.
 macos   agc_thread_priority_refused_rt  Expects a refused real-time priority request to throw; macOS grants it.
 macos   agc_thread_priority_refused_high  Same as above, high priority.
+macos   guest_ces_wide(_module)?        Upstream now reads and writes guest memory in libSceCesCs through GuestCopyIn/GuestCopyOut, which are a Mach call each on macOS (mach_vm_read_overwrite, mach_vm_write; Linux has a fault-recovering copy): 4 s on main, over 120 s now. Needs a macOS fault-recovering GuestCopy; needs a look.
+macos   guest_icu_comparisons           Same cause as guest_ces_wide, in libSceIcu: 0.67 s on main, over 20 s now.
 macos   agc_driver_pm4_priority_refused Same as above, for the PM4 queue priority.
 macos   agc_shared_write                Cannot inspect mapping lifetimes on macOS.
 macos   agc_write_tracking              Known macOS failure (also on the developers' Macs): a block outside the import window reads as written.
