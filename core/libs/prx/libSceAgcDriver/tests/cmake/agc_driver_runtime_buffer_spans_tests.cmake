@@ -9,8 +9,10 @@ if(BUILD_TESTING)
                 list(APPEND environment "APS5_BDA_BYTE_READS=1")
             endif()
             add_test(NAME ${test} COMMAND agc_driver_runtime_buffer_spans_tests ${components} ${argument})
-            # One at a time: run side by side on a shared lavapipe runner they miss the 30 s limit.
-            set_tests_properties(${test} PROPERTIES ENVIRONMENT "${environment}" SKIP_RETURN_CODE 77 TIMEOUT 30 RESOURCE_LOCK agc_driver_runtime_buffer_spans WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+            # A cold lavapipe shader cache on a shared hosted runner compiles these 10 to 20 times slower
+            # than upstream's runner (1 to 3 s there, 12 to 30 s here, like the runtime formatted store
+            # tests on main), so they get the 120 s every untimed test has, and run one at a time.
+            set_tests_properties(${test} PROPERTIES ENVIRONMENT "${environment}" SKIP_RETURN_CODE 77 TIMEOUT 120 RESOURCE_LOCK agc_driver_runtime_buffer_spans WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
             if(WIN32)
                 set_tests_properties(${test} PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:$<TARGET_FILE_DIR:libc>")
             endif()

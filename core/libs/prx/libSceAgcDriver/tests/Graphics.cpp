@@ -14320,12 +14320,15 @@ void pipelineJournalReplayPriorityTests() {
     FlushPipelineJournal();
     ClearCachedPipelines(context.device);
     Require(replayPriorities.empty(), "a pipeline built outside a replay counted as replayed");
-    const int caller = currentThreadPriority();
 #ifdef _WIN32
     const int expected = THREAD_PRIORITY_BELOW_NORMAL;
 #elif defined(__APPLE__)
     const int expected = static_cast<int>(QOS_CLASS_UTILITY);
+    // A process launchd starts without a ProcessType (the GitHub macOS runner's tests) begins at the
+    // utility QoS class, the replay's own: the thread is raised first so the replay's lowering shows.
+    if (currentThreadPriority() == expected) Require(pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0) == 0, "the test thread could not leave the utility QoS class");
 #endif
+    const int caller = currentThreadPriority();
     Require(caller != expected, "the test thread already runs at the replay's priority " + std::to_string(expected));
     auto replay = StartPipelineJournalReplay(context, fingerprint, {});
     Require(replay != nullptr, "the replay did not start");

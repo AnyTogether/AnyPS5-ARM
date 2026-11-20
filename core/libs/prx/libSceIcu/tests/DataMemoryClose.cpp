@@ -38,6 +38,20 @@ using MincoreVector = char;  // macOS declares mincore with char *, Linux with u
 using MincoreVector = unsigned char;
 #endif
 
+#if !defined(_WIN32)
+// The mapping udata_close must unmap. Under Rosetta a process sees 4 KiB pages on a 16 KiB-page
+// kernel: unmapping 4 KiB of a 16 KiB page leaves the kernel page mapped, so mincore still finds
+// it. A whole kernel page is mapped there, so the unmap reaches the kernel.
+std::size_t MappingBytes() {
+    const auto pageSize = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+#if defined(__APPLE__)
+    return pageSize < 16384 ? 16384 : pageSize;
+#else
+    return pageSize;
+#endif
+}
+#endif
+
 struct GuardedData {
     std::array<std::uint8_t, 32> before;
     UDataMemory data;
@@ -112,7 +126,7 @@ void Mapping() {
 }
 #else
 void Mapping() {
-    const auto pageSize = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    const auto pageSize = MappingBytes();
     void* mapping = mmap(nullptr, pageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     Require(mapping != MAP_FAILED);
 
@@ -156,7 +170,7 @@ void Heap() {
     Require(VirtualQuery(view, &information, sizeof(information)) == sizeof(information));
     Require(information.State == MEM_FREE);
 #else
-    const auto pageSize = static_cast<std::size_t>(sysconf(_SC_PAGESIZE));
+    const auto pageSize = MappingBytes();
     void* mapping = mmap(nullptr, pageSize, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     Require(mapping != MAP_FAILED);
     data->pHeader = static_cast<const DataHeader*>(mapping);
