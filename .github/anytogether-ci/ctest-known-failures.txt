@@ -27,6 +27,7 @@ linux   agc_driver_optimize_on_fiber    Needs SPIRV-Tools, which the fork's buil
 linux   agc_driver_image_sample_lod_clamp_shader_lane  Upstream test (#12980, its Linux job did not run), fails on lavapipe on upstream's own tree too: a filtered image_sample_lz through an S# that holds the LOD at 0 reads one mip level off. #15333 widened one check, the trilinear case still fails.
 linux   agc_driver_image_gather_lod  New upstream lavapipe test; level 1 of a gather reads 0 here. Upstream's runner passes it on Mesa 26.0.8 (run 44716515864), this runner has Ubuntu 24.04's Mesa 25.2.8; the shader code is upstream's.
 linux   agc_driver_image_table_packed_guards  New upstream lavapipe test ("unrecoverable packed table format was not poisoned"); passes on upstream's Mesa 26.0.8 runner (run 44716515864), fails on this runner's Mesa 25.2.8; the materializer and table code are upstream's.
+linux   guest_thermal_sensors       Reads the runner's real hwmon and SoC sensors: 0.02 s on the AMD EPYC runners (runs 44721839889, 44756068076 attempt 2), over 20 s on all three tries on the Intel Xeon 6975P ones (44756068076 attempt 1, 44774113524). The sensor code and the test are upstream's unchanged; needs a look at which host read stalls there.
 
 # Windows: real failures on main, to fix (WinLibs GCC 15.2, as the owner's Windows builds).
 windows prx_thread_local_destructors    libkernel (dl*_nid_postfix, LoadFailure) and AgcDriver (LockStats) register thread_local destructors, which run after emulated TLS is freed on Windows; they belong in HostThreadLocal.
