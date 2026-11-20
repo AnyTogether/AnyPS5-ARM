@@ -198,13 +198,10 @@ void TestBiasCorrectionBehavior() {
     const int handle0 = 1;
     Require(scePadSetAngularVelocityBiasCorrectionState(handle0, false) == PAD_OK);
 
-    bool caught = false;
-    try {
-        scePadSetAngularVelocityBiasCorrectionState(handle0, true);
-    } catch (...) {
-        caught = true;
-    }
-    Require(caught);
+    // The fork implements bias correction (2d0c051852), where upstream reports enabling it as not
+    // implemented: enabling it is accepted, and it is turned off again for the checks below.
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle0, true) == PAD_OK);
+    Require(scePadSetAngularVelocityBiasCorrectionState(handle0, false) == PAD_OK);
 
     for (int invalid : {-100, -1, 0, 3, 4, 32, 33, 9999}) {
         Require(scePadSetAngularVelocityBiasCorrectionState(invalid, false) == PAD_ERROR_INVALID_HANDLE);

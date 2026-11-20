@@ -492,7 +492,11 @@ void PadInput::applyMappingSnapshot() {
     if (snapshot == appliedMapping) return;
     appliedMapping = snapshot;
     keyboardMouse.Replace(*snapshot);
-    for (auto& controller : controllers) controller.state = sampleController(controller.handle);
+    // publish() sends each controller's aimed state, so it is redone from the newly mapped one.
+    for (auto& controller : controllers) {
+        controller.state = sampleController(controller.handle);
+        controller.aimed = aimed(controller.aim, controller.aimedAt, controller.state);
+    }
     static_cast<void>(keyboardMouse.PadChordRequests(firstPlayerControllerButtons()));
 }
 

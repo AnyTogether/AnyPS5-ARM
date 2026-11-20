@@ -601,6 +601,8 @@ static void CheckReadStateHandle(int handle) {
 }
 
 static void CheckAngularVelocityFilters(int handle) {
+    // Upstream's CheckQueuedMotionSampleTimes, which runs first, leaves the motion sensor off.
+    Require(scePadSetMotionSensorState(handle, true) == PAD_OK);
     PadInputState resting;
     resting.hasMotion = true;
     resting.gyro = {0.01f, -0.01f, 0.5f};
@@ -622,6 +624,7 @@ static void CheckAngularVelocityFilters(int handle) {
     Require(scePadSetAngularVelocityBiasCorrectionState(handle, false) == PAD_OK);
     Require(Pad::ReadState().angular_velocity_x == 0.03f);
     PadPublishInput_nid_postfix(PadInputState{});
+    Require(scePadSetMotionSensorState(handle, false) == PAD_OK);
 }
 
 static void CheckAbsentDevices(int handle) {

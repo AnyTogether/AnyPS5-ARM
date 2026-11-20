@@ -130,13 +130,10 @@ int main() {
     Require(scePadOpenExt(0x10000000, PAD_PORT_TYPE_SPECIAL, 0, nullptr) == errorInvalidArg);
     Require(scePadOpenExt(0x10000000, PAD_PORT_TYPE_SPECIAL, 1, &extParam) == errorInvalidArg);
     Require(scePadOpenExt(0x10000000, PAD_PORT_TYPE_SPECIAL, 0, &extParam) == errorDeviceNotConnected);
-    bool threwOpenExt = false;
-    try {
-        scePadOpenExt(0x10000000, PAD_PORT_TYPE_STANDARD, 0, &extParam);
-    } catch (const std::runtime_error&) {
-        threwOpenExt = true;
-    }
-    Require(threwOpenExt);
+    // The fork opens a standard port through scePadOpenExt as scePadOpen does (2d0c051852), where
+    // upstream reports it as not implemented: the handle is the one scePadOpen gives below.
+    const int standardExt = scePadOpenExt(0x10000000, PAD_PORT_TYPE_STANDARD, 0, &extParam);
+    Require(standardExt > 0);
 
     Require(scePadOpenExt2(0x10000000, 0x08, ext2Param.data()) == errorInvalidArg);
     Require(scePadOpenExt2(0x10000000, 0x10, nullptr) == errorInvalidArg);
@@ -150,6 +147,7 @@ int main() {
 
     const int standard = scePadOpen_nid_postfix(0x10000000, PAD_PORT_TYPE_STANDARD, 0, nullptr);
     Require(standard > 0);
+    Require(standard == standardExt);
 
     const int special = scePadOpen_nid_postfix(0x10000000, PAD_PORT_TYPE_SPECIAL, 0, nullptr);
     Require(special > 0);
