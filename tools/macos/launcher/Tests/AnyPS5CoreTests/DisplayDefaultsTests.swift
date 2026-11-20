@@ -25,7 +25,7 @@ final class DisplayDefaultsTests: XCTestCase {
         XCTAssertEqual(environment["ANYPS5_FULLSCREEN"], "1")
         XCTAssertEqual(environment["ANYPS5_WINDOW_SIZE"], "60")
         XCTAssertEqual(environment["ANYPS5_PRESENT_MODE"], "immediate")
-        XCTAssertEqual(GameSettings().environment(launcherLanguage: 1)["ANYPS5_FULLSCREEN"], "0", "the built-in defaults, as before")
+        XCTAssertEqual(GameSettings().environment(launcherLanguage: 1)["ANYPS5_FULLSCREEN"], "1", "the built-in default is Full Screen, as on Windows and Linux")
     }
 
     func testTheGamesOwnChoiceWins() {
@@ -69,6 +69,7 @@ final class DisplayDefaultsTests: XCTestCase {
         // Before the defaults every file had every display key, changed or not.
         let untouched = try decode(#"{"fullscreen":false,"windowSize":75,"vsync":true,"overlay":"off"}"#)
         XCTAssertTrue(untouched.followsDisplayDefaults, "the old built-in values follow the defaults")
+        XCTAssertTrue(untouched.withDefaults(DisplayDefaults()).fullscreen, "so it starts in Full Screen now")
         let full = try decode(#"{"fullscreen":true,"windowSize":75,"vsync":true,"overlay":"off"}"#)
         XCTAssertEqual(full.ownFullscreen, true)
         XCTAssertNil(full.ownWindowSize)
@@ -76,6 +77,7 @@ final class DisplayDefaultsTests: XCTestCase {
         let sized = try decode(#"{"fullscreen":false,"windowSize":60,"vsync":true,"overlay":"off"}"#)
         XCTAssertEqual(sized.ownWindowSize, 60)
         XCTAssertEqual(sized.ownFullscreen, false, "windowed with a size of its own was chosen")
+        XCTAssertFalse(sized.withDefaults(DisplayDefaults()).fullscreen, "and stays Window")
         let tearing = try decode(#"{"fullscreen":false,"windowSize":75,"vsync":false,"overlay":"off"}"#)
         XCTAssertEqual(tearing.ownVsync, false)
         XCTAssertNil(tearing.ownFullscreen)
@@ -96,7 +98,7 @@ final class DisplayDefaultsTests: XCTestCase {
         encoder.userInfo[GameSettings.legacyDisplayKeys] = true
         let data = try encoder.encode(settings)
         let older = try JSONDecoder().decode(Older.self, from: data)
-        XCTAssertEqual([older.fullscreen, older.vsync], [false, false])
+        XCTAssertEqual([older.fullscreen, older.vsync], [true, false], "the display it starts with: Full Screen, its own vsync")
         XCTAssertEqual(older.windowSize, 75)
         let again = try JSONDecoder().decode(GameSettings.self, from: data)
         XCTAssertEqual(again, settings, "only vsync is the game's own")
@@ -105,10 +107,33 @@ final class DisplayDefaultsTests: XCTestCase {
 
     func testTheDefaultsReadLeniently() throws {
         XCTAssertTrue(DisplayDefaults().isBuiltIn)
-        XCTAssertEqual(DisplayDefaults(), DisplayDefaults(fullscreen: false, windowSize: 75, vsync: true))
+        XCTAssertEqual(DisplayDefaults(), DisplayDefaults(fullscreen: true, windowSize: 75, vsync: true))
+        XCTAssertEqual(DisplayDefaults.formerBuiltIn, DisplayDefaults(fullscreen: false, windowSize: 75, vsync: true))
         let read = try JSONDecoder().decode(DisplayDefaults.self, from: Data(#"{"fullscreen":true,"windowSize":10,"vsync":"yes"}"#.utf8))
         XCTAssertEqual(read, DisplayDefaults(fullscreen: true, windowSize: DisplayDefaults.minimumWindowSize, vsync: true))
         XCTAssertEqual(try JSONDecoder().decode(DisplayDefaults.self, from: JSONEncoder().encode(custom)), custom)
+    }
+
+    /// Lenny4250gh's AnyTogether/AnyPS5-Desktop#179: Full Screen became the built-in default. A
+    /// preferences file from before it kept Default Display only when it differed from Window at
+    /// 75 %, so only Window at a size of its own was a choice of Window.
+    func testOlderPreferencesFollowFullScreenUnlessWindowWasChosen() {
+        let version = DisplayDefaults.preferencesVersion
+        XCTAssertNil(DisplayDefaults.fromPreferences(nil, version: nil), "never changed: the built-in Full Screen")
+        XCTAssertEqual(DisplayDefaults.fromPreferences(DisplayDefaults(fullscreen: false, windowSize: 75, vsync: false), version: nil),
+                       DisplayDefaults(fullscreen: true, windowSize: 75, vsync: false), "Window at 75 % was the old default: Full Screen, vsync stays off")
+        XCTAssertEqual(DisplayDefaults.fromPreferences(DisplayDefaults(fullscreen: false, windowSize: 75, startAnimation: false), version: nil),
+                       DisplayDefaults(fullscreen: true, startAnimation: false), "the start animation stays off")
+        XCTAssertNil(DisplayDefaults.fromPreferences(DisplayDefaults.formerBuiltIn, version: nil), "the old built-in values are the new built-in ones")
+        XCTAssertEqual(DisplayDefaults.fromPreferences(DisplayDefaults(fullscreen: false, windowSize: 60), version: nil),
+                       DisplayDefaults(fullscreen: false, windowSize: 60), "Window at 60 % was chosen and stays")
+        XCTAssertEqual(DisplayDefaults.fromPreferences(DisplayDefaults(fullscreen: true, windowSize: 60, vsync: false), version: nil),
+                       DisplayDefaults(fullscreen: true, windowSize: 60, vsync: false))
+        XCTAssertEqual(DisplayDefaults.fromPreferences(DisplayDefaults(fullscreen: false, windowSize: 75, vsync: false), version: version),
+                       DisplayDefaults(fullscreen: false, windowSize: 75, vsync: false), "a current file is read as written")
+        XCTAssertEqual(DisplayDefaults.fromPreferences(DisplayDefaults.formerBuiltIn, version: version), DisplayDefaults.formerBuiltIn,
+                       "Window chosen in this launcher stays")
+        XCTAssertNil(DisplayDefaults.fromPreferences(nil, version: version))
     }
 
     func testTheCrashReportSaysHowTheGameStarted() {
