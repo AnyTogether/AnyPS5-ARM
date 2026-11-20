@@ -3794,13 +3794,6 @@ void PrepareHostWrite(std::uintptr_t address, std::size_t bytes) {
     const HostWriteInFlight inFlight;
     if (hostWritesStopped.load(std::memory_order_seq_cst)) return;
     const ReadSiteScope site(ReadSite::HostWrite);
-    // The flush runs under the GpuMutex (the fork's 4e3bae9ba5): the flush hook's lock-free snapshot
-    // check could otherwise run while another thread holds the mutex midway through publishing a
-    // storage image over the range (taken off the pending list, its write not yet noted), find
-    // nothing, and let the host write land before that write-back, which then overwrites it (Stray's
-    // "Serial size mismatch" in 2 of 8 starts; 16 of 16 clean with the lock).
-    TagGpuLockSite(GpuLockSite::Hook);
-    std::lock_guard gpu(GpuMutex());
     if (!MemoryProfiled()) {
         FlushGpuWrites(address, bytes);
         return;
