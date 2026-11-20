@@ -9,6 +9,8 @@
 #include <exception>
 #include <limits>
 #include <stdexcept>
+#include <string>
+#include <string_view>
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -117,6 +119,51 @@ inline std::atomic<void(*)()> terminateHandler {DefaultTerminate};
 }
 [[noreturn]] void Terminate() { InvokeTerminate(terminateHandler.load(std::memory_order_acquire)); }
 
+#ifdef __APPLE__
+// On macOS an exception the host C++ runtime threw (NotImplemented's, any libc++ throw) that nothing
+// catches ends in the host's std::terminate, not in InvokeTerminate as on Linux and Windows, where
+// the host runtime is this one. The host's handler is this function: it does what InvokeTerminate
+// does (the run report, a game's own handler first), so such a run reports the same way.
+[[noreturn]] static void HostTerminate() {
+    std::string what;
+    bool hasWhat = false;
+    if (const auto current = std::current_exception()) {
+        try {
+            std::rethrow_exception(current);
+        } catch (const std::exception& error) {
+            what = error.what();
+            hasWhat = true;
+        } catch (...) {
+        }
+    }
+    const char* text = hasWhat ? what.c_str() : nullptr;
+    const auto handler = terminateHandler.load(std::memory_order_acquire);
+    const bool runtimeHandler = handler == nullptr || handler == DefaultTerminate || handler == std::abort;
+    if (!runtimeHandler) {
+        try { handler(); } catch (...) {}
+        LibcRunReportTerminate_nid_no_patch(text);
+        std::abort();
+    }
+    LibcRunReportTerminate_nid_no_patch(text);
+    if (const std::type_info* type = abi::__cxa_current_exception_type()) {
+        int status = 0;
+        char* demangled = abi::__cxa_demangle(type->name(), nullptr, nullptr, &status);
+        RawLog("terminate called after throwing an instance of '%s'\n", status == 0 && demangled ? demangled : type->name());
+        std::free(demangled);
+        if (hasWhat) {
+            RawLog("  what():  ");
+            RawWrite(text, std::strlen(text));
+            RawWrite("\n", 1);
+        }
+    } else {
+        RawLog("terminate called without an active exception\n");
+    }
+    std::abort();
+}
+
+[[maybe_unused]] const bool hostTerminateInstalled = (std::set_terminate(HostTerminate), true);
+#endif
+
 _Unwind_Exception* UnwindOf(Header* header) {
     return Native(header->unwind.exception_class) ? &header->unwind : reinterpret_cast<_Unwind_Exception*>(header->landing);
 }
@@ -154,8 +201,29 @@ static void APS5_VABI Cleanup(_Unwind_Reason_Code reason, _Unwind_Exception* exc
     } else Release(header + 1);
 }
 
+#ifdef __APPLE__
+// libc++ puts some standard classes in its versioned namespace: std::__1::future_error is
+// "NSt3__112future_errorE", where the console's library (and libstdc++) name it "St12future_error".
+// Host code built against libc++ that catches one of them from the guest's runtime names the same
+// type, as it does on Linux, where both spell it the console's way.
+static bool SameUnversioned(const char* versioned, const char* plain) {
+    constexpr std::string_view prefix = "NSt3__1";
+    std::string_view name(versioned);
+    if (!name.starts_with(prefix) || !name.ends_with('E') || std::strncmp(plain, "St", 2) != 0) return false;
+    name = name.substr(prefix.size(), name.size() - prefix.size() - 1);
+    return name == std::string_view(plain + 2);
+}
+#endif
+
 bool Equal(const std::type_info* a, const std::type_info* b) {
-    return a == b || (a && b && std::strcmp(a->name(), b->name()) == 0);
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (std::strcmp(a->name(), b->name()) == 0) return true;
+#ifdef __APPLE__
+    return SameUnversioned(a->name(), b->name()) || SameUnversioned(b->name(), a->name());
+#else
+    return false;
+#endif
 }
 
 static const std::type_info* TypeOfTypeInfo(const std::type_info* type) {
@@ -409,9 +477,7 @@ int APS5_VABI _ZSt19uncaught_exceptionsv_nid_postfix() { return static_cast<int>
 [[noreturn]] void APS5_VABI _ZSt9terminatev_nid_postfix() { LibcException::Terminate(); }
 
 LibcTerminateHandler APS5_VABI _ZSt13set_terminatePFvvE_nid_postfix(LibcTerminateHandler handler) {
-#ifdef __APPLE__
-    std::set_terminate(handler ? handler : std::abort);
-#endif
+    // On macOS the host runtime's handler stays HostTerminate, which calls this one.
     return LibcException::terminateHandler.exchange(handler ? handler : std::abort);
 }
 LibcTerminateHandler APS5_VABI _ZSt13get_terminatev_nid_postfix() { return LibcException::terminateHandler.load(); }

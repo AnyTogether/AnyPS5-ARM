@@ -167,7 +167,7 @@ struct Socket : KernelSocketPoll::NativeOwner {
     bool sendShut = false;
     bool localAddressCleared = false;
     bool connectStarted = false;
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     bool connecting = false;
     int connectFailure = 0;
 #endif
@@ -463,7 +463,9 @@ int Disconnect(Socket& socket) {
     socket.localAddressCleared = true;
     return 0;
 }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
+// FreeBSD (and Linux) send to the local host when a datagram's destination is INADDR_ANY or its
+// v4-mapped form; Winsock refuses it, and macOS answers EHOSTUNREACH.
 void LoopbackForUnspecifiedInet(sockaddr_storage& native) {
     if (native.ss_family == AF_INET) {
         auto& inet = reinterpret_cast<sockaddr_in&>(native);
@@ -1868,25 +1870,56 @@ int APS5_VABI socketpair_nid_postfix(int family, int type, int protocol, int* de
         return Fail(12);
     }
 }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
+// FreeBSD 11.4's tcp_usr_connect answers any connect after a dropped attempt with ECONNREFUSED. A
+// stream socket remembers that its nonblocking connect is pending; the next connect reads the host
+// SO_ERROR and, once the attempt failed, answers ECONNREFUSED from then on. Winsock left the socket
+// ready for another attempt (EINPROGRESS again); macOS answers EISCONN.
 static int ConnectFailure(Socket& socket) {
     std::lock_guard lock(socket.modeMutex);
     if (socket.connecting) {
         int pending = 0;
+#ifdef _WIN32
         int size = sizeof(pending);
-        if (::getsockopt(socket.value, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&pending), &size) == 0 && pending != 0) {
+        const bool read = ::getsockopt(socket.value, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&pending), &size) == 0;
+        constexpr int refused = WSAECONNREFUSED;
+#else
+        socklen_t size = sizeof(pending);
+        const bool read = ::getsockopt(socket.value, SOL_SOCKET, SO_ERROR, &pending, &size) == 0;
+        constexpr int refused = ECONNREFUSED;
+#endif
+        if (read && pending != 0) {
             socket.connecting = false;
-            socket.connectFailure = GuestSockets::GuestErrorFromHost(WSAECONNREFUSED);
+            socket.connectFailure = GuestSockets::GuestErrorFromHost(refused);
         }
     }
     return socket.connectFailure;
 }
 static int NoteConnectError(Socket& socket) {
+#ifdef _WIN32
     const int host = WSAGetLastError();
     const int error = ConnectError();
     std::lock_guard lock(socket.modeMutex);
     socket.connecting = host == WSAEWOULDBLOCK || (socket.connecting && host == WSAEALREADY);
     return error;
+#else
+    const int host = errno;
+    const int error = ConnectError();
+    std::lock_guard lock(socket.modeMutex);
+    // The pending error was read already (SO_ERROR clears it on macOS), so macOS's EISCONN for a
+    // socket that never connected is the dropped attempt.
+    if (host == EISCONN && socket.connecting) {
+        sockaddr_storage peer{};
+        socklen_t peerSize = sizeof(peer);
+        if (::getpeername(socket.value, reinterpret_cast<sockaddr*>(&peer), &peerSize) != 0 && errno == ENOTCONN) {
+            socket.connecting = false;
+            socket.connectFailure = GuestSockets::GuestErrorFromHost(ECONNREFUSED);
+            return socket.connectFailure;
+        }
+    }
+    socket.connecting = host == EINPROGRESS || (socket.connecting && host == EALREADY);
+    return error;
+#endif
 }
 #endif
 int APS5_VABI connect_nid_postfix(int descriptor, const void* address, std::uint32_t length) {
@@ -1920,6 +1953,10 @@ int APS5_VABI connect_nid_postfix(int descriptor, const void* address, std::uint
         if (const int failure = ConnectFailure(*socket)) return Fail(failure);
         RefuseClosedLoopbackAtOnce_nid_no_patch(socket->value, reinterpret_cast<const sockaddr*>(&native));
     }
+#elif defined(__APPLE__)
+    if (socket->type == 1 && socket->family != GuestUnix) {
+        if (const int failure = ConnectFailure(*socket)) return Fail(failure);
+    }
 #endif
     std::unique_lock lock(socket->modeMutex);
     socket->options.reportedError = 0;
@@ -1928,10 +1965,12 @@ int APS5_VABI connect_nid_postfix(int descriptor, const void* address, std::uint
     if (::connect(socket->value, reinterpret_cast<sockaddr*>(&native), size)) {
 #ifdef _WIN32
         if (socket->type == 1) return Fail(NoteConnectError(*socket));
+#elif defined(__APPLE__)
+        if (socket->type == 1 && socket->family != GuestUnix) return Fail(NoteConnectError(*socket));
 #endif
         return Fail(ConnectError());
     }
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__APPLE__)
     if (socket->type == 1) {
         std::lock_guard connected(socket->modeMutex);
         socket->connecting = false;
@@ -2309,6 +2348,8 @@ std::int64_t APS5_VABI sendto_nid_postfix(int descriptor, const void* buffer, st
 #ifdef _WIN32
         LoopbackForUnspecifiedInet(native);
         if (SourceFaults(buffer, length)) return Fail(14);
+#elif defined(__APPLE__)
+        LoopbackForUnspecifiedInet(native);
 #endif
         result = static_cast<int>(::sendto(socket->value, static_cast<const char*>(buffer), static_cast<int>(length), SocketSendFlags(*socket, flags),
             reinterpret_cast<sockaddr*>(&native), size));

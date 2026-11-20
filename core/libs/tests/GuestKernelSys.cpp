@@ -1328,7 +1328,10 @@ void CheckRawGetcwdErrors() {
     Require(unlinkat_nid_postfix(-100, directory.c_str(), 0x800) == 0);
 }
 
-#ifndef _WIN32
+// Not on macOS: the host limits a whole path to 1024 bytes with its NUL (PATH_MAX), and the guest
+// root's host directory comes in front of the guest path, so the 1023- and 1024-byte guest working
+// directories this needs cannot be made through host paths there (mkdirat fails with ENAMETOOLONG).
+#if !defined(_WIN32) && !defined(__APPLE__)
 void CheckRawGetcwdPathLimit() {
     std::array<char, 4096> previous{};
     Require(getcwd_nid_postfix(previous.data(), previous.size()) == previous.data());
@@ -1442,7 +1445,7 @@ int main() {
     Require(sceKernelGetPhysPageSize() == 16384);
     CheckProcessQueries();
     CheckRawGetcwdErrors();
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(__APPLE__)
     CheckRawGetcwdPathLimit();
 #endif
     CheckRawGetcwd();
