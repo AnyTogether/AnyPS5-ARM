@@ -344,6 +344,8 @@ public:
     static bool UnwatchHookLocksGpu(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges);
     static void SetPublishHookForTest(void (*hook)());
     static void SetPendingHookForTest(void (*hook)(std::uint64_t address, std::size_t bytes));
+    // Called by Flush once the image left the pending list, before its write-back (tests only).
+    static void SetFlushHookForTest(void (*hook)(const StorageTexture& texture));
     static constexpr std::uint64_t SmallStoreBytes = 64 * 1024;
     static constexpr std::uint64_t OccasionalStoreBytes = 1024 * 1024;
     static constexpr std::uint64_t OccasionalWriteFlips = 8;

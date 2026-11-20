@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <utility>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -1257,6 +1258,24 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL RecoveryProc(VkDevice device, const cha
     return recovery.deviceProc(device, name);
 }
 
+// An image being flushed stays visible to the lock-free checks a host write makes until its
+// write-back is recorded: between leaving the pending list and that record, a check that found it
+// nowhere let a file read land under a store that then overwrote it (the fork's 4e3bae9ba5).
+struct FlushWindowProbe {
+    std::uint64_t address = 0;
+    std::size_t bytes = 0;
+    bool called = false;
+    bool listed = false;
+    bool notClear = false;
+} flushWindow;
+
+void ProbeFlushWindow(const StorageTexture&) {
+    flushWindow.called = true;
+    const std::array<std::pair<std::uint64_t, std::uint64_t>, 1> range{{{flushWindow.address, flushWindow.address + flushWindow.bytes}}};
+    flushWindow.listed = StorageTexture::AnyPendingOverlaps(range);
+    flushWindow.notClear = !StorageTexture::PendingClearOnThread(flushWindow.address, flushWindow.bytes);
+}
+
 void recoveryTests(Context context, const std::string& mode) {
     recovery = RecoveryProbe{};
     recovery.deviceProc = context.deviceProc;
@@ -1278,7 +1297,12 @@ void recoveryTests(Context context, const std::string& mode) {
         Require(made != nullptr && released.expired(), "storage allocation recovery did not release its own oldest clean image");
         Require(pending->Dirty() && StorageImageCached(context, pending.get()), "storage allocation recovery changed an image with pending results");
         Require(recovery.released == allocated, "storage allocation recovery counted memory still held by its caller");
+        flushWindow = FlushWindowProbe{block.Surface(1), SurfaceBytes};
+        StorageTexture::SetFlushHookForTest(ProbeFlushWindow);
         pending->Flush();
+        StorageTexture::SetFlushHookForTest(nullptr);
+        Require(flushWindow.called, "the flush window probe did not run");
+        Require(flushWindow.listed && flushWindow.notClear, "an image between the pending list and its write-back was invisible to a host write's checks");
         Require(!pending->Dirty(), "pending storage results could not be stored after memory recovery");
     } else if (mode == "recover-sampled") {
         auto oldest = Sampled(context, block.Surface(0));

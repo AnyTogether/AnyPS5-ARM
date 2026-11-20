@@ -281,6 +281,7 @@ struct LiveImages {
 
 std::atomic<void (*)()> publishHookForTest{nullptr};
 std::atomic<void (*)(std::uint64_t, std::size_t)> pendingHookForTest{nullptr};
+std::atomic<void (*)(const StorageTexture&)> flushHookForTest{nullptr};
 
 LiveImages& Live() {
     static LiveImages live;
@@ -5207,14 +5208,34 @@ void StorageTexture::Flush(const char* reason) {
         std::lock_guard lock(live.mutex);
         released = true;
     }
+    // The image moves from the pending list to the flushing one in one step and stays there until
+    // its write-back is recorded (as FlushPending's images do): a lock-free host-write check in
+    // between would otherwise find it in neither list and its store not yet noted, let the host's
+    // bytes land, and have the store land over them later (the fork's 4e3bae9ba5: Stray's
+    // "Serial size mismatch"). WaitForFlushing waits for it there.
+    struct Unflushing {
+        StorageTexture* texture = nullptr;
+        ~Unflushing() {
+            if (texture == nullptr) return;
+            auto& pending = Pending();
+            std::lock_guard lock(pending.mutex);
+            std::erase(pending.flushing, texture);
+            pending.flushingCount.store(pending.flushing.size(), std::memory_order_release);
+            BumpPendingSerial();
+        }
+    } unflushing;
     {
         auto& pending = Pending();
         std::lock_guard lock(pending.mutex);
         if (!dirty) return;
         dirty = false;
         pending.textures.remove(this);
+        pending.flushing.push_back(this);
+        pending.flushingCount.store(pending.flushing.size(), std::memory_order_release);
+        unflushing.texture = this;
         BumpPendingSerial();
     }
+    if (const auto hook = flushHookForTest.load(std::memory_order_acquire)) hook(*this);
     std::lock_guard gpu(GuestMemory::GpuMutex());
     const auto previous = std::exchange(flushReason, reason);
     writeBack(descriptor.baseAddress, static_cast<std::size_t>(guestBytes));
@@ -5566,6 +5587,10 @@ void StorageTexture::SetPublishHookForTest(void (*hook)()) {
 
 void StorageTexture::SetPendingHookForTest(void (*hook)(std::uint64_t address, std::size_t bytes)) {
     pendingHookForTest.store(hook, std::memory_order_release);
+}
+
+void StorageTexture::SetFlushHookForTest(void (*hook)(const StorageTexture& texture)) {
+    flushHookForTest.store(hook, std::memory_order_release);
 }
 
 bool StorageTexture::UnwatchHookLocksGpu(std::span<const std::pair<std::uint64_t, std::uint64_t>> ranges) {
