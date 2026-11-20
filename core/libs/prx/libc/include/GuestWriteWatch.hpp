@@ -17,6 +17,10 @@ bool GuestWriteWatchOverlaps_nid_postfix(std::uintptr_t address, std::size_t byt
 bool GuestWriteWatchHandleFault_nid_postfix(std::uintptr_t address);
 // macOS: a SIGSEGV or SIGBUS (its siginfo_t and ucontext_t) the watch's own handler would take, taken.
 bool GuestWriteWatchClaimFault_nid_postfix(void* info, void* context);
+// macOS x86-64: copies bytes with a fault-recovering rep movsb that the watch's own SIGSEGV/SIGBUS
+// handler resumes past (as libc's GuestFaultCopy does on Linux): 1 copied, 0 a fault stopped it, -1
+// unavailable (no watch handler, or APS5_GUEST_COPY_SYSCALL set), so the caller asks the kernel.
+int GuestWriteWatchFaultCopy_nid_no_patch(void* destination, const void* source, std::size_t bytes);
 bool GuestWriteWatchCollect_nid_postfix(std::uintptr_t address, std::size_t bytes, void (*written)(void* context, std::uintptr_t begin, std::uintptr_t end), void* context);
 void GuestWriteWatchBeginHostWrite_nid_postfix(const void* pointer, std::size_t bytes);
 void GuestWriteWatchEndHostWrite_nid_postfix(const void* pointer, std::size_t bytes);
