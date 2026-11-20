@@ -23,6 +23,14 @@ static void Check(bool value, int line) {
 }
 #define Require(value) Check((value), __LINE__)
 
+#ifndef _WIN32
+#if defined(__APPLE__)
+static constexpr long MaxRssGrowth = 64L * 1024 * 1024;
+#else
+static constexpr long MaxRssGrowth = 64L * 1024;
+#endif
+#endif
+
 static constexpr int NotFound = static_cast<int>(0x817B1025);
 static constexpr int InvalidId = static_cast<int>(0x817B1100);
 static constexpr int OutOfSize = static_cast<int>(0x817B1104);
@@ -126,18 +134,7 @@ static void CheckUnmappedOutputs(int box) {
 #ifndef _WIN32
     rusage after{};
     getrusage(RUSAGE_SELF, &after);
-    if (after.ru_maxrss - before.ru_maxrss >= 64 * 1024) {
-        rusage controlBefore{};
-        getrusage(RUSAGE_SELF, &controlBefore);
-        std::string control;
-        control.resize(64 * 1024);
-        rusage controlAfter{};
-        getrusage(RUSAGE_SELF, &controlAfter);
-        std::fprintf(stderr, "ru_maxrss grew by %ld across the 2^40-byte add (from %ld); a plain 64 KiB string resize after it grew it by %ld\n",
-                     static_cast<long>(after.ru_maxrss - before.ru_maxrss), static_cast<long>(before.ru_maxrss),
-                     static_cast<long>(controlAfter.ru_maxrss - controlBefore.ru_maxrss));
-    }
-    Require(after.ru_maxrss - before.ru_maxrss < 64 * 1024);
+    Require(after.ru_maxrss - before.ru_maxrss < MaxRssGrowth);
 #endif
     Require(errno == 71);
     GuestArena::GuestArenaSetHostReadHook_nid_no_patch(nullptr);
