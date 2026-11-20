@@ -477,38 +477,6 @@ private:
 
 const bool g_opened = (Watch::Get(), true);
 #elif defined(__APPLE__)
-#if defined(__x86_64__)
-// The checked guest copy's one faulting instruction: a fault on it (an unmapped or unreadable guest
-// page) resumes after it with %rcx the bytes left, which the copy returns.
-extern "C" {
-std::size_t GuestFaultCopyBytes(void* destination, const void* source, std::size_t bytes);
-extern const char GuestFaultCopyAccess[];
-extern const char GuestFaultCopyResume[];
-}
-
-__asm__(
-    ".text\n"
-    ".p2align 4\n"
-    ".private_extern _GuestFaultCopyBytes\n"
-    "_GuestFaultCopyBytes:\n"
-    "    movq %rdx, %rcx\n"
-    ".private_extern _GuestFaultCopyAccess\n"
-    "_GuestFaultCopyAccess:\n"
-    "    rep movsb\n"
-    ".private_extern _GuestFaultCopyResume\n"
-    "_GuestFaultCopyResume:\n"
-    "    movq %rcx, %rax\n"
-    "    ret\n");
-
-bool ResumeFaultCopy(const siginfo_t* info, void* context) {
-    if (info == nullptr || context == nullptr || info->si_code <= 0 || info->si_code >= SI_USER) return false;
-    auto* state = static_cast<ucontext_t*>(context)->uc_mcontext;
-    if (state == nullptr || state->__ss.__rip != reinterpret_cast<std::uint64_t>(GuestFaultCopyAccess)) return false;
-    state->__ss.__rip = reinterpret_cast<std::uint64_t>(GuestFaultCopyResume);
-    return true;
-}
-#endif
-
 class Watch {
 public:
     static Watch& Get() {
@@ -1035,13 +1003,7 @@ public:
         auto& watch = Get();
         const bool write = isWriteFault(info, context);
         if (info->si_code > 0 && info->si_code < SI_USER && watch.resolveTrap(reinterpret_cast<std::uintptr_t>(info->si_addr), write)) return true;
-        if (write && watch.record(reinterpret_cast<std::uintptr_t>(info->si_addr))) return true;
-#if defined(__x86_64__)
-        // After the watch's own: a checked guest copy into a watched page is recorded and retried.
-        return ResumeFaultCopy(info, context);
-#else
-        return false;
-#endif
+        return write && watch.record(reinterpret_cast<std::uintptr_t>(info->si_addr));
     }
 
 private:
@@ -1630,19 +1592,6 @@ bool GuestWriteWatchHandleFault_nid_postfix(std::uintptr_t address) {
 #else
     static_cast<void>(address);
     return false;
-#endif
-}
-
-int GuestWriteWatchFaultCopy_nid_no_patch(void* destination, const void* source, std::size_t bytes) {
-#if defined(__APPLE__) && defined(__x86_64__)
-    static const bool enabled = std::getenv("APS5_GUEST_COPY_SYSCALL") == nullptr;
-    if (!enabled || !Watch::Get().Available()) return -1;
-    return GuestFaultCopyBytes(destination, source, bytes) == 0 ? 1 : 0;
-#else
-    static_cast<void>(destination);
-    static_cast<void>(source);
-    static_cast<void>(bytes);
-    return -1;
 #endif
 }
 
