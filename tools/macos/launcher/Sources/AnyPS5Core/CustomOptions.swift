@@ -70,7 +70,7 @@ public enum CustomRelinkerOptions {
     /// The launcher's to choose: the system and CPU the game is made for, where its modules and
     /// libraries are, and the title's patches.
     public static let launcherOwned: Set<String> = [
-        "--windows", "--windows-gui", "--macos", "--to-intel", "--to-rosetta",
+        "--windows", "--windows-gui", "--macos", "--to-intel", "--to-rosetta", "--to-avx",
         "--sce-module-path", "--module-dir", "--executable", "--rpath", "--patches", "--no-patches",
     ]
     /// After these the rebuild writes no game, or one without its modules.
@@ -84,7 +84,7 @@ public enum CustomRelinkerOptions {
     /// Options that stand alone.
     public static let plain: Set<String> = [
         "--windows-diagnostics", "--frame-red-zone", "--omit-unavailable-dependencies", "--registry",
-        "--skip-syscall-check", "--trap-sdk-syscall-stubs", "--lazy-binding",
+        "--skip-syscall-check", "--trap-sdk-syscall-stubs", "--lazy-binding", "--function-symbol-roots",
     ]
     /// The relinker's one option without dashes, with the values it takes.
     public static let unusedFilters: Set<String> = ["unused-filter=0", "unused-filter=1", "unused-filter=2"]

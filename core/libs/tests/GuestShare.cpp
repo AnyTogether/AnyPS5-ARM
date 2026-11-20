@@ -1,5 +1,8 @@
 #include "prx/libSceShare/include/Api.hpp"
+#include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/general/VabiMacros.hpp"
+#include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -7,6 +10,8 @@
 #include <string>
 
 namespace {
+
+void ClobberErrno(std::uintptr_t, std::size_t) { errno = 99; }
 
 void Require(bool value) { if (!value) std::abort(); }
 
@@ -51,6 +56,37 @@ int main() {
     };
     checkExtended(sceShareCaptureScreenshotExtended, 24);
     checkExtended(sceShareCaptureVideoClipExtended, 40);
+
+    // The native backend (guest_share_native) has no Extended calls and writes through its pointers.
+    GuestArena::GuestArenaSetHostReadHook_nid_no_patch(ClobberErrno);
+    GuestArena::GuestArenaSetHostWriteHook_nid_no_patch(ClobberErrno);
+    ShareScreenshotParamExtended screenshot{};
+    screenshot.size = sizeof(screenshot);
+    reqId = 7;
+    errno = 71;
+    Require(sceShareCaptureScreenshotExtended(reinterpret_cast<const ShareScreenshotParamExtended*>(0x10), &reqId) == invalidParam && reqId == 7 && errno == 71);
+    errno = 71;
+    Require(sceShareCaptureScreenshotExtended(&screenshot, reinterpret_cast<std::int32_t*>(0x10)) == invalidParam && errno == 71);
+    errno = 71;
+    Require(sceShareCaptureScreenshotExtended(&screenshot, &reqId) == static_cast<std::int32_t>(0x81960007) && reqId == -1 && errno == 71);
+
+    ShareVideoClipParamExtended clip{};
+    clip.size = sizeof(clip);
+    reqId = 7;
+    errno = 71;
+    Require(sceShareCaptureVideoClipExtended(reinterpret_cast<const ShareVideoClipParamExtended*>(0x10), &reqId) == invalidParam && reqId == 7 && errno == 71);
+    errno = 71;
+    Require(sceShareCaptureVideoClipExtended(&clip, reinterpret_cast<std::int32_t*>(0x10)) == invalidParam && errno == 71);
+    errno = 71;
+    Require(sceShareCaptureVideoClipExtended(&clip, &reqId) == static_cast<std::int32_t>(0x81960007) && reqId == -1 && errno == 71);
+    reqId = 7;
+
+    errno = 71;
+    Require(sceShareCaptureScreenshot(param, reinterpret_cast<std::int32_t*>(0x10)) == invalidParam && errno == 71);
+    errno = 71;
+    Require(sceShareCaptureVideoClip(param, reinterpret_cast<std::int32_t*>(0x10)) == invalidParam && errno == 71);
+    GuestArena::GuestArenaSetHostReadHook_nid_no_patch(nullptr);
+    GuestArena::GuestArenaSetHostWriteHook_nid_no_patch(nullptr);
 #endif
 
     for (Capture capture : {sceShareCaptureScreenshot, sceShareCaptureVideoClip}) {
@@ -78,19 +114,29 @@ int main() {
     Require(status[0] == 0x5a);
     Require(sceShareGetCurrentStatus(1, nullptr) == invalidParam);
 #ifndef SHARE_NATIVE_BACKEND
+    GuestArena::GuestArenaSetHostReadHook_nid_no_patch(ClobberErrno);
+    GuestArena::GuestArenaSetHostWriteHook_nid_no_patch(ClobberErrno);
     Require(sceShareGetCurrentStatus(1, reinterpret_cast<ShareCurrentStatus*>(0x10)) == invalidParam);
     std::uint32_t running[2]{0xffffffffu, 0x5a5a5a5au};
     Require(sceShareGetRunningStatus(running) == 0);
     Require(running[0] == 0 && running[1] == 0x5a5a5a5au);
     Require(sceShareGetRunningStatus(nullptr) == invalidParam);
     Require(sceShareGetRunningStatus(reinterpret_cast<std::uint32_t*>(0x10)) == invalidParam);
-    Require(sceShareSetContentParamForApplicationTitle("title") == 0);
+    errno = 71;
+    Require(sceShareSetContentParamForApplicationTitle("title") == 0 && errno == 71);
     Require(sceShareSetContentParamForApplicationTitle(nullptr) == invalidParam);
-    Require(sceShareSetContentParamForApplicationTitle("") == invalidParam);
+    errno = 71;
+    Require(sceShareSetContentParamForApplicationTitle(reinterpret_cast<const char*>(0x10)) == invalidParam && errno == 71);
+    errno = 71;
+    Require(sceShareSetContentParamForApplicationTitle("") == invalidParam && errno == 71);
     std::string title(5119, 'a');
-    Require(sceShareSetContentParamForApplicationTitle(title.c_str()) == 0);
+    errno = 71;
+    Require(sceShareSetContentParamForApplicationTitle(title.c_str()) == 0 && errno == 71);
     title.push_back('a');
-    Require(sceShareSetContentParamForApplicationTitle(title.c_str()) == invalidParam);
+    errno = 71;
+    Require(sceShareSetContentParamForApplicationTitle(title.c_str()) == invalidParam && errno == 71);
+    GuestArena::GuestArenaSetHostReadHook_nid_no_patch(nullptr);
+    GuestArena::GuestArenaSetHostWriteHook_nid_no_patch(nullptr);
 #endif
     Require(sceShareTerminate() == 0);
     return 0;

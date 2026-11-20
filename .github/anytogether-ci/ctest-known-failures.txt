@@ -25,6 +25,9 @@ linux   agc_driver_sampled_cache_budget(_without_storage_image_multisample)?  Th
 linux   agc_driver                      Fails on main on lavapipe ("a small copy whose source the GPU still stores into was not recorded on the GPU"); needs a look.
 linux   agc_driver_optimize_on_fiber    Needs SPIRV-Tools, which the fork's builds leave off (it would only report a skip). With SPIRV-Tools on, agc_spirv_optimizer* and agc_driver_pixel_sample_iteration fail on main too.
 linux   agc_driver_image_sample_lod_clamp_shader_lane  Upstream test (#12980, its Linux job did not run), fails on lavapipe on upstream's own tree too: a filtered image_sample_lz through an S# that holds the LOD at 0 reads one mip level off. #15333 widened one check, the trilinear case still fails.
+linux   agc_driver_image_gather_lod  New upstream lavapipe test; level 1 of a gather reads 0 here. Upstream's runner passes it on Mesa 26.0.8 (run 44716515864), this runner has Ubuntu 24.04's Mesa 25.2.8; the shader code is upstream's.
+linux   agc_driver_image_table_packed_guards  New upstream lavapipe test ("unrecoverable packed table format was not poisoned"); passes on upstream's Mesa 26.0.8 runner (run 44716515864), fails on this runner's Mesa 25.2.8; the materializer and table code are upstream's.
+linux   guest_thermal_sensors       Reads the runner's real hwmon and SoC sensors: 0.02 s on the AMD EPYC runners (runs 44721839889, 44756068076 attempt 2), over 20 s on all three tries on the Intel Xeon 6975P ones (44756068076 attempt 1, 44774113524). The sensor code and the test are upstream's unchanged; needs a look at which host read stalls there.
 
 # Windows: real failures on main, to fix (WinLibs GCC 15.2, as the owner's Windows builds).
 windows prx_thread_local_destructors    libkernel (dl*_nid_postfix, LoadFailure) and AgcDriver (LockStats) register thread_local destructors, which run after emulated TLS is freed on Windows; they belong in HostThreadLocal.
@@ -38,6 +41,11 @@ macos   macos_fixtures                  Its argv fixture ends in int3, which sta
 macos   guest_kernel_fcntl              Flaky under parallel ctest on macOS.
 macos   agc_thread_priority_refused_rt  Expects a refused real-time priority request to throw; macOS grants it.
 macos   agc_thread_priority_refused_high  Same as above, high priority.
+macos   guest_ces_wide(_module)?        Upstream now reads and writes guest memory in libSceCesCs through GuestCopyIn/GuestCopyOut, which are a Mach call each on macOS (mach_vm_read_overwrite, mach_vm_write; Linux has a fault-recovering copy): 4 s on main, over 120 s now. Needs a macOS fault-recovering GuestCopy; needs a look.
+macos   guest_icu_comparisons           Same cause as guest_ces_wide, in libSceIcu: 0.67 s on main, over 20 s now.
+macos   guest_radix64                   Same cause as guest_ces_wide, in libc's a64l/l64a buffer probes: 0.36 s on main, 10-20+ s now against its 20 s limit. The fault-recovering macOS copy is fix/macos-guest-copy-fast.
+macos   guest_icu_recovered_signatures  New upstream test: after udata_close unmaps a mapping, mincore under Rosetta (4 KiB pages on a 16 KiB-page kernel) fails without ENOMEM (DataMemoryClose.cpp:144, which now prints the errno); needs a look.
+macos   guest_libc_internal_exception_virtuals  New upstream test: host code catches a guest-thrown std::future_error by type, which macOS's libc++ names NSt3__112future_errorE, a different class from the guest's St12future_error; matching the two names makes the host handler take a guest object as its own (_Unwind_Resume aborts). Needs a look.
 macos   agc_driver_pm4_priority_refused Same as above, for the PM4 queue priority.
 macos   agc_shared_write                Cannot inspect mapping lifetimes on macOS.
 macos   agc_write_tracking              Known macOS failure (also on the developers' Macs): a block outside the import window reads as written.

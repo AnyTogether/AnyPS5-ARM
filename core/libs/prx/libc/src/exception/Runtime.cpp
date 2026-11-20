@@ -1,16 +1,36 @@
 #include "prx/libc/include/exceptions/Unwind.hpp"
 #include "prx/libc/include/Api.hpp"
 #include "prx/libc/include/exceptions/Runtime.hpp"
+#include "prx/libc/include/RunReport.hpp"
 #include <algorithm>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <limits>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #ifdef _WIN32
 #include <windows.h>
 #else
 #include <cerrno>
 #include <unistd.h>
+#endif
+
+#ifdef __APPLE__
+namespace {
+
+[[maybe_unused]] const bool hostRefstringPrepared = [] {
+    const int saved = errno;
+    {
+        const std::runtime_error prepared("");
+    }
+    errno = saved;
+    return true;
+}();
+
+}
 #endif
 
 namespace LibcException {
@@ -51,24 +71,28 @@ static void RawLog(const char* format, ...) {
     RawWrite(buffer, static_cast<std::size_t>(length));
 }
 
+const char* CaughtWhat(const char** typeName) {
+    if (!globals.caught || !Native(globals.caught->unwind.exception_class)) return nullptr;
+    Header* primary = Primary(globals.caught);
+    if (typeName != nullptr) *typeName = primary->type ? primary->type->name() : nullptr;
+    void* exception = primary->adjusted;
+    if (!exception || !primary->type || !Match(&typeid(std::exception), primary->type, exception)) return nullptr;
+    struct VtableLayout { std::ptrdiff_t offset; const void* type; void (*destroy)(void*); void (*del)(void*); const char* (*whatFn)(const void*); };
+    const void* vtable = *static_cast<const void* const*>(exception);
+    auto* layout = reinterpret_cast<const VtableLayout*>(static_cast<const char*>(vtable) - offsetof(VtableLayout, destroy));
+#ifdef _WIN32
+    if (!primary->_pad) {
+        using GuestWhat = const char* (APS5_VABI *)(const void*);
+        return reinterpret_cast<GuestWhat>(layout->whatFn)(exception);
+    }
+#endif
+    return layout->whatFn(exception);
+}
+
 [[noreturn]] static void DefaultTerminate() {
     if (globals.caught && Native(globals.caught->unwind.exception_class)) {
-        Header* primary = Primary(globals.caught);
-        const char* typeName = primary->type ? primary->type->name() : nullptr;
-        const char* what = nullptr;
-        void* exception = primary->adjusted;
-        if (exception && primary->type && Match(&typeid(std::exception), primary->type, exception)) {
-            struct VtableLayout { std::ptrdiff_t offset; const void* type; void (*destroy)(void*); void (*del)(void*); const char* (*whatFn)(const void*); };
-            const void* vtable = *static_cast<const void* const*>(exception);
-            auto* layout = reinterpret_cast<const VtableLayout*>(static_cast<const char*>(vtable) - offsetof(VtableLayout, destroy));
-#ifdef _WIN32
-            if (!primary->_pad) {
-                using GuestWhat = const char* (__attribute__((sysv_abi)) *)(const void*);
-                what = reinterpret_cast<GuestWhat>(layout->whatFn)(exception);
-            } else
-#endif
-            what = layout->whatFn(exception);
-        }
+        const char* typeName = nullptr;
+        const char* what = CaughtWhat(&typeName);
         int status = 0;
         char* demangled = abi::__cxa_demangle(typeName, nullptr, nullptr, &status);
         const char* displayName = (status == 0 && demangled) ? demangled : typeName;
@@ -87,10 +111,58 @@ static void RawLog(const char* format, ...) {
 
 inline std::atomic<void(*)()> terminateHandler {DefaultTerminate};
 [[noreturn]] void InvokeTerminate(void (*handler)()) {
+    const bool runtimeHandler = handler == nullptr || handler == DefaultTerminate || handler == std::abort;
+    if (runtimeHandler) LibcRunReportTerminate_nid_no_patch(CaughtWhat(nullptr));
     try { if (handler) handler(); } catch (...) {}
+    if (!runtimeHandler) LibcRunReportTerminate_nid_no_patch(CaughtWhat(nullptr));
     std::abort();
 }
 [[noreturn]] void Terminate() { InvokeTerminate(terminateHandler.load(std::memory_order_acquire)); }
+
+#ifdef __APPLE__
+// On macOS an exception the host C++ runtime threw (NotImplemented's, any libc++ throw) that nothing
+// catches ends in the host's std::terminate, not in InvokeTerminate as on Linux and Windows, where
+// the host runtime is this one. The host's handler is this function: it does what InvokeTerminate
+// does (the run report, a game's own handler first), so such a run reports the same way.
+[[noreturn]] static void HostTerminate() {
+    std::string what;
+    bool hasWhat = false;
+    if (const auto current = std::current_exception()) {
+        try {
+            std::rethrow_exception(current);
+        } catch (const std::exception& error) {
+            what = error.what();
+            hasWhat = true;
+        } catch (...) {
+        }
+    }
+    const char* text = hasWhat ? what.c_str() : nullptr;
+    const auto handler = terminateHandler.load(std::memory_order_acquire);
+    const bool runtimeHandler = handler == nullptr || handler == DefaultTerminate || handler == std::abort;
+    if (!runtimeHandler) {
+        try { handler(); } catch (...) {}
+        LibcRunReportTerminate_nid_no_patch(text);
+        std::abort();
+    }
+    LibcRunReportTerminate_nid_no_patch(text);
+    if (const std::type_info* type = abi::__cxa_current_exception_type()) {
+        int status = 0;
+        char* demangled = abi::__cxa_demangle(type->name(), nullptr, nullptr, &status);
+        RawLog("terminate called after throwing an instance of '%s'\n", status == 0 && demangled ? demangled : type->name());
+        std::free(demangled);
+        if (hasWhat) {
+            RawLog("  what():  ");
+            RawWrite(text, std::strlen(text));
+            RawWrite("\n", 1);
+        }
+    } else {
+        RawLog("terminate called without an active exception\n");
+    }
+    std::abort();
+}
+
+[[maybe_unused]] const bool hostTerminateInstalled = (std::set_terminate(HostTerminate), true);
+#endif
 
 _Unwind_Exception* UnwindOf(Header* header) {
     return Native(header->unwind.exception_class) ? &header->unwind : reinterpret_cast<_Unwind_Exception*>(header->landing);
@@ -384,6 +456,7 @@ int APS5_VABI _ZSt19uncaught_exceptionsv_nid_postfix() { return static_cast<int>
 [[noreturn]] void APS5_VABI _ZSt9terminatev_nid_postfix() { LibcException::Terminate(); }
 
 LibcTerminateHandler APS5_VABI _ZSt13set_terminatePFvvE_nid_postfix(LibcTerminateHandler handler) {
+    // On macOS the host runtime's handler stays HostTerminate, which calls this one.
     return LibcException::terminateHandler.exchange(handler ? handler : std::abort);
 }
 LibcTerminateHandler APS5_VABI _ZSt13get_terminatev_nid_postfix() { return LibcException::terminateHandler.load(); }

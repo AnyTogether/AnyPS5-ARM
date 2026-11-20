@@ -1,15 +1,16 @@
 #include "prx/libSceVideoOut/include/DisplayWindow.hpp"
 #include "prx/libSceVideoOut/include/StatsOverlay.hpp"
 #include "prx/libSceVideoOut/include/Telemetry.hpp"
+#include "prx/libSceVideoOut/include/WindowTitleUpdate.hpp"
 #include "prx/libSceAgcDriver/Execution/include/AspectFit.hpp"
 #include "prx/libSceAgcDriver/Execution/include/Driver.hpp"
+#include "prx/libSceMouse/include/MouseState.hpp"
 #include "prx/libkernel/AppMetadata/include/AppMetadata.hpp"
 #include "Decoder/Png.hpp"
 #include "SDL_vulkan.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -28,7 +29,7 @@ void require(bool condition, const char* reason) {
 }
 
 // ANYPS5_WINDOW_SIZE sets the share of the usable display the first window takes, as a percent
-// (1 to 100, DisplayWindowInitialSizePercent by default); ANYPS5_FULLSCREEN=1 opens it full screen.
+// (1 to 100, DisplayWindowInitialSizePercent by default). ANYPS5_FULLSCREEN is upstream's HostFullscreen.
 std::uint32_t initialSizePercent() {
     const char* text = std::getenv("ANYPS5_WINDOW_SIZE");
     if (text == nullptr || *text == '\0') return DisplayWindowInitialSizePercent;
@@ -36,14 +37,6 @@ std::uint32_t initialSizePercent() {
     const auto value = std::strtoul(text, &end, 10);
     if (*end != '\0' || value == 0 || value > 100) throw std::runtime_error("DisplayWindow: ANYPS5_WINDOW_SIZE must be a percent from 1 to 100, not '" + std::string(text) + "'");
     return static_cast<std::uint32_t>(value);
-}
-
-bool startsFullscreen() {
-    const char* text = std::getenv("ANYPS5_FULLSCREEN");
-    const std::string_view value = text != nullptr ? text : "";
-    if (value.empty() || value == "0") return false;
-    if (value == "1") return true;
-    throw std::runtime_error("DisplayWindow: ANYPS5_FULLSCREEN must be 1 or 0, not '" + std::string(value) + "'");
 }
 
 int initialDisplayIndex() {
@@ -66,6 +59,36 @@ void applyAppIcon(SDL_Window* window) {
     SDL_SetWindowIcon(window, icon);
     SDL_FreeSurface(icon);
 }
+
+class SdlHostWindow final : public IHostFullscreenWindow {
+public:
+    explicit SdlHostWindow(SDL_Window* window) : window(window) {}
+
+    bool IsFullscreen() const override {
+        return (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0;
+    }
+
+    void SetFullscreen(bool fullscreen) override {
+        require(SDL_SetWindowFullscreen(window, fullscreen ? static_cast<Uint32>(SDL_WINDOW_FULLSCREEN_DESKTOP) : 0u) == 0, SDL_GetError());
+    }
+
+    HostWindowSize Size() const override {
+        HostWindowSize size;
+        SDL_GetWindowSize(window, &size.width, &size.height);
+        return size;
+    }
+
+    void SetSize(HostWindowSize size) override {
+        SDL_SetWindowSize(window, size.width, size.height);
+    }
+
+    void ShowCursor(bool show) override {
+        require(SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE) >= 0, SDL_GetError());
+    }
+
+private:
+    SDL_Window* window;
+};
 
 #ifdef _WIN32
 constexpr UINT_PTR DisplayWindowSubclassId = 0x41505335u;
@@ -93,17 +116,22 @@ void DisplayWindow::create(std::uint32_t sourceWidth, std::uint32_t sourceHeight
     const auto boundsHeight = static_cast<std::uint32_t>(static_cast<std::uint64_t>(usable.h) * percent / 100);
     const auto initialSize = AgcDriver::ComputeContainSize_nid_postfix(sourceWidth, sourceHeight, boundsWidth, boundsHeight, true);
     require(initialSize.width >= DisplayWindowMinimumWidth && initialSize.height >= DisplayWindowMinimumHeight, "initial window extent is smaller than the minimum");
+    const char* fullscreenSetting = std::getenv("ANYPS5_FULLSCREEN");
+    bool unrecognizedFullscreen = false;
+    const auto fullscreenMode = ParseHostFullscreenMode(fullscreenSetting, &unrecognizedFullscreen);
+    if (unrecognizedFullscreen) std::fprintf(stderr, "%s\n", HostFullscreenWarning(fullscreenSetting).c_str());
     const auto title = GetAppTitle_nid_postfix();
     AgcDriverLockVulkanLoader_nid_postfix();
-    const char* fullscreen = std::getenv("ANYPS5_FULLSCREEN");
-    const Uint32 fullscreenFlag = fullscreen != nullptr && *fullscreen != '\0' && std::strcmp(fullscreen, "0") != 0 ? static_cast<Uint32>(SDL_WINDOW_FULLSCREEN_DESKTOP) : 0u;
+    const auto fullscreenFlag = fullscreenMode == HostFullscreenMode::Borderless ? static_cast<Uint32>(SDL_WINDOW_FULLSCREEN_DESKTOP) : 0u;
     window = SDL_CreateWindow(title.value, SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex), SDL_WINDOWPOS_CENTERED_DISPLAY(displayIndex), static_cast<int>(initialSize.width), static_cast<int>(initialSize.height), SDL_WINDOW_SHOWN | SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI | fullscreenFlag);
     AgcDriverUnlockVulkanLoader_nid_postfix();
     require(window != nullptr, SDL_GetError());
     SDL_SetWindowMinimumSize(window, static_cast<int>(DisplayWindowMinimumWidth), static_cast<int>(DisplayWindowMinimumHeight));
     applyAppIcon(window);
     installSubclass();
-    if (startsFullscreen()) require(SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN_DESKTOP) == 0, SDL_GetError());
+    hostWindow = std::make_unique<SdlHostWindow>(window);
+    fullscreen = std::make_unique<HostFullscreenState>(*hostWindow);
+    fullscreen->Adopt(fullscreenMode, HostWindowSize{static_cast<int>(initialSize.width), static_cast<int>(initialSize.height)});
 }
 
 void DisplayWindow::updateAspectRatio(std::uint32_t sourceWidth, std::uint32_t sourceHeight) {
@@ -113,6 +141,9 @@ void DisplayWindow::updateAspectRatio(std::uint32_t sourceWidth, std::uint32_t s
 
 void DisplayWindow::Destroy() noexcept {
     if (window == nullptr) return;
+    if (fullscreen) fullscreen->Release();
+    fullscreen.reset();
+    hostWindow.reset();
     removeSubclass();
     SDL_DestroyWindow(window);
     window = nullptr;
@@ -123,9 +154,9 @@ SDL_Window* DisplayWindow::Handle() const {
 }
 
 void DisplayWindow::ToggleFullscreen() {
-    require(window != nullptr, "window must exist before toggling fullscreen");
-    const auto flags = (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0 ? 0u : static_cast<Uint32>(SDL_WINDOW_FULLSCREEN_DESKTOP);
-    require(SDL_SetWindowFullscreen(window, flags) == 0, SDL_GetError());
+    require(window != nullptr && fullscreen != nullptr, "window must exist before toggling fullscreen");
+    fullscreen->Toggle();
+    fullscreen->Refresh(MouseIsOpen_nid_no_patch());
 }
 
 void DisplayWindow::DrawableSize(std::uint32_t& width, std::uint32_t& height) const {
@@ -151,15 +182,20 @@ void DisplayWindow::UpdateTitle() {
     frameNum++;
     fpsFrames++;
     const double elapsed = std::chrono::duration<double>(now - fpsStart).count();
+    bool fpsWindowClosed = false;
     if (elapsed >= 2.0) {
         currentFps = static_cast<double>(fpsFrames) / elapsed;
         fpsStart = now;
         fpsFrames = 0;
+        fpsWindowClosed = true;
     }
-    char text[160];
-    std::snprintf(text, sizeof(text), "%s | FPS: %.2f (%llu)", title.value, currentFps, static_cast<unsigned long long>(frameNum));
-    SDL_SetWindowTitle(window, text);
+    if (WindowTitleUpdate::ShouldPush(frameNum, fpsWindowClosed)) {
+        char text[160];
+        std::snprintf(text, sizeof(text), "%s | FPS: %.2f (%llu)", title.value, currentFps, static_cast<unsigned long long>(frameNum));
+        SDL_SetWindowTitle(window, text);
+    }
     StatsOverlay::Present(window);
+    if (fullscreen) fullscreen->Refresh(MouseIsOpen_nid_no_patch());
     if (auto* telemetry = VideoOutTelemetry::Instance(); telemetry != nullptr && (frameNum == 1 || frameNum % 30 == 0)) telemetry->EmitPresent(frameNum, currentFps);
 }
 

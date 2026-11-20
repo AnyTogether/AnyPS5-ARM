@@ -265,8 +265,8 @@ void AdvancesTheContext() {
     Check(std::memcmp(before.gregs, m.gregs, sizeof(m.gregs)) == 0, "a declined instruction changed the signal context");
 }
 
-// libc's SIGILL handler, loaded from the given libc, takes a CLFLUSHOPT fault and passes any other
-// SIGILL on: a ud2 still ends the process with SIGILL and the fatal line.
+// libc's SIGILL handler (upstream's fatal signal report), loaded from the given libc, takes a CLFLUSHOPT
+// fault and passes any other SIGILL on: a ud2 still ends the process with SIGILL and the report's line.
 void HandlesSigill(const char* libc) {
     int pipe[2];
     if (::pipe(pipe) != 0) {
@@ -309,7 +309,7 @@ void HandlesSigill(const char* libc) {
     Check(child > 0 && ::waitpid(child, &status, 0) == child, "cannot run the SIGILL child");
     Check(output.find("stepped over clflushopt\n") != std::string::npos, "libc's SIGILL handler did not emulate CLFLUSHOPT: " + output);
     Check(WIFSIGNALED(status) && WTERMSIG(status) == SIGILL, "a ud2 after the emulated CLFLUSHOPT did not end the child with SIGILL: " + output);
-    Check(output.find("[fatal] host signal 4 (SIGILL)") != std::string::npos, "the ud2 left no fatal line: " + output);
+    Check(output.find("[libc] fatal SIGILL") != std::string::npos, "the ud2 left no fatal line: " + output);
 }
 #else
 void AdvancesTheContext() {}

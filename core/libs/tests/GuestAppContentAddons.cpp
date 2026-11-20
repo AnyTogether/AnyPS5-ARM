@@ -20,6 +20,7 @@ int APS5_VABI access_nid_postfix(const char*, int);
 
 namespace {
 
+constexpr int ErrorBusy = static_cast<int>(0x80D90003);
 constexpr int ErrorNotFound = static_cast<int>(0x80D90005);
 constexpr int ErrorDrmNoEntitlement = static_cast<int>(0x80D90007);
 constexpr std::uint32_t StatusNoExtraData = 0;
@@ -123,8 +124,9 @@ int main() {
     Require(std::strcmp(first.data, "/addcont0") == 0);
     Require(access_nid_postfix("/addcont0/maps/island.pak", 0) == 0);
     Require(std::filesystem::equivalent(ResolvePath_nid_no_patch("/addcont0/maps/island.pak"), expansion / "maps" / "island.pak"));
+    // A second mount of a mounted add-on is busy (upstream's AddcontMount).
     AppContentMountPoint again{};
-    Require(sceAppContentAddcontMount(0, &expansionLabel, &again) == 0 && std::strcmp(again.data, "/addcont0") == 0);
+    Require(sceAppContentAddcontMount(0, &expansionLabel, &again) == ErrorBusy);
     AppContentMountPoint second{};
     Require(sceAppContentAddcontMount(0, &label, &second) == 0);
     Require(std::strcmp(second.data, "/addcont1") == 0);
@@ -139,7 +141,7 @@ int main() {
     Require(sceAppContentAddcontMount(0, &licenseLabel, &refused) == ErrorNotFound);
     Require(std::memcmp(&refused, &untouched, sizeof(refused)) == 0);
 
-    // Unmounting closes the path; the freed slot is used again.
+    // Unmounting closes the path; mounting again gives the add-on its /addcontN back.
     Require(sceAppContentAddcontUnmount(&first) == 0);
     Require(access_nid_postfix("/addcont0/maps/island.pak", 0) == -1);
     Require(sceAppContentAddcontUnmount(&first) == ErrorNotFound);

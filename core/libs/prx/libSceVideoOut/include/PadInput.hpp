@@ -4,6 +4,7 @@
 #include "SDL_events.h"
 #include "SDL_gamecontroller.h"
 #include "SDL_hidapi.h"
+#include "prx/libScePad/include/InputMapping.hpp"
 #include "prx/libScePad/include/KeyboardMouse.hpp"
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/Pad.hpp"
@@ -48,6 +49,8 @@ private:
         PadInputState state{};
         bool outputPending = true;
         bool sensors = true;
+        // Upstream's: the motors were last started (cleared when rumble pauses on focus loss).
+        bool rumbleLive = false;
         std::chrono::steady_clock::time_point nextRumbleRefresh{};
         LightBarPacer lightBar;
         TriggerEffectCache triggerEffect;
@@ -85,6 +88,13 @@ private:
 
     explicit PadInput(Pad::InputConfiguration configuration);
     void publish(std::uint64_t frame);
+    void applyMappingSnapshot();
+    void reloadInputMapping();
+    void dispatchPadChords(DisplayWindow& window);
+    void applyRequests(const Pad::InputRequests& requests, bool windowFocused, DisplayWindow& window);
+    void startInputMappingWatch();
+    void watchInputMapping(std::string titleId, Pad::InputMappingWatch watch);
+    std::uint32_t firstPlayerControllerButtons() const;
     void setMouseMode(bool enabled);
     void openAvailableControllers();
     void openController(int deviceIndex);
@@ -117,6 +127,8 @@ private:
     void closeHaptics();
     void streamHaptics();
 
+    Pad::InputMappingStore mappings;
+    std::shared_ptr<const Pad::InputConfiguration> appliedMapping;
     Pad::KeyboardMouse keyboardMouse;
     Pad::IdentifyMode identifyMode = Pad::IdentifyMode::Off;
     std::vector<Controller> controllers;
@@ -147,6 +159,8 @@ private:
     std::thread hapticsThread;
     bool hapticsRumbled = false;
     std::atomic<std::chrono::steady_clock::rep> hapticsReconfigureAt{0};
+    std::thread mappingWatchThread;
+    std::atomic<bool> mappingWatchStop{false};
 };
 
 #endif

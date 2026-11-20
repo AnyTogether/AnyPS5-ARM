@@ -25,7 +25,7 @@ static void RequireError(const char* path, int flags, int error) {
     Require(*__error_nid_postfix() == error);
 }
 #ifdef __APPLE__
-// On macOS a named object lives in the process until shm_unlink.
+// On macOS a named object is a host file in the temporary directory until shm_unlink, as /dev/shm on Linux.
 static void CheckNamed() {
     const char* const name = "/anyps5-shm";
     RequireError(name, 0x2, 2);

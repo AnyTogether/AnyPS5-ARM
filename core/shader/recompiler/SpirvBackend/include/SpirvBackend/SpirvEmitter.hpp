@@ -31,6 +31,7 @@ struct SpirvTargetOptions {
     bool meshAsCompute = false;
     bool float16DenormPreserve = false;
     bool spannedWaves = false;
+    bool spannedAnySubgroup = false;
     bool robustBufferAccess2 = false;
     bool exactRobustLoads = false;
     bool float32FlushToZero = false;
@@ -48,9 +49,11 @@ struct SpirvTargetOptions {
     std::uint32_t pixelFunctionStorageDwords = 4096u;
     bool deviceScopeLdsMemoryBarriers = false;
     bool ldsLockFences = false;
+    bool deviceAtomicWorkgroupMemoryBarriers = false;
     bool meshWindowBuffer = false;
     bool float16WidenNans = false;
     bool float16NarrowNans = false;
+    bool meshInlineFunctions = false;
 };
 
 struct SpirvEmitInfo {
@@ -58,6 +61,7 @@ struct SpirvEmitInfo {
     bool functionLdsBuffer = false;
     bool meshWindowBuffer = false;
     std::uint32_t scratchPoolSlotDwords = 0;
+    bool anySubgroupSize = false;
 };
 
 struct SpannedWaveUnsupported : std::runtime_error {

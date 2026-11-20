@@ -342,7 +342,7 @@ void FrameGenerator::dispatch(VkCommandBuffer commands, Pass pass, VkDescriptorS
         std::array<float, 4> floats;
     } push{integers, {t, 0.0f, 0.0f, 0.0f}};
     static_assert(sizeof(Push) == 48);
-    context.Function<PFN_vkCmdBindPipeline>("vkCmdBindPipeline")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[pass]);
+    context.BindComputePipeline(commands, pipelines[pass]);
     context.Function<PFN_vkCmdBindDescriptorSets>("vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &set, 0, nullptr);
     context.Function<PFN_vkCmdPushConstants>("vkCmdPushConstants")(commands, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push), &push);
     context.Function<PFN_vkCmdDispatch>("vkCmdDispatch")(commands, divideUp(threads.width, 8), divideUp(threads.height, 8), 1);

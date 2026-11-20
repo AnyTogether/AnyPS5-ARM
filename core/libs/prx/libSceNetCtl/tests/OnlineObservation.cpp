@@ -1,5 +1,6 @@
 #include "prx/libc/include/general/VabiMacros.hpp"
 #include "SceTypes.hpp"
+#include "prx/libSceNpMatching2/include/Api.hpp"
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -54,6 +55,10 @@ int main() {
         sceNpSetNpTitleId(&titleId, &secret);
         const char body[] = "{\"hello\":1}";
         sceNpWebApi2SendRequest(5, body, std::strlen(body), nullptr);
+        // Upstream answers NOT_INITIALIZED before an initialize, so the title initializes first.
+        NpMatching2InitializeParameter matching{};
+        matching.size = sizeof(matching);
+        require(sceNpMatching2Initialize(&matching) == 0, "sceNpMatching2Initialize answers");
         bool threw = false;
         try {
             sceNpMatching2JoinRoom();

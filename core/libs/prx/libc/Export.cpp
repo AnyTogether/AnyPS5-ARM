@@ -7,7 +7,7 @@
 #include "prx/libc/include/General.hpp"
 #include "prx/libc/include/HeapDiagnostics.hpp"
 
-uint32_t Need_sceLibc = 1;
+uint32_t Need_sceLibc_nid_postfix = 1;
 
 extern "C" {
 
@@ -18,14 +18,6 @@ extern "C" {
     void APS5_VABI LibcHeapGetTraceInfo_nid_postfix(LibcHeapInfo* info) {
         LibcHeapTraceInfo_nid_no_patch(info);
     }
-
-// std::_Atomic_assert(expression, location): Dinkumware's failure report for an atomic operation
-// given an invalid memory order. Imported (without call sites) by Cyberpunk 2077 (PPSA04029).
-[[noreturn]] void APS5_VABI _ZSt14_Atomic_assertPKcS0__nid_postfix(const char* expression, const char* location) {
-    std::fprintf(stderr, "[libc] guest atomic assertion failed: %s (%s)\n", expression ? expression : "?", location ? location : "?");
-    std::fflush(stderr);
-    std::abort();
-}
 
 APS5_EXPORT("H2e8t5ScQGc", libc___cxa_finalize);
 void APS5_VABI libc___cxa_finalize(void* dsoHandle) {

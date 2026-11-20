@@ -3,7 +3,7 @@ target_include_directories(agc_driver_prepared_shaders_tests PRIVATE
 )
 
 if(BUILD_TESTING)
-    foreach(preparedMode IN ITEMS indirect uncached debug debug_failure deferred deferred_undecodable registered_workgroup registered_workgroup_sync dispatch_ahead_prewarm abi_deferred_compute abi_deferred_pixel abi_deferred_stages abi_deferred_rectangle abi_deferred_undecodable_state abi_deferred_registration_failure abi_deferred_vertex_inputs abi_deferred_rectangle_pairs lazy lazy_sync lazy_budget_zero)
+    foreach(preparedMode IN ITEMS indirect uncached debug debug_failure deferred deferred_undecodable registered_workgroup registered_workgroup_sync dispatch_ahead_prewarm abi_deferred_compute abi_deferred_pixel abi_deferred_stages abi_deferred_rectangle abi_deferred_undecodable_state abi_deferred_registration_failure abi_deferred_vertex_inputs abi_deferred_rectangle_pairs abi_deferred_background_draw abi_deferred_background_progress abi_deferred_background_close lazy lazy_sync lazy_budget_zero)
         set(preparedTest "agc_driver_prepared_shaders_${preparedMode}")
         if(preparedMode MATCHES "^abi_deferred_")
             string(REPLACE "_" "-" preparedArgument ${preparedMode})
@@ -28,6 +28,7 @@ if(BUILD_TESTING)
         endif()
         # Registration preparation is off by default on small macOS hosts; these tests are about it.
         set_tests_properties(${preparedTest} PROPERTIES ENVIRONMENT "ANYPS5_NO_SHADER_CACHE=1;APS5_REGISTRATION_PREPARE=1" SKIP_RETURN_CODE 77 WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+        set_property(TEST ${preparedTest} APPEND PROPERTY ENVIRONMENT "APS5_NO_MASKED_RESULT_MEMO=1")
         if(preparedMode MATCHES "^abi_deferred_")
             set_property(TEST ${preparedTest} APPEND PROPERTY ENVIRONMENT "APS5_NO_FAILURE_MEMO=1")
         elseif(preparedMode STREQUAL "uncached")

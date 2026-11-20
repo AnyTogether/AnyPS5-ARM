@@ -245,7 +245,7 @@ void Fsr1Upscaler::transition(VkCommandBuffer commands, VkImage image, VkImageLa
 }
 
 void Fsr1Upscaler::dispatch(VkCommandBuffer commands, Pass pass, const void* constants, std::uint32_t bytes) const {
-    context.Function<PFN_vkCmdBindPipeline>("vkCmdBindPipeline")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelines[pass]);
+    context.BindComputePipeline(commands, pipelines[pass]);
     context.Function<PFN_vkCmdBindDescriptorSets>("vkCmdBindDescriptorSets")(commands, VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, 0, 1, &sets[pass], 0, nullptr);
     context.Function<PFN_vkCmdPushConstants>("vkCmdPushConstants")(commands, pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, bytes, constants);
     context.Function<PFN_vkCmdDispatch>("vkCmdDispatch")(commands, divideUp(output.extent.width, 8), divideUp(output.extent.height, 8), 1);
