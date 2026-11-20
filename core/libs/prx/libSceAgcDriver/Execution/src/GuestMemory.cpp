@@ -1010,7 +1010,9 @@ bool describePages(std::uintptr_t address, std::size_t bytes, Emit&& emit, bool 
                 std::uint64_t end;
                 bool writable;
             };
-            thread_local std::vector<ReadableRange> readable;
+            // A HostThreadLocal: a thread_local vector's destructor would run after Windows' emulated TLS freed it.
+            struct ReadableRangesStorage {};
+            auto& readable = HostThreadLocal<std::vector<ReadableRange>, ReadableRangesStorage>();
             thread_local std::uint64_t readableGeneration = ~std::uint64_t{0};
             const auto generation = GuestAllocations::GuestAllocationsGeneration_nid_postfix();
             if (generation != readableGeneration) {
@@ -3338,8 +3340,10 @@ std::string OtherWaitStacksReport(GpuLockStats& stats) {
 }
 
 GpuLockStats& LockStats() {
-    thread_local GpuLockStats stats;
-    return stats;
+    // A HostThreadLocal: the caller-stack map makes the stats non-trivially destructible, and a
+    // thread_local destructor runs after Windows' emulated TLS freed the object.
+    struct GpuLockStatsStorage {};
+    return HostThreadLocal<GpuLockStats, GpuLockStatsStorage>();
 }
 
 bool GpuLockProfiled() {

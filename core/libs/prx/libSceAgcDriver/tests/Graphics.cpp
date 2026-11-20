@@ -8588,7 +8588,10 @@ void textureBudgetsWithoutHostImportsTests() {
     const auto owned = UsageWithoutHostImports(unified, report, 12 * GiB, moltenVk);
     Require(owned.heapUsage[0] == 3 * GiB + 512 * MiB && owned.heapBudget[0] == 18 * GiB, "a unified heap that counts its live imports kept them in the usage the texture caches read, or changed its budget");
     Require(StorageTextureBudget(unified, &owned, GiB, 512 * MiB) == 9 * GiB, "the storage cache on a unified heap was not given its ceiling once the imports it does not own were left out");
-    Require(SampledTextureBudget(unified, &owned, GiB + 512 * MiB, 512 * MiB) == 7936 * MiB, "the sampled cache on a unified heap was still held down by imports it does not own");
+    // The fork budgets a shared memory heap's texture caches by an eighth of it (743f29c63c): the
+    // sampled cache rises from its 2 GiB floor to that ceiling, 3 GiB of this 24 GiB heap, where
+    // upstream's quarter-heap budget gives 7936 MiB.
+    Require(SampledTextureBudget(unified, &owned, GiB + 512 * MiB, 512 * MiB) == 3 * GiB, "the sampled cache on a unified heap was still held down by imports it does not own");
     Require(UsageWithoutHostImports(unified, report, 20 * GiB, moltenVk).heapUsage[0] == 0, "imports above the reported usage did not leave a usage of zero");
 
     VkPhysicalDeviceMemoryProperties integrated{};
