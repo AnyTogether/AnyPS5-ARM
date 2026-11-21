@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "İndiriliyor… %%%d",
   "engineReady": "%@ motoru hazır",
   "engineDownloadFailed": "Motor indirilemedi",
+  "engineDownloadStopped": "%%%d noktasında durdu · sürdürmek için seç · %@",
   "enginePrerelease": "Ön sürüm",
   "engineBuilt": "%@ derlendi",
   "engineSigned": "İmzalı",

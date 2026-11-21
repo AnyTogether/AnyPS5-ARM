@@ -226,7 +226,14 @@ public enum Updates {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("AnyPS5-update-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let zip = folder.appendingPathComponent(assetName)
-        try await self.download(download, to: zip, progress: progress)
+        // Tried again by itself when it fails on the way, going on from what came (DownloadRetry).
+        do {
+            try await DownloadRetry.run(url: download, file: zip, expected: Int64(release.size ?? 0), configuration: session.configuration, progress: progress)
+        } catch {
+            try? FileManager.default.removeItem(at: folder)
+            throw error
+        }
+        progress(1)
         do {
             try sums.check(zip, as: assetName)
         } catch let failure as ReleaseSigning.Failure {
