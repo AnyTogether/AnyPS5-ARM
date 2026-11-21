@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Загрузка… %d%%",
   "engineReady": "AnyPS5 двигатель %@ готов",
   "engineDownloadFailed": "Не удалось загрузить движок",
+  "engineDownloadStopped": "Остановлено на %d%% · выберите, чтобы продолжить · %@",
   "enginePrerelease": "Предварительная версия",
   "engineBuilt": "Сборка %@",
   "engineSigned": "Подписан",

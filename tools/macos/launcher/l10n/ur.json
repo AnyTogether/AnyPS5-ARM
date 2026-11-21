@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "ڈاؤن لوڈ ہو رہا ہے… %d%%",
   "engineReady": "AnyPS5 انجن %@ تیار ہے۔",
   "engineDownloadFailed": "انجن ڈاؤن لوڈ نہیں ہو سکا",
+  "engineDownloadStopped": "%d%% پر رک گیا · جاری رکھنے کے لیے منتخب کریں · %@",
   "enginePrerelease": "پری ریلیز",
   "engineBuilt": "%@ کو بنایا گیا",
   "engineSigned": "دستخط شدہ",

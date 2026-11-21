@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Laster ned … %d%%",
   "engineReady": "AnyPS5-motor %@ er klar",
   "engineDownloadFailed": "Kunne ikke laste ned motoren",
+  "engineDownloadStopped": "Stoppet ved %d%% · velg for å fortsette · %@",
   "enginePrerelease": "Forhåndsutgivelse",
   "engineBuilt": "Bygget %@",
   "engineSigned": "Signert",

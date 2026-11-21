@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Letöltés… %d%%",
   "engineReady": "Az AnyPS5 motor (%@) készen áll",
   "engineDownloadFailed": "A motort nem sikerült letölteni",
+  "engineDownloadStopped": "Megállt %d%%-nál · a folytatáshoz nyomd meg a Select gombot · %@",
   "enginePrerelease": "Előzetes kiadás",
   "engineBuilt": "Build ideje: %@",
   "engineSigned": "Aláírt",

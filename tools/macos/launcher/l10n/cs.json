@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Stahování… %d%%",
   "engineReady": "Motor AnyPS5 / %@ je připraven",
   "engineDownloadFailed": "Engine se nepodařilo stáhnout",
+  "engineDownloadStopped": "Zastaveno na %d%% · vyberte pro pokračování · %@",
   "enginePrerelease": "Předběžná verze",
   "engineBuilt": "Sestaveno %@",
   "engineSigned": "Podepsáno",

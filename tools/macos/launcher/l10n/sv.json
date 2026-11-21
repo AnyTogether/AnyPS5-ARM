@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Laddar ned… %d%%",
   "engineReady": "Motor AnyPS5 (%@) är redo",
   "engineDownloadFailed": "Motorn kunde inte laddas ner",
+  "engineDownloadStopped": "Stannade vid %d%% · välj för att fortsätta · %@",
   "enginePrerelease": "Förhandsversion",
   "engineBuilt": "Byggd %@",
   "engineSigned": "Signerad",

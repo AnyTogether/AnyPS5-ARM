@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "डाउनलोड हो रहल बा... %d%%",
   "engineReady": "AnyPS5 इंजन %@ तैयार बा",
   "engineDownloadFailed": "इंजन डाउनलोड ना हो सकल",
+  "engineDownloadStopped": "%d%% पर रुक गइल · आगे बढ़ावे खातिर चुनीं · %@",
   "enginePrerelease": "पूर्व-रिलीज़",
   "engineBuilt": "%@ के बनल",
   "engineSigned": "हस्ताक्षरित",

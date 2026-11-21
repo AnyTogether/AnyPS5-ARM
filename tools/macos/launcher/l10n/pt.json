@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Baixando… %d%%",
   "engineReady": "O mecanismo do AnyPS5 %@ está pronto",
   "engineDownloadFailed": "Não foi possível baixar o mecanismo",
+  "engineDownloadStopped": "Parou em %d%% · selecione para continuar · %@",
   "enginePrerelease": "Pré-lançamento",
   "engineBuilt": "Compilado em %@",
   "engineSigned": "Assinado",

@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "正在下載… %d%%",
   "engineReady": "AnyPS5 引擎 %@ 已就緒",
   "engineDownloadFailed": "無法下載引擎",
+  "engineDownloadStopped": "停在 %d%% · 選取以繼續下載 · %@",
   "enginePrerelease": "預先發行版本",
   "engineBuilt": "建置於 %@",
   "engineSigned": "已簽署",

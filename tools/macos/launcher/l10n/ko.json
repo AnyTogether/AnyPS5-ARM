@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "다운로드 중… %d%%",
   "engineReady": "AnyPS5 엔진(%@) 준비 완료",
   "engineDownloadFailed": "엔진을 다운로드할 수 없습니다",
+  "engineDownloadStopped": "%d%%에서 멈춤 · 선택하여 이어서 다운로드 · %@",
   "enginePrerelease": "사전 출시(Pre-release)",
   "engineBuilt": "%@에 빌드됨",
   "engineSigned": "서명됨",

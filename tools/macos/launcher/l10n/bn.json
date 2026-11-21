@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "ডাউনলোড হচ্ছে… %d%%",
   "engineReady": "AnyPS5 ইঞ্জিন %@ প্রস্তুত",
   "engineDownloadFailed": "ইঞ্জিন ডাউনলোড করা যায়নি",
+  "engineDownloadStopped": "%d%% এ থেমে গেছে · চালিয়ে যেতে নির্বাচন করুন · %@",
   "enginePrerelease": "প্রি-রিলিজ",
   "engineBuilt": "%@ বিল্ড হয়েছে",
   "engineSigned": "স্বাক্ষরিত",

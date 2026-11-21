@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "በማውረድ ላይ… %d%%",
   "engineReady": "AnyPS5 ሞተር %@ ዝግጁ ነው",
   "engineDownloadFailed": "ኤንጂኑን ማውረድ አልተቻለም",
+  "engineDownloadStopped": "በ%d%% ላይ ቆሟል · ለመቀጠል ይምረጡ · %@",
   "enginePrerelease": "ቅድመ-ስሪት (Pre-release)",
   "engineBuilt": "%@ ተገንብቷል",
   "engineSigned": "የተፈረመ",
