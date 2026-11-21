@@ -15,7 +15,21 @@
 #include <unistd.h>
 #endif
 
-static void Require(bool value) { if (!value) std::abort(); }
+static void Check(bool value, int line) {
+    if (!value) {
+        std::fprintf(stderr, "http2 cookie check failed at line %d\n", line);
+        std::abort();
+    }
+}
+#define Require(value) Check((value), __LINE__)
+
+#ifndef _WIN32
+#if defined(__APPLE__)
+static constexpr long MaxRssGrowth = 64L * 1024 * 1024;
+#else
+static constexpr long MaxRssGrowth = 64L * 1024;
+#endif
+#endif
 
 static constexpr int NotFound = static_cast<int>(0x817B1025);
 static constexpr int InvalidId = static_cast<int>(0x817B1100);
@@ -120,7 +134,7 @@ static void CheckUnmappedOutputs(int box) {
 #ifndef _WIN32
     rusage after{};
     getrusage(RUSAGE_SELF, &after);
-    Require(after.ru_maxrss - before.ru_maxrss < 64 * 1024);
+    Require(after.ru_maxrss - before.ru_maxrss < MaxRssGrowth);
 #endif
     Require(errno == 71);
     GuestArena::GuestArenaSetHostReadHook_nid_no_patch(nullptr);

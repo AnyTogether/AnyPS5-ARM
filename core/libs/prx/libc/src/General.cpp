@@ -55,6 +55,7 @@
 #include "prx/libc/include/FilesystemError.hpp"
 #include "prx/libc/include/AppArchive.hpp"
 #include "prx/libc/include/GuestArena.hpp"
+#include "prx/libc/include/GuestWriteWatch.hpp"
 #include "prx/libc/include/ApplicationHeap.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 
@@ -113,6 +114,8 @@ bool CopyGuestBytes(void* destination, const void* source, std::size_t bytes, bo
     errno = saved;
     return copied >= 0 && static_cast<std::size_t>(copied) == bytes;
 #elif defined(__APPLE__)
+    // A Mach call per copy is slow under Rosetta (upstream's checked copies are per field or character).
+    if (const int copied = GuestWriteWatch::GuestWriteWatchFaultCopy_nid_no_patch(destination, source, bytes); copied >= 0) return copied == 1;
     mach_vm_size_t copied = 0;
     return mach_vm_read_overwrite(mach_task_self(), reinterpret_cast<mach_vm_address_t>(source), bytes,
                reinterpret_cast<mach_vm_address_t>(destination), &copied) == KERN_SUCCESS && copied == bytes;
@@ -964,6 +967,7 @@ extern "C" bool GuestCopyOut_nid_no_patch(void* destination, const void* source,
     }
     return static_cast<std::size_t>(copied) == bytes;
 #elif defined(__APPLE__)
+    if (const int copied = GuestWriteWatch::GuestWriteWatchFaultCopy_nid_no_patch(destination, source, bytes); copied >= 0) return copied == 1;
     return ::mach_vm_write(::mach_task_self(), reinterpret_cast<mach_vm_address_t>(destination),
         reinterpret_cast<vm_offset_t>(source), static_cast<mach_msg_type_number_t>(bytes)) == KERN_SUCCESS;
 #else
