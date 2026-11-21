@@ -10,6 +10,7 @@ folder: `en.json` is English, the source, and `tr.json` is Turkish.
 | Hindi, Bengali, Bhojpuri, Arabic, Urdu | `hi`, `bn`, `bho`, `ar`, `ur` | VK |
 | Czech, Danish, Hungarian, Norwegian, Romanian, Swedish, Filipino, Malay | `cs`, `da`, `hu`, `no`, `ro`, `sv`, `fil`, `ms` | VK |
 | Simplified Chinese, Traditional Chinese, Korean, Khmer, Lao, Amharic | `zh-Hans`, `zh-Hant`, `ko`, `km`, `lo`, `am` | VK |
+| Polish | `pl` | QguAr71 (AnyPS5-Desktop #185); the Mac's own texts by the AnyPS5 team, for review |
 
 The texts VK had not translated, in these 26 languages, were filled by machine translation from the English
 source (the same wording in both launchers); translators can correct any of them.
