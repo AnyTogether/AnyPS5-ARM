@@ -1197,6 +1197,14 @@ void verifyWaterfallRuntimeValues() {
         std::uint32_t result = 0;
         require(evaluator.Evaluate(Detail::IrNode(&nestedFirst), result) && result == (word == 4u ? word : word + 1u), "waterfall: a nested select ignored its uniform condition");
     }
+    auto& copiedCondition = make(IrOpcode::IEqual32, IrType::Bool, {&input, &lane});
+    auto& copiedMask = make(IrOpcode::LogicalAnd, IrType::Bool, {&copiedCondition, &uniform});
+    auto& copiedFirst = make(IrOpcode::ReadFirstLane, IrType::U32, {&selected, &copiedMask});
+    require(SrtWalker().ValidateRuntimeValue(plan, &copiedFirst), "waterfall: a mask whose conjunct is a structural copy of the select condition was rejected");
+    auto& negatedCondition = make(IrOpcode::INotEqual32, IrType::Bool, {&input, &lane});
+    auto& negatedMask = make(IrOpcode::LogicalAnd, IrType::Bool, {&negatedCondition, &uniform});
+    auto& negatedFirst = make(IrOpcode::ReadFirstLane, IrType::U32, {&selected, &negatedMask});
+    require(!SrtWalker().ValidateRuntimeValue(plan, &negatedFirst), "waterfall: a mask whose conjunct is the negation of the select condition was accepted");
 }
 
 void verifyUniformVectorComponents() {
@@ -8933,7 +8941,7 @@ void verifyPixelRequestSerialization() {
     minimal.context.pixel->layerExported = true;
     minimal.context.pixel->ditheredAlphaToCoverage = true;
     const auto encoded = serializer.Serialize(minimal);
-    require(requestPrefix(encoded, 8u) == "NVNQQT8AAAA=", "new requests did not use serialization version 63");
+    require(requestPrefix(encoded, 8u) == "NVNQQUAAAAA=", "new requests did not use serialization version 64");
     auto withBarycentric = minimal;
     withBarycentric.target.fragmentBarycentricBuiltins = true;
     require(serializer.Deserialize(serializer.Serialize(withBarycentric)).request.target.fragmentBarycentricBuiltins && !serializer.Deserialize(encoded).request.target.fragmentBarycentricBuiltins, "barycentric built-ins were lost in serialization");
@@ -9054,7 +9062,7 @@ void verifyPixelRequestSerialization() {
     for (std::size_t bytes = 0; bytes < 45u; ++bytes) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(requestPrefix(encoded, mappingOffset + bytes))); }, "truncated data", "a truncated pixel mapping, packing, dual-source, alpha-to-coverage, stencil reference export flag, primitive class, layer export, dither or front-face flag, quad pixel mask or quad sample mask was accepted");
     }
-    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQTIAAAA=", "NVNQQToAAAA=", "NVNQQT0AAAA=", "NVNQQUAAAAA="}) {
+    for (const auto unsupported : {"NVNQQQAAAAA=", "NVNQQTIAAAA=", "NVNQQToAAAA=", "NVNQQT0AAAA=", "NVNQQUEAAAA="}) {
         expectFailure([&] { static_cast<void>(serializer.Deserialize(unsupported)); }, "serialization version", "an unsupported request version was accepted");
     }
     static constexpr std::string_view version18Request{
@@ -9111,16 +9119,25 @@ std::vector<std::uint8_t> decodeBase64(std::string_view text) {
     return bytes;
 }
 
-// A version 63 request as the upstream version 56 request it extends: the fork's version 63 fields
-// (subgroup stage mask, default all stages, and the mesh-as-compute flag) and upstream's version 57
-// and 62 fields are dropped from the end.
-// The fork's version 63 fields at the end of a request: the subgroup stage mask and the mesh-as-compute flag.
+// The fork's version 64 fields at the end of a request: the subgroup stage mask and the mesh-as-compute flag.
 constexpr std::size_t ForkTailBytes = 5u;
 
-std::vector<std::uint8_t> version56Bytes(std::vector<std::uint8_t> bytes) {
+// A default version 64 request as the upstream version 63 request it extends: the fork's fields
+// (subgroup stage mask, default all stages, and the mesh-as-compute flag) are dropped from the end.
+std::vector<std::uint8_t> stripForkTail(std::vector<std::uint8_t> bytes) {
     static constexpr std::array<std::uint8_t, ForkTailBytes> forkTail{0xffu, 0xffu, 0xffu, 0xffu, 0u};
-    require(bytes.size() > 19u && bytes[4] == 63u && std::equal(forkTail.begin(), forkTail.end(), bytes.end() - 5), "a legacy fixture did not start from a default serialization version 63");
-    bytes.resize(bytes.size() - ForkTailBytes - 6u);
+    require(bytes.size() > 8u + ForkTailBytes && bytes[4] == 64u && std::equal(forkTail.begin(), forkTail.end(), bytes.end() - static_cast<std::ptrdiff_t>(ForkTailBytes)), "a fixture did not start from a default serialization version 64");
+    bytes.resize(bytes.size() - ForkTailBytes);
+    bytes[4] = 63u;
+    return bytes;
+}
+
+// A version 64 request as the upstream version 56 request it extends: the fork's version 64 fields and
+// upstream's version 57 and 62 fields are dropped from the end (upstream's version 63 flag is unset).
+std::vector<std::uint8_t> version56Bytes(std::vector<std::uint8_t> bytes) {
+    bytes = stripForkTail(std::move(bytes));
+    require(bytes.size() > 14u && bytes[4] == 63u, "a legacy fixture did not start from serialization version 63");
+    bytes.resize(bytes.size() - 6u);
     bytes[4] = 56u;
     return bytes;
 }
@@ -9138,6 +9155,65 @@ std::string encodeBase64(const std::vector<std::uint8_t>& bytes) {
         }
     }
     return text;
+}
+
+void verifyEmulatedBarycentricRequests() {
+    using namespace ShaderRecompiler;
+    const std::array<std::uint32_t, 1> code{0xbf810000u};
+    RecompileRequest request{};
+    request.shader = {ShaderStage::Fragment, 0x30000u, code, 0, {}};
+    request.context.waveSize = 64;
+    request.context.pixel = ShaderPixelStageInfo{};
+    request.graphics = GraphicsCompileContext{0u, {}, std::nullopt, std::nullopt, {}};
+    const RequestSerializer serializer;
+    std::vector<std::uint64_t> native;
+    RecompileCacheKey::Build(request, native);
+    auto unset = request;
+    unset.graphics.reset();
+    std::vector<std::uint64_t> withoutGraphics;
+    RecompileCacheKey::Build(unset, withoutGraphics);
+    require(native == withoutGraphics && RecompileCacheKey::ContextHash(request) == RecompileCacheKey::ContextHash(unset), "a pixel request that does not emulate barycentrics changed its cache key");
+    auto emulated = request;
+    emulated.graphics->emulateBarycentrics = true;
+    std::vector<std::uint64_t> forced;
+    RecompileCacheKey::Build(emulated, forced);
+    require(forced.size() == native.size() + 1u && RecompileCacheKey::ContextHash(emulated) != RecompileCacheKey::ContextHash(request), "emulated barycentrics are not one extra cache key element");
+    const auto added = std::ranges::mismatch(native, forced).in2;
+    auto removed = forced;
+    removed.erase(removed.begin() + (added - forced.begin()));
+    require(removed == native, "emulated barycentrics changed cache key elements other than their own");
+    for (const auto stage : {ShaderStage::Vertex, ShaderStage::Mesh, ShaderStage::TessellationEvaluation}) {
+        auto other = request;
+        other.shader.stage = stage;
+        other.context.pixel.reset();
+        std::vector<std::uint64_t> plain;
+        RecompileCacheKey::Build(other, plain);
+        other.graphics->emulateBarycentrics = true;
+        std::vector<std::uint64_t> flagged;
+        RecompileCacheKey::Build(other, flagged);
+        require(plain == flagged, "emulated barycentrics changed the cache key of a stage other than the pixel shader");
+    }
+    const auto encoded = serializer.Serialize(emulated);
+    const auto replay = serializer.Deserialize(encoded);
+    require(replay.request.graphics.has_value() && replay.request.graphics->emulateBarycentrics && serializer.Serialize(replay.request) == encoded, "emulated barycentrics were lost in serialization");
+    auto bytes = stripForkTail(decodeBase64(serializer.Serialize(request)));
+    auto flagged = stripForkTail(decodeBase64(encoded));
+    require(bytes[4] == 63u && flagged.size() == bytes.size() + 1u && flagged.back() == 1u && std::equal(bytes.begin(), bytes.end(), flagged.begin()), "emulated barycentrics are not one trailing byte after an otherwise identical request");
+    auto legacyBytes = bytes;
+    legacyBytes[4] = 62u;
+    const auto legacy = serializer.Deserialize(encodeBase64(legacyBytes));
+    require(legacy.request.graphics.has_value() && !legacy.request.graphics->emulateBarycentrics, "a version 62 request emulated barycentrics");
+    std::vector<std::uint64_t> legacyKey;
+    RecompileCacheKey::Build(legacy.request, legacyKey);
+    require(legacyKey == native && serializer.Serialize(legacy.request) == serializer.Serialize(request), "a version 62 request changed its cache key or its upgraded bytes");
+    flagged[4] = 62u;
+    expectFailure([&] { static_cast<void>(serializer.Deserialize(encodeBase64(flagged))); }, "unexpected trailing data", "a version 62 request accepted an emulated barycentrics flag");
+    flagged[4] = 63u;
+    flagged.back() = 0u;
+    expectFailure([&] { static_cast<void>(serializer.Deserialize(encodeBase64(flagged))); }, "flag is clear", "a written but clear emulated barycentrics flag was accepted");
+    auto orphanBytes = stripForkTail(decodeBase64(serializer.Serialize(unset)));
+    orphanBytes.push_back(1u);
+    expectFailure([&] { static_cast<void>(serializer.Deserialize(encodeBase64(orphanBytes))); }, "emulated barycentrics without a graphics context", "emulated barycentrics without a graphics context were accepted");
 }
 
 void verifyDepthExportClamp() {
@@ -9928,6 +10004,16 @@ void verifyPixelInputs() {
         RecompileCacheKey::Build(other, key);
         require(key != first && RecompileCacheKey::ContextHash(request) != RecompileCacheKey::ContextHash(other), "the cache keys ignore the pixel input layout");
     }
+    request.context.pixel->alphaToCoverage = true;
+    request.context.pixel->ditheredAlphaToCoverage = true;
+    request.context.pixel->ditheredAlphaSamples = 1;
+    request.context.pixel->singleSampleDither = SingleSampleDither::E701;
+    auto rounded = request;
+    rounded.context.pixel->singleSampleDither = SingleSampleDither::Rounded18701;
+    std::vector<std::uint64_t> roundedKey;
+    RecompileCacheKey::BuildInterface(request, key);
+    RecompileCacheKey::BuildInterface(rounded, roundedKey);
+    require(key != roundedKey && RecompileCacheKey::ContextHash(request) != RecompileCacheKey::ContextHash(rounded), "the cache keys alias the single-sample dither patterns");
 }
 
 ShaderRecompiler::RecompileRequest slotRequest(std::initializer_list<std::uint32_t> controls, std::span<const std::uint32_t> code, bool hostInterpolationFirst) {
@@ -13450,6 +13536,7 @@ int main(int argc, char** argv) {
         verifyPixelInputs();
         verifyCanonicalVersion20And21Requests();
         verifyPixelRequestSerialization();
+        verifyEmulatedBarycentricRequests();
         verifyVertexInfoVersion19();
         verifyDepthRemapRequests();
         verifyMergedHullConfiguration();

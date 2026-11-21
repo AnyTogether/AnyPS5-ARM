@@ -62,6 +62,7 @@ public:
     const SampleOrder& HostSampleOrder() const { return sampleOrder; }
     bool ReordersSamples() const { return Graphics::ReordersSamples(sampleOrder); }
     bool SampleLocationsEnabled() const { return sampleLocationsEnabled; }
+    bool NarrowLibraryKeys() const { return narrowLibraryKeys; }
     VkExtent2D HostSampleLocationGrid() const { return sampleLocationGrid; }
     void PushConstants(VkCommandBuffer commands, VkShaderStageFlags stages, std::span<const std::byte, PipelinePushConstantBytes> bytes) const;
     bool EmulatesMesh() const { return computePipeline != VK_NULL_HANDLE; }
@@ -100,6 +101,9 @@ private:
     bool depthBounds = false;
     bool depthBias = false;
     bool libraries = false;
+    bool narrowLibraryKeys = false;
+    bool dynamicDepthBiasEnable = false;
+    bool dynamicColorWriteMask = false;
     std::uint32_t dynamicSlots = 0;
     std::shared_ptr<OptimizedPipeline> optimized;
     bool dynamicRendering = false;
@@ -166,6 +170,12 @@ void ValidateProvokingVertex(const Context& context, const State& state, std::sp
 // Whether a fragment stage reads flat or per-vertex inputs, so that the provoking vertex shows.
 bool ReadsProvokingVertex(std::span<const CompiledShader> shaders);
 bool BarycentricPatches(const State& state, std::span<const CompiledShader> shaders);
+// Whether the device can draw through the barycentric tessellation patch stages: tessellation and
+// geometry shaders. Without geometry shaders (MoltenVK) the recompiler keeps host interpolation, as the
+// patch stages' separate ClipDistance outputs fail MoltenVK's shader conversion, and a last provoking
+// vertex is drawn through the last-vertex-first index rewrite (Draw.cpp) instead of LastVertexPatches.
+bool BarycentricPatchStages(const ShaderRecompiler::SpirvTarget& target);
+bool LastVertexPatches(const State& state, std::span<const CompiledShader> shaders, bool provokingVertexLast, bool tessellation, bool primitiveListRestart, bool indexed);
 bool ValidateSampleLocations(const Context& context, const State& state);
 
 void ValidateShaderPair(const ShaderRecompiler::RecompileResult& vertex, const ShaderRecompiler::RecompileResult& fragment);

@@ -148,7 +148,7 @@ void AppendVertexTail(std::vector<std::uint8_t>& bytes) {
     bytes.insert(bytes.end(), {0u, 0u, 0u, 0x80u, 0x3fu, 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u});
 }
 
-// Version 63 is upstream's version 62 followed by the fork's fields: the subgroup stage mask
+// Version 64 is upstream's version 63 followed by the fork's fields: the subgroup stage mask
 // (default all stages) and the mesh-as-compute flag.
 constexpr std::uint8_t kForkTail[] = {0xffu, 0xffu, 0xffu, 0xffu, 0u};
 
@@ -156,11 +156,11 @@ void AppendForkTail(std::vector<std::uint8_t>& bytes) {
     bytes.insert(bytes.end(), std::begin(kForkTail), std::end(kForkTail));
 }
 
-// A default version 63 request as the upstream version 62 request it extends.
+// A default version 64 request as the upstream version 63 request it extends.
 std::vector<std::uint8_t> StripForkTail(std::vector<std::uint8_t> bytes) {
-    Require(bytes.size() > 8u + sizeof(kForkTail) && bytes[4] == 63u && std::equal(std::begin(kForkTail), std::end(kForkTail), bytes.end() - static_cast<std::ptrdiff_t>(sizeof(kForkTail))));
+    Require(bytes.size() > 8u + sizeof(kForkTail) && bytes[4] == 64u && std::equal(std::begin(kForkTail), std::end(kForkTail), bytes.end() - static_cast<std::ptrdiff_t>(sizeof(kForkTail))));
     bytes.resize(bytes.size() - sizeof(kForkTail));
-    bytes[4] = 62u;
+    bytes[4] = 63u;
     return bytes;
 }
 
@@ -219,7 +219,7 @@ void VerifyTessellationInstancePatches() {
 
 std::string SerializeVersion56(const ShaderRecompiler::RecompileRequest& request) {
     auto bytes = StripForkTail(DecodeBase64(ShaderRecompiler::RequestSerializer{}.Serialize(request)));
-    Require(bytes.size() > 14u && bytes[4] == 62u);
+    Require(bytes.size() > 14u && bytes[4] == 63u);
     bytes.resize(bytes.size() - 6u);
     bytes[4] = 56u;
     return EncodeBase64(bytes);
@@ -243,7 +243,7 @@ void VerifyTargetOptions() {
                     Require(replay.request.target.float16WidenNans == widen && replay.request.target.float16NarrowNans == narrow);
                     Require(serializer.Serialize(replay.request) == encoded);
                     auto bytes = StripForkTail(DecodeBase64(encoded));
-                    Require(bytes[4] == 62u && bytes.back() == 0u);
+                    Require(bytes[4] == 63u && bytes.back() == 0u);
                     for (std::size_t missing = 1u; missing <= 6u; ++missing) {
                         auto truncated = bytes;
                         truncated.resize(truncated.size() - missing);
@@ -255,6 +255,10 @@ void VerifyTargetOptions() {
                         }
                         Require(rejected);
                     }
+                    auto legacy62Bytes = bytes;
+                    legacy62Bytes[4] = 62u;
+                    const auto legacy62 = serializer.Deserialize(EncodeBase64(legacy62Bytes));
+                    Require(legacy62.request.target.fixedPushSlots == fixed && legacy62.request.target.maxImageArrayLayers == layers && !legacy62.request.graphics.has_value());
                     bytes.pop_back();
                     bytes[4] = 57u;
                     const auto legacy57 = serializer.Deserialize(EncodeBase64(bytes));
@@ -282,7 +286,14 @@ void VerifyTargetOptions() {
             }
         }
     }
-    auto trailing = DecodeBase64(serializer.Serialize(ShaderRecompiler::RecompileRequest{}));
+    ShaderRecompiler::RecompileRequest emulated{};
+    emulated.graphics = ShaderRecompiler::GraphicsCompileContext{};
+    emulated.graphics->emulateBarycentrics = true;
+    // In version 64 the fork's fields follow the flag, and the request round-trips.
+    const auto emulatedReplay = serializer.Deserialize(serializer.Serialize(emulated));
+    Require(emulatedReplay.request.graphics->emulateBarycentrics && emulatedReplay.request.target.subgroupStages == 0xffffffffu && !emulatedReplay.request.target.meshAsCompute);
+    auto trailing = StripForkTail(DecodeBase64(serializer.Serialize(emulated)));
+    Require(trailing.back() == 1u && serializer.Deserialize(EncodeBase64(trailing)).request.graphics->emulateBarycentrics);
     trailing.push_back(2u);
     bool rejected = false;
     try {
@@ -291,20 +302,20 @@ void VerifyTargetOptions() {
         rejected = std::string_view(error.what()) == "RequestSerializer: unexpected trailing data";
     }
     Require(rejected);
-    // The fork's fields (version 63) round-trip, and a version 62 request reads their defaults.
+    // The fork's fields (version 64) round-trip, and a version 63 request reads their defaults.
     ShaderRecompiler::RecompileRequest fork{};
     fork.target.subgroupStages = 0x12u;
     fork.target.meshAsCompute = true;
     auto forkBytes = DecodeBase64(serializer.Serialize(fork));
-    Require(forkBytes[4] == 63u && forkBytes.size() > 5u);
+    Require(forkBytes[4] == 64u && forkBytes.size() > 5u);
     const std::vector<std::uint8_t> forkTail(forkBytes.end() - 5, forkBytes.end());
     Require(forkTail == std::vector<std::uint8_t>{0x12u, 0u, 0u, 0u, 1u});
     const auto forkReplay = serializer.Deserialize(EncodeBase64(forkBytes));
     Require(forkReplay.request.target.subgroupStages == 0x12u && forkReplay.request.target.meshAsCompute);
     forkBytes.resize(forkBytes.size() - 5u);
-    forkBytes[4] = 62u;
-    const auto forkReplay62 = serializer.Deserialize(EncodeBase64(forkBytes));
-    Require(forkReplay62.request.target.subgroupStages == 0xffffffffu && !forkReplay62.request.target.meshAsCompute);
+    forkBytes[4] = 63u;
+    const auto forkReplay63 = serializer.Deserialize(EncodeBase64(forkBytes));
+    Require(forkReplay63.request.target.subgroupStages == 0xffffffffu && !forkReplay63.request.target.meshAsCompute);
 }
 
 int VerifyVersion56Compatibility() {
@@ -807,7 +818,7 @@ int VerifyVersion56Compatibility() {
         version40[4] = 40u;
         const auto replay40 = serializer.Deserialize(EncodeBase64(version40));
         Require(!replay40.request.target.float32DenormPreserve && replay40.request.target.float32FlushToZero == !preserve);
-        for (const std::uint8_t unwritten : {58u, 59u, 60u, 61u, 64u}) {
+        for (const std::uint8_t unwritten : {58u, 59u, 60u, 61u, 65u}) {
             auto future = bytes;
             future[4] = unwritten;
             bool futureRejected = false;
@@ -922,8 +933,9 @@ int VerifyVersion56Compatibility() {
         const auto replay35 = serializer.Deserialize(EncodeBase64(version35));
         Require(replay35.request.target.spannedWaves == spanned && !replay35.request.target.float32FlushToZero);
         request.target.spannedAnySubgroup = spanned;
-        const auto version62 = StripForkTail(DecodeBase64(serializer.Serialize(request)));
-        Require(version62[4] == 62u && version62.back() == (spanned ? 1u : 0u));
+        auto version62 = StripForkTail(DecodeBase64(serializer.Serialize(request)));
+        Require(version62[4] == 63u && version62.back() == (spanned ? 1u : 0u));
+        version62[4] = 62u;
         Require(serializer.Deserialize(EncodeBase64(version62)).request.target.spannedAnySubgroup == spanned);
         auto version57 = version62;
         version57[4] = 57u;
@@ -1203,7 +1215,79 @@ int VerifyVersion56Compatibility() {
     return 0;
 }
 
+void VerifySingleSampleVersion63() {
+    const ShaderRecompiler::RequestSerializer serializer;
+    ShaderRecompiler::RecompileRequest request{};
+    request.shader.stage = ShaderRecompiler::ShaderStage::Fragment;
+    request.context.pixel.emplace();
+    request.context.pixel->alphaToCoverage = true;
+    request.context.pixel->ditheredAlphaToCoverage = true;
+    request.target.maxImageArrayLayers = 4097u;
+    request.target.fixedPushSlots = true;
+    request.target.spannedAnySubgroup = true;
+    std::vector<std::uint8_t> first;
+    std::size_t ditherByte = 0u;
+    for (const auto mode : {ShaderRecompiler::SingleSampleDither::E701, ShaderRecompiler::SingleSampleDither::Rounded18701}) {
+        request.context.pixel->ditheredAlphaSamples = 1u;
+        request.context.pixel->singleSampleDither = mode;
+        const auto bytes = StripForkTail(DecodeBase64(serializer.Serialize(request)));
+        Require(bytes[4] == 63u);
+        const auto replay = serializer.Deserialize(EncodeBase64(bytes));
+        Require(replay.request.context.pixel->singleSampleDither == mode && replay.request.context.pixel->ditheredAlphaSamples == 1u);
+        Require(replay.request.target.maxImageArrayLayers == 4097u && replay.request.target.fixedPushSlots && replay.request.target.spannedAnySubgroup);
+        Require(StripForkTail(DecodeBase64(serializer.Serialize(replay.request))) == bytes);
+        for (const auto version : {53u, 54u, 55u, 56u, 57u, 62u}) {
+            auto previous = bytes;
+            previous[4] = version;
+            bool rejected = false;
+            try {
+                static_cast<void>(serializer.Deserialize(EncodeBase64(previous)));
+            } catch (const std::runtime_error& error) {
+                rejected = std::string_view(error.what()) == "RequestSerializer: invalid alpha-to-coverage dither value";
+            }
+            if (!rejected) throw std::runtime_error("a legacy request did not reject a single-sample dither code");
+        }
+        if (first.empty()) first = bytes;
+        else {
+            Require(first.size() == bytes.size());
+            std::size_t differences = 0u;
+            for (std::size_t index = 0u; index < bytes.size(); ++index) {
+                if (first[index] == bytes[index]) continue;
+                ditherByte = index;
+                ++differences;
+            }
+            Require(differences == 1u && first[ditherByte] == 3u && bytes[ditherByte] == 4u);
+        }
+    }
+    for (const auto version : {55u, 56u, 57u, 62u}) {
+        for (const auto samples : {2u, 8u}) {
+            request.context.pixel->ditheredAlphaSamples = samples;
+            request.context.pixel->singleSampleDither = ShaderRecompiler::SingleSampleDither::None;
+            auto legacy = StripForkTail(DecodeBase64(serializer.Serialize(request)));
+            legacy[4] = version;
+            if (version < 57u) legacy.resize(legacy.size() - 6u);
+            else if (version < 62u) legacy.pop_back();
+            const auto replay = serializer.Deserialize(EncodeBase64(legacy));
+            Require(replay.request.context.pixel->ditheredAlphaSamples == samples && replay.request.context.pixel->singleSampleDither == ShaderRecompiler::SingleSampleDither::None);
+            Require(replay.request.target.maxImageArrayLayers == (version >= 57u ? 4097u : 0u) && replay.request.target.fixedPushSlots == (version >= 57u) && replay.request.target.spannedAnySubgroup == (version >= 62u));
+        }
+    }
+    for (const auto [version, dither] : {std::pair{63u, 5u}, std::pair{65u, 3u}}) {
+        auto invalid = first;
+        invalid[4] = version;
+        invalid[ditherByte] = dither;
+        bool rejected = false;
+        try {
+            static_cast<void>(serializer.Deserialize(EncodeBase64(invalid)));
+        } catch (const std::runtime_error&) {
+            rejected = true;
+        }
+        Require(rejected);
+    }
+}
+
 int main() {
+    VerifySingleSampleVersion63();
     VerifyTargetOptions();
     return VerifyVersion56Compatibility();
 }

@@ -7,7 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#ifdef __APPLE__
+#ifndef _WIN32
 #include <sys/uio.h>
 #endif
 
@@ -64,6 +64,9 @@ std::int64_t WritevAtEnd(int descriptor, const iovec* iov, int iovcnt);
 #endif
 #ifdef __APPLE__
 [[nodiscard]] std::optional<PositionedTransferLock> LockAppendOffset(int descriptor);
+#endif
+#ifndef _WIN32
+std::int64_t TransferInParts(int descriptor, const iovec* iov, int iovcnt, const std::int64_t* offset, bool write);
 #endif
 }
 

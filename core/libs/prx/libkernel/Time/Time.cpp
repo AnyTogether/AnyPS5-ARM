@@ -129,8 +129,16 @@ static std::uint64_t GetStartNanos() {
 
 // Process time counts from the library's load, not from its first query, which could read 0.
 static const std::uint64_t g_processStart = GetStartNanos();
+#ifdef _WIN32
+static std::uint64_t APS5_VABI LibcMonotonicNanos() {
+    return GetMonotonicNanos();
+}
+#endif
 static const bool g_clockSourceInstalled = [] {
     LibcSetProcessTimeSource_nid_no_patch(&sceKernelGetProcessTime);
+#ifdef _WIN32
+    LibcSetMonotonicTimeSource_nid_no_patch(&LibcMonotonicNanos);
+#endif
     return true;
 }();
 
