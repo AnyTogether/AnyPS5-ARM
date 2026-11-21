@@ -426,7 +426,9 @@ struct DefaultFilterOperation : public FilterOperation {
     FilterOperationType m_representedType{FilterOperationType::Default};
     std::uint8_t m_subPad[7]{0, 0, 0, 0, 0, 0, 0};
 
-    FilterOperationType representedType() const { return m_representedType; }
+    // No representedType() member: its mangled name is _ZNK7WebCore22DefaultFilterOperation15representedTypeEv,
+    // the extern "C" getter's name (FieldGetters.cpp). Built with clang (macOS), a call to the getter from a
+    // file that also saw the member returned the member's one-byte value: 44 for 300 (run 44868992978).
 };
 
 static_assert(sizeof(DefaultFilterOperation) == 24);

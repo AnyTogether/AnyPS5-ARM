@@ -106,13 +106,7 @@ void TestDefaultRepresentedTypes() {
         auto operation = _ZN7WebCore22DefaultFilterOperation6createENS_15FilterOperation13OperationTypeE(type);
         auto* operationPtr = operation.get();
         Require(operationPtr != nullptr);
-        const auto represented = _ZNK7WebCore22DefaultFilterOperation15representedTypeEv(operationPtr);
-        if (represented != type) {
-            std::fprintf(stderr, "represented type %u for %u; bytes at +0x10:", represented, type);
-            for (std::size_t offset = 0; offset < sizeof(WebCore::DefaultFilterOperation); ++offset) std::fprintf(stderr, " %02x", reinterpret_cast<const unsigned char*>(operationPtr)[offset]);
-            std::fprintf(stderr, "\n");
-        }
-        Require(represented == type);
+        Require(_ZNK7WebCore22DefaultFilterOperation15representedTypeEv(operationPtr) == type);
         Require(operationPtr->m_type == WebCore::FilterOperationType::Default);
         Require(operationPtr->m_refCount.load() == 1);
     }

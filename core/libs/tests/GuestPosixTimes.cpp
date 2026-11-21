@@ -2,19 +2,13 @@
 #include "prx/libScePosixForWebKit/GuestTimes.hpp"
 #include <cerrno>
 #include <chrono>
-#include <cstdio>
 #include <cstdlib>
-#include <source_location>
 #include <stdexcept>
 #include <thread>
 
-static void Require(bool condition, std::source_location location = std::source_location::current()) {
-    if (condition) return;
-    std::fprintf(stderr, "posix times check failed at line %u (errno %d)\n", static_cast<unsigned>(location.line()), errno);
-    std::abort();
-}
+static void Require(bool condition) { if (!condition) std::abort(); }
 
-static void Run() {
+int main() {
     errno = E2BIG;
     PosixForWebKitTms first{};
     const auto before = times_nid_postfix(&first);
@@ -23,6 +17,8 @@ static void Run() {
     Require(errno == E2BIG);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    // On macOS errno is ETIMEDOUT after this sleep (run 44868992978), so it is set again.
+    errno = E2BIG;
     PosixForWebKitTms second{};
     const auto after = times_nid_postfix(&second);
     Require(after > before);
@@ -31,20 +27,11 @@ static void Run() {
 
     try {
         times_nid_postfix(nullptr);
-        Require(false);
+        std::abort();
     } catch (const std::invalid_argument&) { Require(errno == E2BIG); }
 
     try {
         times_nid_postfix(reinterpret_cast<PosixForWebKitTms*>(0x1000));
-        Require(false);
-    } catch (const std::invalid_argument&) { Require(errno == E2BIG); }
-}
-
-int main() {
-    try {
-        Run();
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "posix times: unexpected exception: %s\n", error.what());
         std::abort();
-    }
+    } catch (const std::invalid_argument&) { Require(errno == E2BIG); }
 }
