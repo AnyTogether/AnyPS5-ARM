@@ -147,6 +147,9 @@ struct Preferences: Codable, Equatable {
     /// The SwanStation options the player chose in the game's menu, by key, given to every PS1
     /// game the host starts (protocol.md "start": `options`).
     var retroHostOptions: [String: String]?
+    /// The core options the player chose in a game's menu that are kept for that game only
+    /// (`RetroGraphics.perGameKeys`: PS1 widescreen), by the game's title ID, then by key.
+    var retroHostGameOptions: [String: [String: String]]?
     /// The window full screen at start (WindowStart): nil the first time, then as it was left.
     var fullScreen: Bool?
     /// Settings → Behaviour → Pause Game When Opening the Menu: nil means on.

@@ -1,0 +1,2055 @@
+{
+  "description": "The last status of the lrps2-no-bios-folder scenario in AnyPS5 Desktop test/fixtures/retro_host_ps2_recording.json: a host built from AnyTogether/anyps5-retro-host main 1b57932 (#18) running the real LRPS2 core (LRPS2_COMMIT c0d39a58e with the host patch) with no BIOS folder, so it ended before it drew. Its options are every option LRPS2 lists.",
+  "from": "AnyTogether/AnyPS5-Desktop test/fixtures/retro_host_ps2_recording.json at 9ac19fdbb0",
+  "status": {
+    "ready": false,
+    "ended": true,
+    "error": "No PS2 BIOS was found.",
+    "errorCode": "bios",
+    "aspect": 1.3333333333333333,
+    "hardware": false,
+    "resolutionError": "",
+    "graphicsPending": false,
+    "progressLabel": null,
+    "progressPercent": null,
+    "options": {
+      "pcsx2_fastboot": {
+        "title": "System > Fast Boot (Restart)",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 0,
+        "activeValue": "enabled",
+        "restart": true
+      },
+      "pcsx2_fastcdvd": {
+        "title": "System > Fast CD/DVD Access (Restart)",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": true
+      },
+      "pcsx2_hint_language_unlock": {
+        "title": "System > Language Unlock",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_enable_cheats": {
+        "title": "System > Enable Cheats",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_use_external_gameindex": {
+        "title": "System > Use External GameIndex Database",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_upscale_multiplier": {
+        "title": "Video > Internal Resolution (Restart)",
+        "values": [
+          "1x (Native)",
+          "2x",
+          "4x",
+          "8x"
+        ],
+        "labels": [
+          "1x (Native)",
+          "2x",
+          "4x",
+          "8x"
+        ],
+        "selected": 0,
+        "activeValue": "1x (Native)",
+        "restart": true
+      },
+      "pcsx2_native_scaling": {
+        "title": "Video > Native Scaling",
+        "values": [
+          "Automatic",
+          "disabled",
+          "Normal",
+          "Aggressive"
+        ],
+        "labels": [
+          "Automatic",
+          "disabled",
+          "Normal",
+          "Aggressive"
+        ],
+        "selected": 0,
+        "activeValue": "Automatic",
+        "restart": false
+      },
+      "pcsx2_widescreen_hint": {
+        "title": "Video > Widescreen hint (Restart)",
+        "values": [
+          "disabled",
+          "enabled (16:9)",
+          "enabled (16:10)",
+          "enabled (21:9)",
+          "enabled (32:9)"
+        ],
+        "labels": [
+          "disabled",
+          "enabled (16:9)",
+          "enabled (16:10)",
+          "enabled (21:9)",
+          "enabled (32:9)"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": true
+      },
+      "pcsx2_deinterlace_mode": {
+        "title": "Video > Deinterlacing",
+        "values": [
+          "Automatic",
+          "Off",
+          "Weave TFF",
+          "Weave BFF",
+          "Bob TFF",
+          "Bob BFF",
+          "Blend TFF",
+          "Blend BFF",
+          "Adaptive TFF",
+          "Adaptive BFF"
+        ],
+        "labels": [
+          "Automatic",
+          "Off",
+          "Weave TFF",
+          "Weave BFF",
+          "Bob TFF",
+          "Bob BFF",
+          "Blend TFF",
+          "Blend BFF",
+          "Adaptive TFF",
+          "Adaptive BFF"
+        ],
+        "selected": 0,
+        "activeValue": "Automatic",
+        "restart": false
+      },
+      "pcsx2_nointerlacing_hint": {
+        "title": "Video > No Interlacing Hint (Restart)",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 0,
+        "activeValue": "enabled",
+        "restart": true
+      },
+      "pcsx2_disable_interlace_offset": {
+        "title": "Video > Disable Interlace Offset",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_hw_download_mode": {
+        "title": "Video > Hardware Download Mode",
+        "values": [
+          "Accurate",
+          "Disable Readbacks",
+          "Unsynchronized",
+          "Disabled"
+        ],
+        "labels": [
+          "Accurate",
+          "Disable Readbacks",
+          "Unsynchronized",
+          "Disabled"
+        ],
+        "selected": 0,
+        "activeValue": "Accurate",
+        "restart": false
+      },
+      "pcsx2_pgs_disable_mipmaps": {
+        "title": "Video > Force Texture LOD0",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_texture_filtering": {
+        "title": "Video > Texture Filtering",
+        "values": [
+          "Nearest",
+          "Bilinear (Forced)",
+          "Bilinear (PS2)",
+          "Bilinear (Forced excluding sprite)"
+        ],
+        "labels": [
+          "Nearest",
+          "Bilinear (Forced)",
+          "Bilinear (PS2)",
+          "Bilinear (Forced excluding sprite)"
+        ],
+        "selected": 2,
+        "activeValue": "Bilinear (PS2)",
+        "restart": false
+      },
+      "pcsx2_trilinear_filtering": {
+        "title": "Video > Trilinear Filtering",
+        "values": [
+          "Automatic",
+          "disabled",
+          "Trilinear (PS2)",
+          "Trilinear (Forced)"
+        ],
+        "labels": [
+          "Automatic",
+          "disabled",
+          "Trilinear (PS2)",
+          "Trilinear (Forced)"
+        ],
+        "selected": 0,
+        "activeValue": "Automatic",
+        "restart": false
+      },
+      "pcsx2_anisotropic_filtering": {
+        "title": "Video > Anisotropic Filtering",
+        "values": [
+          "disabled",
+          "2x",
+          "4x",
+          "8x",
+          "16x"
+        ],
+        "labels": [
+          "disabled",
+          "2x",
+          "4x",
+          "8x",
+          "16x"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_dithering": {
+        "title": "Video > Dithering",
+        "values": [
+          "disabled",
+          "Scaled",
+          "Unscaled",
+          "Force 32bit"
+        ],
+        "labels": [
+          "disabled",
+          "Scaled",
+          "Unscaled",
+          "Force 32bit"
+        ],
+        "selected": 2,
+        "activeValue": "Unscaled",
+        "restart": false
+      },
+      "pcsx2_blending_accuracy": {
+        "title": "Video > Blending Accuracy",
+        "values": [
+          "Minimum",
+          "Basic",
+          "Medium",
+          "High",
+          "Full",
+          "Maximum"
+        ],
+        "labels": [
+          "Minimum",
+          "Basic",
+          "Medium",
+          "High",
+          "Full",
+          "Maximum"
+        ],
+        "selected": 1,
+        "activeValue": "Basic",
+        "restart": false
+      },
+      "pcsx2_pcrtc_antiblur": {
+        "title": "Video > PCRTC Anti-Blur",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 0,
+        "activeValue": "enabled",
+        "restart": false
+      },
+      "pcsx2_pcrtc_screen_offsets": {
+        "title": "Video > PCRTC Screen Offsets",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_vr_mode": {
+        "title": "Video > VR",
+        "values": [
+          "disabled",
+          "stereoscopic"
+        ],
+        "labels": [
+          "Off",
+          "Stereoscopic"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_vr_depth": {
+        "title": "Video > VR Depth",
+        "values": [
+          "25%",
+          "50%",
+          "75%",
+          "100%",
+          "125%",
+          "150%",
+          "200%"
+        ],
+        "labels": [
+          "25%",
+          "50%",
+          "75%",
+          "100%",
+          "125%",
+          "150%",
+          "200%"
+        ],
+        "selected": 3,
+        "activeValue": "100%",
+        "restart": false
+      },
+      "pcsx2_disable_shader_cache": {
+        "title": "Video > Disable Shader Cache (Restart)",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": true
+      },
+      "pcsx2_vu_accurate_addsub": {
+        "title": "Emulation > VU Accurate Add/Sub",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_vu_exact_mul": {
+        "title": "Emulation > VU Exact Multiply",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_vu_exact_div": {
+        "title": "Emulation > VU Exact Divide",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_vu0_softfloat": {
+        "title": "Emulation > VU0 Soft Float (Micro Programs)",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_vu1_softfloat": {
+        "title": "Emulation > VU1 Soft Float",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_mtvu": {
+        "title": "Emulation > MTVU (Multi-Threaded VU1) (Restart)",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": true
+      },
+      "pcsx2_instant_vu1": {
+        "title": "Emulation > Instant VU1 (Restart)",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 0,
+        "activeValue": "enabled",
+        "restart": true
+      },
+      "pcsx2_ee_accurate_fpu": {
+        "title": "Emulation > EE Accurate FPU Arithmetic",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 0,
+        "activeValue": "enabled",
+        "restart": false
+      },
+      "pcsx2_fpu_softfloat": {
+        "title": "Emulation > EE FPU Soft Float (Recompiler)",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_ee_cycle_rate": {
+        "title": "Emulation > EE Cycle Rate",
+        "values": [
+          "50% (Underclock)",
+          "60% (Underclock)",
+          "75% (Underclock)",
+          "100% (Normal Speed)",
+          "130% (Overclock)",
+          "180% (Overclock)",
+          "300% (Overclock)"
+        ],
+        "labels": [
+          "50% (Underclock)",
+          "60% (Underclock)",
+          "75% (Underclock)",
+          "100% (Normal Speed)",
+          "130% (Overclock)",
+          "180% (Overclock)",
+          "300% (Overclock)"
+        ],
+        "selected": 3,
+        "activeValue": "100% (Normal Speed)",
+        "restart": false
+      },
+      "pcsx2_ee_cpu": {
+        "title": "Emulation > EE CPU Provider (Restart)",
+        "values": [
+          "Recompiler",
+          "Interpreter"
+        ],
+        "labels": [
+          "Recompiler",
+          "Interpreter"
+        ],
+        "selected": 0,
+        "activeValue": "Recompiler",
+        "restart": true
+      },
+      "pcsx2_ee_cycle_skip": {
+        "title": "Emulation > EE Cycle Skipping",
+        "values": [
+          "disabled",
+          "Mild Underclock",
+          "Moderate Underclock",
+          "Maximum Underclock"
+        ],
+        "labels": [
+          "disabled",
+          "Mild Underclock",
+          "Moderate Underclock",
+          "Maximum Underclock"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_fastmem": {
+        "title": "Emulation > Fastmem (Restart)",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 0,
+        "activeValue": "enabled",
+        "restart": true
+      },
+      "pcsx2_game_enhancements_hint": {
+        "title": "Emulation > Game Enhancements hint (Restart)",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": true
+      },
+      "pcsx2_uncapped_framerate_hint": {
+        "title": "Emulation > Uncapped Framerate hint (Restart)",
+        "values": [
+          "disabled",
+          "enabled",
+          "60fps PAL-to-NTSC"
+        ],
+        "labels": [
+          "disabled",
+          "enabled",
+          "60fps PAL-to-NTSC"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": true
+      },
+      "pcsx2_enable_hw_hacks": {
+        "title": "HW Hacks > Enable Manual Hardware Renderer Fixes (Not Recommended)",
+        "values": [
+          "enabled",
+          "disabled"
+        ],
+        "labels": [
+          "enabled",
+          "disabled"
+        ],
+        "selected": 1,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_cpu_sprite_size": {
+        "title": "HW Hacks > CPU Sprite Render Size",
+        "values": [
+          "0",
+          "1",
+          "2",
+          "3",
+          "4",
+          "5",
+          "6",
+          "7",
+          "8",
+          "9",
+          "10"
+        ],
+        "labels": [
+          "disabled",
+          "1 (64 Max Width)",
+          "2 (128 Max Width)",
+          "3 (192 Max Width)",
+          "4 (256 Max Width)",
+          "5 (320 Max Width)",
+          "6 (384 Max Width)",
+          "7 (448 Max Width)",
+          "8 (512 Max Width)",
+          "9 (576 Max Width)",
+          "10 (640 Max Width)"
+        ],
+        "selected": 0,
+        "activeValue": "0",
+        "restart": false
+      },
+      "pcsx2_cpu_sprite_level": {
+        "title": "HW Hacks > CPU Sprite Render Level",
+        "values": [
+          "Sprites Only",
+          "Sprites/Triangles",
+          "Blended Sprites/Triangles"
+        ],
+        "labels": [
+          "Sprites Only",
+          "Sprites/Triangles",
+          "Blended Sprites/Triangles"
+        ],
+        "selected": 0,
+        "activeValue": "Sprites Only",
+        "restart": false
+      },
+      "pcsx2_software_clut_render": {
+        "title": "HW Hacks > Software CLUT Render",
+        "values": [
+          "disabled",
+          "Normal",
+          "Aggressive"
+        ],
+        "labels": [
+          "disabled",
+          "Normal",
+          "Aggressive"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_texture_inside_rt": {
+        "title": "HW Hacks > Texture Inside RT",
+        "values": [
+          "disabled",
+          "Inside Target",
+          "Merge Targets"
+        ],
+        "labels": [
+          "disabled",
+          "Inside Target",
+          "Merge Targets"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_disable_depth_conversion": {
+        "title": "HW Hacks > Disabled Depth Conversion",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_framebuffer_conversion": {
+        "title": "HW Hacks > Framebuffer Conversion",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_disable_partial_invalidation": {
+        "title": "HW Hacks > Disable Partial Source Invalidation",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_gpu_palette_conversion": {
+        "title": "HW Hacks > GPU Palette Conversion",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_preload_frame_data": {
+        "title": "HW Hacks > Preload Frame Data",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_half_pixel_offset": {
+        "title": "HW Hacks > Half Pixel Offset",
+        "values": [
+          "disabled",
+          "Normal (Vertex)",
+          "Special (Texture)",
+          "Special (Texture - Aggressive)",
+          "Align to Native"
+        ],
+        "labels": [
+          "disabled",
+          "Normal (Vertex)",
+          "Special (Texture)",
+          "Special (Texture - Aggressive)",
+          "Align to Native"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_round_sprite": {
+        "title": "HW Hacks > Round Sprite",
+        "values": [
+          "disabled",
+          "Half",
+          "Full"
+        ],
+        "labels": [
+          "disabled",
+          "Half",
+          "Full"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_align_sprite": {
+        "title": "HW Hacks > Align Sprite",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_merge_sprite": {
+        "title": "HW Hacks > Merge Sprite",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_unscaled_palette_draw": {
+        "title": "HW Hacks > Unscaled Palette Texture Draws",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_force_sprite_position": {
+        "title": "HW Hacks > Force Even Sprite Position",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_axis_deadzone1": {
+        "title": "Input > Port 1 > Analog Deadzone",
+        "values": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "labels": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "selected": 15,
+        "activeValue": "15%",
+        "restart": false
+      },
+      "pcsx2_button_deadzone1": {
+        "title": "Input > Port 1 > Trigger Deadzone",
+        "values": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "labels": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "selected": 0,
+        "activeValue": "0%",
+        "restart": false
+      },
+      "pcsx2_axis_scale1": {
+        "title": "Input > Port 1 > Analog Sensitivity",
+        "values": [
+          "80%",
+          "81%",
+          "82%",
+          "83%",
+          "84%",
+          "85%",
+          "86%",
+          "87%",
+          "88%",
+          "89%",
+          "90%",
+          "91%",
+          "92%",
+          "93%",
+          "94%",
+          "95%",
+          "96%",
+          "97%",
+          "98%",
+          "99%",
+          "100%",
+          "101%",
+          "102%",
+          "103%",
+          "104%",
+          "105%",
+          "106%",
+          "107%",
+          "108%",
+          "109%",
+          "110%",
+          "111%",
+          "112%",
+          "113%",
+          "114%",
+          "115%",
+          "116%",
+          "117%",
+          "118%",
+          "119%",
+          "120%",
+          "121%",
+          "122%",
+          "123%",
+          "124%",
+          "125%",
+          "126%",
+          "127%",
+          "128%",
+          "129%",
+          "130%",
+          "131%",
+          "132%",
+          "133%",
+          "134%",
+          "135%",
+          "136%",
+          "137%",
+          "138%",
+          "139%",
+          "140%",
+          "141%",
+          "142%",
+          "143%",
+          "144%",
+          "145%",
+          "146%",
+          "147%",
+          "148%",
+          "149%",
+          "150%",
+          "151%",
+          "152%",
+          "153%",
+          "154%",
+          "155%",
+          "156%",
+          "157%",
+          "158%",
+          "159%",
+          "160%",
+          "161%",
+          "162%",
+          "163%",
+          "164%",
+          "165%",
+          "166%",
+          "167%",
+          "168%",
+          "169%",
+          "170%",
+          "171%",
+          "172%",
+          "173%",
+          "174%",
+          "175%",
+          "176%",
+          "177%",
+          "178%",
+          "179%",
+          "180%",
+          "181%",
+          "182%",
+          "183%",
+          "184%",
+          "185%",
+          "186%",
+          "187%",
+          "188%",
+          "189%",
+          "190%",
+          "191%",
+          "192%",
+          "193%",
+          "194%",
+          "195%",
+          "196%",
+          "197%",
+          "198%",
+          "199%",
+          "200%"
+        ],
+        "labels": [
+          "80%",
+          "81%",
+          "82%",
+          "83%",
+          "84%",
+          "85%",
+          "86%",
+          "87%",
+          "88%",
+          "89%",
+          "90%",
+          "91%",
+          "92%",
+          "93%",
+          "94%",
+          "95%",
+          "96%",
+          "97%",
+          "98%",
+          "99%",
+          "100%",
+          "101%",
+          "102%",
+          "103%",
+          "104%",
+          "105%",
+          "106%",
+          "107%",
+          "108%",
+          "109%",
+          "110%",
+          "111%",
+          "112%",
+          "113%",
+          "114%",
+          "115%",
+          "116%",
+          "117%",
+          "118%",
+          "119%",
+          "120%",
+          "121%",
+          "122%",
+          "123%",
+          "124%",
+          "125%",
+          "126%",
+          "127%",
+          "128%",
+          "129%",
+          "130%",
+          "131%",
+          "132%",
+          "133%",
+          "134%",
+          "135%",
+          "136%",
+          "137%",
+          "138%",
+          "139%",
+          "140%",
+          "141%",
+          "142%",
+          "143%",
+          "144%",
+          "145%",
+          "146%",
+          "147%",
+          "148%",
+          "149%",
+          "150%",
+          "151%",
+          "152%",
+          "153%",
+          "154%",
+          "155%",
+          "156%",
+          "157%",
+          "158%",
+          "159%",
+          "160%",
+          "161%",
+          "162%",
+          "163%",
+          "164%",
+          "165%",
+          "166%",
+          "167%",
+          "168%",
+          "169%",
+          "170%",
+          "171%",
+          "172%",
+          "173%",
+          "174%",
+          "175%",
+          "176%",
+          "177%",
+          "178%",
+          "179%",
+          "180%",
+          "181%",
+          "182%",
+          "183%",
+          "184%",
+          "185%",
+          "186%",
+          "187%",
+          "188%",
+          "189%",
+          "190%",
+          "191%",
+          "192%",
+          "193%",
+          "194%",
+          "195%",
+          "196%",
+          "197%",
+          "198%",
+          "199%",
+          "200%"
+        ],
+        "selected": 53,
+        "activeValue": "133%",
+        "restart": false
+      },
+      "pcsx2_invert_left_stick1": {
+        "title": "Input > Port 1 > Invert Left Analog Axis",
+        "values": [
+          "disabled",
+          "x_axis",
+          "y_axis",
+          "all"
+        ],
+        "labels": [
+          "disabled",
+          "Left/Right",
+          "Up/Down",
+          "Up/Down and Left/Right"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_invert_right_stick1": {
+        "title": "Input > Port 1 > Invert Right Analog Axis",
+        "values": [
+          "disabled",
+          "x_axis",
+          "y_axis",
+          "all"
+        ],
+        "labels": [
+          "disabled",
+          "Left/Right",
+          "Up/Down",
+          "Up/Down and Left/Right"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_analog_mode1": {
+        "title": "Input > Port 1 > Start in Analog Mode",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_enable_rumble1": {
+        "title": "Input > Port 1 > Rumble",
+        "values": [
+          "disabled",
+          "5%",
+          "10%",
+          "15%",
+          "20%",
+          "25%",
+          "30%",
+          "35%",
+          "40%",
+          "45%",
+          "50%",
+          "55%",
+          "60%",
+          "65%",
+          "70%",
+          "75%",
+          "80%",
+          "85%",
+          "90%",
+          "95%",
+          "100%"
+        ],
+        "labels": [
+          "disabled",
+          "5%",
+          "10%",
+          "15%",
+          "20%",
+          "25%",
+          "30%",
+          "35%",
+          "40%",
+          "45%",
+          "50%",
+          "55%",
+          "60%",
+          "65%",
+          "70%",
+          "75%",
+          "80%",
+          "85%",
+          "90%",
+          "95%",
+          "100%"
+        ],
+        "selected": 20,
+        "activeValue": "100%",
+        "restart": false
+      },
+      "pcsx2_axis_deadzone2": {
+        "title": "Input > Port 2 > Analog Deadzone",
+        "values": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "labels": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "selected": 15,
+        "activeValue": "15%",
+        "restart": false
+      },
+      "pcsx2_button_deadzone2": {
+        "title": "Input > Port 2 > Trigger Deadzone",
+        "values": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "labels": [
+          "0%",
+          "1%",
+          "2%",
+          "3%",
+          "4%",
+          "5%",
+          "6%",
+          "7%",
+          "8%",
+          "9%",
+          "10%",
+          "11%",
+          "12%",
+          "13%",
+          "14%",
+          "15%",
+          "16%",
+          "17%",
+          "18%",
+          "19%",
+          "20%",
+          "21%",
+          "22%",
+          "23%",
+          "24%",
+          "25%",
+          "26%",
+          "27%",
+          "28%",
+          "29%",
+          "30%",
+          "31%",
+          "32%",
+          "33%",
+          "34%",
+          "35%",
+          "36%",
+          "37%",
+          "38%",
+          "39%",
+          "40%",
+          "41%",
+          "42%",
+          "43%",
+          "44%",
+          "45%",
+          "46%",
+          "47%",
+          "48%",
+          "49%",
+          "50%"
+        ],
+        "selected": 0,
+        "activeValue": "0%",
+        "restart": false
+      },
+      "pcsx2_axis_scale2": {
+        "title": "Input > Port 2 > Analog Sensitivity",
+        "values": [
+          "80%",
+          "81%",
+          "82%",
+          "83%",
+          "84%",
+          "85%",
+          "86%",
+          "87%",
+          "88%",
+          "89%",
+          "90%",
+          "91%",
+          "92%",
+          "93%",
+          "94%",
+          "95%",
+          "96%",
+          "97%",
+          "98%",
+          "99%",
+          "100%",
+          "101%",
+          "102%",
+          "103%",
+          "104%",
+          "105%",
+          "106%",
+          "107%",
+          "108%",
+          "109%",
+          "110%",
+          "111%",
+          "112%",
+          "113%",
+          "114%",
+          "115%",
+          "116%",
+          "117%",
+          "118%",
+          "119%",
+          "120%",
+          "121%",
+          "122%",
+          "123%",
+          "124%",
+          "125%",
+          "126%",
+          "127%",
+          "128%",
+          "129%",
+          "130%",
+          "131%",
+          "132%",
+          "133%",
+          "134%",
+          "135%",
+          "136%",
+          "137%",
+          "138%",
+          "139%",
+          "140%",
+          "141%",
+          "142%",
+          "143%",
+          "144%",
+          "145%",
+          "146%",
+          "147%",
+          "148%",
+          "149%",
+          "150%",
+          "151%",
+          "152%",
+          "153%",
+          "154%",
+          "155%",
+          "156%",
+          "157%",
+          "158%",
+          "159%",
+          "160%",
+          "161%",
+          "162%",
+          "163%",
+          "164%",
+          "165%",
+          "166%",
+          "167%",
+          "168%",
+          "169%",
+          "170%",
+          "171%",
+          "172%",
+          "173%",
+          "174%",
+          "175%",
+          "176%",
+          "177%",
+          "178%",
+          "179%",
+          "180%",
+          "181%",
+          "182%",
+          "183%",
+          "184%",
+          "185%",
+          "186%",
+          "187%",
+          "188%",
+          "189%",
+          "190%",
+          "191%",
+          "192%",
+          "193%",
+          "194%",
+          "195%",
+          "196%",
+          "197%",
+          "198%",
+          "199%",
+          "200%"
+        ],
+        "labels": [
+          "80%",
+          "81%",
+          "82%",
+          "83%",
+          "84%",
+          "85%",
+          "86%",
+          "87%",
+          "88%",
+          "89%",
+          "90%",
+          "91%",
+          "92%",
+          "93%",
+          "94%",
+          "95%",
+          "96%",
+          "97%",
+          "98%",
+          "99%",
+          "100%",
+          "101%",
+          "102%",
+          "103%",
+          "104%",
+          "105%",
+          "106%",
+          "107%",
+          "108%",
+          "109%",
+          "110%",
+          "111%",
+          "112%",
+          "113%",
+          "114%",
+          "115%",
+          "116%",
+          "117%",
+          "118%",
+          "119%",
+          "120%",
+          "121%",
+          "122%",
+          "123%",
+          "124%",
+          "125%",
+          "126%",
+          "127%",
+          "128%",
+          "129%",
+          "130%",
+          "131%",
+          "132%",
+          "133%",
+          "134%",
+          "135%",
+          "136%",
+          "137%",
+          "138%",
+          "139%",
+          "140%",
+          "141%",
+          "142%",
+          "143%",
+          "144%",
+          "145%",
+          "146%",
+          "147%",
+          "148%",
+          "149%",
+          "150%",
+          "151%",
+          "152%",
+          "153%",
+          "154%",
+          "155%",
+          "156%",
+          "157%",
+          "158%",
+          "159%",
+          "160%",
+          "161%",
+          "162%",
+          "163%",
+          "164%",
+          "165%",
+          "166%",
+          "167%",
+          "168%",
+          "169%",
+          "170%",
+          "171%",
+          "172%",
+          "173%",
+          "174%",
+          "175%",
+          "176%",
+          "177%",
+          "178%",
+          "179%",
+          "180%",
+          "181%",
+          "182%",
+          "183%",
+          "184%",
+          "185%",
+          "186%",
+          "187%",
+          "188%",
+          "189%",
+          "190%",
+          "191%",
+          "192%",
+          "193%",
+          "194%",
+          "195%",
+          "196%",
+          "197%",
+          "198%",
+          "199%",
+          "200%"
+        ],
+        "selected": 53,
+        "activeValue": "133%",
+        "restart": false
+      },
+      "pcsx2_invert_left_stick2": {
+        "title": "Input > Port 2 > Invert Left Analog Axis",
+        "values": [
+          "disabled",
+          "x_axis",
+          "y_axis",
+          "all"
+        ],
+        "labels": [
+          "disabled",
+          "Left/Right",
+          "Up/Down",
+          "Up/Down and Left/Right"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_invert_right_stick2": {
+        "title": "Input > Port 2 > Invert Right Analog Axis",
+        "values": [
+          "disabled",
+          "x_axis",
+          "y_axis",
+          "all"
+        ],
+        "labels": [
+          "disabled",
+          "Left/Right",
+          "Up/Down",
+          "Up/Down and Left/Right"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_analog_mode2": {
+        "title": "Input > Port 2 > Start in Analog Mode",
+        "values": [
+          "disabled",
+          "enabled"
+        ],
+        "labels": [
+          "disabled",
+          "enabled"
+        ],
+        "selected": 0,
+        "activeValue": "disabled",
+        "restart": false
+      },
+      "pcsx2_enable_rumble2": {
+        "title": "Input > Port 2 > Rumble",
+        "values": [
+          "disabled",
+          "5%",
+          "10%",
+          "15%",
+          "20%",
+          "25%",
+          "30%",
+          "35%",
+          "40%",
+          "45%",
+          "50%",
+          "55%",
+          "60%",
+          "65%",
+          "70%",
+          "75%",
+          "80%",
+          "85%",
+          "90%",
+          "95%",
+          "100%"
+        ],
+        "labels": [
+          "disabled",
+          "5%",
+          "10%",
+          "15%",
+          "20%",
+          "25%",
+          "30%",
+          "35%",
+          "40%",
+          "45%",
+          "50%",
+          "55%",
+          "60%",
+          "65%",
+          "70%",
+          "75%",
+          "80%",
+          "85%",
+          "90%",
+          "95%",
+          "100%"
+        ],
+        "selected": 20,
+        "activeValue": "100%",
+        "restart": false
+      }
+    },
+    "cardUnreadable": false,
+    "console": "ps2",
+    "core": {
+      "name": "ParaLLEl PS2",
+      "version": "anyps5-1-b1b749c197ae47b0562ca79e3cdacf08873dfd156065f18576508c926d02eb5f"
+    },
+    "timing": null
+  }
+}

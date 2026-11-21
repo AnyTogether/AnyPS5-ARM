@@ -31,7 +31,8 @@ final class RetroResolutionTests: XCTestCase {
         return try RetroStatus.parse(try RetroJSON.parse(Array(text.utf8)))
     }
 
-    func testAPs2GameOffersNative2xAnd4xOnlyOnAHostThatLimitsItAndSaysTheRefusal() throws {
+    func testAPs2GameOffersNativeTo8xOfWhatTheHostListsOnlyOnAHostThatLimitsItAndSaysTheRefusal() throws {
+        XCTAssertEqual(RetroResolution.offered(ps2: true), ["1x (Native)": 1, "2x": 2, "4x": 4, "8x": 8], "LRPS2 lists no 3x or 6x")
         let status = try recordedPs2Status()
         XCTAssertNil(RetroResolutionChoice.of(status, limitsPs2: false), "an older host does not limit it: nothing offered")
         let choice = try XCTUnwrap(RetroResolutionChoice.of(status, limitsPs2: true))
@@ -50,7 +51,8 @@ final class RetroResolutionTests: XCTestCase {
         XCTAssertTrue(RetroOptionSection.sent("pcsx2_upscale_multiplier", ps2: true), "the menu's first page offers it")
         XCTAssertTrue(RetroOptionSection.sent("swanstation_GPU_ResolutionScale"))
         XCTAssertFalse(RetroOptionSection.sent("swanstation_GPU_ResolutionScale", ps2: true))
-        XCTAssertFalse(RetroOptionSection.sent("swanstation_GPU_TextureFilter"), "every other graphics option stays held back")
+        XCTAssertTrue(RetroOptionSection.sent("swanstation_GPU_TextureFilter"), "the Graphics page's smooth textures sets it")
+        XCTAssertFalse(RetroOptionSection.sent("swanstation_GPU_ChromaSmoothing24Bit"), "a graphics option no row sets stays held back")
         let status = try recordedPs2Status()
         let shown = RetroGameMenu.rowsFor(status, volume: 1, muted: false).compactMap { row -> RetroOptionRow? in
             if case .option(let option) = row { return option }
@@ -59,13 +61,16 @@ final class RetroResolutionTests: XCTestCase {
         XCTAssertFalse(shown.contains { $0.section == .advanced }, "with the recorded LRPS2 status nothing is under Advanced")
     }
 
-    func testAPs1GameOffersNativeTo4xAndTheValueChosenEvenAboveIt() throws {
-        let choice = try XCTUnwrap(RetroResolutionChoice.of(try ps1Status(chosen: "8", active: "8"), limitsPs2: false))
-        XCTAssertEqual(choice.values.map(\.value), ["1", "2", "3", "4", "8"])
-        XCTAssertEqual(choice.values.map(\.scale), [1, 2, 3, 4, nil])
-        XCTAssertEqual(choice.values.last?.label, "8x", "the host's own label for a value the launcher does not offer")
-        XCTAssertEqual(choice.selected, 4)
-        XCTAssertEqual(choice.note, .none)
+    func testAPs1GameOffersNativeTo4x6xAnd8xAndTheValueChosenEvenWhenNotOffered() throws {
+        let offered = try XCTUnwrap(RetroResolutionChoice.of(try ps1Status(chosen: "1", active: "1"), limitsPs2: false))
+        XCTAssertEqual(offered.values.map(\.value), ["1", "2", "3", "4", "6", "8"], "5x, 7x and 9x to 16x are not offered")
+        XCTAssertEqual(offered.values.map(\.scale), [1, 2, 3, 4, 6, 8])
+        let choice = try XCTUnwrap(RetroResolutionChoice.of(try ps1Status(chosen: "7", active: "7"), limitsPs2: false))
+        XCTAssertEqual(choice.values.map(\.value), ["1", "2", "3", "4", "6", "7", "8"])
+        XCTAssertEqual(choice.values.map(\.scale), [1, 2, 3, 4, 6, nil, 8])
+        XCTAssertEqual(choice.values[5].label, "7x", "the host's own label for a value the launcher does not offer")
+        XCTAssertEqual(choice.selected, 5)
+        XCTAssertEqual(choice.note, RetroGraphicsNote.none)
         XCTAssertEqual(RetroResolutionChoice.of(try ps1Status(chosen: "2", active: "1"), limitsPs2: false)?.note, .applying)
         XCTAssertEqual(RetroResolutionChoice.of(try ps1Status(chosen: "2", active: "2", pending: true), limitsPs2: false)?.note, .applying)
         XCTAssertEqual(RetroResolutionChoice.of(try ps1Status(chosen: "4", active: "2", refusal: "too large"), limitsPs2: false)?.note, .refused)

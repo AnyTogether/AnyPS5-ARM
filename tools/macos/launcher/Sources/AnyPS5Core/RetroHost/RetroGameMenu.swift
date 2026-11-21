@@ -148,6 +148,41 @@ public final class RetroGameMenu {
         return await game.setOption(key: choice.key, value: value)
     }
 
+    /// The game's other graphics settings as the Graphics page offers them, in its order: those of
+    /// the game's console the host lists (`RetroGraphicsChoice.of`).
+    public var graphics: [RetroGraphicsChoice] { RetroGraphics.settings.compactMap { RetroGraphicsChoice.of(game.status, $0) } }
+
+    private var choosingGraphics = false
+
+    /// Chooses the value at `index` of `setting`'s row: the options it sets that differ from the
+    /// host's are sent, in order. One choice at a time: another made while one is sent is not
+    /// taken, so two choices never leave a setting's options half of each. When the host refuses
+    /// one, those it took are asked back to what the host had; should the host refuse that too,
+    /// the row shows the half-set value with the host's label (`RetroGraphicsChoice.of`) until the
+    /// player chooses again. Every option the value sets, to keep together, once the host took
+    /// them all; nil when the row does not offer that value now, it already has it, a choice is
+    /// being sent, or the host refused one.
+    public func chooseGraphics(_ setting: RetroGraphicsSetting, _ index: Int) async -> [String: String]? {
+        guard !choosingGraphics, let status = game.status, let choice = RetroGraphicsChoice.of(status, setting),
+              choice.values.indices.contains(index), let offer = choice.values[index].offer else { return nil }
+        let changes = choice.changesFor(status, index)
+        guard !changes.isEmpty else { return nil }
+        choosingGraphics = true
+        defer { choosingGraphics = false }
+        var taken: [String] = []
+        for change in changes {
+            guard await game.setOption(key: change.key, value: change.value) else {
+                for key in taken {
+                    guard let option = status.options[key] else { continue }
+                    _ = await game.setOption(key: key, value: option.values[option.selected])
+                }
+                return nil
+            }
+            taken.append(change.key)
+        }
+        return Dictionary(offer.options.map { ($0.key, $0.value) }, uniquingKeysWith: { first, _ in first })
+    }
+
     /// Moves the volume `steps` of `volumeStep` up (down when negative), from 0 to 1. Turning it up
     /// unmutes. The level is counted in whole steps and divided last, so three tenths is 0.3.
     public func stepVolume(_ steps: Int) async {
