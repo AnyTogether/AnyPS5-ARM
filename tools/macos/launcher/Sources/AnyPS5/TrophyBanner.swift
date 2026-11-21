@@ -29,8 +29,13 @@ final class TrophyBanner {
     }
 
     /// Any other short message over the game, in the same card; `icon` (a game's) in place of the
-    /// symbol, and `cue` the sound it comes with.
+    /// symbol, and `cue` the sound it comes with. Away from the launcher with no game playing it is
+    /// a notification in Notification Center instead (SystemNotices), as on AnyPS5 Desktop.
     func notice(_ title: String, detail: String, symbol: String, icon: URL? = nil, cue: Sounds.Cue = .unlocked, sounds: Bool) {
+        if SystemNotices.shared.take(title, detail: detail, icon: icon) {
+            if sounds { Sounds.shared.play(cue) }
+            return
+        }
         self.sounds = sounds
         enqueue(.notice(title: title, detail: detail, symbol: symbol, icon: icon), cue: cue)
         next()

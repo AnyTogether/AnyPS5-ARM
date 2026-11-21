@@ -899,6 +899,10 @@ final class AppModel: ObservableObject {
         changeSink = objectWillChange.sink { [weak self] _ in MainActor.assumeIsolated { self?.changeCount &+= 1 } }
         startPowerWatch()
         if persists { loadEngines(); loadProfilePicture(); watchFullScreen(); watchLauncher() }
+        if persists {
+            // Away from the launcher with no game, the card's words go to Notification Center.
+            SystemNotices.shared.start(gamePlaying: { [weak self] in self?.playing ?? false }, opened: { [weak self] in self?.bringLauncherFront() })
+        }
         if persists { retroHostReleases = { try await RetroHostStore.releases() } }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
