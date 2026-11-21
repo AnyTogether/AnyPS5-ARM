@@ -68,6 +68,8 @@ public struct FontDownloads: Sendable {
 
     public let package: FontPackage
     public let folder: URL
+    /// The free bytes on the drive of a folder (FreeSpace.available); replaceable in tests.
+    public var freeSpace: @Sendable (URL) -> Int64? = { FreeSpace.available(at: $0) }
 
     public init(package: FontPackage = .notoCJK, folder: URL = FontDownloads.root.appendingPathComponent("CJK")) {
         self.package = package
@@ -144,10 +146,10 @@ public struct FontDownloads: Sendable {
         }
     }
 
-    /// Refuses to begin without room for the archive and what comes out of it.
+    /// Refuses to begin without room for the archive and what comes out of it, when the drive
+    /// says how much is free (FreeSpace reads a 0 for important usage as not saying).
     func checkSpace() throws {
-        let values = try? downloads.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        guard let free = values?.volumeAvailableCapacityForImportantUsage else { return }
+        guard let free = freeSpace(downloads) else { return }
         let needed = (package.size - resumable) + package.installedSize + (256 << 20)
         if free < needed {
             throw FontDownloadError("the fonts need \(ByteCountFormatter.string(fromByteCount: needed, countStyle: .file)) free; there is \(ByteCountFormatter.string(fromByteCount: free, countStyle: .file))")

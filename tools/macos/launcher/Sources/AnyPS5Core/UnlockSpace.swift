@@ -84,12 +84,21 @@ public struct SpaceShortage: LocalizedError, Equatable, Sendable {
 public enum FreeSpace {
     /// The bytes free for this user where `url` is, or would be (its nearest existing folder):
     /// the room macOS can make for something the user asked for (purgeable files count), else
-    /// the plain free space; nil when the drive does not say.
+    /// the plain free space; nil when the drive does not say. Every check for room before a
+    /// download or an unlock reads this, not the resource keys themselves.
     public static func available(at url: URL) -> Int64? {
         guard let folder = existing(url) else { return nil }
         let values = try? folder.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey])
-        if let important = values?.volumeAvailableCapacityForImportantUsage, important > 0 { return important }
-        if let plain = values?.volumeAvailableCapacity { return Int64(plain) }
+        return reading(important: values?.volumeAvailableCapacityForImportantUsage, plain: values?.volumeAvailableCapacity)
+    }
+
+    /// The figure to go by from the two the drive gave. macOS answers 0 for the important-usage
+    /// key on some Macs and drives that have plenty free (a CI runner did, run 44841387892, while
+    /// the plain figure on the same disk was not 0), so a 0 there says nothing and the plain free
+    /// space is used instead; only a known figure can refuse anything.
+    public static func reading(important: Int64?, plain: Int?) -> Int64? {
+        if let important, important > 0 { return important }
+        if let plain { return Int64(plain) }
         return nil
     }
 

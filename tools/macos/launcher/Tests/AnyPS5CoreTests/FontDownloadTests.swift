@@ -254,6 +254,29 @@ final class FontDownloadTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: downloads.folder.path))
     }
 
+    /// macOS can answer 0 for the important-usage key with plenty free (run 44841387892 refused
+    /// every font download with "there is Zero KB"): that 0 is not a full disk.
+    func testAZeroForImportantUsageIsNotAFullDisk() throws {
+        XCTAssertEqual(FreeSpace.reading(important: 0, plain: 40_000_000_000), 40_000_000_000)
+        XCTAssertEqual(FreeSpace.reading(important: nil, plain: 40_000_000_000), 40_000_000_000)
+        XCTAssertEqual(FreeSpace.reading(important: 50_000_000_000, plain: 40_000_000_000), 50_000_000_000, "purgeable space counts when macOS says")
+        XCTAssertEqual(FreeSpace.reading(important: 0, plain: 0), 0, "a drive that is full by both figures is full")
+        XCTAssertNil(FreeSpace.reading(important: nil, plain: nil))
+        XCTAssertNil(FreeSpace.reading(important: 0, plain: nil), "a 0 alone says nothing")
+
+        var downloads = FontDownloads(package: .notoCJK, folder: scratch.appendingPathComponent("CJK"))
+        downloads.freeSpace = { _ in FreeSpace.reading(important: 0, plain: 40_000_000_000) }
+        XCTAssertNoThrow(try downloads.checkSpace())
+        downloads.freeSpace = { _ in FreeSpace.reading(important: 0, plain: nil) }
+        XCTAssertNoThrow(try downloads.checkSpace(), "a drive that does not say never stops the download")
+        downloads.freeSpace = { _ in FreeSpace.reading(important: 0, plain: 10 << 20) }
+        XCTAssertThrowsError(try downloads.checkSpace(), "a known figure that is too small still refuses") { error in
+            XCTAssertTrue((error as? FontDownloadError)?.message.contains("the fonts need") == true, "\(error)")
+        }
+        // By default it asks the drive through FreeSpace, which says how much is free here.
+        XCTAssertNotNil(FontDownloads().freeSpace(scratch))
+    }
+
     func testNotosOwnReleaseIsPinned() {
         let package = FontPackage.notoCJK
         XCTAssertEqual(package.url.host, "github.com")
