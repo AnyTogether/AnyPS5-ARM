@@ -398,6 +398,7 @@ int main(int argc, char** argv) {
         Expect(!Has(trap, "AMD-only instruction"), "trap named as an AMD-only instruction");
         const auto monitorx = run("locked-monitorx", SIGILL);
         Expect(Has(monitorx, "[libc] fatal SIGILL") && Has(monitorx, "  MONITORX is an AMD-only instruction this CPU lacks: relink with --to-intel"), "AMD-only instruction not named");
+        Expect(Has(monitorx, "  bytes at rip: f0 0f 01 fa"), "bytes at rip missing");
         for (const char* name : {"guest-abort", "guest-abort-edge"}) {
             const auto result = run(name, SIGSEGV);
             Expect(Has(result, "  guest abort() (int 0x45)"), std::string(name) + ": guest abort description missing");
