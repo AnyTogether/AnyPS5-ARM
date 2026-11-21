@@ -17,15 +17,9 @@ if(BUILD_TESTING)
 
     add_test_executable(guest_ajmi_batch_aliases_tests ${LIBS_INCLUDE_DIR}/tests/GuestAjmiBatchAliases.cpp)
     target_include_directories(guest_ajmi_batch_aliases_tests PRIVATE ${LIBS_INCLUDE_DIR})
-    # The test only dlopens the modules (it takes no symbol from them at link time). ld64 keeps the
-    # load commands of unused libraries, so on macOS a linked libSceAjmi would bring the unpatched
-    # libSceAjm.native.prx in at launch, and the patched alias module's @rpath dependency would bind
-    # to that image, which lacks the NIDs. It links like guest_ajmi_lifecycle_aliases_tests there.
-    if(APPLE)
-        target_link_libraries(guest_ajmi_batch_aliases_tests PRIVATE ${CMAKE_DL_LIBS})
-        add_dependencies(guest_ajmi_batch_aliases_tests libSceAjmi libc)
-    else()
-        target_link_libraries(guest_ajmi_batch_aliases_tests PRIVATE libSceAjmi libc ${CMAKE_DL_LIBS})
+    target_link_libraries(guest_ajmi_batch_aliases_tests PRIVATE ${CMAKE_DL_LIBS})
+    if(WIN32)
+        target_link_libraries(guest_ajmi_batch_aliases_tests PRIVATE libc)
     endif()
     configure_windows_unwind(guest_ajmi_batch_aliases_tests)
     set(ajmiAliasModuleDir ${CMAKE_CURRENT_BINARY_DIR}/guest_ajmi_batch_alias_modules)

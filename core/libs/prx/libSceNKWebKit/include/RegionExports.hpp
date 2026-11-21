@@ -91,6 +91,74 @@ inline Ref<T> adoptRef(T& object) {
     return Ref<T>(object, AdoptRef);
 }
 
+template<typename T>
+class RefPtr {
+public:
+    RefPtr() = default;
+
+    RefPtr(std::nullptr_t) {}
+
+    RefPtr(T* object) : m_ptr(object) {
+        if (m_ptr)
+            m_ptr->ref();
+    }
+
+    RefPtr(T& object, AdoptRefTag) : m_ptr(&object) {}
+
+    RefPtr(const RefPtr& other) : m_ptr(other.m_ptr) {
+        if (m_ptr)
+            m_ptr->ref();
+    }
+
+    template<typename U>
+    RefPtr(const RefPtr<U>& other) : m_ptr(other.get()) {
+        if (m_ptr)
+            m_ptr->ref();
+    }
+
+    RefPtr(RefPtr&& other) noexcept : m_ptr(other.leakRef()) {}
+
+    template<typename U>
+    RefPtr(RefPtr<U>&& other) noexcept : m_ptr(other.leakRef()) {}
+
+    ~RefPtr() {
+        if (m_ptr)
+            m_ptr->deref();
+    }
+
+    RefPtr& operator=(const RefPtr& other) {
+        if (other.m_ptr)
+            other.m_ptr->ref();
+        T* old = m_ptr;
+        m_ptr = other.m_ptr;
+        if (old)
+            old->deref();
+        return *this;
+    }
+
+    RefPtr& operator=(RefPtr&& other) noexcept {
+        T* old = m_ptr;
+        m_ptr = other.leakRef();
+        if (old)
+            old->deref();
+        return *this;
+    }
+
+    T* leakRef() noexcept {
+        T* ptr = m_ptr;
+        m_ptr = nullptr;
+        return ptr;
+    }
+
+    T* get() const { return m_ptr; }
+    T* operator->() const { return m_ptr; }
+    T& operator*() const { return *m_ptr; }
+    explicit operator bool() const { return m_ptr != nullptr; }
+
+private:
+    T* m_ptr{nullptr};
+};
+
 template<typename T, std::size_t inlineCapacity>
 class Vector {
 public:
@@ -347,7 +415,7 @@ struct FilterOperation {
     void ref() const { ++m_refCount; }
     void deref() const {
         if (!--m_refCount)
-            std::free(const_cast<FilterOperation*>(this));
+            NKWebKit::Deallocate(const_cast<FilterOperation*>(this));
     }
     unsigned refCount() const { return m_refCount; }
 };
@@ -358,7 +426,9 @@ struct DefaultFilterOperation : public FilterOperation {
     FilterOperationType m_representedType{FilterOperationType::Default};
     std::uint8_t m_subPad[7]{0, 0, 0, 0, 0, 0, 0};
 
-    FilterOperationType representedType() const { return m_representedType; }
+    // No representedType() member: its mangled name is _ZNK7WebCore22DefaultFilterOperation15representedTypeEv,
+    // the extern "C" getter's name (FieldGetters.cpp). Built with clang (macOS), a call to the getter from a
+    // file that also saw the member returned the member's one-byte value: 44 for 300 (run 44868992978).
 };
 
 static_assert(sizeof(DefaultFilterOperation) == 24);

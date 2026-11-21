@@ -18,6 +18,13 @@ struct FilteredStream {
     LogRepeatFilter filter;
 };
 
+// APS5_NO_LOG_REPEAT_FILTER turns the filter off, for a program whose standard output is data rather
+// than a log (a test that prints one result line per input).
+bool FilterEnabled() {
+    static const bool enabled = std::getenv("APS5_NO_LOG_REPEAT_FILTER") == nullptr;
+    return enabled;
+}
+
 std::array<FilteredStream, 2>& Streams() {
     static auto* streams = new std::array<FilteredStream, 2>();
     return *streams;
@@ -92,6 +99,10 @@ extern "C" {
 
 // Writes data that the title sent to its standard output (1) or error (2), which still reach the host's.
 void LogRepeatFilterWrite_nid_no_patch(int standard, int descriptor, const void* data, std::size_t size) {
+    if (!FilterEnabled()) {
+        WriteAll(descriptor, std::string_view(static_cast<const char*>(data), size));
+        return;
+    }
     auto& stream = Streams()[static_cast<std::size_t>(standard == 2 ? 1 : 0)];
     const std::lock_guard lock(stream.mutex);
     stream.filter.Write(std::string_view(static_cast<const char*>(data), size), LogRepeatFilter::Clock::now(),
@@ -101,6 +112,7 @@ void LogRepeatFilterWrite_nid_no_patch(int standard, int descriptor, const void*
 // Filters a host stream that writes to the log. A stream whose descriptor stops being the log is unhooked.
 void LogRepeatFilterHookStream_nid_no_patch(std::FILE* file, int standard) {
 #ifdef __APPLE__
+    if (!FilterEnabled()) return;
     if (file == nullptr || file->_cookie != file || file->_write == nullptr || file->_write == FilteredStreamWrite) return;
     const std::lock_guard lock(HookMutex());
     for (auto& hook : g_hooks) {
