@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Mengunduh… %d%%",
   "engineReady": "Mesin AnyPS5 %@ siap",
   "engineDownloadFailed": "Mesin tidak dapat diunduh",
+  "engineDownloadStopped": "Berhenti di %d%% · pilih untuk melanjutkan · %@",
   "enginePrerelease": "Pra-rilis",
   "engineBuilt": "Dibuat %@",
   "engineSigned": "Bertanda tangan",

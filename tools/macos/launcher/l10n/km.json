@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "កំពុងទាញយក… %d%%",
   "engineReady": "ម៉ាស៊ីន AnyPS5 %@ រួចរាល់ហើយ",
   "engineDownloadFailed": "មិនអាចទាញយកម៉ាស៊ីនហ្គេមបានទេ",
+  "engineDownloadStopped": "បានឈប់នៅ %d%% · ជ្រើសរើសដើម្បីបន្ត · %@",
   "enginePrerelease": "កំណែមុនការចេញផ្សាយជាផ្លូវការ (Pre-release)",
   "engineBuilt": "បង្កើតនៅ %@",
   "engineSigned": "មានហត្ថលេខា",

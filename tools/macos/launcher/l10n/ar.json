@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "جارٍ التحميل… %d%%",
   "engineReady": "محرك AnyPS5 %@ جاهز",
   "engineDownloadFailed": "تعذر تنزيل المحرك",
+  "engineDownloadStopped": "توقف عند %d%% · اختر للمتابعة · %@",
   "enginePrerelease": "الإصدار المسبق",
   "engineBuilt": "بُني %@",
   "engineSigned": "موقّع",

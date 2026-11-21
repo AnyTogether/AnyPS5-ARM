@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Wird heruntergeladen… %d%%",
   "engineReady": "AnyPS5-Engine %@ ist bereit",
   "engineDownloadFailed": "Die Engine konnte nicht heruntergeladen werden",
+  "engineDownloadStopped": "Bei %d%% angehalten · zum Fortsetzen auswählen · %@",
   "enginePrerelease": "Vorabversion",
   "engineBuilt": "Erstellt %@",
   "engineSigned": "Signiert",

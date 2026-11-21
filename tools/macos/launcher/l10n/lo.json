@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "ກຳລັງດາວໂຫຼດ… %d%%",
   "engineReady": "AnyPS5 engine ເວີຊັນ %@ ພ້ອມໃຊ້ງານແລ້ວ",
   "engineDownloadFailed": "ບໍ່ສາມາດດາວໂຫຼດ engine ໄດ້",
+  "engineDownloadStopped": "ຢຸດທີ່ %d%% · ເລືອກເພື່ອດາວໂຫຼດຕໍ່ · %@",
   "enginePrerelease": "ເວີຊັນທົດລອງກ່ອນປ່ອຍຈິງ (Pre-release)",
   "engineBuilt": "ບິວເມື່ອ %@",
   "engineSigned": "ເຊັນແລ້ວ",

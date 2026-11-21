@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Se descarcă… %d%%",
   "engineReady": "Motorul AnyPS5 %@ este pregătit",
   "engineDownloadFailed": "Motorul nu a putut fi descărcat",
+  "engineDownloadStopped": "Oprită la %d%% · selectează pentru a continua · %@",
   "enginePrerelease": "Versiune preliminară",
   "engineBuilt": "Construit %@",
   "engineSigned": "Semnat",

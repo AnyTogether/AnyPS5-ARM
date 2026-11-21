@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Nagda-download… %d%%",
   "engineReady": "Handa na ang AnyPS5 engine %@",
   "engineDownloadFailed": "Hindi ma-download ang engine",
+  "engineDownloadStopped": "Huminto sa %d%% · piliin para ituloy · %@",
   "enginePrerelease": "Pre-release",
   "engineBuilt": "Binuo noong %@",
   "engineSigned": "Pinirmahan",

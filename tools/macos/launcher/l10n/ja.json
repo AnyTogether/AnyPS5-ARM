@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "ダウンロード中… %d%%",
   "engineReady": "AnyPS5 エンジン %@ が準備完了です",
   "engineDownloadFailed": "エンジンをダウンロードできませんでした",
+  "engineDownloadStopped": "%d%% で止まりました · 選択して続きをダウンロード · %@",
   "enginePrerelease": "プレリリース",
   "engineBuilt": "%@ にビルド",
   "engineSigned": "署名済み",
