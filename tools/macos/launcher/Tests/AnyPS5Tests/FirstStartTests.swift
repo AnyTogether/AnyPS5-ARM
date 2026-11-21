@@ -47,7 +47,14 @@ final class FirstStartTests: XCTestCase {
             XCTAssertLessThanOrEqual(grid.height, 96 * scale)
             XCTAssertGreaterThan(grid.height, 40 * scale, "a card tall enough for a name")
             XCTAssertEqual((0..<grid.rows).flatMap { Array(grid.row($0, count: 28)) }, Array(0..<28), "every language has its card, once")
+            // Past 28 languages (Polish made 29) a fifth row comes: the cards get shorter and still fit.
+            let five = LanguageGrid(count: 35, size: size, scale: scale)
+            XCTAssertEqual(five.rows, 5)
+            XCTAssertLessThanOrEqual(five.height * 5 + five.runSpacing * 4, size.height + 0.01, "five rows fit the height")
+            XCTAssertGreaterThan(five.height, 40 * scale, "a card tall enough for a name")
         }
+        let shipped = LanguageGrid(count: Language.allCases.count, size: CGSize(width: 938, height: 290), scale: 0.68)
+        XCTAssertGreaterThan(shipped.height, 40 * 0.68, "every shipped language has a card tall enough for its name")
         XCTAssertEqual(LanguageGrid(count: 2, size: CGSize(width: 1380, height: 430), scale: 1).rows, 1)
         XCTAssertEqual(LanguageGrid(count: 2, size: CGSize(width: 1380, height: 430), scale: 1).height, 96, "few languages: the card at its full size")
         XCTAssertEqual(LanguageGrid.move(.down, from: 3, count: 28), 10)

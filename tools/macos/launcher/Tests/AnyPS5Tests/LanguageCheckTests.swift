@@ -134,22 +134,28 @@ final class LanguageCheckTests: XCTestCase {
         XCTAssertNil(Language(rawValue: "xx"))
     }
 
-    /// VK's twelve languages, carried over from AnyLauncher Port where both launchers' English
-    /// reads the same (scripts/import-port-translations.py): listed by their own names, complete,
-    /// and English wherever they have no text.
+    /// The languages carried over from AnyPS5 Desktop where both launchers' English reads the same
+    /// (scripts/import-port-translations.py): VK's, QguAr71's Polish and any added later. Every
+    /// file in l10n but English and Turkish, read from the folder so that a new language needs no
+    /// edit here: listed by its own name, within English's keys and placeholders, and English
+    /// wherever it has no text.
     func testThePortsLanguagesAreListedAndFallBackToEnglish() throws {
         let saved = T.language
         defer { T.language = saved }
-        let names = ["ar": "العربية", "bho": "भोजपुरी", "bn": "বাংলা", "de": "Deutsch", "es": "Español", "fr": "Français",
-                     "hi": "हिन्दी", "id": "Bahasa Indonesia", "ja": "日本語", "pt": "Português", "ru": "Русский", "ur": "اردو",
-                     // VK's second batch.
-                     "am": "አማርኛ", "cs": "Čeština", "da": "Dansk", "fil": "Filipino", "hu": "Magyar", "km": "ភាសាខ្មែរ",
-                     "ko": "한국어", "lo": "ພາສາລາວ", "ms": "Bahasa Melayu", "no": "Norsk", "ro": "Română", "sv": "Svenska",
-                     "zh-Hans": "简体中文", "zh-Hant": "繁體中文"]
-        let english = try file("en").texts
+        let codes = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasSuffix(".json") }
+            .map { String($0.dropLast(5)) }.filter { $0 != LanguageFiles.english && $0 != "tr" }.sorted()
+        XCTAssertGreaterThan(codes.count, 20, "\(codes)")
+        // A few names by hand, so that a file which lost its own name is caught.
+        let names = ["de": "Deutsch", "ja": "日本語", "ar": "العربية", "zh-Hant": "繁體中文", "pl": "Polski"]
         for (code, name) in names {
+            XCTAssertEqual(Language(rawValue: code)?.displayName, name, code)
+        }
+        XCTAssertEqual(Language(rawValue: "pl")?.consoleLanguage, 16, "Polish games start in Polish")
+        let english = try file("en").texts
+        for code in codes {
             let language = try XCTUnwrap(Language(rawValue: code), "\(code).json is listed")
-            XCTAssertEqual(language.displayName, name)
+            XCTAssertEqual(language.displayName, try file(code).name, "\(code).json is listed by its own name")
+            XCTAssertNotEqual(language.displayName, code, "\(code).json has its own name")
             let texts = try file(code).texts
             XCTAssertGreaterThan(texts.count, 500, "\(code).json carries the shared texts")
             XCTAssertLessThanOrEqual(texts.count, english.count, "\(code).json has no key English lacks")
@@ -178,6 +184,7 @@ final class LanguageCheckTests: XCTestCase {
             ("nb-NO", "no"), ("nn-NO", "no"), ("no", "no"), ("fil-PH", "fil"), ("tl-PH", "fil"),
             ("ko-KR", "ko"), ("km-KH", "km"), ("lo-LA", "lo"), ("am-ET", "am"), ("cs-CZ", "cs"), ("hu-HU", "hu"),
             ("ro-RO", "ro"), ("ms-MY", "ms"), ("sv-SE", "sv"), ("da-DK", "da"), ("de_DE@euro", "de"), ("pt-BR", "pt"),
+            ("pl-PL", "pl"), ("pl", "pl"),
             ("eo", nil),
         ]
         for (system, code) in cases {
