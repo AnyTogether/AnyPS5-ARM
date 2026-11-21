@@ -205,9 +205,20 @@ void Report(int signal, const siginfo_t* info, const ucontext_t* context) {
     DescribeAddress(line, rip);
     line.Write();
     if (signal == SIGILL) {
-        std::uint8_t bytes[8];
+        // The bytes that would not execute, as the executable holds them at run time: the address
+        // alone does not say which instruction it is, and a relinked image's file offsets differ
+        // from its addresses.
+        std::uint8_t bytes[16];
         std::size_t available = sizeof(bytes);
         while (available != 0 && !ReadMemory(rip, bytes, available)) --available;
+        if (available != 0) {
+            line.Text("  bytes at rip:");
+            for (std::size_t index = 0; index < available; ++index) {
+                const char text[] = {' ', "0123456789abcdef"[bytes[index] >> 4], "0123456789abcdef"[bytes[index] & 0xf], '\0'};
+                line.Text(text);
+            }
+            line.Write();
+        }
         if (const char* name = crash_text::AmdOnlyInstruction(bytes, available)) line.Text("  ").Text(name).Text(" is an AMD-only instruction this CPU lacks: relink with --to-intel, which converts the executable and its modules but not code generated at run time").Write();
     }
     if (signal == SIGSEGV && info->si_code == SI_KERNEL && registers[REG_TRAPNO] == 13) {
