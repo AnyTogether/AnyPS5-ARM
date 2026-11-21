@@ -124,7 +124,11 @@ final class RetryServer: @unchecked Sendable {
 final class DownloadRetryTests: XCTestCase {
     private var scratch: URL!
     private var pauses: [Duration] = []
-    private let body = Data((0..<300_000).map { UInt8(($0 * 7 + $0 / 251) % 256) })
+    private let body: Data = {
+        var bytes = [UInt8](repeating: 0, count: 300_000)
+        for index in bytes.indices { bytes[index] = UInt8(truncatingIfNeeded: index &* 7 &+ index / 251) }
+        return Data(bytes)
+    }()
 
     override func setUpWithError() throws {
         scratch = FileManager.default.temporaryDirectory.appendingPathComponent("download-retry-\(UUID().uuidString)")
@@ -156,10 +160,13 @@ final class DownloadRetryTests: XCTestCase {
         try await download(server)
         XCTAssertEqual(try Data(contentsOf: file), body)
         // Every try starts at the release's address, so the storage address is signed afresh.
-        XCTAssertEqual(server.requests.map(\.path), Array(repeating: ["/download/\(server.name)", "/blob/\(server.name)"], count: 3).flatMap { $0 })
-        XCTAssertEqual(server.storageRequests.map(\.signature), [1, 2, 3])
+        let pair: [String] = ["/download/\(server.name)", "/blob/\(server.name)"]
+        let paths: [String] = server.requests.map { (request: RetryServer.Request) in request.path }
+        XCTAssertEqual(paths, pair + pair + pair)
+        let signatures: [Int?] = server.storageRequests.map { (request: RetryServer.Request) in request.signature }
+        XCTAssertEqual(signatures, [1, 2, 3])
         // The two tries after the drop ask for the same rest of the file, at both addresses.
-        let resumes = server.requests.dropFirst(2).map(\.range)
+        let resumes: [String?] = server.requests.dropFirst(2).map { (request: RetryServer.Request) in request.range }
         XCTAssertEqual(Set(resumes).count, 1, "\(resumes)")
     }
 
