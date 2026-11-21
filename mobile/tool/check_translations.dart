@@ -1,8 +1,8 @@
 // Checks the language files in assets/l10n and the code in lib (TRANSLATING.md in
 // AnyPS5-Desktop): dart run tool/check_translations.dart [assets/l10n [lib]]
 //
-// Every file is one flat JSON object of texts, as Weblate keeps monolingual JSON: no key en.json
-// lacks, the same placeholders as English in each text, and the language's own name under
+// Every file is one flat JSON object of texts, as Weblate keeps monolingual JSON: no key twice, no
+// key en.json lacks, the same placeholders as English in each text, and the language's own name under
 // "languageName". A text not translated yet is fine: the app shows the English one, and the check
 // counts it. The code is checked too: no text chosen by comparing the language's code, and no
 // Turkish words in it, since those belong in the files. A line that has to compare the code for
@@ -67,6 +67,37 @@ String _shown(Set<(int, String)> found) => found.isEmpty
     ? 'none'
     : [for (final (number, kind) in found.toList()..sort((a, b) => a.$1 - b.$1)) '#$number %$kind'].join(', ');
 
+/// The keys the top-level object of [source] (valid JSON) has more than once. jsonDecode keeps
+/// the last one without a word, so a text written twice shows only its second translation.
+List<String> duplicateKeys(String source) {
+  final seen = <String>{};
+  final twice = <String>[];
+  var depth = 0;
+  for (var index = 0; index < source.length; index++) {
+    final char = source[index];
+    if (char == '"') {
+      final start = index;
+      for (index++; index < source.length && source[index] != '"'; index++) {
+        if (source[index] == '\\') index++;
+      }
+      if (depth != 1) continue;
+      var after = index + 1;
+      while (after < source.length && ' \t\r\n'.contains(source[after])) {
+        after++;
+      }
+      if (after < source.length && source[after] == ':') {
+        final key = jsonDecode(source.substring(start, index + 1)) as String;
+        if (!seen.add(key) && !twice.contains(key)) twice.add(key);
+      }
+    } else if (char == '{' || char == '[') {
+      depth++;
+    } else if (char == '}' || char == ']') {
+      depth--;
+    }
+  }
+  return twice;
+}
+
 /// The texts of a file, or the problems that keep it from being one flat object of texts.
 (Map<String, String>, List<String>) readTexts(String file, String source) {
   final Object? json;
@@ -78,7 +109,10 @@ String _shown(Set<(int, String)> found) => found.isEmpty
   if (json is! Map<String, Object?>) {
     return (const {}, ['$file has to be one JSON object: { "key": "text", ... }']);
   }
-  final problems = <String>[];
+  final problems = <String>[
+    for (final key in duplicateKeys(source))
+      '$file: "$key" is in the file more than once; the launcher shows only the last one, so keep one',
+  ];
   final texts = <String, String>{};
   for (final MapEntry(:key, :value) in json.entries) {
     if (key == legacyMeta) {
