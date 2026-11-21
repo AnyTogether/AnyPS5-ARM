@@ -259,13 +259,17 @@ final class RetroHostPlayTests: XCTestCase {
         XCTAssertTrue(condition(), message)
     }
 
-    /// Plays the disc and waits for its `start`; the fake host made for it.
+    /// Plays the disc and waits for its `start` and the first `status` the start itself asks; the
+    /// fake host made for it. The phase is `.loading` before that status is in, and a `refresh()`
+    /// asked while it is out is let go (`RetroHostGame.refresh`), so a test that set its own status
+    /// and refreshed then could be left with none, or with the start's.
     private func play(_ model: AppModel, _ game: Game, opened: () -> [FakePlayHost]) async throws -> FakePlayHost {
         let before = opened().count
         model.play(game)
         try await settle({ opened().count > before || (model.retroPlay != nil && opened().last?.started.isEmpty == false) }, "a host opened")
         let host = try XCTUnwrap(opened().last)
-        try await settle({ !host.started.isEmpty && model.retroPlay?.host.phase == .loading }, "the game is loading")
+        try await settle({ !host.started.isEmpty && model.retroPlay?.host.phase == .loading && model.retroPlay?.host.status != nil },
+                         "the game is loading, its first status in")
         return host
     }
 
