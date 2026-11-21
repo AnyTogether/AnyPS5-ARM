@@ -15,7 +15,7 @@ enum TE {
         case engineGameDetail, engineUnlockedWith, engineNotUnlocked, engineSwitch
         case engineDownloadedSection, engineAvailableSection, engineCustomSection
         case engineInUse, engineDeleteHint, engineDeleted = "engineVersionDeleted", engineInUseNoDelete, engineDeleteUnused, engineDeleteUnusedDetail, engineNothingUnused
-        case engineDownloadHint, engineDownloading = "engineDownloadingPercent", engineReady, engineDownloadFailed, enginePrerelease, engineBuilt
+        case engineDownloadHint, engineDownloading = "engineDownloadingPercent", engineReady, engineDownloadFailed, engineDownloadStopped, enginePrerelease, engineBuilt
         case engineSigned, engineUnsignedOlder, engineUnsignedOlderDetail, engineUnsignedReady, engineUnsignedRefused, engineUnsignedRefusedDetail
         case engineRefresh, engineChecked, engineChecking, engineOffline = "engineOfflineList", engineNeverChecked, engineNoneYet, engineCheckFailed
         case engineFolder, engineFolderNone, engineFolderReset, engineFolderInvalid, engineFolderPick, engineFolderUsed

@@ -56,7 +56,13 @@ public struct FontPackage: Sendable {
 
 public struct FontDownloadError: LocalizedError, Equatable {
     public let message: String
-    public init(_ message: String) { self.message = message }
+    /// The HTTP status the server answered with, when that is the failure (DownloadRetry tries
+    /// some of them again).
+    public let status: Int?
+    public init(_ message: String, status: Int? = nil) {
+        self.message = message
+        self.status = status
+    }
     public var errorDescription: String? { message }
 }
 
@@ -140,7 +146,7 @@ public struct FontDownloads: Sendable {
                 try await ResumableDownload(url: package.url, file: partial, expected: package.size, progress: progress).run(configuration: configuration)
                 if resumable >= package.size { return }
                 if attempt == attempts { throw FontDownloadError("the download of \(package.archiveName) stopped short") }
-            } catch let error as URLError where attempt < attempts && error.code != .cancelled {
+            } catch let error where attempt < attempts && DownloadRetry.passing(error) {
                 try? await Task.sleep(for: .milliseconds(300 * attempt))
             }
         }
@@ -284,7 +290,7 @@ final class ResumableDownload: NSObject, URLSessionDataDelegate, @unchecked Send
                 finished = true
                 return completionHandler(.cancel)
             default:
-                throw FontDownloadError("the server answered \(status)")
+                throw FontDownloadError("the server answered \(status)", status: status)
             }
             completionHandler(.allow)
         } catch {

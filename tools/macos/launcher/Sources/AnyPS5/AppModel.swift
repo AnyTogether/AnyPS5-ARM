@@ -731,6 +731,9 @@ final class AppModel: ObservableObject {
     @Published var checkingEngines = false
     /// How far each release's toolkit download is.
     @Published var engineDownloads: [String: Double] = [:]
+    /// The releases whose last download failed: how far it had come and why, said on the row until
+    /// the next try, which carries on from the part kept.
+    @Published var engineFailures: [String: (fraction: Double, message: String)] = [:]
     /// The custom toolkit folder, when it holds a toolkit.
     @Published var customToolkit: Toolkit?
     /// The Noto fonts inside the app (SystemFontsPanel.swift).

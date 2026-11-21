@@ -109,6 +109,7 @@ extension AppModel {
         guard engineDownloads[entry.release] == nil else { return }
         if entry.trust == .unsignedRefused { return show(TE.text(.engineUnsignedRefusedDetail), symbol: "xmark.shield.fill") }
         engineDownloads[entry.release] = 0
+        engineFailures[entry.release] = nil
         let store = toolkitStore
         let current = AppModel.runningVersion
         Task { @MainActor in
@@ -123,6 +124,8 @@ extension AppModel {
                 self.show(TE.format(unsigned ? .engineUnsignedReady : .engineReady, Toolkit.shortVersion(installed.version)),
                           symbol: unsigned ? "exclamationmark.shield.fill" : "checkmark.seal.fill")
             } catch {
+                // Said on the release's row until the next try, not only in a notice that goes.
+                self.engineFailures[entry.release] = (self.engineDownloads[entry.release] ?? 0, error.localizedDescription)
                 self.engineDownloads[entry.release] = nil
                 self.show(TE.text(.engineDownloadFailed) + ": " + error.localizedDescription, symbol: "exclamationmark.triangle.fill")
             }
@@ -212,6 +215,7 @@ extension AppModel {
             case .unsignedRefused: TE.text(.engineUnsignedRefusedDetail)
             }
             let detail = engineDownloads[entry.release].map { TE.format(.engineDownloading, Int($0 * 100)) }
+                ?? engineFailures[entry.release].map { TE.format(.engineDownloadStopped, Int($0.fraction * 100), $0.message) }
                 ?? warning ?? [date, entry.summary.nilIfEmpty ?? TE.text(.engineDownloadHint)].compactMap { $0 }.joined(separator: " · ")
             let label: TE.Key = switch trust {
             case .signed: .engineSigned
@@ -220,6 +224,7 @@ extension AppModel {
             }
             let title = entry.release + (entry.prerelease ? " · " + TE.text(.enginePrerelease) : "") + " · " + TE.text(label)
             let symbol = engineDownloads[entry.release] != nil ? "arrow.down.circle.dotted"
+                : engineFailures[entry.release] != nil ? "exclamationmark.triangle"
                 : trust == .signed ? "arrow.down.circle" : trust == .unsignedOlder ? "exclamationmark.shield" : "xmark.shield"
             rows.append(PanelRow(id: "engineGet-" + entry.release, title: title, detail: detail, symbol: symbol,
                                  kind: .action(destructive: trust != .signed) { [weak self] in

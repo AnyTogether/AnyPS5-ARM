@@ -1212,6 +1212,7 @@
   "engineDownloadingPercent": "Downloading… %d%%",
   "engineReady": "Engine %@ is ready",
   "engineDownloadFailed": "The engine could not be downloaded",
+  "engineDownloadStopped": "Stopped at %d%% · select to carry on · %@",
   "enginePrerelease": "Pre-release",
   "engineBuilt": "Built %@",
   "engineSigned": "Signed",
