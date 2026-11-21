@@ -98,6 +98,11 @@ if(BUILD_TESTING AND Python3_Interpreter_FOUND)
     add_test(NAME guest_freetype_arithmetic COMMAND ${Python3_EXECUTABLE}
         ${LIBS_INCLUDE_DIR}/tests/test_guest_freetype_arithmetic.py $<TARGET_FILE:guest_freetype_arithmetic_tests>)
     set_tests_properties(guest_freetype_arithmetic PROPERTIES TIMEOUT 30)
+    # Its standard output is one result line per input, many of them alike; on macOS the libc it links
+    # filters repeated lines from the host stdout as a game log, which drops results.
+    if(APPLE)
+        set_tests_properties(guest_freetype_arithmetic PROPERTIES ENVIRONMENT APS5_NO_LOG_REPEAT_FILTER=1)
+    endif()
     if(WIN32)
         set_tests_properties(guest_freetype_arithmetic PROPERTIES ENVIRONMENT_MODIFICATION
             "PATH=path_list_prepend:$<TARGET_FILE_DIR:libSceFreeType>")

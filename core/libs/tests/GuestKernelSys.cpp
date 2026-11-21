@@ -1180,7 +1180,9 @@ void DirectoryRenameTests(const std::filesystem::path& parent) {
     Require(std::filesystem::remove(original / "marker") && std::filesystem::remove(original / "new-only"));
     Require(std::filesystem::remove(moved / "different"));
     Require(std::filesystem::remove(original) && std::filesystem::remove(moved) && std::filesystem::remove(fixture));
-#ifndef _WIN32
+    // On macOS the host's own rename(2) below does not replace an empty directory that has no
+    // permissions (it fails on the macOS runner), so the guest's rename, which calls it, cannot either.
+#if !defined(_WIN32) && !defined(__APPLE__)
     if (::geteuid() != 0) {
         const auto nativeSource = parent / "native-rename-source";
         const auto nativeTarget = parent / "native-rename-target";

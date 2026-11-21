@@ -139,7 +139,12 @@ struct PathCloseSubpath {
     std::uint8_t empty{0};
 };
 
+// PathSegment and Path name their empty member as the one a default construction starts. GCC 12
+// deletes the implicit default constructor of a class whose anonymous union has members with
+// non-trivial default constructors even when another member has a default initializer, so the
+// constructors are written out; layout and copies stay as they are.
 struct PathSegment {
+    PathSegment() : empty(0) {}
     union {
         std::uint8_t empty{0};
         PathMoveTo moveTo;
@@ -163,6 +168,7 @@ struct PathSegment {
 };
 
 struct Path {
+    Path() : empty(0) {}
     union {
         std::uint8_t empty{0};
         PathSegment segment;
