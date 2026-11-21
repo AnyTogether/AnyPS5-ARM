@@ -15,30 +15,14 @@ public enum RetroResolution {
     /// The internal resolution's option key for a PS1 game, or with `ps2` for a PS2 game.
     public static func key(ps2: Bool = false) -> String { ps2 ? ps2Key : ps1Key }
 
-    /// The values the launcher offers, by console, with the scale each one draws at: Native to 4x.
-    /// LRPS2 lists no 3x. Larger scales are not offered: on a 1080p or 1440p display most of the
-    /// gain is at 2x to 4x, and PS2 games at 8x ran at about half speed on a fast graphics card
-    /// (anyps5-retro-host docs/ps2.md "Drawing"). The host may list fewer, and only those it lists
-    /// are offered.
+    /// The values the launcher offers, by console, with the scale each one draws at: Native to 4x,
+    /// and 6x and 8x for PS1 and 8x for PS2 for strong graphics cards. LRPS2 lists no 3x or 6x;
+    /// SwanStation's 5x and 7x are left out, so each step is a clear one. 8x is for the player to
+    /// choose: PS2 games at 8x ran at about half speed on a fast graphics card (anyps5-retro-host
+    /// docs/ps2.md "Drawing"). The host may list fewer, and only those it lists are offered.
     static func offered(ps2: Bool) -> [String: Int] {
-        ps2 ? ["1x (Native)": 1, "2x": 2, "4x": 4] : ["1": 1, "2": 2, "3": 3, "4": 4]
+        ps2 ? ["1x (Native)": 1, "2x": 2, "4x": 4, "8x": 8] : ["1": 1, "2": 2, "3": 3, "4": 4, "6": 6, "8": 8]
     }
-}
-
-/// What the row says under the internal resolution.
-public enum RetroResolutionNote: Equatable, Sendable {
-    /// Nothing to say: the value chosen is the one the game draws at.
-    case none
-    /// The value chosen is being applied and shows in a moment (a PS1 game).
-    case applying
-    /// The value chosen takes effect when the game is started again (a PS2 game).
-    case nextStart
-    /// The game draws at the value it started with, and any change takes effect at its next start
-    /// (a PS2 game).
-    case changesAtNextStart
-    /// The host could not use the value saved and draws at the largest it can
-    /// (`status.resolutionError`).
-    case refused
 }
 
 /// One value the row offers.
@@ -68,7 +52,7 @@ public struct RetroResolutionChoice: Equatable, Sendable {
     public let selected: Int
     /// The value the game draws at now (`activeValue`), which the refusal names.
     public let active: RetroResolutionValue
-    public let note: RetroResolutionNote
+    public let note: RetroGraphicsNote
 
     /// The choice `status` allows, or nil when the menu offers none: no status yet, the host draws
     /// without the GPU (`hardware` false), the core lists no internal resolution, or it is a PS2
@@ -96,7 +80,7 @@ public struct RetroResolutionChoice: Equatable, Sendable {
                                      active: active, note: note(status, option, chosen))
     }
 
-    private static func note(_ status: RetroStatus, _ option: RetroOption, _ chosen: String) -> RetroResolutionNote {
+    private static func note(_ status: RetroStatus, _ option: RetroOption, _ chosen: String) -> RetroGraphicsNote {
         if !status.resolutionError.isEmpty { return .refused }
         if option.restart { return chosen == option.activeValue ? .changesAtNextStart : .nextStart }
         if chosen != option.activeValue || status.graphicsPending { return .applying }

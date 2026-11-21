@@ -96,7 +96,8 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
     private var gate: PlayGate?
     private var hook: ((String, RetroJSON) -> Void)?
     private var stopCode: String?
-    /// What `saveState` and `loadState` return, by method; `false` for one not set.
+    /// What `saveState`, `loadState` and `option` return, by method; `false` for a state call not
+    /// set, `true` for an `option`.
     func answer(_ method: String, _ result: RetroJSON) { locked { results[method] = result; errors[method] = nil } }
     /// The `error` reply `saveState` or `loadState` gets instead.
     func refuse(_ method: String, _ error: RetroCallError?) { locked { errors[method] = error } }
@@ -139,7 +140,8 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
             case "release":
                 if current?.ended == true { current = nil }
                 return .success(.null)
-            case "connectedPorts", "changeDisc", "option": return .success(.bool(true))
+            case "connectedPorts", "changeDisc": return .success(.bool(true))
+            case "option": return .success(results[method] ?? .bool(true))
             case "saveState", "loadState":
                 if let error = errors[method] { return .failure(error) }
                 return .success(results[method] ?? .bool(false))
@@ -326,8 +328,10 @@ final class RetroHostPlayTests: XCTestCase {
                        game.retro?.path.resolvingSymlinksInPath().path)
         XCTAssertEqual(start["system"], .string(model.retroFolder.appendingPathComponent("system").standardizedFileURL.path))
         XCTAssertEqual(start["saves"], .string(model.retroFolder.appendingPathComponent("saves/ps1").standardizedFileURL.path))
-        XCTAssertEqual(start["options"], .object(["swanstation_Console_Region": .string("NTSC-U"), "swanstation_GPU_ResolutionScale": .string("2")]),
-                       "the internal resolution goes, which the menu offers; a hidden option and another core's are not sent")
+        let options: [String: RetroJSON] = ["swanstation_Console_Region": .string("NTSC-U"), "swanstation_GPU_ResolutionScale": .string("2"),
+                                            "swanstation_GPU_PGXPEnable": .string("true"), "swanstation_GPU_TrueColor": .string("true")]
+        XCTAssertEqual(start["options"], .object(options),
+                       "the internal resolution goes, which the menu offers, with the Graphics defaults; a hidden option and another core's are not sent")
         XCTAssertNil(start["console"], "a PS1 start is the same on every host")
         XCTAssertEqual(model.retroPlay?.game, game)
         XCTAssertTrue(model.playing)
@@ -576,8 +580,8 @@ final class RetroHostPlayTests: XCTestCase {
         XCTAssertEqual(start["console"], .string("ps2"))
         XCTAssertEqual(start["core"], .string("/test/pcsx2_libretro.dylib"))
         XCTAssertEqual(start["saves"], .string(model.retroFolder.appendingPathComponent("saves/ps2").standardizedFileURL.path))
-        XCTAssertEqual(start["options"], .object(["pcsx2_fastboot": .string("enabled")]),
-                       "only LRPS2's options, and its resolution not to a host without ps2ResolutionLimits")
+        XCTAssertEqual(start["options"], .object(["pcsx2_fastboot": .string("enabled"), "pcsx2_anisotropic_filtering": .string("16x")]),
+                       "only LRPS2's options, and its resolution not to a host without ps2ResolutionLimits; sharper textures start on")
         XCTAssertNil(start["initialDisc"])
     }
 
@@ -612,7 +616,65 @@ final class RetroHostPlayTests: XCTestCase {
         XCTAssertEqual(opened.map(\.path), [model.retroFolder.appendingPathComponent("system/pcsx2/bios").path])
     }
 
-    func testTheInternalResolutionRowSitsAfterAudioAndKeepsAChoiceTheHostTook() async throws {
+    // MARK: The Graphics page, as on Windows and Linux (Desktop's test/ui/retro_host_play_test.dart and retro_host_ps2_test.dart after #183)
+
+    private static func coreFixture(_ name: String) throws -> RetroJSON {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("../AnyPS5CoreTests/Fixtures/\(name)").standardized
+        return try RetroJSON.parse(Array(try Data(contentsOf: url)))
+    }
+
+    /// The status of the real host with SwanStation drawing on the GPU (AnyPS5CoreTests'
+    /// Fixtures/retro-host-swanstation-status.json), with the option at each key of `selected` chosen
+    /// and in effect at that index.
+    private static func recordedStatus(selected: [String: Int] = [:], hardware: Bool = true) throws -> RetroStatus {
+        var status = try RetroStatus.parse(try XCTUnwrap(try coreFixture("retro-host-swanstation-status.json").objectValue?["status"]))
+        status.hardware = hardware
+        for (key, index) in selected {
+            let option = try XCTUnwrap(status.options[key])
+            status.options[key] = RetroOption(key: key, title: option.title, values: option.values, labels: option.labels, selected: index,
+                                              activeValue: option.values[index], restart: option.restart)
+        }
+        return status
+    }
+
+    /// LRPS2's options of the real host (AnyPS5CoreTests' Fixtures/retro-host-lrps2-status.json),
+    /// as a game that is playing on the GPU.
+    private static func lrps2Status() throws -> RetroStatus {
+        var status = try RetroStatus.parse(try XCTUnwrap(try coreFixture("retro-host-lrps2-status.json").objectValue?["status"]), ps2: true)
+        status.ready = true
+        status.ended = false
+        status.error = ""
+        status.errorCode = ""
+        status.hardware = true
+        return status
+    }
+
+    private let hack = "swanstation_GPU_WidescreenHack"
+    private let aspect = "swanstation_Display_AspectRatio"
+    private let filter = "swanstation_GPU_TextureFilter"
+
+    private func option(_ key: String, _ value: String) -> RetroJSON { .object(["key": .string(key), "value": .string(value)]) }
+
+    /// A PS1 game playing `status` on a fake host, its menu open; the host.
+    private func menuOpen(_ model: AppModel, _ game: Game, status: RetroStatus, hosts: @escaping () -> [FakePlayHost]) async throws -> FakePlayHost {
+        let host = try await play(model, game, opened: hosts)
+        host.gameStatus = status
+        await model.retroPlay?.host.refresh()
+        XCTAssertEqual(model.retroPlay?.host.phase, .playing)
+        XCTAssertTrue(model.handle(.home))
+        return host
+    }
+
+    private func choice(_ model: AppModel, _ id: String) throws -> (options: [String], selected: Int, set: (Int) -> Void) {
+        guard case .choice(let options, let selected, let set) = try row(model, id).kind else {
+            XCTFail("\(id) is not a choice")
+            return ([], -1, { _ in })
+        }
+        return (options, selected, set)
+    }
+
+    func testTheGraphicsRowAfterAudioHoldsTheInternalResolutionNativeTo8xAndKeepsAChoiceTheHostTook() async throws {
         let (model, game, _) = try launcher()
         var hosts: [FakePlayHost] = []
         model.openRetroHost = { _, _, _, _ in
@@ -620,28 +682,220 @@ final class RetroHostPlayTests: XCTestCase {
             hosts.append(fake)
             return fake
         }
-        let host = try await play(model, game) { hosts }
-        var status = try Self.status(ready: true)
-        status.hardware = true
-        host.gameStatus = status
-        await model.retroPlay?.host.refresh()
-        XCTAssertTrue(model.handle(.home))
-        let rows = model.retroMenuPanelRows()
-        XCTAssertEqual(rows.map(\.id), ["resume", "section-audio", "resolution", "section-console", "section-advanced", "closeGame"])
-        let row = try XCTUnwrap(rows.first { $0.id == "resolution" })
-        XCTAssertEqual(row.title, "Internal resolution")
-        XCTAssertEqual(row.detail, "Draws the game sharper. Higher values need a faster graphics card.")
-        guard case .choice(let options, let selected, let set) = row.kind else { return XCTFail("a choice") }
-        XCTAssertEqual(options, ["Native", "2x"], "the values the launcher offers that the host lists")
-        XCTAssertEqual(selected, 0)
-        set(1)
-        try await settle({ model.preferences.retroHostOptions?["swanstation_GPU_ResolutionScale"] == "2" }, "kept once the host took it")
-        XCTAssertTrue(host.args("option").contains(.object(["key": .string("swanstation_GPU_ResolutionScale"), "value": .string("2")])))
+        let host = try await menuOpen(model, game, status: try Self.recordedStatus()) { hosts }
+        XCTAssertEqual(ids(model), ["resume", "section-audio", "section-graphics", "section-controller", "section-console", "section-advanced", "closeGame"],
+                       "the internal resolution is no longer on the first page")
+        let graphics = try row(model, "section-graphics")
+        XCTAssertEqual(graphics.title, "Graphics")
+        XCTAssertEqual(graphics.detail, "Resolution, textures and widescreen.")
+        model.menuIndex = 2
+        XCTAssertTrue(model.handle(.select))
+        XCTAssertEqual(model.retroMenuTitle, "Graphics")
+        XCTAssertEqual(ids(model), ["resolution", "smoothTextures", "fixWobbly3d", "widescreen"])
+        let resolution = try row(model, "resolution")
+        XCTAssertEqual(resolution.title, "Internal resolution")
+        XCTAssertEqual(resolution.detail, "Draws the game sharper. Higher values need a faster graphics card.")
+        let values = try choice(model, "resolution")
+        XCTAssertEqual(values.options, ["Native", "2x", "3x", "4x", "6x", "8x"], "the host lists 1 to 8; 5x and 7x are not offered")
+        XCTAssertEqual(values.selected, 0)
+        values.set(3)
+        try await settle({ model.preferences.retroHostOptions?["swanstation_GPU_ResolutionScale"] == "4" }, "kept once the host took it")
+        XCTAssertTrue(host.args("option").contains(option("swanstation_GPU_ResolutionScale", "4")))
+        XCTAssertEqual(model.retroPlay?.menuSection, .graphics, "the menu stays on Graphics")
+        XCTAssertTrue(model.handle(.back))
+        XCTAssertEqual(model.menuIndex, 2, "back on the Graphics row")
         XCTAssertEqual(AppModel.retroResolutionDetail(try XCTUnwrap(RetroResolutionChoice.of({
-            var refused = status
+            var refused = try! Self.recordedStatus()
             refused.resolutionError = "too large"
             return refused
         }(), limitsPs2: false))), "The emulator can't show the resolution you saved, so the game uses Native.")
+    }
+
+    func testTheGraphicsRowsOfferWhatTheHostListsSendTheirOptionsTogetherAndKeepThem() async throws {
+        let (model, game, _) = try launcher()
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            hosts.append(fake)
+            return fake
+        }
+        let host = try await menuOpen(model, game, status: try Self.recordedStatus()) { hosts }
+        try choose(model, "section-graphics")
+
+        let smooth = try row(model, "smoothTextures")
+        XCTAssertEqual(smooth.title, "Smooth textures")
+        XCTAssertEqual(smooth.detail, "Softens blocky textures and sprites; 2D art can show seams.")
+        XCTAssertEqual(try choice(model, "smoothTextures").options, ["Off", "Smooth", "Extra smooth"],
+                       "Nearest, Bilinear and xBR; JINC2 and the No Edge Blending values are not offered")
+        XCTAssertEqual(try choice(model, "smoothTextures").selected, 0)
+        XCTAssertEqual(try row(model, "fixWobbly3d").title, "Fix wobbly 3D")
+        XCTAssertEqual(try choice(model, "fixWobbly3d").options, ["Off", "On"])
+        XCTAssertEqual(try choice(model, "fixWobbly3d").selected, 0, "the recorded game started without PGXP")
+        XCTAssertEqual(try row(model, "widescreen").title, "Widescreen")
+        XCTAssertEqual(try row(model, "widescreen").detail, "Shows more of a 3D game at 16:9. 2D games and drawn backgrounds can look wrong.")
+
+        host.gameStatus = try Self.recordedStatus(selected: [hack: 0, aspect: 1])
+        try choice(model, "widescreen").set(1)
+        try await settle({ model.preferences.retroHostGameOptions?[game.titleID] == [self.hack: "true", self.aspect: "16:9"] },
+                         "widescreen is kept for this game, under its states folder's name")
+        XCTAssertEqual(host.args("option"), [option(hack, "true"), option(aspect, "16:9")], "the hack and its aspect ratio change together")
+        XCTAssertEqual(model.retroStatesFolder(game, ps2: false).lastPathComponent, game.titleID)
+        XCTAssertNil(model.preferences.retroHostOptions?[hack], "not for every game")
+        XCTAssertEqual(try choice(model, "widescreen").selected, 1)
+        XCTAssertEqual(try row(model, "widescreen").detail, "Shows more of a 3D game at 16:9. 2D games and drawn backgrounds can look wrong.", "in effect")
+
+        host.answer("option", .bool(false))
+        try choice(model, "fixWobbly3d").set(1)
+        try await settle({ host.args("option").last == self.option("swanstation_GPU_PGXPEnable", "true") }, "sent")
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(model.preferences.retroHostOptions?["swanstation_GPU_PGXPEnable"], "refused, so not kept")
+    }
+
+    func testWidescreenNeverStaysHalfSetARefusedAspectRatioSetsTheHackBackOneChoiceAtATime() async throws {
+        let (model, game, _) = try launcher()
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            hosts.append(fake)
+            return fake
+        }
+        let host = try await menuOpen(model, game, status: try Self.recordedStatus()) { hosts }
+        try choose(model, "section-graphics")
+        let aspect = self.aspect
+        host.onCall = { [unowned host] method, args in
+            guard method == "option" else { return }
+            host.answer("option", .bool(args.objectValue?["key"] != .string(aspect)))
+        }
+        try choice(model, "widescreen").set(1)
+        try await settle({ host.args("option").count == 3 }, "the hack, the refused aspect ratio, the hack set back")
+        XCTAssertEqual(host.args("option"), [option(hack, "true"), option(aspect, "16:9"), option(hack, "false")],
+                       "the hack is set back to what the host had")
+        XCTAssertNil(model.preferences.retroHostGameOptions)
+        XCTAssertNil(model.preferences.retroHostOptions?[hack])
+
+        host.onCall = nil
+        host.answer("option", .bool(true))
+        let gate = PlayGate()
+        host.callGate = gate
+        try choice(model, "widescreen").set(1)
+        try await settle({ host.args("option").count == 4 }, "the hack is being sent")
+        try choice(model, "smoothTextures").set(1)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(host.args("option").count, 4, "the second choice waits for none: it is not taken")
+        host.callGate = nil
+        gate.open()
+        try await settle({ model.preferences.retroHostGameOptions?[game.titleID] == [self.hack: "true", aspect: "16:9"] }, "kept once both were taken")
+        XCTAssertEqual(Array(host.args("option").dropFirst(3)), [option(hack, "true"), option(aspect, "16:9")], "widescreen's two options, and no texture filter")
+        XCTAssertNil(model.preferences.retroHostOptions?[filter])
+    }
+
+    func testWhileTheHostDrawsWithoutTheGpuGraphicsOffersOnlyWidescreen() async throws {
+        let (model, game, _) = try launcher()
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            hosts.append(fake)
+            return fake
+        }
+        _ = try await menuOpen(model, game, status: try Self.recordedStatus(hardware: false)) { hosts }
+        try choose(model, "section-graphics")
+        XCTAssertEqual(ids(model), ["widescreen"])
+    }
+
+    func testWidescreenChosenInOnePs1GameStartsThatGameOnlyWithItAlsoOnTheKeptHostAndSurvivesARestart() async throws {
+        let (model, first, _) = try launcher()
+        let root = try XCTUnwrap(model.libraryRoots.first)
+        let folder = root.appendingPathComponent("Day Racer")
+        try write(Data(), folder.appendingPathComponent("game.cue"))
+        try write(try JSONSerialization.data(withJSONObject: ["platform": "ps1", "titleId": "SLUS00002", "name": "Day Racer", "disc": "game.cue"]),
+                  folder.appendingPathComponent("retro.json"))
+        model.scanAtOnce()
+        let second = try XCTUnwrap(model.games.first { $0.name == "Day Racer" })
+        let game = try XCTUnwrap(model.games.first { $0.name == first.name })
+        XCTAssertNotEqual(game.titleID, second.titleID)
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            hosts.append(fake)
+            return fake
+        }
+        model.selected = try XCTUnwrap(model.games.firstIndex(of: game))
+        let host = try await menuOpen(model, game, status: try Self.recordedStatus()) { hosts }
+        try choose(model, "section-graphics")
+        host.gameStatus = try Self.recordedStatus(selected: [hack: 0, aspect: 1])
+        try choice(model, "widescreen").set(1)
+        try await settle({ model.preferences.retroHostGameOptions?[game.titleID]?[self.hack] == "true" }, "widescreen kept for the first game")
+        try choice(model, "smoothTextures").set(1)
+        try await settle({ model.preferences.retroHostOptions?[self.filter] == "Bilinear" }, "smooth textures kept for every game")
+        XCTAssertNil(model.preferences.retroHostOptions?[hack])
+        await model.closeRetroGame()
+        XCTAssertTrue(model.retroHostKeeper.holding, "the host stays for the next game")
+
+        func startedOptions(_ index: Int) throws -> [String: RetroJSON] {
+            try XCTUnwrap(host.started[index].objectValue?["options"]?.objectValue)
+        }
+        model.selected = try XCTUnwrap(model.games.firstIndex(of: second))
+        _ = try await play(model, second) { hosts }
+        try await settle({ host.started.count == 2 }, "the other game started")
+        XCTAssertEqual(hosts.count, 1, "on the kept host")
+        let other = try startedOptions(1)
+        XCTAssertNil(other[hack], "the other game starts without widescreen")
+        XCTAssertNil(other[aspect])
+        XCTAssertEqual(other[filter], .string("Bilinear"), "a choice kept for every game still reaches it")
+        XCTAssertEqual(other["swanstation_GPU_PGXPEnable"], .string("true"))
+        await model.closeRetroGame()
+
+        let data = try XCTUnwrap(model.preferences.encoded())
+        let saved = try XCTUnwrap(Preferences.read(data))
+        XCTAssertEqual(saved.retroHostGameOptions, model.preferences.retroHostGameOptions, "saved and read back")
+        model.preferences.retroHostGameOptions = nil
+        model.preferences.retroHostGameOptions = saved.retroHostGameOptions
+        model.selected = try XCTUnwrap(model.games.firstIndex(of: game))
+        _ = try await play(model, game) { hosts }
+        try await settle({ host.started.count == 3 }, "the first game started again")
+        let again = try startedOptions(2)
+        XCTAssertEqual(again[hack], .string("true"))
+        XCTAssertEqual(again[aspect], .string("16:9"))
+        XCTAssertEqual(again[filter], .string("Bilinear"))
+    }
+
+    func testAPs2GamesGraphicsRowSaysTheRefusalAndItsPageOffersSharperTexturesAndWidescreen() async throws {
+        let (model, game) = try ps2Launcher(lrps2: true)
+        model.setRetroHostPs2(true)
+        var hosts: [FakePlayHost] = []
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            fake.canPlayPs2 = true
+            fake.limitsPs2Resolution = true
+            hosts.append(fake)
+            return fake
+        }
+        let refusal = try RetroStatus.parse(try XCTUnwrap(try Self.coreFixture("retro-host-ps2-resolution-status.json").objectValue?["reply"]?.objectValue?["result"]),
+                                            ps2: true)
+        let host = try await menuOpen(model, game, status: refusal) { hosts }
+        XCTAssertTrue(ids(model).contains("section-graphics"))
+        XCTAssertFalse(ids(model).contains("section-advanced"), "LRPS2's VR, the recording's other option, is not shown")
+        XCTAssertEqual(try row(model, "section-graphics").detail, "The emulator can't show the resolution you saved, so the game uses 4x.",
+                       "the refusal shows before Graphics is opened")
+        try choose(model, "section-graphics")
+        XCTAssertEqual(ids(model), ["resolution"], "the recording lists no other graphics option")
+        XCTAssertEqual(try row(model, "resolution").detail, "The emulator can't show the resolution you saved, so the game uses 4x.")
+
+        host.gameStatus = try Self.lrps2Status()
+        await model.retroPlay?.host.refresh()
+        XCTAssertEqual(ids(model), ["resolution", "sharperTextures", "widescreen"])
+        XCTAssertEqual(try choice(model, "resolution").options, ["Native", "2x", "4x", "8x"])
+        XCTAssertEqual(try row(model, "sharperTextures").title, "Sharper textures")
+        XCTAssertEqual(try row(model, "sharperTextures").detail, "Keeps textures sharp on surfaces seen at an angle.")
+        XCTAssertEqual(try choice(model, "sharperTextures").options, ["Off", "On"])
+        XCTAssertEqual(try choice(model, "widescreen").options, ["Off", "On"], "16:10, 21:9 and 32:9 are not offered")
+        XCTAssertEqual(try row(model, "widescreen").detail, "Changes take effect when the game is started again.", "LRPS2 patches the game at boot")
+        let settled = RetroGraphicsChoice(setting: .widescreenPs2, values: [], selected: 0, note: .none)
+        XCTAssertEqual(AppModel.retroGraphicsDetail(settled), "Shows the game at 16:9 if the game supports it.")
+        try choice(model, "widescreen").set(1)
+        try await settle({ model.preferences.retroHostOptions?["pcsx2_widescreen_hint"] == "enabled (16:9)" }, "kept for every PS2 game")
+        XCTAssertNil(model.preferences.retroHostGameOptions, "PS2 widescreen is not kept per game")
+        XCTAssertEqual(host.args("option").last, option("pcsx2_widescreen_hint", "enabled (16:9)"))
     }
 
     func testTheMenuWordsInTurkishSayKontrolcu() throws {

@@ -303,7 +303,8 @@ extension AppModel {
         await host.start(RetroHostStartRequest(
             core: core, disc: discPath, system: retroSystemFolder.standardizedFileURL.path,
             saves: (ps2 ? retroPs2SavesFolder : retroSavesFolder).standardizedFileURL.path,
-            options: (preferences.retroHostOptions ?? [:]).filter { RetroOptionSection.sent($0.key, ps2: ps2) },
+            options: RetroOptionSection.startOptions(kept: preferences.retroHostOptions ?? [:], ps2: ps2,
+                                                     game: preferences.retroHostGameOptions?[game.titleID] ?? [:]),
             console: ps2 ? RetroConsole.ps2 : nil, states: statesPath))
     }
 
@@ -546,9 +547,11 @@ extension AppModel {
     // MARK: The menu
 
     /// The menu's sections, in the order its first page lists them, each with the words of its
-    /// row and heading and of the row's detail. Graphics is not among them.
+    /// row and heading and of the row's detail. Graphics lists not its options but the internal
+    /// resolution and the settings that set them (`RetroGameMenu.graphics`).
     static let retroMenuSections: [(RetroOptionSection, TRetro.Key, TRetro.Key)] = [
         (.audio, .retroMenuAudio, .retroMenuAudioDetail),
+        (.graphics, .retroMenuGraphics, .retroMenuGraphicsDetail),
         (.controller, .retroMenuController, .retroMenuControllerDetail),
         (.console, .retroMenuConsole, .retroMenuConsoleDetail),
         (.advanced, .retroMenuAdvanced, .retroMenuAdvancedDetail),
@@ -566,7 +569,8 @@ extension AppModel {
     /// The game's menu, as on Windows and Linux. Its first page: Resume, the discs of a multi-disc
     /// game, Save state and Load state where its host saves states, a row for each section that has
     /// rows, and Close game. A section's page: its options in the order the host lists them, with
-    /// Volume and Mute first in Audio. Save state's and Load state's pages: the game's slots.
+    /// Volume and Mute first in Audio; Graphics' page its own rows (`retroGraphicsRows`). Save
+    /// state's and Load state's pages: the game's slots.
     func retroMenuPanelRows() -> [PanelRow] {
         guard let play = retroPlay else { return [] }
         if let page = play.statePage { return retroStateRows(play, page) }
@@ -590,19 +594,117 @@ extension AppModel {
         rows += retroStateMenuRows(play)
         for (section, title, detail) in Self.retroMenuSections {
             if !retroSectionRows(play, section).isEmpty {
-                rows.append(PanelRow(id: "section-\(section.rawValue)", title: TRetro.text(title), detail: TRetro.text(detail),
+                rows.append(PanelRow(id: "section-\(section.rawValue)", title: TRetro.text(title),
+                                     detail: section == .graphics ? retroGraphicsSectionDetail(play) : TRetro.text(detail),
                                      symbol: Self.retroSectionSymbol(section),
                                      kind: .action(destructive: false) { [weak self] in self?.openRetroMenuSection(play, section) }))
             }
-            // The internal resolution after Audio's row, also when Audio has none.
-            if section == .audio, let resolution = retroResolutionRow(play) { rows.append(resolution) }
         }
         rows.append(PanelRow(id: "closeGame", title: TH.text(.closeGame), symbol: "xmark.circle",
                              kind: .action(destructive: true) { [weak self] in Task { await self?.closeRetroGame() } }))
         return rows
     }
 
-    /// The first page's Internal resolution row: the values the launcher offers that the host
+    /// What the first page's Graphics row says: what the page holds, or the internal resolution's
+    /// refusal, so a saved value the emulator cannot show is said before the page is opened.
+    private func retroGraphicsSectionDetail(_ play: RetroPlay) -> String {
+        guard let resolution = play.menu.resolution, resolution.note == .refused else { return TRetro.text(.retroMenuGraphicsDetail) }
+        return Self.retroResolutionDetail(resolution)
+    }
+
+    /// The Graphics page's rows: the internal resolution, then the console's other graphics
+    /// settings, each where the host lists it.
+    private func retroGraphicsRows(_ play: RetroPlay) -> [PanelRow] {
+        var rows: [PanelRow] = []
+        if let resolution = retroResolutionRow(play) { rows.append(resolution) }
+        for choice in play.menu.graphics { rows.append(retroGraphicsRow(play, choice)) }
+        return rows
+    }
+
+    /// A Graphics setting's row (`RetroGraphicsChoice`): its values in the setting's order, with
+    /// what it does or when the value chosen takes effect under it.
+    private func retroGraphicsRow(_ play: RetroPlay, _ choice: RetroGraphicsChoice) -> PanelRow {
+        PanelRow(id: choice.setting.kind.rawValue, title: TRetro.text(Self.retroGraphicsTitle(choice.setting)), detail: Self.retroGraphicsDetail(choice),
+                 symbol: Self.retroGraphicsSymbol(choice.setting.kind),
+                 kind: .choice(options: choice.values.map(Self.retroGraphicsLabel), selected: choice.selected) { [weak self] index in
+            self?.chooseRetroGraphics(play, choice.setting, index)
+        })
+    }
+
+    /// A Graphics value chosen in the menu: the options it sets sent to the game, and kept once the
+    /// host took them all, for every later game of its console, or for this game only when the
+    /// setting is kept per game (`RetroGraphicsSetting.perGame`), under its title ID as its save
+    /// states are (`retroStatesFolder`). Each takes effect as its option does: in a moment, or at
+    /// the game's next start.
+    private func chooseRetroGraphics(_ play: RetroPlay, _ setting: RetroGraphicsSetting, _ index: Int) {
+        Task { @MainActor [weak self] in
+            guard let taken = await play.menu.chooseGraphics(setting, index), let self else { return }
+            if setting.perGame {
+                var games = self.preferences.retroHostGameOptions ?? [:]
+                games[play.game.titleID, default: [:]].merge(taken) { _, chosen in chosen }
+                self.preferences.retroHostGameOptions = games
+            } else {
+                self.preferences.retroHostOptions = (self.preferences.retroHostOptions ?? [:]).merging(taken) { _, chosen in chosen }
+            }
+        }
+    }
+
+    /// The words of a Graphics setting's title.
+    static func retroGraphicsTitle(_ setting: RetroGraphicsSetting) -> TRetro.Key {
+        switch setting.kind {
+        case .smoothTextures: return .retroSmoothTextures
+        case .fixWobbly3d: return .retroFixWobbly3d
+        case .widescreen: return .retroWidescreen
+        case .sharperTextures: return .retroSharperTextures
+        }
+    }
+
+    /// The words under a Graphics setting's row (`retroGraphicsNoteDetail`); widescreen says what
+    /// it does on each console.
+    static func retroGraphicsDetail(_ choice: RetroGraphicsChoice) -> String {
+        let about: TRetro.Key
+        switch choice.setting.kind {
+        case .smoothTextures: about = .retroSmoothTexturesDetail
+        case .fixWobbly3d: about = .retroFixWobbly3dDetail
+        case .widescreen: about = choice.setting.ps2 ? .retroWidescreenPs2Detail : .retroWidescreenPs1Detail
+        case .sharperTextures: about = .retroSharperTexturesDetail
+        }
+        return retroGraphicsNoteDetail(choice.note, about: about)
+    }
+
+    /// The words of a Graphics value: Off and On, Smooth and Extra smooth, or the host's own label
+    /// for a value the launcher does not offer.
+    static func retroGraphicsLabel(_ value: RetroGraphicsValue) -> String {
+        switch value.offer?.level {
+        case nil: return value.label
+        case .off?: return TRetro.text(.retroGraphicsValueOff)
+        case .on?: return TRetro.text(.retroGraphicsValueOn)
+        case .smooth?: return TRetro.text(.retroGraphicsValueSmooth)
+        case .extraSmooth?: return TRetro.text(.retroGraphicsValueExtraSmooth)
+        }
+    }
+
+    /// The words under a Graphics row for `note`: what the setting does (`about`) while its value
+    /// is in effect, otherwise when the value chosen takes effect.
+    static func retroGraphicsNoteDetail(_ note: RetroGraphicsNote, about: TRetro.Key) -> String {
+        switch note {
+        case .applying: return TRetro.text(.retroMenuOptionPendingDetail)
+        case .nextStart: return TRetro.text(.retroMenuOptionRestartDetail)
+        case .changesAtNextStart: return TRetro.text(.retroMenuOptionRestartOnlyDetail)
+        case .none, .refused: return TRetro.text(about)
+        }
+    }
+
+    private static func retroGraphicsSymbol(_ kind: RetroGraphicsKind) -> String {
+        switch kind {
+        case .smoothTextures: return "camera.filters"
+        case .fixWobbly3d: return "cube"
+        case .widescreen: return "rectangle.ratio.16.to.9"
+        case .sharperTextures: return "camera.aperture"
+        }
+    }
+
+    /// The Graphics page's Internal resolution row: the values the launcher offers that the host
     /// lists (`RetroResolutionChoice.of`), or nil when the menu offers none.
     private func retroResolutionRow(_ play: RetroPlay) -> PanelRow? {
         guard let choice = play.menu.resolution else { return nil }
@@ -636,16 +738,12 @@ extension AppModel {
         }
     }
 
-    /// The line under the row: the refusal naming the value the game draws at, when the next start
-    /// takes it, that it shows in a moment, or what it does.
+    /// The line under the row: the refusal naming the value the game draws at, in the launcher's
+    /// words (the host's English `resolutionError` goes to the log), or the words every Graphics
+    /// row says (`retroGraphicsNoteDetail`).
     static func retroResolutionDetail(_ choice: RetroResolutionChoice) -> String {
-        switch choice.note {
-        case .none: return TRetro.text(.retroResolutionDetail)
-        case .applying: return TRetro.text(.retroMenuOptionPendingDetail)
-        case .nextStart: return TRetro.text(.retroMenuOptionRestartDetail)
-        case .changesAtNextStart: return TRetro.text(.retroMenuOptionRestartOnlyDetail)
-        case .refused: return TRetro.format(.retroResolutionRefusedDetail, retroResolutionLabel(choice.active))
-        }
+        guard choice.note != .refused else { return TRetro.format(.retroResolutionRefusedDetail, retroResolutionLabel(choice.active)) }
+        return retroGraphicsNoteDetail(choice.note, about: .retroResolutionDetail)
     }
 
     private static func retroSectionSymbol(_ section: RetroOptionSection) -> String {
@@ -653,7 +751,8 @@ extension AppModel {
         case .audio: return "speaker.wave.2.fill"
         case .controller: return "gamecontroller.fill"
         case .console: return "cpu"
-        case .advanced, .graphics: return "wrench.and.screwdriver"
+        case .graphics: return "sparkles.tv"
+        case .advanced: return "wrench.and.screwdriver"
         }
     }
 
@@ -661,6 +760,7 @@ extension AppModel {
     /// options. An option that takes effect only when the game starts again says so; a chosen
     /// value not yet in effect says when it will be.
     private func retroSectionRows(_ play: RetroPlay, _ section: RetroOptionSection) -> [PanelRow] {
+        if section == .graphics { return retroGraphicsRows(play) }
         var rows: [PanelRow] = []
         if section == .audio {
             rows.append(PanelRow(id: "volume", title: TRetro.text(.retroMenuVolume), symbol: "speaker.wave.2",
