@@ -11,9 +11,17 @@ public enum RetroProtocol {
     /// The capability that plays PS2 games on LRPS2: `start.console` and `status.console`
     /// (protocol.md "Capabilities", anyps5-retro-host docs/ps2.md).
     public static let ps2Capability = "ps2"
+    /// The capability that saves and loads a game's state for one player: `start.states` and the
+    /// methods `saveState` and `loadState` (protocol.md "saveState and loadState").
+    public static let saveStatesCapability = "saveStates"
+    /// The capability that limits a PS2 game's internal resolution (`pcsx2_upscale_multiplier`),
+    /// so it may be sent in `start.options` and with `option` (anyps5-retro-host #25).
+    public static let ps2ResolutionLimitsCapability = "ps2ResolutionLimits"
     /// The largest call and ping id.
     public static let maxID = 2_147_483_647
     public static let maxUInt32 = 4_294_967_295
+    /// The largest integer a JSON number holds exactly (protocol.md "Values").
+    public static let maxSafeInteger = 9_007_199_254_740_991
     /// The longest message body, and the shortest.
     public static let maxBody = 1_048_576
     public static let minBody = 2
@@ -38,6 +46,19 @@ public struct RetroCallError: Error, Equatable, CustomStringConvertible {
     public static let busy = "busy"
     public static let start = "start"
     public static let tooLarge = "tooLarge"
+    /// `loadState`: the slot or file holds no state (protocol.md "saveState and loadState").
+    public static let noState = "noState"
+    /// `loadState`: not a state file of a version the host reads, or one whose header does not
+    /// match its size.
+    public static let badState = "badState"
+    /// `loadState`: the state was saved from another game (another console or disc name).
+    public static let otherGame = "otherGame"
+    /// `loadState`: the state was saved by another core or core build (`status.core` differs).
+    public static let otherCore = "otherCore"
+    /// The core gave no state, or refused the one in the file; the game runs on.
+    public static let coreRefused = "coreRefused"
+    /// The state file could not be written or read, or not in time.
+    public static let fileError = "fileError"
 
     public init(code: String, message: String) {
         self.code = code
@@ -194,6 +215,9 @@ public struct RetroStatus: Equatable, Sendable {
     public var progressLabel: String?
     public var progressPercent: Int?
     public var options: [String: RetroOption] = [:]
+    /// The keys of `options` in the order the host lists them, which is the order the game's menu
+    /// shows them in, as on Windows and Linux.
+    public var optionOrder: [String] = []
     /// Memory card 1's file is there but the host could not read it as a card, so it is left as it is
     /// and this game's saves are not written anywhere. False from a status without the field.
     public var cardUnreadable = false
@@ -224,11 +248,26 @@ public struct RetroStatus: Equatable, Sendable {
         map["graphicsPending"] = .bool(graphicsPending)
         map["progressLabel"] = progressLabel.map(RetroJSON.string) ?? RetroJSON.null
         map["progressPercent"] = progressPercent.map(RetroJSON.int) ?? RetroJSON.null
-        map["options"] = .object(options.mapValues(\.json))
+        map["options"] = .object(options.mapValues(\.json), keys: orderedOptionKeys)
         map["cardUnreadable"] = .bool(cardUnreadable)
         if let discs { map["discs"] = discs.json }
         if let console { map["console"] = .string(console) }
         return .object(map)
+    }
+
+    /// The keys of `options` in the host's order: `optionOrder` when it names every option, else
+    /// sorted.
+    public var orderedOptionKeys: [String] {
+        optionOrder.count == options.count && Set(optionOrder) == Set(options.keys) ? optionOrder : options.keys.sorted()
+    }
+
+    /// The options in the host's order.
+    public var orderedOptions: [RetroOption] { orderedOptionKeys.compactMap { options[$0] } }
+
+    /// Whether `other` says the same as this status, field by field as protocol.md "status" writes
+    /// it, the order of the options too, which is the menu's order.
+    public func sameAs(_ other: RetroStatus) -> Bool {
+        self == other && orderedOptionKeys == other.orderedOptionKeys
     }
 
     /// Whether `value` is the client's own failure report rather than a host's status, which always
@@ -247,7 +286,8 @@ public struct RetroStatus: Equatable, Sendable {
         let f = try RetroFields(value, "status")
         var options: [String: RetroOption] = [:]
         let optionFields = try f.object("options")
-        for key in optionFields.map.keys {
+        let optionOrder = f.map["options"]?.objectKeys ?? []
+        for key in optionOrder {
             let o = try optionFields.object(key)
             let values = try o.strings("values")
             let labels = try o.strings("labels")
@@ -294,6 +334,7 @@ public struct RetroStatus: Equatable, Sendable {
         status.progressLabel = try f.stringOrNull("progressLabel")
         status.progressPercent = percent
         status.options = options
+        status.optionOrder = optionOrder
         status.cardUnreadable = try f.has("cardUnreadable") ? f.boolean("cardUnreadable") : false
         status.discs = discs
         if ps2 {

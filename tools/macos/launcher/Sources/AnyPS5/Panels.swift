@@ -30,6 +30,9 @@ struct PanelRow: Identifiable {
     var person: PanelPerson?
     /// A picture (a game's icon) that stands in for the symbol.
     var picture: Data?
+    /// The picture's width to its height when it is not square (a save state's picture of the game);
+    /// a row with one and no `picture` holds the picture's place empty, so a list of them lines up.
+    var pictureAspect: Double?
     /// The detail is advice to read whole (the controller troubleshooter): no line limit.
     var wraps = false
     /// What △ does on this row, with the hint saying so (a Hub theme: Wear on my profile).
@@ -590,7 +593,8 @@ extension AppModel {
         let changes = settings(for: game).controls ?? [:]
         // The game's own actions, when its files name them, under each button.
         let actions = gameControls[game.id] ?? [:]
-        var rows = gyroRows(game)
+        // A disc in the emulator host has no gyro: its keys only.
+        var rows = game.retro == nil ? gyroRows(game) : []
         rows.append(PanelRow(id: "hint", title: T.text(.controlsHint), detail: actions.isEmpty ? nil : T.text(.controlsFromGame), kind: .info("")))
         for action in PadAction.allCases {
             rows.append(PanelRow(id: action.rawValue, title: action.title, detail: actions[action]?.joined(separator: " · "), symbol: action.symbol,

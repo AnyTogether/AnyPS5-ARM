@@ -2,10 +2,12 @@
 #include "prx/libSceNpGameIntent/include/InventoryExports.hpp"
 #include "prx/libSceNpGameIntent/include/Api.hpp"
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include "SceTypes.hpp"
 #include "prx/libc/include/General.hpp"
 
@@ -18,6 +20,7 @@ constexpr int NpGameIntentErrorValueNotFound = -2141898745;
 constexpr int NpGameIntentUserIdInvalid = -1;
 constexpr int NpAppLauncherErrorNotInitialized = -2141898238;
 constexpr int NpAppLauncherErrorInvalidArgument = -2141898236;
+constexpr int NpSessionServiceErrorNotInitialized = -2141861374;
 
 std::atomic_bool& NpGameIntentInitialized() {
     static std::atomic_bool initialized{false};
@@ -27,6 +30,13 @@ std::atomic_bool& NpGameIntentInitialized() {
 std::atomic_bool& AppLauncherInitialized() {
     static std::atomic_bool initialized{false};
     return initialized;
+}
+
+bool ReadGuestBytePreservingErrno_nid_no_patch(const char* source, char& value) {
+    const int savedErrno = errno;
+    const bool copied = GuestCopyIn_nid_no_patch(&value, source, sizeof(value));
+    errno = savedErrno;
+    return copied;
 }
 
 }
@@ -60,18 +70,30 @@ int APS5_VABI sceNpGameIntentGetPropertyValueString(const NpGameIntentData* inte
 	if (!NpGameIntentInitialized()) {
 		return call.Return(NpGameIntentErrorNotInitialized);
 	}
-	if (intentData == nullptr || key == nullptr || key[0] == '\0' || valueBuf == nullptr || bufSize == 0) {
+	if (intentData == nullptr || key == nullptr || valueBuf == nullptr || bufSize == 0) {
 		return call.Return(NpGameIntentErrorInvalidArgument);
 	}
 
- valueBuf[0] = '\0';
- return call.Return(NpGameIntentErrorValueNotFound);
+	const int savedErrno = errno;
+	char firstKeyByte{};
+	const bool keyReadable = GuestCopyIn_nid_no_patch(&firstKeyByte, key, 1);
+	errno = savedErrno;
+	if (!keyReadable || firstKeyByte == '\0') {
+		return call.Return(NpGameIntentErrorInvalidArgument);
+	}
+
+	const char terminator = '\0';
+	const bool outputWritable = GuestCopyOut_nid_no_patch(valueBuf, &terminator, 1);
+	errno = savedErrno;
+	return call.Return(outputWritable ? NpGameIntentErrorValueNotFound : NpGameIntentErrorInvalidArgument);
 }
 
 int APS5_VABI sceNpGameIntentInitialize(const void* initParam) {
     Online::Call call("libSceNpGameIntent", __func__);
     call.Args([&](Online::Fields& in) { in.Ptr("initParam", initParam); });
-	(void)initParam;
+	if (initParam == nullptr) {
+		return call.Return(NpGameIntentErrorInvalidArgument);
+	}
 	NpGameIntentInitialized() = true;
 	return call.Return(0);
 }
@@ -82,15 +104,26 @@ int APS5_VABI sceNpGameIntentReceiveIntent(NpGameIntentInfo* intentInfo) {
 	if (!NpGameIntentInitialized()) {
 		return call.Return(NpGameIntentErrorNotInitialized);
 	}
-	if (intentInfo == nullptr || intentInfo->size != 0x4140) {
+	if (intentInfo == nullptr) {
 		return call.Return(NpGameIntentErrorInvalidArgument);
 	}
-
-	intentInfo->user_id = NpGameIntentUserIdInvalid;
-	std::memset(intentInfo->intent_type, 0, sizeof(intentInfo->intent_type));
-	std::memset(&intentInfo->intent_data, 0, sizeof(intentInfo->intent_data));
-
- return call.Return(NpGameIntentErrorIntentNotFound);
+	NpGameIntentInfo localInfo{};
+	const int savedErrno = errno;
+	const bool copiedIn = GuestCopyIn_nid_no_patch(&localInfo, intentInfo, sizeof(localInfo));
+	errno = savedErrno;
+	if (!copiedIn || localInfo.size != 0x4140) {
+		return call.Return(NpGameIntentErrorInvalidArgument);
+	}
+	localInfo.user_id = NpGameIntentUserIdInvalid;
+	std::memset(localInfo.intent_type, 0, sizeof(localInfo.intent_type));
+	std::memset(&localInfo.intent_data, 0, sizeof(localInfo.intent_data));
+	const int savedErrnoOut = errno;
+	const bool copiedOut = GuestCopyOut_nid_no_patch(intentInfo, &localInfo, sizeof(localInfo));
+	errno = savedErrnoOut;
+	if (!copiedOut) {
+		return call.Return(NpGameIntentErrorInvalidArgument);
+	}
+	return call.Return(NpGameIntentErrorIntentNotFound);
 }
 
 int APS5_VABI sceNpGameIntentTerminate(void) {
@@ -105,8 +138,14 @@ int APS5_VABI sceNpGameIntentInitParamInit(NpGameIntentInitParam* param) {
     if (param == nullptr) {
         APS5_INVALID_ARG_EX;
     }
-    std::memset(param, 0, sizeof(NpGameIntentInitParam));
-    param->size = sizeof(NpGameIntentInitParam);
+    NpGameIntentInitParam localParam{};
+    localParam.size = sizeof(NpGameIntentInitParam);
+    const int savedErrno = errno;
+    const bool copied = GuestCopyOut_nid_no_patch(param, &localParam, sizeof(localParam));
+    errno = savedErrno;
+    if (!copied) {
+        APS5_INVALID_ARG_EX;
+    }
     return call.Return(0);
 }
 
@@ -116,9 +155,15 @@ int APS5_VABI sceNpGameIntentInfoInit(NpGameIntentInfo* info) {
     if (info == nullptr) {
         APS5_INVALID_ARG_EX;
     }
-    std::memset(info, 0, sizeof(NpGameIntentInfo));
-    info->size = sizeof(NpGameIntentInfo);
-    info->user_id = NpGameIntentUserIdInvalid;
+    NpGameIntentInfo localInfo{};
+    localInfo.size = sizeof(NpGameIntentInfo);
+    localInfo.user_id = NpGameIntentUserIdInvalid;
+    const int savedErrno = errno;
+    const bool copied = GuestCopyOut_nid_no_patch(info, &localInfo, sizeof(localInfo));
+    errno = savedErrno;
+    if (!copied) {
+        APS5_INVALID_ARG_EX;
+    }
     return call.Return(0);
 }
 
@@ -143,9 +188,16 @@ int APS5_VABI sceNpAppLauncherInitialize(const void* initParam) {
 int APS5_VABI sceNpAppLauncherLaunchApp(std::int32_t arg0, const char* arg2, const char* arg3) {
     (void)arg0;
     if (!AppLauncherInitialized()) return NpAppLauncherErrorNotInitialized;
-    if (arg2 == nullptr || *arg2 == '\0' || (arg3 != nullptr && std::memchr(arg3, '\0', 0x2001) == nullptr)) return NpAppLauncherErrorInvalidArgument;
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    char first = 0;
+    if (arg2 == nullptr || !ReadGuestBytePreservingErrno_nid_no_patch(arg2, first) || first == '\0') return NpAppLauncherErrorInvalidArgument;
+    if (arg3 != nullptr) {
+        std::string optionalArgument;
+        const int savedErrno = errno;
+        const int copyResult = CopyGuestString_nid_no_patch(arg3, 0x2001, optionalArgument);
+        errno = savedErrno;
+        if (copyResult != 0) return NpAppLauncherErrorInvalidArgument;
+    }
+    return NpAppLauncherErrorNotInitialized;
 }
 
 int APS5_VABI sceNpAppLauncherTerminate() {
@@ -155,28 +207,39 @@ int APS5_VABI sceNpAppLauncherTerminate() {
 }
 
 int APS5_VABI sceNpGameIntentGetUdsNpComId() {
+    if (!NpGameIntentInitialized()) {
+        return NpGameIntentErrorNotInitialized;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceNpGameIntentLaunchApp() {
+    if (!NpGameIntentInitialized()) {
+        return NpGameIntentErrorNotInitialized;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceNpGameIntentLaunchApp2() {
+    if (!NpGameIntentInitialized()) {
+        return NpGameIntentErrorNotInitialized;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceNpGameIntentNotifyAppLaunched() {
+    if (!NpGameIntentInitialized()) {
+        return NpGameIntentErrorNotInitialized;
+    }
     NotImplemented_nid_no_patch(__func__);
     return 0;
 }
 
 int APS5_VABI sceNpSessionServiceGetJoinedPartySession() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return NpSessionServiceErrorNotInitialized;
 }
 
 int APS5_VABI sceNpSessionServiceInitialize() {
@@ -184,21 +247,19 @@ int APS5_VABI sceNpSessionServiceInitialize() {
 }
 
 int APS5_VABI sceNpSessionServiceGetRunningGamePlayerSession() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return NpSessionServiceErrorNotInitialized;
 }
 
 int APS5_VABI sceNpSessionServiceSendPlayerSessionInvitations() {
-    NotImplemented_nid_no_patch(__func__);
-    return 0;
+    return NpSessionServiceErrorNotInitialized;
 }
 
 int APS5_VABI sceNpSessionServiceSendPlayerSessionRequestToJoin() {
-    NotImplemented_nid_no_patch(__func__);
+    return NpSessionServiceErrorNotInitialized;
 }
 
 int APS5_VABI sceNpSessionServiceTerminate() {
-    NotImplemented_nid_no_patch(__func__);
+    return NpSessionServiceErrorNotInitialized;
 }
 
 }

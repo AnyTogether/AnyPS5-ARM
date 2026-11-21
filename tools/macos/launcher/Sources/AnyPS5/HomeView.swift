@@ -9,7 +9,7 @@ struct Backdrop: View {
 
     var body: some View {
         let preferences = model.preferences
-        let paused = model.running != nil || model.emulator != nil || !model.active || preferences.reducedMotion || model.powerDimmed
+        let paused = model.running != nil || model.emulator != nil || model.retroPlay != nil || !model.active || preferences.reducedMotion || model.powerDimmed
         ZStack {
             if let design = model.activeDesign, let file = model.themes.file(design.background, of: design) {
                 if design.backgroundIsVideo {
@@ -1038,6 +1038,9 @@ extension AppModel {
             if command == .back { cancelFontWait() }
             return true
         }
+        // A PS1 game in the emulator host on its own screen, or its menu: the controller is the
+        // game's, PS opens its menu.
+        if retroPlay != nil, overlay == nil || retroMenuShown { return retroCommand(command) }
         if command == .home {
             homeButton(hold: false)
             return true
@@ -1176,6 +1179,8 @@ extension AppModel {
             return browserPlayCommand(command)
         case .quickMenu, .closeGame, .homeMenu, .profileMenu, .confirmQuit, .launcherReport, .confirmDeleteGame, .confirmCancelUnlock, .confirmQuitUnlocks:
             return gameMenuCommand(command)
+        case .retroMenu, .retroOverwriteState:
+            return retroCommand(command)
         case .profilePicker:
             return pickerCommand(command)
         case .addProfile:

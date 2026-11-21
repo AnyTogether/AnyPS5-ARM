@@ -89,7 +89,7 @@ extension AppModel {
 enum DisplayPreviews {
     static func run(_ preferences: Preferences, _ found: [Game], _ root: URL, _ still: NSImage?, _ output: URL) {
         PreviewRenderer.render(preferences, found, root, still, output.appendingPathComponent("display-settings.png")) { model in
-            model.updateDisplayDefaults { $0.windowSize = 85 }
+            model.updateDisplayDefaults { $0.fullscreen = false; $0.windowSize = 85 }
             model.open(.settings)
             model.panelCategory = model.panelCategories().firstIndex { $0.id == "display" } ?? 0
             model.panelInRows = true

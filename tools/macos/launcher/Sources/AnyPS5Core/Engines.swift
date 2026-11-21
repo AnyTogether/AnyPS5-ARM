@@ -369,6 +369,11 @@ public struct ToolkitStore: Sendable {
     /// unsigned release published after signing began is refused; an older one only goes ahead
     /// with `allowUnsigned` (the user saw the warning) and is then checked with GitHub's sha256,
     /// which it must have.
+    ///
+    /// The download goes into .downloads/<asset>.part and is tried again by itself when it fails
+    /// on the way (DownloadRetry): a dropped or stalled connection, or a 403 from GitHub's storage
+    /// once its signed address expired. When every try failed the part is kept, so downloading the
+    /// same release again carries on from there; it goes once the download is installed or refused.
     @discardableResult
     public func download(_ entry: EngineCatalogue.Entry, launcherVersion: String, allowUnsigned: Bool = false,
                          keys: [ReleaseSigning.Key] = ReleaseSigning.trustedKeys, session: URLSession = .shared,
@@ -377,12 +382,15 @@ public struct ToolkitStore: Sendable {
         let fileManager = FileManager.default
         let downloads = folder.appendingPathComponent(".downloads")
         try fileManager.createDirectory(at: downloads, withIntermediateDirectories: true)
-        let file = downloads.appendingPathComponent(UUID().uuidString + ".zip")
+        let name = ToolkitStore.isSafeName(entry.assetName) ? entry.assetName : "engine-download.zip"
+        let file = downloads.appendingPathComponent(name + ".part")
+        let expected = Int64(entry.size ?? 0)
+        if expected > 0, FontDownloads.size(of: file) > expected { try? fileManager.removeItem(at: file) }
+        try await DownloadRetry.run(url: entry.download, file: file, expected: expected, configuration: session.configuration) { progress($0 * 0.9) }
         defer {
             try? fileManager.removeItem(at: file)
             if (try? fileManager.contentsOfDirectory(atPath: downloads.path))?.isEmpty == true { try? fileManager.removeItem(at: downloads) }
         }
-        try await Updates.download(entry.download, to: file) { progress($0 * 0.9) }
         let installed = try install(zip: file, digest: digest, release: entry.release, launcherVersion: launcherVersion)
         progress(1)
         return installed

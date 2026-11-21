@@ -1,5 +1,6 @@
 #include "SceTypes.hpp"
 #include "prx/libc/include/Api.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include "prx/libc/include/GuestWriteWatch.hpp"
 #include "prx/libkernel/include/Api.hpp"
 #include <atomic>
@@ -39,77 +40,69 @@ struct RegisterState {
 
 static_assert(offsetof(RegisterState, vectorOut) == 32 && offsetof(RegisterState, avx) == 64 && offsetof(RegisterState, r12) == 72 && offsetof(RegisterState, r13) == 80);
 
-// The asm below names its labels without the leading underscore Mach-O gives C symbols, so on
-// macOS each declaration names its label.
-#ifdef __APPLE__
-#define FAULT_TEST_SYMBOL(name) __asm__(#name)
-#else
-#define FAULT_TEST_SYMBOL(name)
-#endif
-
 extern "C" {
-std::uint64_t APS5_VABI FaultTestRead(std::uintptr_t address) FAULT_TEST_SYMBOL(FaultTestRead);
-void FaultTestReadSite() FAULT_TEST_SYMBOL(FaultTestReadSite);
-void FaultTestReadResume() FAULT_TEST_SYMBOL(FaultTestReadResume);
-std::uint64_t APS5_VABI FaultTestWrite(std::uintptr_t address, std::uint64_t value) FAULT_TEST_SYMBOL(FaultTestWrite);
-void FaultTestWriteSite() FAULT_TEST_SYMBOL(FaultTestWriteSite);
-void FaultTestWriteResume() FAULT_TEST_SYMBOL(FaultTestWriteResume);
-std::uint64_t APS5_VABI FaultTestIllegal() FAULT_TEST_SYMBOL(FaultTestIllegal);
-void FaultTestIllegalSite() FAULT_TEST_SYMBOL(FaultTestIllegalSite);
-void FaultTestIllegalResume() FAULT_TEST_SYMBOL(FaultTestIllegalResume);
-std::uint64_t APS5_VABI FaultTestDivide(std::int32_t dividend, std::int32_t divisor) FAULT_TEST_SYMBOL(FaultTestDivide);
-void FaultTestDivideSite() FAULT_TEST_SYMBOL(FaultTestDivideSite);
-void FaultTestDivideResume() FAULT_TEST_SYMBOL(FaultTestDivideResume);
-void APS5_VABI FaultTestRegisters(std::uintptr_t address, RegisterState* state) FAULT_TEST_SYMBOL(FaultTestRegisters);
-void FaultTestRegistersSite() FAULT_TEST_SYMBOL(FaultTestRegistersSite);
-void FaultTestRegistersResume() FAULT_TEST_SYMBOL(FaultTestRegistersResume);
-std::uint64_t APS5_VABI FaultTestJump(std::uintptr_t address, void* buffer) FAULT_TEST_SYMBOL(FaultTestJump);
-void FaultTestJumpSite() FAULT_TEST_SYMBOL(FaultTestJumpSite);
-std::uint64_t APS5_VABI FaultTestSimdDivide() FAULT_TEST_SYMBOL(FaultTestSimdDivide);
-void FaultTestSimdDivideSite() FAULT_TEST_SYMBOL(FaultTestSimdDivideSite);
-void FaultTestSimdDivideResume() FAULT_TEST_SYMBOL(FaultTestSimdDivideResume);
+std::uint64_t APS5_VABI FaultTestRead(std::uintptr_t address);
+void FaultTestReadSite();
+void FaultTestReadResume();
+std::uint64_t APS5_VABI FaultTestWrite(std::uintptr_t address, std::uint64_t value);
+void FaultTestWriteSite();
+void FaultTestWriteResume();
+std::uint64_t APS5_VABI FaultTestIllegal();
+void FaultTestIllegalSite();
+void FaultTestIllegalResume();
+std::uint64_t APS5_VABI FaultTestDivide(std::int32_t dividend, std::int32_t divisor);
+void FaultTestDivideSite();
+void FaultTestDivideResume();
+void APS5_VABI FaultTestRegisters(std::uintptr_t address, RegisterState* state);
+void FaultTestRegistersSite();
+void FaultTestRegistersResume();
+std::uint64_t APS5_VABI FaultTestJump(std::uintptr_t address, void* buffer);
+void FaultTestJumpSite();
+std::uint64_t APS5_VABI FaultTestSimdDivide();
+void FaultTestSimdDivideSite();
+void FaultTestSimdDivideResume();
 }
 
 asm(".text\n"
-    ".globl FaultTestRead\n"
-    "FaultTestRead:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestRead") "\n"
+    APS5_ASM_SYMBOL("FaultTestRead") ":\n"
     "    xorl %eax, %eax\n"
-    ".globl FaultTestReadSite\n"
-    "FaultTestReadSite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestReadSite") "\n"
+    APS5_ASM_SYMBOL("FaultTestReadSite") ":\n"
     "    movq (%rdi), %rax\n"
-    ".globl FaultTestReadResume\n"
-    "FaultTestReadResume:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestReadResume") "\n"
+    APS5_ASM_SYMBOL("FaultTestReadResume") ":\n"
     "    ret\n"
-    ".globl FaultTestWrite\n"
-    "FaultTestWrite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestWrite") "\n"
+    APS5_ASM_SYMBOL("FaultTestWrite") ":\n"
     "    xorl %eax, %eax\n"
-    ".globl FaultTestWriteSite\n"
-    "FaultTestWriteSite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestWriteSite") "\n"
+    APS5_ASM_SYMBOL("FaultTestWriteSite") ":\n"
     "    movq %rsi, (%rdi)\n"
-    ".globl FaultTestWriteResume\n"
-    "FaultTestWriteResume:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestWriteResume") "\n"
+    APS5_ASM_SYMBOL("FaultTestWriteResume") ":\n"
     "    ret\n"
-    ".globl FaultTestIllegal\n"
-    "FaultTestIllegal:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestIllegal") "\n"
+    APS5_ASM_SYMBOL("FaultTestIllegal") ":\n"
     "    xorl %eax, %eax\n"
-    ".globl FaultTestIllegalSite\n"
-    "FaultTestIllegalSite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestIllegalSite") "\n"
+    APS5_ASM_SYMBOL("FaultTestIllegalSite") ":\n"
     "    ud2\n"
-    ".globl FaultTestIllegalResume\n"
-    "FaultTestIllegalResume:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestIllegalResume") "\n"
+    APS5_ASM_SYMBOL("FaultTestIllegalResume") ":\n"
     "    ret\n"
-    ".globl FaultTestDivide\n"
-    "FaultTestDivide:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestDivide") "\n"
+    APS5_ASM_SYMBOL("FaultTestDivide") ":\n"
     "    movl %edi, %eax\n"
     "    cltd\n"
-    ".globl FaultTestDivideSite\n"
-    "FaultTestDivideSite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestDivideSite") "\n"
+    APS5_ASM_SYMBOL("FaultTestDivideSite") ":\n"
     "    idivl %esi\n"
-    ".globl FaultTestDivideResume\n"
-    "FaultTestDivideResume:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestDivideResume") "\n"
+    APS5_ASM_SYMBOL("FaultTestDivideResume") ":\n"
     "    ret\n"
-    ".globl FaultTestRegisters\n"
-    "FaultTestRegisters:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestRegisters") "\n"
+    APS5_ASM_SYMBOL("FaultTestRegisters") ":\n"
     "    pushq %r12\n"
     "    pushq %r13\n"
     "    pushq %rbx\n"
@@ -123,11 +116,11 @@ asm(".text\n"
     "1:\n"
     "    movdqu 0(%rbx), %xmm8\n"
     "2:\n"
-    ".globl FaultTestRegistersSite\n"
-    "FaultTestRegistersSite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestRegistersSite") "\n"
+    APS5_ASM_SYMBOL("FaultTestRegistersSite") ":\n"
     "    movq (%rdi), %rax\n"
-    ".globl FaultTestRegistersResume\n"
-    "FaultTestRegistersResume:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestRegistersResume") "\n"
+    APS5_ASM_SYMBOL("FaultTestRegistersResume") ":\n"
     "    movq %r12, 72(%rbx)\n"
     "    movq %r13, 80(%rbx)\n"
     "    cmpl $0, 64(%rbx)\n"
@@ -142,8 +135,8 @@ asm(".text\n"
     "    popq %r13\n"
     "    popq %r12\n"
     "    ret\n"
-    ".globl FaultTestJump\n"
-    "FaultTestJump:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestJump") "\n"
+    APS5_ASM_SYMBOL("FaultTestJump") ":\n"
     "    pushq %rbx\n"
     "    pushq %rbp\n"
     "    pushq %r12\n"
@@ -162,8 +155,8 @@ asm(".text\n"
     "    movq %r15, 56(%rsi)\n"
     "    stmxcsr 64(%rsi)\n"
     "    fnstcw 68(%rsi)\n"
-    ".globl FaultTestJumpSite\n"
-    "FaultTestJumpSite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestJumpSite") "\n"
+    APS5_ASM_SYMBOL("FaultTestJumpSite") ":\n"
     "    movq (%rdi), %rax\n"
     "    xorl %eax, %eax\n"
     "5:\n"
@@ -175,8 +168,8 @@ asm(".text\n"
     "    popq %rbp\n"
     "    popq %rbx\n"
     "    ret\n"
-    ".globl FaultTestSimdDivide\n"
-    "FaultTestSimdDivide:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestSimdDivide") "\n"
+    APS5_ASM_SYMBOL("FaultTestSimdDivide") ":\n"
     "    subq $8, %rsp\n"
     "    stmxcsr (%rsp)\n"
     "    movl $0x1d80, 4(%rsp)\n"
@@ -185,11 +178,11 @@ asm(".text\n"
     "    cvtsi2ss %eax, %xmm0\n"
     "    xorps %xmm1, %xmm1\n"
     "    xorl %eax, %eax\n"
-    ".globl FaultTestSimdDivideSite\n"
-    "FaultTestSimdDivideSite:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestSimdDivideSite") "\n"
+    APS5_ASM_SYMBOL("FaultTestSimdDivideSite") ":\n"
     "    divss %xmm1, %xmm0\n"
-    ".globl FaultTestSimdDivideResume\n"
-    "FaultTestSimdDivideResume:\n"
+    ".globl " APS5_ASM_SYMBOL("FaultTestSimdDivideResume") "\n"
+    APS5_ASM_SYMBOL("FaultTestSimdDivideResume") ":\n"
     "    ldmxcsr (%rsp)\n"
     "    addq $8, %rsp\n"
     "    ret\n");

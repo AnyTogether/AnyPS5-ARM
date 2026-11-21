@@ -57,6 +57,7 @@ build-wasm/
 
 .idea/
 .vscode/
+.system_generated/
 
 .venv/
 venv/
@@ -107,6 +108,11 @@ downloads/
 !/docs/run-report.schema.json
 !/docs/run-report-fixtures/*.json
 !tools/titles.json
+!tools/input-mapper/package.json
+# The fork's tracked JSON: the iOS app's asset catalogs and the phone app's and launcher's test fixtures.
+!mobile/ios/Runner/Assets.xcassets/**/Contents.json
+!mobile/test/fixtures/*.json
+!tools/macos/launcher/Tests/AnyPS5CoreTests/Fixtures/**/*.json
 
 !/assets/*.jpg
 !/assets/*.png
@@ -118,6 +124,13 @@ cookies.txt
 
 .env
 .env.local
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
 
 !docs/screenshots/*.jpg
 !docs/games/img/*.jpg

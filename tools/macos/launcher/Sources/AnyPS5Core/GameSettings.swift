@@ -1,8 +1,8 @@
 import Foundation
 
 /// Settings › Default Display: how a game starts that made no display choice of its own (Game
-/// Settings › Display, Window Size and Vertical Sync left at Default). The built-in values are the
-/// ones every game started with before there were defaults. The same as AnyPS5 Desktop's.
+/// Settings › Display, Window Size and Vertical Sync left at Default). Full Screen is built in, as
+/// on AnyPS5 Desktop; games started in a window before (formerBuiltIn).
 public struct DisplayDefaults: Codable, Equatable, Sendable {
     public var fullscreen: Bool
     /// The share of the display the window takes, in percent.
@@ -14,7 +14,27 @@ public struct DisplayDefaults: Codable, Equatable, Sendable {
 
     public static let minimumWindowSize = 30
 
-    public init(fullscreen: Bool = false, windowSize: Int = 75, vsync: Bool = true, startAnimation: Bool = true) {
+    /// The built-in values before Full Screen was: Window at 75 % with vertical sync on. Older
+    /// files read against them (fromPreferences, GameSettings.init(from:)).
+    public static let formerBuiltIn = DisplayDefaults(fullscreen: false)
+
+    /// The launcher's preferences format since Full Screen is built in, as AnyPS5 Desktop's
+    /// `preferencesVersion`. A file without it was written while Window was.
+    public static let preferencesVersion = 1
+
+    /// The defaults a preferences file kept (nil: the built-in ones), as the launcher uses them.
+    /// A file from before preferencesVersion kept them only when they differed from formerBuiltIn,
+    /// so none, or Window at 75 % with only vertical sync or the start animation changed, never
+    /// chose Window: they follow Full Screen and keep the rest. Window at a size of its own was
+    /// chosen and stays. A current file is read as written. AnyPS5 Desktop's
+    /// DisplayDefaults.fromPreferences.
+    public static func fromPreferences(_ saved: DisplayDefaults?, version: Int?) -> DisplayDefaults? {
+        guard var defaults = saved, (version ?? 0) < preferencesVersion else { return saved }
+        if !defaults.fullscreen && defaults.windowSize == formerBuiltIn.windowSize { defaults.fullscreen = true }
+        return defaults.isBuiltIn ? nil : defaults
+    }
+
+    public init(fullscreen: Bool = true, windowSize: Int = 75, vsync: Bool = true, startAnimation: Bool = true) {
         self.fullscreen = fullscreen
         self.windowSize = windowSize
         self.vsync = vsync
@@ -208,9 +228,8 @@ public struct GameSettings: Codable, Equatable, Sendable {
         } else if (try container.decodeIfPresent(Int.self, forKey: .settingsVersion) ?? 1) < Self.version {
             // A file from before the defaults wrote every display key, changed or not: a value
             // that is the old built-in one was most likely never chosen, so it follows the
-            // defaults (which start as those same values: nothing changes until they do).
-            // Windowed with a size of its own was chosen, though.
-            let builtIn = DisplayDefaults()
+            // defaults (Full Screen now). Windowed with a size of its own was chosen, though.
+            let builtIn = DisplayDefaults.formerBuiltIn
             if windowSize == builtIn.windowSize { windowSize = nil }
             if fullscreen == builtIn.fullscreen && windowSize == nil { fullscreen = nil }
             if vsync == builtIn.vsync { vsync = nil }

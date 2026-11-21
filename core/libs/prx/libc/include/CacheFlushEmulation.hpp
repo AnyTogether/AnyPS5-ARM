@@ -23,6 +23,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #elif defined(__linux__)
+#include <csignal>
 #include <ucontext.h>
 #endif
 
@@ -174,6 +175,11 @@ inline bool EmulateContext(mcontext_t& context, Instruction* decoded = nullptr, 
     context.gregs[REG_RIP] = static_cast<greg_t>(static_cast<std::uint64_t>(context.gregs[REG_RIP]) + size);
     return true;
 }
+
+// libc's SIGILL handler (specifics/linux/CrashReport.cpp) asks this first: true when a kernel-raised
+// SIGILL was a CLFLUSHOPT or CLWB, now run as CLFLUSH, with the context past it (unless
+// APS5_NO_CACHE_FLUSH_EMULATION is set). Defined in libc (specifics/linux/CacheFlushEmulation.cpp).
+bool EmulateSignal(int signal, siginfo_t* info, void* context);
 #endif
 
 }

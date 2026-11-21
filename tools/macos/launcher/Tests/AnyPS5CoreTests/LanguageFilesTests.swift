@@ -98,6 +98,7 @@ final class LanguageFilesTests: XCTestCase {
         XCTAssertEqual(ConsoleLanguage.forLocale("zh"), 11)
         XCTAssertEqual(ConsoleLanguage.forLocale("es-419"), 20)
         XCTAssertEqual(ConsoleLanguage.forLocale("nb"), 15)
+        XCTAssertEqual(ConsoleLanguage.forLocale("pl"), 16)
         XCTAssertNil(ConsoleLanguage.forLocale("eo"))
     }
 

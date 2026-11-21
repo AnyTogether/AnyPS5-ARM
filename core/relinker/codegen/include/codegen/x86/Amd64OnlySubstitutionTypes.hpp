@@ -13,8 +13,13 @@ namespace Codegen {
 // Intel hosts, not RDSEED, RDPID or CLWB, which are lowered as well.
 enum class Amd64OnlyTarget : std::uint8_t {
     Intel,
-    Rosetta
+    Rosetta,
+    Avx
 };
+
+[[nodiscard]] constexpr Amd64OnlyTarget Amd64OnlyTargetFor(const bool rosetta, const bool avx) {
+    return avx ? Amd64OnlyTarget::Avx : rosetta ? Amd64OnlyTarget::Rosetta : Amd64OnlyTarget::Intel;
+}
 
 enum class Amd64OnlyLowering : std::uint8_t {
     InPlace,

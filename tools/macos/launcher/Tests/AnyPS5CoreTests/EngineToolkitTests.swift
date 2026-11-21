@@ -306,6 +306,44 @@ final class EngineToolkitTests: XCTestCase {
         XCTAssertEqual(store.installed(release: "0.2.16-arm")?.version, "0.2.16-arm-0123456789ab")
     }
 
+    func testAFailedEngineDownloadKeepsItsPartAndTheNextOneCarriesOnPastARefusedResume() async throws {
+        let pauses = DownloadRetry.pauses
+        DownloadRetry.pauses = [.milliseconds(10)]
+        defer { DownloadRetry.pauses = pauses }
+        let zip = try zipOf(version: "0.2.16-arm-0123456789ab", release: "0.2.16-arm")
+        let body = try Data(contentsOf: zip)
+        // Every try drops a tenth of the way on: the download gives up after its tries.
+        let failing = try RetryServer(body: body, every: .drop(after: body.count / 10))
+        let entry = EngineCatalogue.Entry(release: "0.2.16-arm", tag: "v0.2.16-arm", title: "AnyPS5-ARM 0.2.16", summary: "", date: nil,
+                                          page: URL(string: "https://example.com")!, download: failing.url, size: body.count,
+                                          digest: try FakeToolkit.sha256(zip), prerelease: false)
+        let store = ToolkitStore(folder: scratch.appendingPathComponent("Toolkits"))
+        do {
+            _ = try await store.download(entry, launcherVersion: "0.2.16-arm", allowUnsigned: true)
+            XCTFail("a download that keeps dropping was installed")
+        } catch {
+            XCTAssertTrue(DownloadRetry.passing(error), "\(error)")
+        }
+        failing.stop()
+        XCTAssertEqual(failing.storageRequests.count, DownloadRetry.attempts)
+        let part = store.folder.appendingPathComponent(".downloads/\(entry.assetName).part")
+        let kept = FontDownloads.size(of: part)
+        XCTAssertGreaterThan(kept, 0, "what came is kept for the next try")
+        // Downloading it again carries on, past a resume the storage host refuses once (403).
+        let server = try RetryServer(body: body, script: [.refuse(403)])
+        defer { server.stop() }
+        var again = entry
+        again.download = server.url
+        let installed = try await store.download(again, launcherVersion: "0.2.16-arm", allowUnsigned: true)
+        XCTAssertEqual(installed.version, "0.2.16-arm-0123456789ab")
+        XCTAssertEqual(server.requests.filter { $0.signature == nil }.count, 2, "each try starts at the release's address")
+        XCTAssertEqual(server.storageRequests.count, 2)
+        let ranges: [String?] = server.storageRequests.map { (request: RetryServer.Request) in request.range }
+        let rest: String? = "bytes=\(kept)-"
+        XCTAssertEqual(ranges, [rest, rest], "only the rest is asked for, both times")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: part.path), "the part goes once the engine is installed")
+    }
+
     // MARK: Choosing
 
     func testTheGameChoiceWinsOverTheDefault() {

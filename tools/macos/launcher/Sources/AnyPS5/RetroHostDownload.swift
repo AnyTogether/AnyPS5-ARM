@@ -47,6 +47,16 @@ final class RetroHostDownloads {
         version = installed == nil ? nil : store.version
     }
 
+    /// `look()` once the model is made: where the host gained or lost LRPS2, the library is scanned
+    /// again, as it lists PS2 cue sheets only while the host plays PS2 discs.
+    private func lookAgain() {
+        let ps2 = installed?.ps2Core != nil
+        look()
+        if (installed?.ps2Core != nil) != ps2, app.listsRetroGames {
+            if app.persists { app.rescan() } else { app.scanAtOnce() }
+        }
+    }
+
     /// The last look found no signed host release yet.
     private(set) var notYet = false
     /// Why the last download failed; a sentence, or nil.
@@ -56,8 +66,9 @@ final class RetroHostDownloads {
     private(set) var progress: Progress?
     private var task: Task<Void, Never>?
     var downloading: Bool { task != nil }
-    /// The new host is being put in place of the old: no host may start until it is.
-    private(set) var installing = false
+    /// The new host is being put in place of the old: no host may start until it is. Set by the
+    /// download; the tests set it by hand.
+    var installing = false
     /// The checked files are being written over the old host's: past the point of stopping, so the
     /// row no longer offers it (`cancel()` does nothing).
     private(set) var placing = false
@@ -88,12 +99,12 @@ final class RetroHostDownloads {
     /// it again.
     func failedCheck(_ reason: String) {
         broken = reason
-        look()
+        lookAgain()
         app.objectWillChange.send()
     }
 
     /// A game plays in a host, or one is starting.
-    private var hostInUse: Bool { starts > 0 }
+    private var hostInUse: Bool { starts > 0 || app.retroPlay != nil }
 
     /// Downloads the newest signed host, or a newer one than the installed host, checks it and puts
     /// it in place. Runs only when the player selected it; said to the player however it ends.
@@ -141,6 +152,9 @@ final class RetroHostDownloads {
             installing = true
             app.objectWillChange.send()
             if hostInUse { throw RetroHostDownloadError(.badLayout, TRetro.text(.retroHostDownloadCloseGame)) }
+            // The host kept for the next game lets go of its files before the new host goes in.
+            await app.stopKeptRetroHost()
+            if hostInUse { throw RetroHostDownloadError(.badLayout, TRetro.text(.retroHostDownloadCloseGame)) }
             if closed { return }
             try Task.checkCancellation()
             placing = true
@@ -149,11 +163,13 @@ final class RetroHostDownloads {
             do {
                 version = try await store.putInPlace(download)
             } catch {
-                look()
+                lookAgain()
                 throw error
             }
-            look()
+            lookAgain()
             broken = nil
+            // The first host installed turns PS1 games in the host on: the player asked for it.
+            if before == nil { app.setRetroHostPs1(true) }
             Sounds.shared.play(.unlocked)
             app.show(TRetro.format(.retroHostReady, "\(version)"), symbol: "checkmark.circle.fill")
         } catch let failure as RetroHostDownloadError {
@@ -249,6 +265,6 @@ extension AppModel {
             rows.append(PanelRow(id: "retro-host-unchecked", title: TRetro.text(.retroHostUnchecked),
                                  detail: TRetro.text(.retroHostUncheckedDetail), symbol: "flask", kind: .info(""), wraps: true))
         }
-        return rows
+        return rows + retroHostPlayRows()
     }
 }

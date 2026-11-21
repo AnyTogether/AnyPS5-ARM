@@ -74,7 +74,7 @@ extension AppModel {
     /// watch over the folders (preview(games:root:)).
     func scanAtOnce(cache: RetroScanCache? = nil) {
         guard let first = libraryRoots.first else { return }
-        preview(games: GameLibrary.survey(roots: libraryRoots, includeRetro: listsRetroGames, cache: cache).games, root: first)
+        preview(games: GameLibrary.survey(roots: libraryRoots, includeRetro: listsRetroGames, hostPs2: retroHostListsPs2, cache: cache).games, root: first)
         if selected >= games.count { selected = max(0, games.count - 1) }
     }
 
@@ -104,6 +104,11 @@ extension AppModel {
                      kind: .action(destructive: false) { [weak self] in self?.chooseStandaloneEmulator(disc.platform) }),
             PanelRow(id: "log", title: T.text(.openLog), symbol: "doc.text", kind: .action(destructive: false) { [weak self] in self?.openLog(game) }),
         ]
+        // In the emulator host the keyboard plays too, with the keys of the game's Controls.
+        if playsInHost(disc.platform) {
+            rows.insert(PanelRow(id: "controls", title: T.text(.controls), detail: TRetro.text(.retroHostControlsDetail), symbol: "keyboard",
+                                 kind: .action(destructive: false) { [weak self] in self?.open(.controls) }), at: 1)
+        }
         if case .running = state(of: game) {
             rows.insert(PanelRow(id: "stopGame", title: TH.text(.stopGame), detail: TH.text(.stopGameDetail), symbol: "stop.circle",
                                  kind: .action(destructive: true) { [weak self] in

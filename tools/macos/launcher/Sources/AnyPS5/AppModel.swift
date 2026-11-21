@@ -133,6 +133,20 @@ struct Preferences: Codable, Equatable {
     var retroEmulators: [String: String]?
     /// Settings › Emulators › Show as folders: a console's games in one tile on Home; nil means off.
     var showRetroFolders: Bool?
+    /// Settings › Emulators › Run PS1 games in the separate host: a PS1 disc plays in the
+    /// launcher's window through the emulator host (RetroHostPlay.swift); nil means off. It acts
+    /// only where a host is found.
+    var retroHostPs1: Bool?
+    /// Settings › Emulators › Run PS2 games in the separate host, shown only where the host has
+    /// LRPS2 beside it; nil means off.
+    var retroHostPs2: Bool?
+    /// The emulator host's volume in percent and whether it is muted, as the player last set them
+    /// in the game's menu; nil for 100 and not muted. Every PS1 game in the host starts with them.
+    var retroHostVolume: Int?
+    var retroHostMuted: Bool?
+    /// The SwanStation options the player chose in the game's menu, by key, given to every PS1
+    /// game the host starts (protocol.md "start": `options`).
+    var retroHostOptions: [String: String]?
     /// The window full screen at start (WindowStart): nil the first time, then as it was left.
     var fullScreen: Bool?
     /// Settings → Behaviour → Pause Game When Opening the Menu: nil means on.
@@ -145,6 +159,9 @@ struct Preferences: Codable, Equatable {
     /// Settings › Default Display, for every game that leaves its display at Default; nil until
     /// changed (the built-in values). Machine-wide, like the game settings.
     var displayDefaults: DisplayDefaults?
+    /// The file's format (DisplayDefaults.preferencesVersion), written by every save. nil in a
+    /// file an older launcher wrote, whose Default Display read(_:) takes by the older rule.
+    var preferencesVersion: Int?
     var lastPlayed: [String: Date] = [:]
 
     var accentColor: Color { (accent ?? theme.defaultAccent).color }
@@ -159,11 +176,21 @@ struct Preferences: Codable, Equatable {
     }
 
     static let key = "AnyPS5.preferences.v1"
+    static let version = DisplayDefaults.preferencesVersion
 
     static func load() -> Preferences {
-        guard let data = UserDefaults.standard.data(forKey: key), var saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return firstStart() }
+        guard let data = UserDefaults.standard.data(forKey: key), let saved = read(data) else { return firstStart() }
+        return saved
+    }
+
+    /// A saved file as the launcher uses it, nil when it does not decode.
+    static func read(_ data: Data) -> Preferences? {
+        guard var saved = try? JSONDecoder().decode(Preferences.self, from: data) else { return nil }
         // One games folder from an older launcher becomes a list of one.
         saved.libraryFolders = saved.libraryFolders
+        // A file from before Full Screen was built in follows it unless Window was chosen.
+        saved.displayDefaults = DisplayDefaults.fromPreferences(saved.displayDefaults, version: saved.preferencesVersion)
+        saved.preferencesVersion = version
         return saved
     }
 
@@ -172,17 +199,25 @@ struct Preferences: Codable, Equatable {
     /// English when it has none of them.
     static func firstStart(preferred: [String] = Locale.preferredLanguages) -> Preferences {
         var preferences = Preferences()
+        preferences.preferencesVersion = version
         if let code = LanguageFiles.match(preferred, codes: Language.allCases.map(\.code)), let language = Language(rawValue: code) {
             preferences.language = language
         }
         return preferences
     }
 
-    func save() {
-        // Every game's display keys as before, so an older launcher still reads the file.
+    /// The file save() writes: the current format, and every game's display keys as before, so
+    /// an older launcher still reads it.
+    func encoded() -> Data? {
+        var current = self
+        current.preferencesVersion = Self.version
         let encoder = JSONEncoder()
         encoder.userInfo[GameSettings.legacyDisplayKeys] = true
-        if let data = try? encoder.encode(self) { UserDefaults.standard.set(data, forKey: Preferences.key) }
+        return try? encoder.encode(current)
+    }
+
+    func save() {
+        if let data = encoded() { UserDefaults.standard.set(data, forKey: Preferences.key) }
     }
 }
 
@@ -296,6 +331,11 @@ enum Overlay: Equatable {
     case quickMenu
     /// PS held in a game: "Close <game>?".
     case closeGame
+    /// PS in a PS1 game playing in the emulator host (RetroHostPlay.swift): the game paused under
+    /// Resume, its discs, its options, the volume and Close game.
+    case retroMenu
+    /// Save state in that menu on a slot that holds a state: "Overwrite slot N?", Cancel first.
+    case retroOverwriteState
     /// PS held in the launcher: Switch Profile, Quit AnyPS5.
     case homeMenu
     /// Esc on the home screen: "Quit AnyPS5?", Cancel first.
@@ -375,7 +415,10 @@ final class AppModel: ObservableObject {
     var unlockBusy: Bool { installer != nil || !parked.isEmpty || preparer != nil || !queue.isEmpty }
     @Published var selected = 0 {
         didSet {
-            if selected != oldValue { selectionMoved(from: oldValue) }
+            if selected != oldValue {
+                selectionMoved(from: oldValue)
+                scheduleRetroHostCheck()
+            }
             // A game selected from anywhere but Home's rows shows inside its console's folder; a
             // scan that keeps the selection where it was leaves the folder as it is.
             if !anchoringHome, selected != oldValue {
@@ -411,6 +454,8 @@ final class AppModel: ObservableObject {
             if overlay != nil, starting == nil { dropCover() }
             // The controller test takes the pads' buttons: only PS acts while it is open.
             Input.shared.testing = overlay == .controllerTest
+            // A layer over a PS1 game in the emulator host pauses it; the game back in front resumes it.
+            syncRetroMenu()
         }
     }
     @Published var panelCategory = 0
@@ -511,6 +556,7 @@ final class AppModel: ObservableObject {
     var endGame: (NSRunningApplication) -> Void = { $0.forceTerminate() }
     @Published private(set) var running: (game: Game, app: NSRunningApplication)? {
         didSet {
+            scheduleRetroHostCheck()
             guard (oldValue == nil) != (running == nil) else { return }
             prepareSoon()
             // A game takes the phones' pads alone; without one they move around the launcher.
@@ -519,7 +565,11 @@ final class AppModel: ObservableObject {
     }
     /// The game from the press of Play until its first window shows.
     @Published private(set) var starting: Game? {
-        didSet { if (oldValue == nil) != (starting == nil) { prepareSoon() } }
+        didSet {
+            if (oldValue == nil) != (starting == nil) { prepareSoon() }
+            // Another game starting lets the kept emulator host go (RetroHostPlay.swift).
+            scheduleRetroHostCheck()
+        }
     }
     /// The game whose cover stays up after its window showed, until the window has settled
     /// (StartCover.swift), as on Windows and Linux. Apart from `starting`, which means the game
@@ -549,7 +599,10 @@ final class AppModel: ObservableObject {
     /// Discord, Play Together, Remote Play, broadcasts, share play, clips, trophies, save sync)
     /// never sees an emulator game.
     @Published private(set) var emulator: (game: Game, run: EmulatorRun)? {
-        didSet { if (oldValue == nil) != (emulator == nil) { prepareSoon() } }
+        didSet {
+            if (oldValue == nil) != (emulator == nil) { prepareSoon() }
+            scheduleRetroHostCheck()
+        }
     }
     /// Counts the emulator starts and the ones given up: a start whose turn has passed is ended
     /// when its emulator comes up after all.
@@ -580,10 +633,33 @@ final class AppModel: ObservableObject {
     /// The unchecked host of a debug build (`ANYPS5_RETRO_HOST`), looked for once, since the
     /// environment that names it does not change while the launcher runs; always nil in a release.
     lazy var retroHostUnchecked: RetroHostInstall? = RetroHostLocator.runsUncheckedHosts ? RetroHostInstall.locate() : nil
-    /// A game or an emulator plays, or one is starting.
-    var playing: Bool { running != nil || emulator != nil || starting != nil }
-    /// The game playing, a PS5 game or a disc in its emulator.
-    var playingGame: Game? { running?.game ?? emulator?.game }
+    /// A PS1 game playing in the launcher's window through the emulator host (RetroHostPlay.swift).
+    @Published var retroPlay: RetroPlay?
+    /// The emulator host of the last PS1 game, kept for the next one.
+    let retroHostKeeper = RetroHostKeeper()
+    /// How often a PS1 game in the host is asked its `status`; tests ask by hand.
+    var retroStatusEvery: Duration = .milliseconds(500)
+    /// Starts one emulator host with the player's volume; `checked` is a signed release's check,
+    /// whose files the host holds until it exits. Tests give a fake session.
+    var openRetroHost: (RetroHostInstall, RetroHostChecked?, Double, Bool) async throws -> RetroHostSession = { install, checked, volume, muted in
+        try await RetroHostClientSession.start(command: [install.host], checked: checked, volume: volume, muted: muted)
+    }
+    /// The controllers and motors a PS1 game in the host plays with; nil for the launcher's own
+    /// (Controllers.shared), which the tests replace.
+    var retroPads: RetroPadReader?
+    var retroPadMotors: RetroPadMotors?
+    /// The keys held while a PS1 game in the host is on its own screen, by name (Controls.keyName).
+    var retroKeysHeld: Set<String> = []
+    var retroHostCheckPending = false
+    /// The PS1 BIOS and memory cards, in retro/ of the launcher's own folder; the tests give theirs.
+    var retroFolder = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("AnyPS5/retro")
+    /// Opens a folder in Finder; the tests record it instead.
+    var openRetroFolder: ((URL) -> Void)?
+    /// A game or an emulator plays, or one is starting, or a PS1 game plays in the emulator host.
+    var playing: Bool { running != nil || emulator != nil || starting != nil || retroPlay != nil }
+    /// The game playing, a PS5 game, a disc in its emulator, or a PS1 game in the emulator host
+    /// until it is over.
+    var playingGame: Game? { running?.game ?? emulator?.game ?? retroPlay.flatMap { $0.over ? nil : $0.game } }
 
     /// A game starting or ending: the background preparation stops for it or goes on, once the
     /// change has settled.
@@ -636,7 +712,9 @@ final class AppModel: ObservableObject {
     var steamLaunch: SteamLaunch { Self.steamLaunch }
     /// The game a Steam shortcut started: the launcher quits when it ends well, so Steam sees it end.
     var steamQuitAfter: String?
-    @Published var active = true
+    @Published var active = true {
+        didSet { if active != oldValue { retroFocusChanged() } }
+    }
     @Published private(set) var rosettaMissing = false
     @Published private(set) var logText = ""
     @Published var translocated = AppLocation.isTranslocated
@@ -653,6 +731,9 @@ final class AppModel: ObservableObject {
     @Published var checkingEngines = false
     /// How far each release's toolkit download is.
     @Published var engineDownloads: [String: Double] = [:]
+    /// The releases whose last download failed: how far it had come and why, said on the row until
+    /// the next try, which carries on from the part kept.
+    @Published var engineFailures: [String: (fraction: Double, message: String)] = [:]
     /// The custom toolkit folder, when it holds a toolkit.
     @Published var customToolkit: Toolkit?
     /// The Noto fonts inside the app (SystemFontsPanel.swift).
@@ -1454,13 +1535,13 @@ final class AppModel: ObservableObject {
             for root in roots where FileManager.default.fileExists(atPath: root.path) { Installer.removeLeftovers(root: root) }
         }
         // Emulator games turned on or off: a new watch, whose first scan announces no game.
-        if let monitor = libraryMonitor, monitor.roots == roots, monitor.includeRetro == listsRetroGames {
+        if let monitor = libraryMonitor, monitor.roots == roots, monitor.includeRetro == listsRetroGames, monitor.hostPs2 == retroHostListsPs2 {
             monitor.rescan()
             return
         }
         libraryMonitor?.stop()
         let stamp = recordsStamp
-        let monitor = LibraryMonitor(roots: roots, includeRetro: listsRetroGames) { [weak self] update in
+        let monitor = LibraryMonitor(roots: roots, includeRetro: listsRetroGames, hostPs2: retroHostListsPs2) { [weak self] update in
             // The records are read off the main thread too; each game's is one small file.
             let generation = stamp.withLock { $0 }
             let records = AppModel.records(of: update.games, roots: update.roots)
@@ -1619,7 +1700,7 @@ final class AppModel: ObservableObject {
         if starting?.id == game.id { return .starting }
         if running?.game.id == game.id || emulator?.game.id == game.id { return stopping ? .stopping : .running }
         // A disc is ready once its console's emulator is chosen: nothing of it is unlocked.
-        if let disc = game.retro { return standaloneEmulator(disc.platform) == nil ? .needsEmulator : .installed(outdated: false) }
+        if let disc = game.retro { return retroPlayable(disc.platform) ? .installed(outdated: false) : .needsEmulator }
         if let (step, fraction) = progress[game.id] { return .installing(step: step, fraction: fraction) }
         if queue.contains(game.id) { return .queued }
         if let failure = failures[game.id] { return .failed(failure) }
@@ -2522,7 +2603,9 @@ final class AppModel: ObservableObject {
     /// launchers on the same release always play the same build; `asItIs` starts the copy as it
     /// is (it was just rebuilt, it joins a host on that very engine, or the user chose to).
     func play(_ game: Game, trace: Bool = false, once: [String: String] = [:], asItIs: Bool = false) {
-        if let disc = game.retro { return playStandalone(game, disc) }
+        // One game at a time: a PS1 game in the emulator host is one too.
+        guard retroPlay == nil else { return }
+        if let disc = game.retro { return playsInHost(disc.platform) ? playInHost(game, disc) : playStandalone(game, disc) }
         guard root(of: game) != nil, starting == nil, running == nil, emulator == nil, syncing == nil, fontWait == nil else { return }
         if !asItIs, needsRebuild(game) {
             return rebuildFirst(game) { [weak self] in self?.play(game, trace: trace, once: once, asItIs: true) }
@@ -2828,6 +2911,7 @@ final class AppModel: ObservableObject {
 
     /// Create, ⌥F12 or the phone: the last seconds of the game playing go to the gallery.
     func saveClip() {
+        if noRetroCapture() { return }
         guard let game = running?.game else { return }
         guard familyAllows(.mediaSharing) else { return TrophyBanner.shared.notice(FS.refusal(.mediaSharing), detail: "", symbol: "hand.raised.fill", sounds: preferences.sounds) }
         // With the replay buffer off there is nothing kept: Create takes a screenshot instead.

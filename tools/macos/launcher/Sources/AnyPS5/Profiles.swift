@@ -491,6 +491,11 @@ extension AppModel {
 
     /// The right click on Home: the Options menu.
     func homeRightClick() -> Bool {
+        // Over a PS1 game in the emulator host the right button opens its menu.
+        if retroPlay != nil, overlay == nil {
+            _ = retroPointerBack()
+            return true
+        }
         guard preferences.onboarded, overlay == nil, starting == nil, pairing == nil, NSApp.isActive else { return false }
         openProfileMenu()
         return true

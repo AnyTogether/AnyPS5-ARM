@@ -242,16 +242,17 @@ public struct RetroHostStore: Sendable {
         return RetroHostDownload(folder: download, tag: release.tag)
     }
 
-    /// One file of a release into `folder`, going on from what an earlier try kept, then checked
-    /// against its size and `sha256`. A file that does not match is deleted.
+    /// One file of a release into `folder`, going on from what an earlier try kept (and tried
+    /// again by itself, DownloadRetry), then checked against its size and `sha256`. A file that
+    /// does not match is deleted.
     static func get(_ asset: RetroHostAsset, into folder: URL, sha256: String?, configuration: URLSessionConfiguration,
                     progress: @escaping @Sendable (Double) -> Void) async throws {
         let file = folder.appendingPathComponent(asset.name)
         if FontDownloads.size(of: file) == asset.size, let sha256, (try? FileDigest.sha256(file)) == sha256 { return progress(1) }
         if FontDownloads.size(of: file) > asset.size { try? FileManager.default.removeItem(at: file) }
         do {
-            try await ResumableDownload(url: asset.url, file: file, expected: asset.size, httpsOnly: true, progress: progress)
-                .run(configuration: configuration)
+            // Tried again by itself when it fails on the way, going on from what came.
+            try await DownloadRetry.run(url: asset.url, file: file, expected: asset.size, httpsOnly: true, configuration: configuration, progress: progress)
         } catch let error as URLError where error.code == .cancelled {
             if Task.isCancelled { throw RetroHostDownloadError(.cancelled, "the download was stopped") }
             throw RetroHostDownloadError(.network, "\(asset.name) could not be downloaded")

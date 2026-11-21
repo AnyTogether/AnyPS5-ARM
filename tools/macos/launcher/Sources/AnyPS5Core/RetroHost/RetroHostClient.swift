@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// How a connection to the emulator host ended (anyps5-retro-host docs/protocol.md "Fixtures",
 /// `outcome`).
@@ -30,6 +31,12 @@ public enum RetroHostClientError: Error, Equatable {
     case noPs2Capability
     /// A PS2 game has no playlist, so its `start` takes no `initialDisc` (protocol.md "start").
     case ps2HasNoPlaylist
+    /// `saveState`, `loadState` or a `start` naming `states`, which need the `saveStates`
+    /// capability the host did not list.
+    case noSaveStatesCapability
+    /// A PS2 internal resolution, in `start.options` or with `option`, which needs the
+    /// `ps2ResolutionLimits` capability the host did not list.
+    case noPs2ResolutionLimits
     /// This host has used every call id; start a new one for the next game.
     case idsUsedUp
     /// `stop` goes through `stopGame()`, which enforces its time limit.
@@ -139,6 +146,8 @@ public final class RetroHostClient: @unchecked Sendable {
     private var closing = false
     private var agreedFormat: RetroPixelFormat?
     private var hostCapabilities: [String] = []
+    /// A copy of `hostCapabilities` the UI reads from any thread, set once `welcome` came.
+    private let greetedCapabilities = OSAllocatedUnfairLock(initialState: [String]())
     private var hostRelease = ""
     private var endValue: RetroHostEnd?
     private var reason: String?
@@ -263,11 +272,21 @@ public final class RetroHostClient: @unchecked Sendable {
     /// The host's process id, from `posix_spawn`: the one for audio capture, focus and killing.
     public var pid: pid_t { onQueue { processID } }
     public var hostVersion: String { onQueue { hostRelease } }
-    public var capabilities: [String] { onQueue { hostCapabilities } }
+    /// The capabilities the host's `welcome` listed; empty before it. Read from a copy kept
+    /// behind a lock, not on the client's queue, so the UI (the PS menu's rows) never waits behind
+    /// a frame being copied there.
+    public var capabilities: [String] { greetedCapabilities.withLock { $0 } }
     /// Whether the host lists `ps2`, so it takes `start.console` and plays PS2 games on LRPS2, and
     /// each `status` names the console.
-    public var canPlayPs2: Bool { onQueue { hostListsPs2 } }
+    public var canPlayPs2: Bool { capabilities.contains(RetroProtocol.ps2Capability) }
     private var hostListsPs2: Bool { hostCapabilities.contains(RetroProtocol.ps2Capability) }
+    /// Whether the host lists `saveStates`, so it takes `start.states` and the methods `saveState`
+    /// and `loadState`.
+    public var canSaveStates: Bool { capabilities.contains(RetroProtocol.saveStatesCapability) }
+    /// Whether the host lists `ps2ResolutionLimits`, so it limits a PS2 game's internal resolution
+    /// and may be sent one, in `start.options` or with `option`.
+    public var limitsPs2Resolution: Bool { capabilities.contains(RetroProtocol.ps2ResolutionLimitsCapability) }
+    private var hostListsSaveStates: Bool { hostCapabilities.contains(RetroProtocol.saveStatesCapability) }
     public var pixelFormat: RetroPixelFormat? { onQueue { agreedFormat } }
     /// The reason the client gave up on the host, for logs.
     public var failureReason: String? { onQueue { reason } }
@@ -437,6 +456,11 @@ public final class RetroHostClient: @unchecked Sendable {
                 return done(.failure(RetroHostClientError.ps2HasNoPlaylist))
             }
         }
+        let states = method == "saveState" || method == "loadState" || (method == "start" && args.objectValue?["states"] != nil)
+        if states, !hostListsSaveStates { return done(.failure(RetroHostClientError.noSaveStatesCapability)) }
+        if !hostCapabilities.contains(RetroProtocol.ps2ResolutionLimitsCapability), Self.sendsPs2Resolution(method, args) {
+            return done(.failure(RetroHostClientError.noPs2ResolutionLimits))
+        }
         guard nextCallID <= RetroProtocol.maxID else { return done(.failure(RetroHostClientError.idsUsedUp)) }
         let body: [UInt8]
         do {
@@ -483,7 +507,7 @@ public final class RetroHostClient: @unchecked Sendable {
             failedStatus = nil
             gameLoaded = false
             return .success(.null)
-        case "connectedPorts", "changeDisc", "option": return .success(.bool(false))
+        case "connectedPorts", "changeDisc", "option", "saveState", "loadState": return .success(.bool(false))
         case "pause", "stop", "volume": return .success(.null)
         default: return .failure(gone)
         }
@@ -561,6 +585,8 @@ public final class RetroHostClient: @unchecked Sendable {
         let hostPid = try f.integer("pid", 1...RetroProtocol.maxUInt32)
         hostRelease = try f.string("hostVersion")
         hostCapabilities = try f.strings("capabilities")
+        let listed = hostCapabilities
+        greetedCapabilities.withLock { $0 = listed }
         let format = try f.string("pixelFormat")
         guard version == RetroProtocol.version, let agreed = RetroPixelFormat(rawValue: format),
               offeredFormats.contains(agreed) else {
@@ -652,6 +678,12 @@ public final class RetroHostClient: @unchecked Sendable {
         case "connectedPorts", "changeDisc", "option":
             guard let accepted = result.boolValue else { throw RetroProtocolError("The result of \(pending.method) must be a boolean.") }
             if pending.method == "connectedPorts", accepted, let count = pending.args.intValue { ports = count }
+        case "saveState", "loadState":
+            if result == .bool(false) { break }
+            guard result.objectValue != nil else { throw RetroProtocolError("The result of \(pending.method) must be false or an object.") }
+            let done = try RetroFields(result, pending.method)
+            _ = try done.integer("bytes", 0...RetroProtocol.maxSafeInteger)
+            _ = try done.integer("micros", 0...RetroProtocol.maxSafeInteger)
         case "pause":
             try Self.expectNull(pending.method, result)
             if gameLoaded, let pause = pending.args.boolValue { paused = pause }
@@ -865,6 +897,16 @@ public final class RetroHostClient: @unchecked Sendable {
                 self.releaseWaiters = []
                 for waiter in waiting { waiter() }
             }
+        }
+    }
+
+    /// Whether a call gives the host a PS2 internal resolution: `start` with it in `options`, or
+    /// `option` for it.
+    static func sendsPs2Resolution(_ method: String, _ args: RetroJSON) -> Bool {
+        switch method {
+        case "start": return args.objectValue?["options"]?.objectValue?[RetroResolution.ps2Key] != nil
+        case "option": return args.objectValue?["key"] == .string(RetroResolution.ps2Key)
+        default: return false
         }
     }
 

@@ -49,6 +49,22 @@ void main() {
     expect(checkSources(Directory('lib')), isEmpty);
   });
 
+  test('a key written twice is a problem: the app would show only the last one', () {
+    final (_, problems) = readTexts(
+      'tr.json',
+      '{"languageName": "Türkçe", "back": "Geri", "back": "Geri dön"}',
+    );
+    expect(problems.single, contains('"back"'));
+    expect(
+      duplicateKeys(r'{"a": "x", "b": {"a": "y"}, "c": ["a", "a"], "d": "\"a\": \"a\": "}'),
+      isEmpty,
+    );
+    expect(
+      duplicateKeys('{"a": "x", "b": "y", "a": "z", "b": "w", "a": "v"}'),
+      ['a', 'b'],
+    );
+  });
+
   test('Turkish has every English text and no other', () {
     Map<String, Object?> file(String code) =>
         jsonDecode(File('assets/l10n/$code.json').readAsStringSync())

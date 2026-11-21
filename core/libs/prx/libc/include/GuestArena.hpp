@@ -52,6 +52,8 @@ bool GuestArenaHandleRead_nid_postfix(std::uintptr_t address);
 bool GuestArenaCopyOwned_nid_no_patch(std::uintptr_t source, void* destination, std::size_t bytes);
 bool GuestArenaCompareOwned_nid_no_patch(std::uintptr_t source, const void* expected, std::size_t bytes, bool* equal);
 bool GuestArenaRecoverRead_nid_no_patch(_EXCEPTION_POINTERS* exception);
+bool GuestArenaStoreOwned_nid_no_patch(std::uintptr_t destination, const void* source, std::size_t bytes);
+bool GuestArenaRecoverWrite_nid_no_patch(_EXCEPTION_POINTERS* exception);
 void GuestArenaPinWritable_nid_postfix(const void* pointer, std::size_t bytes);
 void GuestArenaUnpinWritable_nid_postfix(const void* pointer, std::size_t bytes);
 bool GuestArenaProtection_nid_postfix(std::uintptr_t address, std::uint32_t* protection);
@@ -59,6 +61,8 @@ bool GuestArenaCollectWrites_nid_postfix(std::uintptr_t address, std::size_t byt
 bool GuestArenaCollectArmedWrites_nid_postfix(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count, bool clear);
 bool GuestArenaCollectFreshWrites_nid_postfix(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count, bool clear);
 bool GuestArenaHostRegionOverlaps_nid_postfix(std::uintptr_t address, std::size_t bytes);
+std::size_t GuestArenaHostRegions_nid_no_patch(std::uintptr_t* regions, std::size_t capacity);
+bool GuestArenaHostRegionIndexActive_nid_no_patch();
 std::uint64_t GuestArenaCommitGeneration_nid_postfix();
 void GuestArenaSetPrivateMappingObserver_nid_postfix(void (*callback)(std::uintptr_t address, std::size_t bytes, std::uint64_t generation));
 void GuestArenaMap_nid_postfix(void* pointer, std::size_t bytes, void* section, std::uint64_t offset, std::uint32_t protection);
@@ -73,6 +77,9 @@ void GuestArenaCompareWhenShared_nid_no_patch(std::uintptr_t address, std::size_
 void GuestArenaCompareResidentWhenShared_nid_no_patch(std::uintptr_t address, std::size_t bytes);
 void GuestArenaComparedPages_nid_no_patch(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count);
 void GuestArenaTakeUnreportedPages_nid_no_patch(std::uintptr_t address, std::size_t bytes, void** pages, std::size_t* count);
+void GuestArenaKnownZero_nid_no_patch(std::uintptr_t address, std::size_t bytes, void (*zero)(void* context, std::uintptr_t begin, std::uintptr_t end), void* context);
+void GuestArenaForgetKnownZero_nid_no_patch(std::uintptr_t address, std::size_t bytes);
+std::uint64_t GuestArenaKnownZeroMarks_nid_no_patch();
 void GuestArenaForgetSection_nid_postfix(void* section);
 bool GuestArenaBeginHostImport_nid_no_patch(void* pointer, std::size_t bytes);
 void GuestArenaEndHostImport_nid_no_patch(void* pointer, std::size_t bytes);
@@ -90,9 +97,6 @@ void GuestArenaReleaseHostRegion_nid_no_patch(const void* pointer, std::size_t b
 bool GuestArenaArmOwned_nid_no_patch(std::uintptr_t address, std::size_t bytes, std::uint64_t* words, std::size_t count, unsigned flags);
 bool GuestArenaOwnedUnchanged_nid_no_patch(std::uintptr_t address, std::size_t bytes, const std::uint64_t* words, std::size_t count);
 bool GuestArenaBeginHostWrite_nid_postfix(void* pointer, std::size_t bytes);
-// Called before a host write (a kernel read into guest memory) lands: the GPU driver flushes the
-// GPU writes still pending over the range there, so a late write-back cannot land over the data.
-void GuestArenaSetHostWriteHook_nid_postfix(void (*hook)(std::uintptr_t address, std::size_t bytes));
 // A host write that leaves the bytes as they are (the GPU driver importing the range): no flush, which
 // would take the write watch the importer already holds.
 bool GuestArenaBeginImportWrite_nid_postfix(void* pointer, std::size_t bytes);
@@ -101,6 +105,10 @@ void GuestArenaEndHostWrite_nid_postfix(void* pointer, std::size_t bytes);
 // overlapping the range made at or after `sinceNs` (steady clock), for the GPU clobber trace.
 bool GuestArenaHostWritesTraced_nid_postfix();
 bool GuestArenaHostWriteSince_nid_postfix(std::uintptr_t address, std::size_t bytes, std::uint64_t sinceNs, std::uintptr_t* hitAddress, std::size_t* hitBytes, std::uint64_t* hitNs);
+// Called before a host write (a kernel read into guest memory) lands: the GPU driver flushes the
+// GPU writes still pending over the range there, so a late write-back cannot land over the data.
+// APS5_NO_HOST_WRITE_FLUSH skips it.
+void GuestArenaSetHostWriteHook_nid_no_patch(void (*hook)(std::uintptr_t address, std::size_t bytes));
 void GuestArenaSetHostReadHook_nid_no_patch(void (*hook)(std::uintptr_t address, std::size_t bytes));
 void GuestArenaPrepareHostRead_nid_no_patch(const void* pointer, std::size_t bytes);
 

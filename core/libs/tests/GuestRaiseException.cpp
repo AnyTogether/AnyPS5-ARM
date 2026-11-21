@@ -1,5 +1,6 @@
 #include "prx/libc/include/general/AsmMacros.hpp"
 #include "prx/libkernel/KernelErrors.hpp"
+#include "prx/libc/include/general/AsmMacros.hpp"
 #include "prx/libkernel/include/Api.hpp"
 #include "prx/libkernel/Semaphore/include/Semaphore.hpp"
 #include "prx/libkernel/Pthread/include/Rwlock.hpp"

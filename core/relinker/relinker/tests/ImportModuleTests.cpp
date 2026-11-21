@@ -51,5 +51,14 @@ int main() {
     if (Domain::NeededLibraryName("libkernel.sprx") != "libkernel.prx" || Domain::NeededLibraryName("libkernel.prx") != "libkernel.prx") return 44;
     if (Elfpatcher::MacOs::MachODependency("libSceLibcInternal.sprx", "@executable_path") != "@rpath/libSceLibcInternal.prx") return 45;
     if (Elfpatcher::MacOs::MachODependency("$ORIGIN/app0/sce_module/libc.sprx", "@executable_path") != "@executable_path/app0/sce_module/libc.sprx") return 46;
+    if (Domain::NeededLibraryName("libSceGnmDriver_padebug.prx") != "libSceGnmDriver.prx") return 90;
+    if (Domain::NeededLibraryName("libSceGnmDriver_padebug.sprx") != "libSceGnmDriver.prx") return 91;
+    if (Domain::ConsoleModuleSuffix("libSceGnmDriver_padebug.prx") || !Domain::ConsoleModuleSuffix("libSceGnmDriver_padebug.sprx")
+        || !Domain::ConsoleModuleSuffix("libc.debug_prx") || Domain::ConsoleModuleSuffix("libc")) return 92;
+    const std::map<std::uint64_t, std::string> gnm{{1, "libSceGnmDriver"}};
+    const std::array<std::string, 1> padebug{"libSceGnmDriver_padebug.prx"};
+    const std::array<std::string, 2> gnmBoth{"libSceGnmDriver_padebug.prx", "libSceGnmDriver.prx"};
+    if (Domain::ImportModule("nid#A#B", gnm, padebug) != padebug[0]) return 93;
+    if (Domain::ImportModule("nid#A#B", gnm, gnmBoth) != gnmBoth[1]) return 94;
     std::cout << "module mapping checks passed\n";
 }

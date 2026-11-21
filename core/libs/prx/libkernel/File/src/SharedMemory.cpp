@@ -53,12 +53,6 @@ extern "C" _invalid_parameter_handler _set_thread_local_invalid_parameter_handle
 
 namespace {
 
-#ifdef __APPLE__
-// Descriptors of named objects, for fpathconf: their backing files keep a name, so the path test below
-// cannot tell them, and their reads and writes stay those of the host file.
-std::mutex namedDescriptorMutex;
-std::unordered_set<int> namedDescriptors;
-#endif
 
 #ifdef _WIN32
 std::mutex sharedDescriptorAccessMutex;
@@ -84,6 +78,21 @@ const std::wstring& WindowsNamedRoot() {
 }
 
 void IgnoreDescriptorParameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned int, std::uintptr_t) {}
+#endif
+
+#if defined(__linux__) || defined(__APPLE__)
+const char* NamedObjectDirectory() {
+#ifdef __APPLE__
+    static const std::string directory = [] {
+        std::error_code error;
+        auto canonical = std::filesystem::canonical(std::filesystem::temp_directory_path(error), error);
+        return error ? std::string{} : canonical.string();
+    }();
+    return directory.c_str();
+#else
+    return "/dev/shm";
+#endif
+}
 #endif
 
 bool IsHostSharedMemoryDescriptor(int descriptor) {
@@ -136,18 +145,22 @@ bool IsHostSharedMemoryDescriptor(int descriptor) {
     return decimal(suffix.substr(0, separator)) && decimal(suffix.substr(separator + 1));
 #elif defined(__APPLE__)
     struct stat status{};
-    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink != 0) return false;
+    if (::fstat(descriptor, &status) != 0 || !S_ISREG(status.st_mode) || status.st_nlink > 1) return false;
     char objectPath[MAXPATHLEN];
     if (::fcntl(descriptor, F_GETPATH, objectPath) != 0) return false;
     const std::string_view path(objectPath);
     const auto slash = path.rfind('/');
-    if (slash == std::string_view::npos || !path.substr(slash + 1).starts_with("anyps5-shm-")) return false;
-    static const std::string directory = [] {
-        std::error_code error;
-        auto canonical = std::filesystem::canonical(std::filesystem::temp_directory_path(error), error);
-        return error ? std::string{} : canonical.string();
-    }();
-    return !directory.empty() && std::string_view(objectPath, slash) == directory;
+    if (slash == std::string_view::npos) return false;
+    constexpr std::string_view prefix = "anyps5-shm-";
+    const auto name = path.substr(slash + 1);
+    if (!name.starts_with(prefix)) return false;
+    if (status.st_nlink == 1) {
+        const auto digest = name.substr(prefix.size());
+        const auto hex = [](char character) { return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'); };
+        if (digest.size() != 40 || !std::all_of(digest.begin(), digest.end(), hex)) return false;
+    }
+    const std::string_view directory = NamedObjectDirectory();
+    return !directory.empty() && path.substr(0, slash) == directory;
 #else
     (void)descriptor;
     return false;
@@ -157,14 +170,14 @@ bool IsHostSharedMemoryDescriptor(int descriptor) {
 class HostShmLock {
 public:
     HostShmLock() {
-#ifdef __linux__
-        descriptor = ::open("/dev/shm", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+#if defined(__linux__) || defined(__APPLE__)
+        descriptor = ::open(NamedObjectDirectory(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
         if (descriptor < 0 || ::flock(descriptor, LOCK_EX) != 0) error = errno;
 #endif
     }
 
     ~HostShmLock() {
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
         const int savedError = errno;
         if (descriptor >= 0) {
             if (!error) ::flock(descriptor, LOCK_UN);
@@ -633,14 +646,27 @@ int ReplaceSharedMemoryDescriptorInternal(int source, int destination) {
     }
     return result;
 }
-#elif !defined(__APPLE__)
+#else
+int OpenHostNamedObject(const std::string& hostName, int flags, int mode) {
+#ifdef __APPLE__
+    return ::open((NamedObjectDirectory() + hostName).c_str(), flags | O_NOFOLLOW, mode);
+#else
+    return ::shm_open(hostName.c_str(), flags, mode);
+#endif
+}
+
+int UnlinkHostNamedObject(const std::string& hostName) {
+#ifdef __APPLE__
+    return ::unlink((NamedObjectDirectory() + hostName).c_str());
+#else
+    return ::shm_unlink(hostName.c_str());
+#endif
+}
+
 int OpenNamedFile(const char* path, int flags, int mode) {
     int validationError = 0;
     const auto hostName = NamedHostName(path, validationError);
     if (validationError != 0) return Fail(NamedGuestError(validationError) ? NamedGuestError(validationError) : GuestInvalid);
-#ifdef __APPLE__
-    NotImplemented_nid_no_patch("shm_open");
-#endif
     HostShmLock namespaceLock;
     if (namespaceLock.Error() != 0) {
         errno = namespaceLock.Error();
@@ -655,19 +681,19 @@ int OpenNamedFile(const char* path, int flags, int mode) {
     bool created = false;
     int descriptor;
     if (flags & SCE_KERNEL_O_CREAT) {
-        descriptor = ::shm_open(hostName.c_str(), hostFlags | O_CLOEXEC | O_EXCL, permissions);
+        descriptor = OpenHostNamedObject(hostName, hostFlags | O_CLOEXEC | O_EXCL, permissions);
         created = descriptor >= 0;
         if (descriptor < 0 && errno == EEXIST && !(flags & SCE_KERNEL_O_EXCL)) {
-            descriptor = ::shm_open(hostName.c_str(), (hostFlags & ~(O_CREAT | O_EXCL)) | O_CLOEXEC, 0);
+            descriptor = OpenHostNamedObject(hostName, (hostFlags & ~(O_CREAT | O_EXCL)) | O_CLOEXEC, 0);
         }
     } else {
-        descriptor = ::shm_open(hostName.c_str(), hostFlags | O_CLOEXEC, 0);
+        descriptor = OpenHostNamedObject(hostName, hostFlags | O_CLOEXEC, 0);
     }
     if (descriptor >= 0) {
         if (!created || ::fchmod(descriptor, permissions) == 0) return descriptor;
         const int error = errno;
         ::close(descriptor);
-        ::shm_unlink(hostName.c_str());
+        UnlinkHostNamedObject(hostName);
         if (const int guest = NamedGuestError(error)) return Fail(guest);
         throw std::runtime_error("shm_open: setting guest creation permissions failed, errno=" + std::to_string(error));
     }
@@ -728,165 +754,10 @@ int CreateAnonymousFile() {
 #endif
 }
 
-#ifdef __APPLE__
-// Without Linux's host POSIX shared memory (macOS caps shm names at 31 characters and cannot read or
-// write a shm object), a named object lives in this process until shm_unlink: each name is backed by
-// a host file that every shm_open of that name reopens with its own access mode and offset, as
-// separate descriptors of one FreeBSD shmfd behave.
-class NamedObjects {
-public:
-    ~NamedObjects() {
-        std::error_code ignored;
-        for (const auto& [name, backing] : objects)
-            std::filesystem::remove(backing, ignored);
-        for (const auto& backing : unlinked)
-            std::filesystem::remove(backing, ignored);
-    }
-
-    std::mutex lock;
-    std::unordered_map<std::string, std::filesystem::path> objects;
-    // Backing files whose name was unlinked while the host still refused to remove them (Windows keeps open files).
-    std::vector<std::filesystem::path> unlinked;
-};
-
-NamedObjects& Named() {
-    static NamedObjects named;
-    return named;
-}
-
-bool CreateBackingFile(std::filesystem::path& backing) {
-#ifdef _WIN32
-    static std::atomic<unsigned> sequence{0};
-    const auto directory = std::filesystem::temp_directory_path();
-    const auto seed = std::to_string(std::random_device{}());
-    for (int attempt = 0; attempt < 64; ++attempt) {
-        const auto path = directory / ("anyps5-shm-named-" + seed + "-" + std::to_string(sequence++));
-        int descriptor = -1;
-        const int error = _wsopen_s(&descriptor, path.c_str(), _O_CREAT | _O_EXCL | _O_RDWR | _O_BINARY, _SH_DENYNO, _S_IREAD | _S_IWRITE);
-        if (error == 0) {
-            _close(descriptor);
-            backing = path;
-            return true;
-        }
-        if (error != EEXIST) {
-            errno = error;
-            return false;
-        }
-    }
-    errno = EEXIST;
-    return false;
-#else
-    std::string path = (std::filesystem::temp_directory_path() / "anyps5-shm-named-XXXXXX").string();
-    const int descriptor = ::mkstemp(path.data());
-    if (descriptor < 0) return false;
-    ::close(descriptor);
-    backing = path;
-    return true;
-#endif
-}
-
-int OpenBackingFile(const std::filesystem::path& backing, bool writable) {
-#ifdef _WIN32
-    int descriptor = -1;
-    const int error = _wsopen_s(&descriptor, backing.c_str(), (writable ? _O_RDWR : _O_RDONLY) | _O_BINARY | _O_NOINHERIT, _SH_DENYNO, 0);
-    if (error != 0) {
-        errno = error;
-        return -1;
-    }
-    return descriptor;
-#else
-    return ::open(backing.c_str(), (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC);
-#endif
-}
-
-int TruncateToEmpty(int descriptor) {
-#ifdef _WIN32
-    const int error = _chsize_s(descriptor, 0);
-    if (error != 0) errno = error;
-    return error == 0 ? 0 : -1;
-#else
-    return ::ftruncate(descriptor, 0);
-#endif
-}
-
-int HostFailure(const char* what) {
-    const int error = errno;
-    if (const int guest = GuestError(error)) return Fail(guest);
-    throw std::runtime_error(std::string("shm_open: ") + what + " failed, errno=" + std::to_string(error));
-}
-
-int ValidateNamedPath(const char* path) {
-    if (path == nullptr) return GuestFault;
-    const auto length = std::strlen(path);
-    if (length >= GuestMaxPath) return GuestNameTooLong;
-    // FreeBSD requires a shared-memory path to start with a slash.
-    if (length == 0 || path[0] != '/') return GuestInvalid;
-    return 0;
-}
-
-int OpenNamed(const char* path, int flags) {
-    if (const int error = ValidateNamedPath(path)) return Fail(error);
-    const bool writable = (flags & SCE_KERNEL_O_ACCMODE) == SCE_KERNEL_O_RDWR;
-    auto& named = Named();
-    std::lock_guard guard(named.lock);
-    auto found = named.objects.find(path);
-    if (found == named.objects.end()) {
-        if ((flags & SCE_KERNEL_O_CREAT) == 0) return Fail(GuestNoEntry);
-        std::filesystem::path backing;
-        if (!CreateBackingFile(backing)) return HostFailure("creating the host backing file");
-        found = named.objects.emplace(path, std::move(backing)).first;
-    } else {
-        if ((flags & (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) == (SCE_KERNEL_O_CREAT | SCE_KERNEL_O_EXCL)) return Fail(GuestExists);
-    }
-    const int descriptor = OpenBackingFile(found->second, writable);
-    if (descriptor < 0) return HostFailure("opening the host backing file");
-    // FreeBSD truncates an existing object only for a read-write open; O_TRUNC is ignored otherwise.
-    if (writable && (flags & SCE_KERNEL_O_TRUNC) != 0 && TruncateToEmpty(descriptor) != 0) {
-        const int error = errno;
-#ifdef _WIN32
-        _close(descriptor);
-#else
-        ::close(descriptor);
-#endif
-        errno = error;
-        return HostFailure("truncating the named object");
-    }
-    {
-        std::lock_guard lock(namedDescriptorMutex);
-        namedDescriptors.insert(descriptor);
-    }
-    return descriptor;
-}
-
-// Open descriptors keep the object's contents, as they do after FreeBSD's shm_unlink; the name is free at once.
-int UnlinkNamed(const char* path) {
-    if (const int error = ValidateNamedPath(path)) return Fail(error);
-    auto& named = Named();
-    std::lock_guard guard(named.lock);
-    const auto found = named.objects.find(path);
-    if (found == named.objects.end()) return Fail(GuestNoEntry);
-    std::error_code error;
-    if (!std::filesystem::remove(found->second, error) && error) named.unlinked.push_back(found->second);
-    named.objects.erase(found);
-    return 0;
-}
-#endif
 
 }
 
 namespace File {
-
-#ifdef __APPLE__
-bool IsNamedSharedMemoryDescriptor_nid_no_patch(int descriptor) {
-    std::lock_guard lock(namedDescriptorMutex);
-    return namedDescriptors.contains(descriptor);
-}
-
-void ForgetNamedSharedMemoryDescriptor(int descriptor) {
-    std::lock_guard lock(namedDescriptorMutex);
-    namedDescriptors.erase(descriptor);
-}
-#endif
 
 bool IsSharedMemoryDescriptor_nid_no_patch(int descriptor) {
     return IsHostSharedMemoryDescriptor(descriptor);
@@ -1217,12 +1088,7 @@ extern "C" int APS5_VABI shm_open_nid_postfix(const char* path, int flags, int m
         std::string copy;
         if (const int error = CopyGuestPath_nid_no_patch(path, copy)) return Fail(error);
         path = copy.c_str();
-#ifdef __APPLE__
-        static_cast<void>(mode);
-        return OpenNamed(path, flags);
-#else
         return OpenNamedFile(path, flags, mode);
-#endif
     }
     if (accessMode == SCE_KERNEL_O_RDONLY) return Fail(GuestInvalid);
     const int descriptor = CreateAnonymousFile();
@@ -1243,28 +1109,23 @@ extern "C" int APS5_VABI shm_unlink_nid_postfix(const char* path) {
     path = copy.c_str();
 #ifdef _WIN32
     return UnlinkNamedFile(path);
-#elif defined(__APPLE__)
-    return UnlinkNamed(path);
 #else
     int validationError = 0;
     const auto hostName = NamedHostName(path, validationError);
     if (validationError != 0) return Fail(NamedGuestError(validationError) ? NamedGuestError(validationError) : GuestInvalid);
-#ifdef __APPLE__
-    NotImplemented_nid_no_patch("shm_unlink");
-#endif
     HostShmLock namespaceLock;
     if (namespaceLock.Error() != 0) {
         errno = namespaceLock.Error();
         if (const int guest = NamedGuestError(errno)) return Fail(guest);
         throw std::runtime_error("shm_unlink: locking the host shared-memory namespace failed, errno=" + std::to_string(errno));
     }
-    const auto objectPath = "/dev/shm" + hostName;
+    const auto objectPath = NamedObjectDirectory() + hostName;
     if (::faccessat(AT_FDCWD, objectPath.c_str(), R_OK | W_OK, AT_EACCESS) != 0) {
         const int error = errno;
         if (const int guest = NamedGuestError(error)) return Fail(guest);
         throw std::runtime_error("shm_unlink: checking shared-memory permissions failed, errno=" + std::to_string(error));
     }
-    if (::shm_unlink(hostName.c_str()) == 0) return 0;
+    if (UnlinkHostNamedObject(hostName) == 0) return 0;
     const int error = errno;
     if (const int guest = NamedGuestError(error)) return Fail(guest);
     throw std::runtime_error("shm_unlink: removing the host named object failed, errno=" + std::to_string(error));

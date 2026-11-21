@@ -124,6 +124,116 @@ final class RetroHostConformanceTests: XCTestCase {
                           })
     }
 
+    // MARK: Save states, as on Windows and Linux
+
+    /// One step of a session of the launcher's own: `message` from `from`, its `id` and `open` left
+    /// open.
+    static func step(_ from: String, _ message: RetroJSON, open: [String] = []) -> RetroJSON {
+        .object(["from": .string(from), "message": message, "anyValueFor": .array((["id"] + open).map { .string($0) })])
+    }
+
+    /// `message` with the id `id`.
+    static func withID(_ message: [String: RetroJSON], _ id: Int) -> RetroJSON {
+        var message = message
+        message["id"] = .int(id)
+        return .object(message)
+    }
+
+    /// A `start` with a states folder, with the session's placeholder paths.
+    static let statesStart: RetroJSON = .object([
+        "core": .string("${core}"), "disc": .string("${disc}"), "system": .string("${system}"), "saves": .string("${saves}"),
+        "states": .string("${states}"),
+    ])
+
+    func testAGameWithSaveStatesTheRecordedHostsStartSavesLoadsAndRefusalsPassTheClientsChecks() async throws {
+        let recording = try RetroSaveStatesRecording.load()
+        let start = try XCTUnwrap(recording.calls("slots", "start").first)
+        var id = 2
+        var steps = [Self.step("launcher", Self.callMessage(id, "start", Self.statesStart)), Self.step("host", Self.withID(start.reply, id))]
+        // Every saveState and loadState the recorded host answered for that game (slots, then
+        // refused), each reply as it was sent but with the step's call id and its file's size and
+        // time taken left open.
+        for scenario in ["slots", "refused"] {
+            for sent in recording.messages(scenario) {
+                guard sent.from == "launcher", let method = sent.message["method"]?.stringValue, method == "saveState" || method == "loadState",
+                      let reply = recording.calls(scenario, method).first(where: { $0.call["id"] == sent.message["id"] }) else { continue }
+                id += 1
+                steps.append(Self.step("launcher", Self.withID(sent.message, id)))
+                steps.append(Self.step("host", Self.withID(reply.reply, id), open: ["result.bytes", "result.micros"]))
+            }
+        }
+        steps += [.object(["from": .string("launcher"), "message": .object(["type": .string("shutdown")])]), .object(["hostExits": .int(0)])]
+        let capabilities = recording.welcome("welcome")["capabilities"]?.arrayValue?.compactMap(\.stringValue) ?? []
+        try await playOwn("A host that lists saveStates, with the capabilities the host built from the save-states branch listed: start with "
+                          + "states, then the saveState and loadState replies it sent, each refusal included, then shutdown.",
+                          outcome: "clean", steps: steps, capabilities: capabilities, afterReady: { client in XCTAssertTrue(client.canSaveStates) })
+    }
+
+    func testTheHostsOwnSaveStateMessageFixturesStartWithStatesASaveALoadAndTwoRefusals() async throws {
+        let checkout = try Self.checkout()
+        func fixture(_ name: String) throws -> [String: RetroJSON] {
+            try XCTUnwrap(try RetroHostFixtures.read(checkout.appendingPathComponent("fixtures/v1/messages/\(name)")).objectValue, name)
+        }
+        let welcome = try XCTUnwrap(try fixture("welcome.json")["message"]?.objectValue)
+        let start = try XCTUnwrap(try fixture("call-start-states.json")["message"]?.objectValue?["args"]?.objectValue)
+        func text(_ key: String) throws -> String { try XCTUnwrap(start[key]?.stringValue, key) }
+        let ours = RetroHostStartRequest(core: try text("core"), disc: try text("disc"), system: try text("system"), saves: try text("saves"),
+                                         states: try text("states"))
+        XCTAssertEqual(ours.args, .object(start), "the launcher's start is the one the fixture shows")
+        var steps: [RetroJSON] = []
+        var id = 1
+        for name in ["call-start-states.json", "call-save-state.json", "call-load-state.json", "call-load-state-no-state.json",
+                     "call-save-state-in-lockstep.json"] {
+            let file = try fixture(name)
+            let open = file["anyValueFor"]?.arrayValue?.compactMap(\.stringValue) ?? []
+            id += 1
+            steps.append(Self.step("launcher", Self.withID(try XCTUnwrap(file["message"]?.objectValue, name), id)))
+            steps.append(Self.step("host", Self.withID(try XCTUnwrap(file["reply"]?.objectValue, name), id), open: open))
+        }
+        steps += [.object(["from": .string("launcher"), "message": .object(["type": .string("shutdown")])]), .object(["hostExits": .int(0)])]
+        try await playOwn("The host's call-start-states, call-save-state, call-load-state, call-load-state-no-state and "
+                          + "call-save-state-in-lockstep fixtures, each with the id of its call here, then shutdown.",
+                          outcome: "clean", steps: steps,
+                          capabilities: welcome["capabilities"]?.arrayValue?.compactMap(\.stringValue) ?? [],
+                          afterReady: { client in XCTAssertTrue(client.canSaveStates) })
+    }
+
+    func testStartStatesSaveStateAndLoadStateGoOnlyToAHostThatListsSaveStates() async throws {
+        try await playOwn("A host without saveStates is sent no states folder and no state call: the client refuses them before they are "
+                          + "sent, and the next call is answered in order.", outcome: "clean", steps: [
+                              Self.step("launcher", Self.callMessage(2, "status", .null)),
+                              Self.step("host", Self.replyMessage(2, .null)),
+                          ], capabilities: [RetroProtocol.ps1Capability, RetroProtocol.ps2Capability], afterReady: { client in
+                              XCTAssertFalse(client.canSaveStates)
+                              let start: RetroJSON = .object(["core": .string("c"), "disc": .string("d.cue"), "system": .string("s"),
+                                                              "saves": .string("v"), "states": .string("t")])
+                              for (method, args) in [("start", start), ("saveState", .object(["slot": .int(0)])),
+                                                     ("loadState", .object(["slot": .int(0)]))] as [(String, RetroJSON)] {
+                                  do {
+                                      _ = try await client.call(method, args)
+                                      XCTFail("\(method) went to a host without saveStates")
+                                  } catch {
+                                      XCTAssertEqual(error as? RetroHostClientError, .noSaveStatesCapability, method)
+                                  }
+                              }
+                          })
+    }
+
+    func testAStateResultThatIsNeitherFalseNorAnObjectOfIntegerBytesAndMicrosIsAProtocolError() async throws {
+        let cases: [(String, RetroJSON, String)] = [
+            ("saveState", .bool(true), "neither false nor an object"),
+            ("saveState", .object(["bytes": .number(1.5), "micros": .int(3)]), "an object whose bytes is not an integer"),
+            ("loadState", .object(["bytes": .int(4096)]), "an object without micros"),
+        ]
+        for (method, result, why) in cases {
+            try await playOwn("The host answers \(method) with \(why).", outcome: "protocolError", steps: [
+                Self.step("launcher", Self.callMessage(2, method, .object(["slot": .int(0)]))),
+                .object(["from": .string("host"), "message": Self.replyMessage(2, result), "anyValueFor": .array([.string("id")]),
+                         "invalid": .string("\(method) returns false or an object of integers bytes and micros")]),
+            ], capabilities: [RetroProtocol.ps1Capability, RetroProtocol.saveStatesCapability])
+        }
+    }
+
     /// A `start` naming `console`, with the session's placeholder paths.
     static func ps2Start(console: String) -> RetroJSON {
         .object(["console": .string(console), "core": .string("${core}"), "disc": .string("${disc}"),
@@ -422,7 +532,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
             try Data().write(to: url)
             paths[name] = url.path
         }
-        for name in ["system", "saves"] {
+        for name in ["system", "saves", "states"] {
             let url = work.appendingPathComponent(name)
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
             paths[name] = url.path
@@ -436,7 +546,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
             for (name, path) in paths { out = out.replacingOccurrences(of: "${\(name)}", with: path) }
             return .string(out)
         case .array(let items): return .array(items.map(fill))
-        case .object(let map): return .object(map.mapValues(fill))
+        case .object(let map, let keys): return .object(map.mapValues(fill), keys: keys)
         default: return value
         }
     }
@@ -584,7 +694,7 @@ final class RetroSessionPlayer: @unchecked Sendable {
 
     private func compare(_ expected: RetroJSON, _ actual: RetroJSON, _ ignore: Set<String>, _ place: String) {
         if ignore.contains(place) { return }
-        if case .object(let wanted) = expected, case .object(let got) = actual {
+        if case .object(let wanted, _) = expected, case .object(let got, _) = actual {
             for (key, value) in wanted where !ignore.contains("\(place).\(key)") {
                 guard let item = got[key] else {
                     XCTFail("\(place).\(key) is missing")
