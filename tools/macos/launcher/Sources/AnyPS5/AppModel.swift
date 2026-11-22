@@ -150,6 +150,9 @@ struct Preferences: Codable, Equatable {
     /// The core options the player chose in a game's menu that are kept for that game only
     /// (`RetroGraphics.perGameKeys`: PS1 widescreen), by the game's title ID, then by key.
     var retroHostGameOptions: [String: [String: String]]?
+    /// What the Auto Optimizer learned of each PS1 game's internal resolution on this Mac, by the
+    /// game's title ID (`RetroAutoMemory`); nil for nothing yet. Never sent anywhere.
+    var retroHostAuto: RetroAutoMemories?
     /// The window full screen at start (WindowStart): nil the first time, then as it was left.
     var fullScreen: Bool?
     /// Settings → Behaviour → Pause Game When Opening the Menu: nil means on.
@@ -642,6 +645,14 @@ final class AppModel: ObservableObject {
     let retroHostKeeper = RetroHostKeeper()
     /// How often a PS1 game in the host is asked its `status`; tests ask by hand.
     var retroStatusEvery: Duration = .milliseconds(500)
+    /// How often the Auto Optimizer judges a PS1 game's last status; tests judge by hand.
+    var retroAutoEvery: Duration = RetroAutoRules.window
+    /// The clock the Auto Optimizer times a PS1 game's play by, from its start; nil for the real
+    /// one, and tests move one by hand.
+    var retroAutoClock: (() -> Duration)?
+    /// The height in pixels of the view a game in the host is shown in, which caps the internal
+    /// resolution the Auto Optimizer chooses (`retroAutoDisplayNeed`); nil for the launcher's window.
+    var retroDisplayHeight: (() -> Double)?
     /// Starts one emulator host with the player's volume; `checked` is a signed release's check,
     /// whose files the host holds until it exits. Tests give a fake session.
     var openRetroHost: (RetroHostInstall, RetroHostChecked?, Double, Bool) async throws -> RetroHostSession = { install, checked, volume, muted in

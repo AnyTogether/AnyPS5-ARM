@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "Melukis permainan dengan lebih tajam. Nilai lebih tinggi memerlukan kad grafik yang lebih pantas.",
   "retroResolutionNative": "Asal",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automatik (%@)",
   "retroResolutionRefusedDetail": "Emulator tidak dapat memaparkan resolusi yang disimpan, jadi permainan menggunakan %@.",
   "retroMenuGraphics": "Grafik",
   "retroMenuGraphicsDetail": "Resolusi, tekstur dan skrin lebar.",

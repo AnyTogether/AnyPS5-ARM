@@ -91,6 +91,14 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
         get { locked { states } }
         set { locked { states = newValue } }
     }
+    private var performance = false
+    /// Whether the host's welcome lists `gamePerformance`; false, as a host before it, unless a test
+    /// says.
+    var reportsPerformance: Bool {
+        get { locked { performance } }
+        set { locked { performance = newValue } }
+    }
+    var hostVersion: String { "1.2.0" }
     private var results: [String: RetroJSON] = [:]
     private var errors: [String: RetroCallError] = [:]
     private var gate: PlayGate?
@@ -187,6 +195,16 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
     }
 }
 
+/// A clock a test moves by hand.
+final class PlayClock: @unchecked Sendable {
+    var now: Duration = .zero
+}
+
+/// The fake hosts a launcher under test opened, in order.
+final class PlayHosts: @unchecked Sendable {
+    var hosts: [FakePlayHost] = []
+}
+
 /// A PS1 disc played in the launcher's window through the emulator host, as on Windows and Linux
 /// (AnyPS5 Desktop's test/ui/retro_host_play_test.dart), with a fake host: the setting and its
 /// rows, the start and what it is given, PS and the game's menu with its sections in the host's
@@ -242,6 +260,7 @@ final class RetroHostPlayTests: XCTestCase {
         model.retroFolder = scratch.appendingPathComponent("retro")
         model.retroHostUnchecked = host ? RetroHostInstall(host: "/test/anyps5-retro-host", core: "/test/swanstation_libretro.dylib") : nil
         model.retroStatusEvery = .seconds(3600)
+        model.retroAutoEvery = .seconds(3600)
         model.retroPads = RetroPadReader(pads: { [] }, state: { _ in nil })
         model.preferences.retroHostPs1 = setting ? true : nil
         model.setRetroLibrary(true)
@@ -263,8 +282,8 @@ final class RetroHostPlayTests: XCTestCase {
 
     /// Plays the disc and waits for its `start` and the first `status` the start itself asks; the
     /// fake host made for it. The phase is `.loading` before that status is in, and a `refresh()`
-    /// asked while it is out is let go (`RetroHostGame.refresh`), so a test that set its own status
-    /// and refreshed then could be left with none, or with the start's.
+    /// asked while it is out waits for the one after it (`RetroHostGame.refresh`), so a test sets
+    /// its own status once the start's is in.
     private func play(_ model: AppModel, _ game: Game, opened: () -> [FakePlayHost]) async throws -> FakePlayHost {
         let before = opened().count
         model.play(game)
@@ -896,6 +915,193 @@ final class RetroHostPlayTests: XCTestCase {
         try await settle({ model.preferences.retroHostOptions?["pcsx2_widescreen_hint"] == "enabled (16:9)" }, "kept for every PS2 game")
         XCTAssertNil(model.preferences.retroHostGameOptions, "PS2 widescreen is not kept per game")
         XCTAssertEqual(host.args("option").last, option("pcsx2_widescreen_hint", "enabled (16:9)"))
+    }
+
+    // MARK: Auto, as on Windows and Linux (Desktop's test/ui/retro_host_play_test.dart after #199)
+
+    private let scaleKey = RetroResolution.ps1Key
+
+    /// The recorded real status at `scale`, with the host's measurement of the game (`speed`, or
+    /// none yet) and its GPU, as a host with `gamePerformance` sends it.
+    private static func measured(_ scale: Int, _ speed: Double?, work: Double = 0.1) throws -> RetroStatus {
+        var status = try recordedStatus(selected: [RetroResolution.ps1Key: scale - 1])
+        status.performance = speed.map { RetroPerformance(speed: $0, work: work, seconds: 5) }
+        status.gpu = RetroGpu(renderer: "RTX", vendor: "NVIDIA", maxTexture: 16384)
+        return status
+    }
+
+    /// A launcher whose hosts list `gamePerformance` (or, with `reports` false, do not), with Auto
+    /// judging only when a test asks, by `clock`, for a view `height` pixels high.
+    private func autoLauncher(reports: Bool = true, height: Double = 1080, clock: PlayClock = PlayClock()) throws
+        -> (AppModel, Game, () -> [FakePlayHost]) {
+        let (model, game, _) = try launcher()
+        let made = PlayHosts()
+        model.openRetroHost = { _, _, _, _ in
+            let fake = FakePlayHost()
+            fake.reportsPerformance = reports
+            made.hosts.append(fake)
+            return fake
+        }
+        model.retroAutoEvery = .seconds(3600)
+        model.retroAutoClock = { clock.now }
+        model.retroDisplayHeight = { height }
+        return (model, game, { made.hosts })
+    }
+
+    private func optionValues(_ host: FakePlayHost) -> [String] {
+        host.args("option").compactMap { $0.objectValue?["value"]?.stringValue }
+    }
+
+    func testAutoOnAHostThatMeasuresSpeedTheStartScaleTheRowAndAHandPickedValue() async throws {
+        let (model, game, hosts) = try autoLauncher()
+        let host = try await menuOpen(model, game, status: try Self.recordedStatus(selected: [scaleKey: 1]), hosts: hosts)
+        XCTAssertEqual(host.started.first?.objectValue?["options"]?.objectValue?[scaleKey], .string("2"),
+                       "nothing learned of this game yet: 2x, below the 5x a 1080-line view needs")
+        XCTAssertNotNil(model.retroPlay?.auto)
+        try choose(model, "section-graphics")
+        let values = try choice(model, "resolution")
+        XCTAssertEqual(values.options, ["Auto (2x)", "Native", "2x", "3x", "4x", "6x", "8x"])
+        XCTAssertEqual(values.selected, 0)
+
+        values.set(2)
+        try await settle({ model.preferences.retroHostOptions?[self.scaleKey] == "2" }, "kept")
+        XCTAssertEqual(host.args("option"), [], "the scale Auto chose, picked by hand, is kept without being sent again")
+        XCTAssertNil(model.retroPlay?.auto, "a hand-picked value turns Auto off")
+        XCTAssertEqual(try choice(model, "resolution").selected, 2)
+
+        try choice(model, "resolution").set(0)
+        try await settle({ model.retroPlay?.auto != nil }, "Auto again")
+        XCTAssertNil(model.preferences.retroHostOptions?[scaleKey])
+        XCTAssertEqual(try choice(model, "resolution").selected, 0)
+    }
+
+    /// A game on Auto at 4x that reads slow twice, so Auto asks for 3x, and the host holds that
+    /// change until the test opens `gate`; the menu is then open on its Graphics page.
+    private func autoChangeOnItsWay(_ model: AppModel, _ game: Game, _ hosts: @escaping () -> [FakePlayHost], _ clock: PlayClock) async throws
+        -> (FakePlayHost, RetroAutoController, PlayGate) {
+        let host = try await play(model, game, opened: hosts)
+        host.gameStatus = try Self.measured(4, nil)
+        await model.retroPlay?.host.refresh()
+        let auto = try XCTUnwrap(model.retroPlay?.auto)
+        let gate = PlayGate()
+        clock.now = .seconds(20)
+        host.gameStatus = try Self.measured(4, 0.6, work: 1.5)
+        await model.retroPlay?.host.refresh()
+        await auto.tick()
+        clock.now = .seconds(25)
+        await model.retroPlay?.host.refresh()
+        host.callGate = gate
+        Task { await auto.tick() }
+        try await settle({ self.optionValues(host) == ["3"] }, "Auto lowers 4x to 3x; the host has not answered")
+        XCTAssertTrue(model.handle(.home))
+        try choose(model, "section-graphics")
+        return (host, auto, gate)
+    }
+
+    func testAValueChosenWhileAnAutoChangeIsStillBeingSentIsTheOneTheGameKeeps() async throws {
+        let clock = PlayClock()
+        let (model, game, hosts) = try autoLauncher(clock: clock)
+        let (host, _, gate) = try await autoChangeOnItsWay(model, game, hosts, clock)
+        let row = try choice(model, "resolution")
+        row.set(try XCTUnwrap(row.options.firstIndex(of: "4x")))
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(optionValues(host), ["3"], "the player's 4x waits for Auto's change to be answered")
+
+        host.gameStatus = try Self.measured(3, nil)
+        host.callGate = nil
+        gate.open()
+        try await settle({ model.preferences.retroHostOptions?[self.scaleKey] == "4" }, "kept once the host took it")
+        XCTAssertEqual(optionValues(host), ["3", "4"], "the player's value is sent last, so the game draws at it")
+        XCTAssertNil(model.retroPlay?.auto)
+    }
+
+    func testChoicesMadeWhileAnAutoChangeIsBeingSentOnlyTheLastOneMadeIsActedOn() async throws {
+        for last in ["2x", "3x", "Auto"] {
+            let clock = PlayClock()
+            let (model, game, hosts) = try autoLauncher(clock: clock)
+            let (host, auto, gate) = try await autoChangeOnItsWay(model, game, hosts, clock)
+            let row = try choice(model, "resolution")
+            row.set(try XCTUnwrap(row.options.firstIndex(of: "4x")))
+            try await Task.sleep(for: .milliseconds(20))
+            let index = try last == "Auto" ? 0 : XCTUnwrap(row.options.firstIndex(of: last))
+            row.set(index)
+            try await Task.sleep(for: .milliseconds(20))
+            host.gameStatus = try Self.measured(3, nil)
+            host.callGate = nil
+            gate.open()
+            switch last {
+            case "2x":
+                try await settle({ model.preferences.retroHostOptions?[self.scaleKey] == "2" }, "2x kept")
+                XCTAssertEqual(optionValues(host), ["3", "2"], "the 4x made before 2x is never sent")
+                XCTAssertNil(model.retroPlay?.auto)
+            case "3x":
+                try await settle({ model.preferences.retroHostOptions?[self.scaleKey] == "3" }, "3x kept")
+                XCTAssertEqual(optionValues(host), ["3"], "3x is the scale Auto's change left: kept, not sent again")
+                XCTAssertNil(model.retroPlay?.auto)
+            default:
+                try await settle({ model.retroPlay?.auto.map { $0 !== auto } ?? false }, "Auto, the last choice, goes on")
+                try await Task.sleep(for: .milliseconds(30))
+                XCTAssertEqual(optionValues(host), ["3"], "the 4x made before Auto is never sent")
+                XCTAssertNil(model.preferences.retroHostOptions?[scaleKey])
+            }
+            await model.closeRetroGame()
+        }
+    }
+
+    func testAValueTheHostRefusesLeavesAGameOnAuto() async throws {
+        let (model, game, hosts) = try autoLauncher()
+        let host = try await menuOpen(model, game, status: try Self.measured(2, nil), hosts: hosts)
+        host.answer("option", .bool(false))
+        try choose(model, "section-graphics")
+        let row = try choice(model, "resolution")
+        row.set(try XCTUnwrap(row.options.firstIndex(of: "4x")))
+        try await settle({ self.optionValues(host) == ["4"] }, "sent")
+        try await settle({ model.retroPlay?.auto != nil }, "still on Auto")
+        XCTAssertNil(model.preferences.retroHostOptions?[scaleKey])
+        XCTAssertEqual(try choice(model, "resolution").selected, 0)
+    }
+
+    func testAutoStartsAGameAtWhatItLearnedOfIt() async throws {
+        let (model, game, hosts) = try autoLauncher(height: 1440)
+        model.preferences.retroHostAuto = RetroAutoMemories([game.titleID: RetroAutoMemory(gpu: "RTX", host: "1.2.0", config: "", scale: 8, slow: [8])])
+        let host = try await play(model, game, opened: hosts)
+        XCTAssertEqual(host.started.first?.objectValue?["options"]?.objectValue?[scaleKey], .string("6"),
+                       "the scale it last used ran slow: the largest below it, within the 6x a 1440-line view needs")
+
+        let data = try XCTUnwrap(model.preferences.encoded())
+        XCTAssertEqual(Preferences.read(data)?.retroHostAuto, model.preferences.retroHostAuto, "kept in the preferences")
+        var file = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var auto = try XCTUnwrap(file["retroHostAuto"] as? [String: Any])
+        auto["SLUS99999"] = ["gpu": 3]
+        file["retroHostAuto"] = auto
+        let read = try XCTUnwrap(Preferences.read(try JSONSerialization.data(withJSONObject: file)), "one bad memory never loses the preferences")
+        XCTAssertEqual(read.retroHostAuto?.games.keys.sorted(), [game.titleID])
+    }
+
+    func testWithoutGamePerformanceThereIsNoAutoAndTheGameStartsAsBefore() async throws {
+        let (model, game, hosts) = try autoLauncher(reports: false)
+        let host = try await menuOpen(model, game, status: try Self.recordedStatus(), hosts: hosts)
+        XCTAssertNil(host.started.first?.objectValue?["options"]?.objectValue?[scaleKey])
+        try choose(model, "section-graphics")
+        XCTAssertEqual(try choice(model, "resolution").options.first, "Native")
+    }
+
+    func testAKeptResolutionStartsTheGameAtItWithAutoOfferedButNotChosen() async throws {
+        let (model, game, hosts) = try autoLauncher()
+        model.preferences.retroHostOptions = [scaleKey: "3"]
+        let host = try await menuOpen(model, game, status: try Self.recordedStatus(selected: [scaleKey: 2]), hosts: hosts)
+        XCTAssertEqual(host.started.first?.objectValue?["options"]?.objectValue?[scaleKey], .string("3"))
+        XCTAssertNil(model.retroPlay?.auto)
+        try choose(model, "section-graphics")
+        let values = try choice(model, "resolution")
+        XCTAssertEqual(values.options.first, "Auto (3x)", "offered, not chosen")
+        XCTAssertEqual(values.selected, 3)
+    }
+
+    func testTheAutoWordsInTurkish() throws {
+        let turkish = try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(contentsOf: T.sourceFolder.appendingPathComponent("tr.json"))) as? [String: String])
+        XCTAssertEqual(turkish["retroResolutionAuto"], "Otomatik (%@)")
+        XCTAssertEqual(TRetro.format(.retroResolutionAuto, "2x"), "Auto (2x)", "the launcher speaks English in tests")
     }
 
     func testTheMenuWordsInTurkishSayKontrolcu() throws {

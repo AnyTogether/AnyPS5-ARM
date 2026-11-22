@@ -39,6 +39,15 @@ final class RetroPlay {
     var loadCardWarned = false
     /// The section of the menu shown, or nil for the menu's first page.
     var menuSection: RetroOptionSection?
+    /// The Auto Optimizer of the game's internal resolution, while it is on Auto: a PS1 game whose
+    /// player kept no resolution, on a host that measures how it runs.
+    var auto: RetroAutoController?
+    /// The internal resolution choices made in the menu, Auto or a value, taken one at a time in the
+    /// order made (`chooseRetroResolutionInTurn`).
+    var resolutionChoices: Task<Void, Never>?
+    /// How many internal resolution choices were made: a choice that is no longer the last one made
+    /// when its turn comes, or after it waited for the host, does nothing more.
+    var resolutionChoice = 0
     /// The game's save states, in its menu's Save state and Load state where its host saves states
     /// (`RetroSaveStates.available`).
     let states: RetroSaveStates
@@ -79,6 +88,7 @@ final class RetroPlay {
     func release() {
         guard !released else { return }
         released = true
+        auto?.dispose()
         if let listener { host.removeListener(listener) }
         states.onChange = nil
         controls.dispose()
@@ -294,6 +304,11 @@ extension AppModel {
             retroPlay = play
             overlay = nil
         }
+        let auto = !ps2 && preferences.retroHostOptions?[RetroResolution.ps1Key] == nil
+        if auto { startRetroAuto(play) }
+        let autoResolution: (@MainActor () -> String)? = auto ? { [weak self] in
+            "\(self?.retroAutoStartScale(play) ?? RetroAutoRules.firstScale)"
+        } : nil
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = play.started
         sessionStart = play.started
@@ -305,7 +320,52 @@ extension AppModel {
             saves: (ps2 ? retroPs2SavesFolder : retroSavesFolder).standardizedFileURL.path,
             options: RetroOptionSection.startOptions(kept: preferences.retroHostOptions ?? [:], ps2: ps2,
                                                      game: preferences.retroHostGameOptions?[game.titleID] ?? [:]),
-            console: ps2 ? RetroConsole.ps2 : nil, states: statesPath))
+            console: ps2 ? RetroConsole.ps2 : nil, states: statesPath),
+            autoResolution: autoResolution)
+    }
+
+    /// The scale `play` starts at on Auto (`RetroAutoResolution.startScale`), from what was learned
+    /// of the game with this host's build only: what another build's cores did proves nothing. The
+    /// GPU and the game's other graphics settings are known only from its statuses; the optimizer
+    /// checks them there and starts its memory again when they differ.
+    private func retroAutoStartScale(_ play: RetroPlay) -> Int {
+        let memory = preferences.retroHostAuto?[play.game.titleID]
+        return RetroAutoResolution.startScale(Self.retroAutoScales, need: retroDisplayNeed,
+                                              memory: memory?.host == play.host.hostVersion ? memory : nil)
+    }
+
+    /// The PS1 scales the Auto Optimizer may start a game at, before its host lists its own: those
+    /// the launcher offers (`RetroResolution.offered`), which every SwanStation the host draws with
+    /// lists.
+    static let retroAutoScales = [1, 2, 3, 4, 6, 8]
+
+    /// The largest PS1 scale the view the game is shown in needs: the launcher window's height in
+    /// pixels.
+    var retroDisplayNeed: Int {
+        if let retroDisplayHeight { return retroAutoDisplayNeed(retroDisplayHeight()) }
+        guard let window = mainWindow else { return retroAutoDisplayNeed(0) }
+        return retroAutoDisplayNeed(Double(window.contentLayoutRect.height * window.backingScaleFactor))
+    }
+
+    /// Puts `play`'s internal resolution on Auto: the optimizer judges it from now while the game
+    /// plays, and what it learns is kept in the preferences.
+    private func startRetroAuto(_ play: RetroPlay) {
+        play.auto?.dispose()
+        let titleID = play.game.titleID
+        let auto = RetroAutoController(
+            menu: play.menu, titleID: titleID,
+            kept: { [weak self] in self?.preferences.retroHostAuto?[titleID] },
+            saved: { [weak self] memory in
+                guard let self else { return }
+                var memories = self.preferences.retroHostAuto ?? RetroAutoMemories()
+                memories[titleID] = memory
+                self.preferences.retroHostAuto = memories
+            },
+            need: { [weak self] in self?.retroDisplayNeed ?? 1 },
+            log: { NSLog("[anyps5-launcher] %@", $0) },
+            every: retroAutoEvery, clock: retroAutoClock)
+        play.auto = auto
+        auto.start()
     }
 
     /// The checks before a start of a signed release's host (protocol.md "Finding and checking the
@@ -705,26 +765,78 @@ extension AppModel {
     }
 
     /// The Graphics page's Internal resolution row: the values the launcher offers that the host
-    /// lists (`RetroResolutionChoice.of`), or nil when the menu offers none.
+    /// lists (`RetroResolutionChoice.of`), or nil when the menu offers none. A PS1 game on a host
+    /// that measures how it runs also offers Auto first, which names the scale the Auto Optimizer
+    /// chose.
     private func retroResolutionRow(_ play: RetroPlay) -> PanelRow? {
         guard let choice = play.menu.resolution else { return nil }
+        let offersAuto = !play.ps2 && play.host.reportsPerformance
+        let onAuto = offersAuto && play.auto != nil
+        let first = offersAuto ? 1 : 0
+        var options = choice.values.map(Self.retroResolutionLabel)
+        if offersAuto { options.insert(TRetro.format(.retroResolutionAuto, Self.retroResolutionLabel(choice.active)), at: 0) }
         return PanelRow(id: "resolution", title: TRetro.text(.retroResolution), detail: Self.retroResolutionDetail(choice), symbol: "sparkles.tv",
-                        kind: .choice(options: choice.values.map(Self.retroResolutionLabel), selected: choice.selected) { [weak self] index in
-            guard choice.values.indices.contains(index) else { return }
-            self?.chooseRetroResolution(play, choice.values[index].value)
+                        kind: .choice(options: options, selected: onAuto ? 0 : choice.selected + first) { [weak self] index in
+            if offersAuto, index == 0 {
+                self?.chooseRetroAuto(play)
+                return
+            }
+            guard choice.values.indices.contains(index - first) else { return }
+            self?.chooseRetroResolution(play, choice.values[index - first].value)
         })
+    }
+
+    /// Auto chosen for a PS1 game's internal resolution: the resolution kept for every game is let
+    /// go, so each game starts at what the Auto Optimizer learned of it, and this one is judged from
+    /// now at the scale it draws at.
+    private func chooseRetroAuto(_ play: RetroPlay) {
+        chooseRetroResolutionInTurn(play) { [weak self] latest in
+            guard let self, play.auto == nil, !play.over, latest() else { return }
+            var kept = self.preferences.retroHostOptions ?? [:]
+            kept[RetroResolution.ps1Key] = nil
+            self.preferences.retroHostOptions = kept
+            self.startRetroAuto(play)
+            self.objectWillChange.send()
+        }
+    }
+
+    /// Runs `choose` once every internal resolution choice made before it is done, so choices reach
+    /// the host in the order made; `latest` says whether it is still the last choice made, and a
+    /// choice that is not sends and keeps nothing.
+    private func chooseRetroResolutionInTurn(_ play: RetroPlay, _ choose: @escaping @MainActor (_ latest: @escaping @MainActor () -> Bool) async -> Void) {
+        play.resolutionChoice += 1
+        let mine = play.resolutionChoice
+        let before = play.resolutionChoices
+        play.resolutionChoices = Task { @MainActor [weak self] in
+            await before?.value
+            guard let self else { return }
+            await choose { [weak self] in self != nil && play.resolutionChoice == mine }
+        }
     }
 
     /// An internal resolution chosen in the menu: sent to the game, and kept for every later game
     /// of its console once the host took it. A PS1 game draws at it in a moment, a PS2 game from
-    /// its next start.
+    /// its next start. A value chosen while on Auto turns Auto off, once a change Auto already asked
+    /// for is answered, so the value chosen is the last one sent. The value the game already has is
+    /// kept without being sent again. When the host refuses the value, a game on Auto stays on it.
     private func chooseRetroResolution(_ play: RetroPlay, _ value: String) {
-        guard let key = play.menu.resolution?.key else { return }
-        Task { @MainActor [weak self] in
-            guard await play.menu.chooseResolution(value), let self else { return }
+        chooseRetroResolutionInTurn(play) { [weak self] latest in
+            guard latest() else { return }
+            let auto = play.auto
+            play.auto = nil
+            await auto?.stop()
+            guard let self, let choice = play.menu.resolution, latest() else { return }
+            let already = choice.values[choice.selected].value == value
+            if !already, !(await play.menu.chooseResolution(value)) {
+                let onAuto = !play.ps2 && play.host.reportsPerformance && self.preferences.retroHostOptions?[choice.key] == nil
+                if onAuto, latest(), !play.over, play.auto == nil { self.startRetroAuto(play) }
+                self.objectWillChange.send()
+                return
+            }
             var kept = self.preferences.retroHostOptions ?? [:]
-            kept[key] = value
+            kept[choice.key] = value
             self.preferences.retroHostOptions = kept
+            self.objectWillChange.send()
         }
     }
 

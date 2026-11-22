@@ -41,7 +41,7 @@ enum TRetro {
         case retroStateOverwrite, retroStateOverwriteDetail, retroStateSaved, retroStateLoaded
         case retroStateOtherCore, retroStateOtherGame, retroStateBad, retroStateLoadFailed, retroStateSaveFailed
         // The PS menu's Graphics page: the internal resolution and the curated graphics settings.
-        case retroResolution, retroResolutionDetail, retroResolutionNative, retroResolutionScale, retroResolutionRefusedDetail
+        case retroResolution, retroResolutionDetail, retroResolutionNative, retroResolutionScale, retroResolutionAuto, retroResolutionRefusedDetail
         case retroMenuGraphics, retroMenuGraphicsDetail, retroGraphicsValueOff, retroGraphicsValueOn, retroGraphicsValueSmooth
         case retroGraphicsValueExtraSmooth, retroSmoothTextures, retroSmoothTexturesDetail, retroFixWobbly3d, retroFixWobbly3dDetail
         case retroWidescreen, retroWidescreenPs1Detail, retroWidescreenPs2Detail, retroSharperTextures, retroSharperTexturesDetail

@@ -2292,6 +2292,7 @@
   "retroResolutionDetail": "ແຕ້ມເກມໃຫ້ຄົມຊັດຂຶ້ນ. ຄ່າທີ່ສູງຂຶ້ນຕ້ອງການກາດກຣາຟິກທີ່ໄວກວ່າ.",
   "retroResolutionNative": "ດັ້ງເດີມ",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "ອັດຕະໂນມັດ (%@)",
   "retroResolutionRefusedDetail": "ອີມູເລເຕີບໍ່ສາມາດສະແດງຄວາມລະອຽດທີ່ບັນທຶກໄວ້ໄດ້, ສະນັ້ນເກມຈຶ່ງໃຊ້ %@.",
   "retroMenuGraphics": "ກຣາຟິກ",
   "retroMenuGraphicsDetail": "ຄວາມລະອຽດ, ພື້ນຜິວ ແລະ ຈໍກວ້າງ.",

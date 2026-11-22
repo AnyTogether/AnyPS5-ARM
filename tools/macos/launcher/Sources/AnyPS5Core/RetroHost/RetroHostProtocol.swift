@@ -17,6 +17,9 @@ public enum RetroProtocol {
     /// The capability that limits a PS2 game's internal resolution (`pcsx2_upscale_multiplier`),
     /// so it may be sent in `start.options` and with `option` (anyps5-retro-host #25).
     public static let ps2ResolutionLimitsCapability = "ps2ResolutionLimits"
+    /// The capability that says how fast a game really runs and which GPU draws it:
+    /// `status.performance` and `status.gpu` (protocol.md "status").
+    public static let gamePerformanceCapability = "gamePerformance"
     /// The largest call and ping id.
     public static let maxID = 2_147_483_647
     public static let maxUInt32 = 4_294_967_295
@@ -202,6 +205,64 @@ public struct RetroDiscs: Equatable, Sendable {
     }
 }
 
+/// How fast a game ran over its last few seconds of play (protocol.md "status", `performance`).
+public struct RetroPerformance: Equatable, Sendable {
+    /// The frames with a picture the core handed over, as a share of those the game should have
+    /// shown: 1 at full speed, give or take a frame or two, 0.5 at half speed.
+    public let speed: Double
+    /// The median time one frame took, as a share of a frame's time; nil when no frame ended. Above
+    /// 1 the PC cannot keep up; for LRPS2 it includes waiting for its own threads.
+    public let work: Double?
+    /// The time measured, in seconds.
+    public let seconds: Double
+
+    public init(speed: Double, work: Double?, seconds: Double) {
+        self.speed = speed
+        self.work = work
+        self.seconds = seconds
+    }
+
+    var json: RetroJSON {
+        .object(["speed": .number(speed), "work": work.map(RetroJSON.number) ?? RetroJSON.null, "seconds": .number(seconds)])
+    }
+
+    static func parse(_ f: RetroFields) throws -> RetroPerformance {
+        let speed = try f.number("speed")
+        guard speed >= 0 else { throw RetroProtocolError("status.performance.speed must not be negative.") }
+        guard let workValue = f.map["work"] else { throw RetroProtocolError("status.performance.work is missing.") }
+        var work: Double?
+        if !workValue.isNull {
+            let value = try f.number("work")
+            guard value >= 0 else { throw RetroProtocolError("status.performance.work must not be negative.") }
+            work = value
+        }
+        return RetroPerformance(speed: speed, work: work, seconds: try f.number("seconds", above: 0))
+    }
+}
+
+/// The OpenGL context a game is drawn in (protocol.md "status", `gpu`).
+public struct RetroGpu: Equatable, Sendable {
+    /// `GL_RENDERER`, naming the GPU and driver that draw the game, or `"?"`.
+    public let renderer: String
+    /// `GL_VENDOR`, or `"?"`.
+    public let vendor: String
+    /// `GL_MAX_TEXTURE_SIZE`.
+    public let maxTexture: Int
+
+    public init(renderer: String, vendor: String, maxTexture: Int) {
+        self.renderer = renderer
+        self.vendor = vendor
+        self.maxTexture = maxTexture
+    }
+
+    var json: RetroJSON { .object(["renderer": .string(renderer), "vendor": .string(vendor), "maxTexture": .int(maxTexture)]) }
+
+    static func parse(_ f: RetroFields) throws -> RetroGpu {
+        RetroGpu(renderer: try f.string("renderer"), vendor: try f.string("vendor"),
+                 maxTexture: try f.integer("maxTexture", 0...RetroProtocol.maxSafeInteger))
+    }
+}
+
 /// A loaded game's state, from `status`, or the shorter form the client gives after a host failure.
 public struct RetroStatus: Equatable, Sendable {
     public var ready: Bool
@@ -225,6 +286,12 @@ public struct RetroStatus: Equatable, Sendable {
     /// The console the game was started as (`RetroConsole`); nil from a host without the `ps2`
     /// capability.
     public var console: String?
+    /// How fast the game ran over its last seconds of play; nil before that, while paused, in
+    /// lockstep, once ended, or from a host without the `gamePerformance` capability.
+    public var performance: RetroPerformance?
+    /// The OpenGL context the game is drawn in, once the host made one; nil before that, for a game
+    /// drawn without one, or from a host without the `gamePerformance` capability.
+    public var gpu: RetroGpu?
 
     /// The most discs `status.discs.labels` may list.
     public static let maxDiscs = 128
@@ -252,6 +319,10 @@ public struct RetroStatus: Equatable, Sendable {
         map["cardUnreadable"] = .bool(cardUnreadable)
         if let discs { map["discs"] = discs.json }
         if let console { map["console"] = .string(console) }
+        if performance != nil || gpu != nil {
+            map["performance"] = performance?.json ?? RetroJSON.null
+            map["gpu"] = gpu?.json ?? RetroJSON.null
+        }
         return .object(map)
     }
 
@@ -265,9 +336,14 @@ public struct RetroStatus: Equatable, Sendable {
     public var orderedOptions: [RetroOption] { orderedOptionKeys.compactMap { options[$0] } }
 
     /// Whether `other` says the same as this status, field by field as protocol.md "status" writes
-    /// it, the order of the options too, which is the menu's order.
+    /// it, the order of the options too, which is the menu's order, but for `performance`: the host
+    /// measures it again at every call, and only what judges it reads it.
     public func sameAs(_ other: RetroStatus) -> Bool {
-        self == other && orderedOptionKeys == other.orderedOptionKeys
+        var mine = self
+        var theirs = other
+        mine.performance = nil
+        theirs.performance = nil
+        return mine == theirs && orderedOptionKeys == other.orderedOptionKeys
     }
 
     /// Whether `value` is the client's own failure report rather than a host's status, which always
@@ -281,8 +357,9 @@ public struct RetroStatus: Equatable, Sendable {
     /// allows. Unknown fields are ignored. A host's `errorCode` of `hostExited` or `hostHung`, which
     /// only the client may report, is read as `other` (protocol.md "status"). A host that lists the
     /// `ps2` capability (`ps2`) sends `console` in every status, `"ps1"` or `"ps2"`; any other host's
-    /// `console` is ignored.
-    public static func parse(_ value: RetroJSON, ps2: Bool = false) throws -> RetroStatus {
+    /// `console` is ignored. A host that lists the `gamePerformance` capability (`performance`) sends
+    /// `performance` and `gpu`, each an object or null; any other host's are ignored.
+    public static func parse(_ value: RetroJSON, ps2: Bool = false, performance: Bool = false) throws -> RetroStatus {
         let f = try RetroFields(value, "status")
         var options: [String: RetroOption] = [:]
         let optionFields = try f.object("options")
@@ -342,6 +419,15 @@ public struct RetroStatus: Equatable, Sendable {
             guard RetroConsole.all.contains(console) else { throw RetroProtocolError("status.console \(console) is unknown.") }
             status.console = console
         }
+        if performance {
+            status.performance = try nullable(f, "performance", RetroPerformance.parse)
+            status.gpu = try nullable(f, "gpu", RetroGpu.parse)
+        }
         return status
+    }
+
+    private static func nullable<T>(_ f: RetroFields, _ key: String, _ parse: (RetroFields) throws -> T) throws -> T? {
+        guard let value = f.map[key] else { throw RetroProtocolError("status.\(key) is missing.") }
+        return value.isNull ? nil : try parse(try f.object(key))
     }
 }

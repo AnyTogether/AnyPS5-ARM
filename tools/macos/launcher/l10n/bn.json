@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "গেমটি আরও স্পষ্ট করে আঁকে। বেশি মানের জন্য দ্রুততর গ্রাফিক্স কার্ড লাগে।",
   "retroResolutionNative": "নেটিভ",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "স্বয়ংক্রিয় (%@)",
   "retroResolutionRefusedDetail": "এমুলেটর আপনার সংরক্ষিত রেজোলিউশন দেখাতে পারে না, তাই গেমটি %@ ব্যবহার করে।",
   "retroMenuGraphics": "গ্রাফিক্স",
   "retroMenuGraphicsDetail": "রেজোলিউশন, টেক্সচার এবং ওয়াইডস্ক্রিন।",

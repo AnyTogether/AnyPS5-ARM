@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "يرسم اللعبة بوضوح أكبر. القيم الأعلى تحتاج إلى بطاقة رسوميات أسرع.",
   "retroResolutionNative": "الأصلية",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "تلقائي (%@)",
   "retroResolutionRefusedDetail": "لا يستطيع المحاكي عرض الدقة التي حفظتها، لذا تستخدم اللعبة %@.",
   "retroMenuGraphics": "الرسومات",
   "retroMenuGraphicsDetail": "الدقة والنسيج والشاشة العريضة.",

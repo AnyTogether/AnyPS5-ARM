@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "게임을 더 선명하게 그립니다. 높은 값일수록 더 빠른 그래픽 카드가 필요합니다.",
   "retroResolutionNative": "기본",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "자동 (%@)",
   "retroResolutionRefusedDetail": "에뮬레이터가 저장된 해상도를 표시할 수 없어 게임이 %@ 해상도를 사용합니다.",
   "retroMenuGraphics": "그래픽",
   "retroMenuGraphicsDetail": "해상도, 텍스처, 와이드스크린.",

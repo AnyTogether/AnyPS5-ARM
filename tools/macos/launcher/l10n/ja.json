@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "ゲームをより鮮明に描画します。高い値ほど高速なグラフィックカードが必要です。",
   "retroResolutionNative": "ネイティブ",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "自動（%@）",
   "retroResolutionRefusedDetail": "エミュレーターが保存した解像度を表示できないため、ゲームは %@ を使います。",
   "retroMenuGraphics": "グラフィック",
   "retroMenuGraphicsDetail": "解像度、テクスチャ、ワイド画面。",

@@ -148,6 +148,8 @@ public final class RetroHostClient: @unchecked Sendable {
     private var hostCapabilities: [String] = []
     /// A copy of `hostCapabilities` the UI reads from any thread, set once `welcome` came.
     private let greetedCapabilities = OSAllocatedUnfairLock(initialState: [String]())
+    /// A copy of `hostRelease` the UI reads from any thread, set once `welcome` came.
+    private let greetedVersion = OSAllocatedUnfairLock(initialState: "")
     private var hostRelease = ""
     private var endValue: RetroHostEnd?
     private var reason: String?
@@ -271,7 +273,9 @@ public final class RetroHostClient: @unchecked Sendable {
 
     /// The host's process id, from `posix_spawn`: the one for audio capture, focus and killing.
     public var pid: pid_t { onQueue { processID } }
-    public var hostVersion: String { onQueue { hostRelease } }
+    /// The host's version from its `welcome` (`hostVersion`), which names the cores it ships; empty
+    /// before it. Read from a copy kept behind a lock, as `capabilities` is.
+    public var hostVersion: String { greetedVersion.withLock { $0 } }
     /// The capabilities the host's `welcome` listed; empty before it. Read from a copy kept
     /// behind a lock, not on the client's queue, so the UI (the PS menu's rows) never waits behind
     /// a frame being copied there.
@@ -287,6 +291,10 @@ public final class RetroHostClient: @unchecked Sendable {
     /// and may be sent one, in `start.options` or with `option`.
     public var limitsPs2Resolution: Bool { capabilities.contains(RetroProtocol.ps2ResolutionLimitsCapability) }
     private var hostListsSaveStates: Bool { hostCapabilities.contains(RetroProtocol.saveStatesCapability) }
+    /// Whether the host lists `gamePerformance`, so each `status` says how fast the game runs
+    /// (`performance`) and which GPU draws it (`gpu`).
+    public var reportsPerformance: Bool { capabilities.contains(RetroProtocol.gamePerformanceCapability) }
+    private var hostListsPerformance: Bool { hostCapabilities.contains(RetroProtocol.gamePerformanceCapability) }
     public var pixelFormat: RetroPixelFormat? { onQueue { agreedFormat } }
     /// The reason the client gave up on the host, for logs.
     public var failureReason: String? { onQueue { reason } }
@@ -356,7 +364,7 @@ public final class RetroHostClient: @unchecked Sendable {
         if RetroStatus.isFailureReport(result), let map = result.objectValue {
             return .failed(error: map["error"]?.stringValue ?? "", errorCode: map["errorCode"]?.stringValue ?? "")
         }
-        return try RetroStatus.parse(result, ps2: canPlayPs2)
+        return try RetroStatus.parse(result, ps2: canPlayPs2, performance: reportsPerformance)
     }
 
     /// `stop`, then `status` until the game has ended, which it gives. The host is killed if the game
@@ -587,6 +595,8 @@ public final class RetroHostClient: @unchecked Sendable {
         hostCapabilities = try f.strings("capabilities")
         let listed = hostCapabilities
         greetedCapabilities.withLock { $0 = listed }
+        let release = hostRelease
+        greetedVersion.withLock { $0 = release }
         let format = try f.string("pixelFormat")
         guard version == RetroProtocol.version, let agreed = RetroPixelFormat(rawValue: format),
               offeredFormats.contains(agreed) else {
@@ -663,7 +673,7 @@ public final class RetroHostClient: @unchecked Sendable {
                 lastStatusEnded = false
                 if afterStop { stopDeadline = nil }
             } else {
-                let status = try RetroStatus.parse(result, ps2: hostListsPs2)
+                let status = try RetroStatus.parse(result, ps2: hostListsPs2, performance: hostListsPerformance)
                 if status.ended, !lastStatusEnded { zeroRumble() }
                 lastStatusEnded = status.ended
                 if status.ended, afterStop { stopDeadline = nil }

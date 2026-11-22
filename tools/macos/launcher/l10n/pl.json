@@ -2306,6 +2306,7 @@
   "retroResolutionDetail": "Rysuje grę ostrzej. Wyższe wartości wymagają szybszej karty graficznej.",
   "retroResolutionNative": "Natywna",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automatyczna (%@)",
   "retroResolutionRefusedDetail": "Emulator nie może pokazać zapisanej rozdzielczości, więc gra używa %@.",
   "retroMenuGraphics": "Grafika",
   "retroMenuGraphicsDetail": "Rozdzielczość, tekstury i tryb panoramiczny.",

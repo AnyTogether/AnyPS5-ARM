@@ -1,0 +1,63 @@
+{
+ "description": "Status of a running PS1 game from a host with gamePerformance, recorded with the real SwanStation at SWANSTATION_COMMIT and Spyro the Dragon at 1x, 45 seconds after start, on an NVIDIA RTX 4080 SUPER (WGL, OpenGL 3.3 core). The game kept up: speed 0.9997 of 59.817 frames a second over the last 5 seconds, each retro_run taking 8% of a frame's time. options shows one of the 50 options SwanStation listed; the rest are as SwanStation gives them. Copied from anyps5-retro-host fixtures/v1/messages/call-status-performance.json at 358c9fa.",
+ "status": {
+  "ready": true,
+  "ended": false,
+  "error": "",
+  "errorCode": "",
+  "aspect": 1.3333333730697632,
+  "hardware": true,
+  "resolutionError": "",
+  "graphicsPending": false,
+  "progressLabel": null,
+  "progressPercent": null,
+  "options": {
+   "swanstation_GPU_ResolutionScale": {
+    "title": "Internal Resolution Scale",
+    "values": [
+     "1",
+     "2",
+     "3",
+     "4",
+     "5",
+     "6",
+     "7",
+     "8"
+    ],
+    "labels": [
+     "1x",
+     "2x",
+     "3x (for 720p)",
+     "4x",
+     "5x (for 1080p)",
+     "6x (for 1440p)",
+     "7x",
+     "8x"
+    ],
+    "selected": 0,
+    "activeValue": "1",
+    "restart": false
+   }
+  },
+  "cardUnreadable": false,
+  "console": "ps1",
+  "core": {
+   "name": "SwanStation",
+   "version": "anyps5-1-cf60683e7486e981eb4a3c150a8ed83e468ccd4015edf9337f078e0431d7fefa"
+  },
+  "timing": {
+   "fps": 59.81733322143555,
+   "region": "ntsc"
+  },
+  "performance": {
+   "speed": 0.9997,
+   "work": 0.0808,
+   "seconds": 5
+  },
+  "gpu": {
+   "renderer": "NVIDIA GeForce RTX 4080 SUPER/PCIe/SSE2",
+   "vendor": "NVIDIA Corporation",
+   "maxTexture": 32768
+  }
+ }
+}

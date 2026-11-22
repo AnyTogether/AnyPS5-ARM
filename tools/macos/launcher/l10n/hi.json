@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "गेम को और साफ़ बनाता है। ऊँचे मानों के लिए तेज़ ग्राफ़िक्स कार्ड चाहिए।",
   "retroResolutionNative": "मूल",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "स्वचालित (%@)",
   "retroResolutionRefusedDetail": "एमुलेटर सहेजा गया रिज़ॉल्यूशन नहीं दिखा सकता, इसलिए गेम %@ का उपयोग करता है।",
   "retroMenuGraphics": "ग्राफ़िक्स",
   "retroMenuGraphicsDetail": "रिज़ॉल्यूशन, टेक्सचर और वाइडस्क्रीन।",

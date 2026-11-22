@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "Affiche le jeu plus net. Les valeurs élevées demandent une carte graphique plus rapide.",
   "retroResolutionNative": "Native",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automatique (%@)",
   "retroResolutionRefusedDetail": "L’émulateur ne peut pas afficher la résolution enregistrée, le jeu utilise donc %@.",
   "retroMenuGraphics": "Graphismes",
   "retroMenuGraphicsDetail": "Résolution, textures et écran large.",

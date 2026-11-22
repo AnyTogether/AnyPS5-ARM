@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "Ritar spelet skarpare. Högre värden kräver ett snabbare grafikkort.",
   "retroResolutionNative": "Ursprunglig",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automatiskt (%@)",
   "retroResolutionRefusedDetail": "Emulatorn kan inte visa den sparade upplösningen, så spelet använder %@.",
   "retroMenuGraphics": "Grafik",
   "retroMenuGraphicsDetail": "Upplösning, texturer och bredbild.",

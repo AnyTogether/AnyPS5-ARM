@@ -2290,6 +2290,7 @@
   "retroResolutionDetail": "ጨዋታውን በበለጠ ጥራት ይስላል። ከፍ ያሉ እሴቶች ፈጣን የግራፊክስ ካርድ ይፈልጋሉ።",
   "retroResolutionNative": "መደበኛ",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "ራስ-ሰር (%@)",
   "retroResolutionRefusedDetail": "ኢሙሌተሩ ያስቀመጡትን ጥራት ማሳየት አይችልም፣ ስለዚህ ጨዋታው %@ ይጠቀማል።",
   "retroMenuGraphics": "ግራፊክስ",
   "retroMenuGraphicsDetail": "ጥራት፣ ቴክስቸሮች እና ሰፊ ማያ።",

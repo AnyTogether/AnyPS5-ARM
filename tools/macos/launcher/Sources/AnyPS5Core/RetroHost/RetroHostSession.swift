@@ -30,6 +30,12 @@ public protocol RetroHostSession: AnyObject, Sendable {
     /// Whether the host lists `ps2ResolutionLimits`, so a PS2 game's internal resolution is
     /// limited by the host and may be sent to it.
     var limitsPs2Resolution: Bool { get }
+    /// Whether the host lists `gamePerformance`, so each `status` says how fast the game runs
+    /// (`performance`) and which GPU draws it (`gpu`).
+    var reportsPerformance: Bool { get }
+    /// The host's version from its greeting (`welcome.hostVersion`), which names the cores it
+    /// ships; empty before it greeted the launcher.
+    var hostVersion: String { get }
     /// Asks the host to stop its game and exit.
     func shutdown()
     /// Kills the host if it still runs and frees the connection.
@@ -92,6 +98,8 @@ public final class RetroHostClientSession: RetroHostSession, @unchecked Sendable
     public var canPlayPs2: Bool { client.canPlayPs2 }
     public var canSaveStates: Bool { client.canSaveStates }
     public var limitsPs2Resolution: Bool { client.limitsPs2Resolution }
+    public var reportsPerformance: Bool { client.reportsPerformance }
+    public var hostVersion: String { client.hostVersion }
     public func shutdown() { client.shutdown() }
     public func close() async { await client.close() }
 
@@ -138,6 +146,13 @@ public struct RetroHostStartRequest: Equatable, Sendable {
     public func withoutOption(_ key: String) -> RetroHostStartRequest {
         var request = self
         request.options[key] = nil
+        return request
+    }
+
+    /// The same start with the option at `key` set to `value`.
+    public func withOption(_ key: String, _ value: String) -> RetroHostStartRequest {
+        var request = self
+        request.options[key] = value
         return request
     }
 

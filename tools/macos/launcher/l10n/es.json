@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "Dibuja el juego con más nitidez. Los valores más altos necesitan una tarjeta gráfica más rápida.",
   "retroResolutionNative": "Nativa",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automático (%@)",
   "retroResolutionRefusedDetail": "El emulador no puede mostrar la resolución guardada, así que el juego usa %@.",
   "retroMenuGraphics": "Gráficos",
   "retroMenuGraphicsDetail": "Resolución, texturas y pantalla panorámica.",
