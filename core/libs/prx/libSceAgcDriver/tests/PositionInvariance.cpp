@@ -88,9 +88,11 @@ constexpr std::array<std::uint32_t, 7> DistanceExports{0xf80000dfu, 0u, 0xf80000
 
 void verifyGuestClipDistances() {
     using namespace ShaderRecompiler;
+    static constexpr std::array<std::uint32_t, 2> capabilities{spv::CapabilityClipDistance, spv::CapabilityCullDistance};
     for (const auto [enabled, expected] : {std::pair{0x007fu, 8u}, std::pair{0x00ffu, 8u}, std::pair{0xf007u, 4u}, std::pair{0xf00fu, 4u}}) {
         auto request = baseRequest(ShaderStage::Vertex);
         request.shader.code = DistanceExports;
+        request.target.supportedCapabilities = capabilities;
         request.context.vertex->paClVsOutCntl = 0x00c00000u | enabled;
         const auto length = clipDistanceLength(Recompile(request));
         if (length != expected) throw std::runtime_error("clip and cull distance enables " + std::to_string(enabled) + " gave a clip distance array of " + std::to_string(length));

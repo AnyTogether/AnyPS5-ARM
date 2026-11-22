@@ -155,7 +155,17 @@ ShaderStageInputInfo RequestInputInfo(const RecompileRequest& request) {
         tessellationCopy->drawParameters = std::find(capabilities.begin(), capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityDrawParameters)) != capabilities.end();
     }
     const auto* tessellation = tessellationCopy ? &*tessellationCopy : nullptr;
-    return BuildShaderStageInputInfo(toShaderStageKind(request.shader.stage), request.context, HostSubgroupSize(request), mesh, tessellation);
+    const auto stage = toShaderStageKind(request.shader.stage);
+    constexpr std::uint32_t CullDistanceEnables = 0x0000ff00u;
+    const auto& capabilities = request.target.supportedCapabilities;
+    const bool cullDistance = std::find(capabilities.begin(), capabilities.end(), static_cast<std::uint32_t>(spv::CapabilityCullDistance)) != capabilities.end();
+    if (!cullDistance && request.context.vertex && (request.context.vertex->paClVsOutCntl & CullDistanceEnables) != 0u) {
+        auto context = request.context;
+        auto& control = context.vertex->paClVsOutCntl;
+        control = (control & ~CullDistanceEnables) | ((control & CullDistanceEnables) >> 8u);
+        return BuildShaderStageInputInfo(stage, context, HostSubgroupSize(request), mesh, tessellation);
+    }
+    return BuildShaderStageInputInfo(stage, request.context, HostSubgroupSize(request), mesh, tessellation);
 }
 
 void ValidateRequestInputs(const RecompileRequest& request) {
