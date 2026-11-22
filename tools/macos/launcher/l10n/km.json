@@ -2292,6 +2292,7 @@
   "retroResolutionDetail": "គូរហ្គេមឱ្យច្បាស់ជាងមុន។ តម្លៃខ្ពស់ត្រូវការកាតក្រាហ្វិកលឿនជាង។",
   "retroResolutionNative": "ដើម",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "ស្វ័យប្រវត្តិ (%@)",
   "retroResolutionRefusedDetail": "កម្មវិធីត្រាប់មិនអាចបង្ហាញគុណភាពបង្ហាញដែលបានរក្សាទុកបានទេ ដូច្នេះហ្គេមប្រើ %@។",
   "retroMenuGraphics": "ក្រាហ្វិក",
   "retroMenuGraphicsDetail": "គុណភាពបង្ហាញ វាយនភាព និងអេក្រង់ធំទូលាយ។",

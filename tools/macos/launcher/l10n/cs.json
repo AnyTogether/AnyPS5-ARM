@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "Vykreslí hru ostřeji. Vyšší hodnoty potřebují rychlejší grafickou kartu.",
   "retroResolutionNative": "Nativní",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automaticky (%@)",
   "retroResolutionRefusedDetail": "Emulátor nedokáže zobrazit uložené rozlišení, takže hra používá %@.",
   "retroMenuGraphics": "Grafika",
   "retroMenuGraphicsDetail": "Rozlišení, textury a širokoúhlý obraz.",

@@ -58,6 +58,9 @@ public final class RetroGameMenu {
     public let volumeStep: Double
 
     public private(set) var isOpen = false
+    /// How many times the menu was opened, so what judges the game's play (`RetroAutoController`)
+    /// knows the game was paused between two of its looks, even when the menu is closed again by then.
+    public private(set) var openings = 0
 
     public init(game: RetroHostGame, controls: RetroHostControls?, volumeStep: Double = 0.1) {
         self.game = game
@@ -105,6 +108,7 @@ public final class RetroGameMenu {
     public func open() async {
         guard !isOpen, game.loaded else { return }
         isOpen = true
+        openings += 1
         controls?.suspended = true
         await game.pause(true)
     }

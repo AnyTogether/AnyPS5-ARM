@@ -57,6 +57,12 @@ public final class RetroHostGame: ObservableObject {
     /// Whether the host limits a PS2 game's internal resolution (`ps2ResolutionLimits`), so the
     /// menu may offer it. False until the host has greeted the launcher.
     public var limitsPs2Resolution: Bool { session.limitsPs2Resolution }
+    /// Whether the host lists `gamePerformance`, so its statuses say how fast the game runs and the
+    /// Auto Optimizer can judge a PS1 game's internal resolution. False until the host has greeted
+    /// the launcher.
+    public var reportsPerformance: Bool { session.reportsPerformance }
+    /// The host's version (`welcome.hostVersion`); empty until it has greeted the launcher.
+    public var hostVersion: String { session.hostVersion }
     /// How many `saveState` and `loadState` calls have been answered.
     public private(set) var stateReplies = 0
     /// How the host's connection ended; nil while it is open. `.unsupported` means the host speaks
@@ -72,7 +78,12 @@ public final class RetroHostGame: ObservableObject {
     private var rumbleListeners: [Int: @MainActor (RetroRumble) -> Void] = [:]
     private var nextListener = 0
     private var pollTask: Task<Void, Never>?
-    private var polling = false
+    /// The `status` calls asked for the callers of `refresh()`, one at a time, while any waits.
+    private var polling: Task<Void, Never>?
+    /// How many `status` calls were begun; each caller of `refresh()` waits for the first one begun
+    /// after its call (`waiters`, with the number of that call).
+    private var pollsBegun = 0
+    private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
     private var disposed = false
     private var hostEnded = false
     private var detached = false
@@ -156,16 +167,20 @@ public final class RetroHostGame: ObservableObject {
     // MARK: Starting and following
 
     /// Waits for the host's greeting, then starts the game. Only one game is started per
-    /// `RetroHostGame`: a second start does nothing.
-    public func start(_ request: RetroHostStartRequest) async {
+    /// `RetroHostGame`: a second start does nothing. `autoResolution` gives the PS1 internal
+    /// resolution the Auto Optimizer starts at, asked once the host has greeted the launcher (so it
+    /// can use `hostVersion`), and only of a host that measures how the game runs
+    /// (`reportsPerformance`); without one the optimizer cannot judge it, and the game starts at
+    /// SwanStation's own default as before.
+    public func start(_ request: RetroHostStartRequest, autoResolution: (@MainActor () -> String)? = nil) async {
         guard phase == .idle else { return }
         setPhase(.starting)
-        let task = Task { await self.startNow(request) }
+        let task = Task { await self.startNow(request, autoResolution) }
         starting = task
         await task.value
     }
 
-    private func startNow(_ request: RetroHostStartRequest) async {
+    private func startNow(_ request: RetroHostStartRequest, _ autoResolution: (@MainActor () -> String)?) async {
         do {
             try await session.ready()
             guard phase == .starting else { return }
@@ -177,8 +192,12 @@ public final class RetroHostGame: ObservableObject {
             let states = request.states != nil && session.canSaveStates
             // A PS2 game's internal resolution goes only to a host that limits it; an older host
             // starts the game at LRPS2's own default.
-            let resolution = request.console == RetroConsole.ps2 && !session.limitsPs2Resolution
-                ? request.withoutOption(RetroResolution.ps2Key) : request
+            var resolution = request
+            if request.console == RetroConsole.ps2, !session.limitsPs2Resolution {
+                resolution = request.withoutOption(RetroResolution.ps2Key)
+            } else if let autoResolution, request.console == nil, session.reportsPerformance {
+                resolution = request.withOption(RetroResolution.ps1Key, autoResolution())
+            }
             _ = try await session.startGame((states ? resolution : resolution.withoutStates()).args)
             savesStates = states
         } catch {
@@ -206,18 +225,43 @@ public final class RetroHostGame: ObservableObject {
             while !Task.isCancelled {
                 try? await Task.sleep(for: every)
                 if Task.isCancelled { return }
-                await self?.refresh()
+                guard let self else { return }
+                if self.polling == nil { await self.refresh() }
             }
         }
     }
 
-    /// Asks `status` once and follows it: the aspect ratio, the first frame, and the game's end.
+    /// Asks `status` and follows it: the aspect ratio, the first frame, and the game's end.
     /// Listeners hear of it only when the status says something new: a game that plays on with the
-    /// same status, asked twice a second, changes nothing.
+    /// same status, asked twice a second, changes nothing. One `status` is asked at a time. The
+    /// call returns once a `status` begun after it was answered, so what follows sees what the
+    /// host said after the call (an `option` the host just took shows); asked while one is on its
+    /// way, it waits for the one after it, and no later call makes it wait longer. The game's twice
+    /// a second ask is left out while one is on its way.
     public func refresh() async {
-        guard loaded, !polling else { return }
-        polling = true
-        defer { polling = false }
+        guard loaded else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            waiters.append((pollsBegun + 1, continuation))
+            if polling == nil { polling = Task { await self.pollWhileWaited() } }
+        }
+    }
+
+    private func pollWhileWaited() async {
+        while loaded, !waiters.isEmpty {
+            pollsBegun += 1
+            let number = pollsBegun
+            await pollOnce()
+            let answered = waiters.filter { $0.0 <= number }
+            waiters.removeAll { $0.0 <= number }
+            for waiter in answered { waiter.1.resume() }
+        }
+        polling = nil
+        let left = waiters
+        waiters = []
+        for waiter in left { waiter.1.resume() }
+    }
+
+    private func pollOnce() async {
         do {
             var asked = 0
             let current = try await afterStateCall { () async throws -> RetroStatus? in

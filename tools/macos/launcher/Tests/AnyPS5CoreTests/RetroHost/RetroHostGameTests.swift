@@ -100,6 +100,79 @@ final class RetroHostGameTests: XCTestCase {
         XCTAssertEqual(heard, 2)
     }
 
+    func testAStatusAskedWhileOneIsOnItsWayIsAskedAgainAfterItAndWaitsForThatOne() async throws {
+        let (session, game) = try await started(Self.parsed())
+        let asked = session.statusAsked
+        let gate = RetroGate()
+        session.statusGate = gate
+        let polling = Task { await game.refresh() }
+        await settleRetro({ session.statusAsked == asked + 1 })
+        var atTwo = try Self.parsed()
+        atTwo = RetroGraphicsTests.edited(atTwo, "swanstation_GPU_ResolutionScale", selected: 1, active: "2")
+        session.nextStatus = atTwo
+        let done = RetroFlag()
+        let again = Task {
+            await game.refresh()
+            done.set()
+        }
+        await yieldRetro()
+        XCTAssertEqual(session.statusAsked, asked + 1, "one status at a time")
+        XCTAssertFalse(done.value)
+        session.statusGate = nil
+        gate.open()
+        await again.value
+        XCTAssertTrue(done.value)
+        XCTAssertEqual(session.statusAsked, asked + 2, "asked once more after the one on its way")
+        XCTAssertEqual(game.status?.options["swanstation_GPU_ResolutionScale"]?.activeValue, "2")
+        await polling.value
+    }
+
+    func testAHostSlowerThanTheGamesTwiceASecondAskStillAnswersEachRefresh() async throws {
+        let session = FakeRetroHostSession()
+        session.greet()
+        session.nextStatus = try Self.parsed()
+        session.statusDelay = .milliseconds(30)
+        let quick = RetroHostGame(session: session, statusEvery: .milliseconds(5))
+        games.append(quick)
+        await quick.start(Self.request)
+        for _ in 0..<3 {
+            let asked = session.statusAsked
+            let refreshed = RetroFlag()
+            let refreshing = Task {
+                await quick.refresh()
+                refreshed.set()
+            }
+            await settleRetro({ refreshed.value }, "answered within the time a few statuses take")
+            await refreshing.value
+            XCTAssertLessThanOrEqual(session.statusAsked - asked, 2, "the one on its way, then its own")
+        }
+    }
+
+    func testAutoGivesAPs1GameItsStartScaleOnlyOnAHostThatMeasuresHowItRuns() async throws {
+        for (reports, console) in [(true, nil), (false, nil), (true, RetroConsole.ps2)] as [(Bool, String?)] {
+            let (session, game) = made()
+            session.reportsPerformance = reports
+            session.limitsPs2Resolution = true
+            session.greet()
+            session.nextStatus = fakeStatus(ready: false)
+            var request = RetroHostStartRequest(core: "c", disc: "d.cue", system: "s", saves: "v")
+            request.console = console
+            let asked = RetroFlag()
+            await game.start(request, autoResolution: {
+                asked.set()
+                return "3"
+            })
+            let options = session.startArgs?.objectValue?["options"]
+            if reports, console == nil {
+                XCTAssertTrue(asked.value)
+                XCTAssertEqual(options, .object(["swanstation_GPU_ResolutionScale": .string("3")]))
+            } else {
+                XCTAssertFalse(asked.value, "reports \(reports), console \(console ?? "ps1")")
+                XCTAssertNil(options)
+            }
+        }
+    }
+
     func testALoadingGameWithTheSameStatusTellsNoOneUntilItIsReady() async {
         let (session, game) = await started(fakeStatus(ready: false))
         var heard = 0

@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "Desenează jocul mai clar. Valorile mai mari au nevoie de o placă video mai rapidă.",
   "retroResolutionNative": "Nativă",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automat (%@)",
   "retroResolutionRefusedDetail": "Emulatorul nu poate afișa rezoluția salvată, așa că jocul folosește %@.",
   "retroMenuGraphics": "Grafică",
   "retroMenuGraphicsDetail": "Rezoluție, texturi și ecran lat.",

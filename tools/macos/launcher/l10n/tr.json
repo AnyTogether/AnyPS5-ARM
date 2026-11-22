@@ -2306,6 +2306,7 @@
   "retroResolutionDetail": "Oyunu daha net gösterir. Yüksek değerler daha hızlı bir ekran kartı gerektirir.",
   "retroResolutionNative": "Yerel",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Otomatik (%@)",
   "retroResolutionRefusedDetail": "Emülatör kaydettiğin çözünürlüğü gösteremiyor, bu yüzden oyun %@ kullanıyor.",
   "retroMenuGraphics": "Grafik",
   "retroMenuGraphicsDetail": "Çözünürlük, dokular ve geniş ekran.",

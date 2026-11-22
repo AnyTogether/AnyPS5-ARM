@@ -103,6 +103,17 @@ final class FakeRetroHostSession: RetroHostSession, @unchecked Sendable {
     /// Whether the host lists `ps2ResolutionLimits`; false, as for the signed host v1.0.0, unless a
     /// test says.
     var limitsPs2Resolution = false
+    /// Whether the host lists `gamePerformance`; false, as a host before it, unless a test says.
+    var reportsPerformance = false
+    var hostVersion = "1.2.0"
+    /// When set, `status` answers only once it opens, with the status it had when it was asked, as
+    /// a host's reply on its way says what was true when the host answered.
+    var statusGate: RetroGate?
+    /// How long each `status` takes to answer.
+    var statusDelay: Duration = .zero
+    private var statusCount = 0
+    /// How many times `status` was asked.
+    var statusAsked: Int { locked { statusCount } }
     /// Runs as each call is taken, before it is answered: what the host does meanwhile (writes a
     /// state's file).
     var onCall: ((String, RetroJSON) -> Void)?
@@ -149,8 +160,12 @@ final class FakeRetroHostSession: RetroHostSession, @unchecked Sendable {
     }
 
     func status() async throws -> RetroStatus? {
+        locked { statusCount += 1 }
         if let statusError { throw statusError }
-        return nextStatus
+        let reply = nextStatus
+        await statusGate?.wait()
+        if statusDelay > .zero { try? await Task.sleep(for: statusDelay) }
+        return reply
     }
 
     /// `stop`: the game has ended, and `status` says so until `release`.

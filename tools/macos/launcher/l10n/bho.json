@@ -2289,6 +2289,7 @@
   "retroResolutionDetail": "गेम के अउरी साफ बनावेला। बड़ मान खातिर तेज ग्राफिक्स कार्ड चाहीं।",
   "retroResolutionNative": "मूल",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "अपने आप (%@)",
   "retroResolutionRefusedDetail": "एमुलेटर रउआ सेव कइल रिजॉल्यूशन ना देखा सकेला, एह से गेम %@ इस्तेमाल करेला।",
   "retroMenuGraphics": "ग्राफिक्स",
   "retroMenuGraphicsDetail": "रिज़ॉल्यूशन, टेक्सचर आ वाइडस्क्रीन।",

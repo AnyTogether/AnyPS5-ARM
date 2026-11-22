@@ -1,0 +1,55 @@
+{
+ "description": "Status of a running PS2 game started with pcsx2_upscale_multiplier 8x, from a host with gamePerformance, recorded with the real LRPS2 at LRPS2_COMMIT and Jak and Daxter, 90 seconds after start, on an NVIDIA RTX 4080 SUPER (WGL, OpenGL 3.3 core). The PC could not keep up at 8x: speed 0.6273, so the game itself ran at 63% of its speed over the last 5 seconds, and the median retro_run took 1.58 frames' time. options shows one of the 69 options LRPS2 listed; the rest are as LRPS2 gives them. Copied from anyps5-retro-host fixtures/v1/messages/call-status-ps2-performance.json at 358c9fa.",
+ "status": {
+  "ready": true,
+  "ended": false,
+  "error": "",
+  "errorCode": "",
+  "aspect": 1.3333333730697632,
+  "hardware": true,
+  "resolutionError": "",
+  "graphicsPending": false,
+  "progressLabel": null,
+  "progressPercent": null,
+  "options": {
+   "pcsx2_upscale_multiplier": {
+    "title": "Video > Internal Resolution (Restart)",
+    "values": [
+     "1x (Native)",
+     "2x",
+     "4x",
+     "8x"
+    ],
+    "labels": [
+     "1x (Native)",
+     "2x",
+     "4x",
+     "8x"
+    ],
+    "selected": 3,
+    "activeValue": "8x",
+    "restart": true
+   }
+  },
+  "cardUnreadable": false,
+  "console": "ps2",
+  "core": {
+   "name": "ParaLLEl PS2",
+   "version": "anyps5-1-b1b749c197ae47b0562ca79e3cdacf08873dfd156065f18576508c926d02eb5f"
+  },
+  "timing": {
+   "fps": 59.94005584716797,
+   "region": "ntsc"
+  },
+  "performance": {
+   "speed": 0.6273,
+   "work": 1.5752,
+   "seconds": 5
+  },
+  "gpu": {
+   "renderer": "NVIDIA GeForce RTX 4080 SUPER/PCIe/SSE2",
+   "vendor": "NVIDIA Corporation",
+   "maxTexture": 32768
+  }
+ }
+}

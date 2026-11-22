@@ -2305,6 +2305,7 @@
   "retroResolutionDetail": "Élesebben rajzolja a játékot. A nagyobb értékekhez gyorsabb videokártya kell.",
   "retroResolutionNative": "Natív",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Automatikus (%@)",
   "retroResolutionRefusedDetail": "Az emulátor nem tudja megjeleníteni a mentett felbontást, ezért a játék ezt használja: %@.",
   "retroMenuGraphics": "Grafika",
   "retroMenuGraphicsDetail": "Felbontás, textúrák és szélesvászon.",

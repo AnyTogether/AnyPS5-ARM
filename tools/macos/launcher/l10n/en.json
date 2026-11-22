@@ -2306,6 +2306,7 @@
   "retroResolutionDetail": "Draws the game sharper. Higher values need a faster graphics card.",
   "retroResolutionNative": "Native",
   "retroResolutionScale": "%@x",
+  "retroResolutionAuto": "Auto (%@)",
   "retroResolutionRefusedDetail": "The emulator can't show the resolution you saved, so the game uses %@.",
   "retroMenuGraphics": "Graphics",
   "retroMenuGraphicsDetail": "Resolution, textures and widescreen.",
