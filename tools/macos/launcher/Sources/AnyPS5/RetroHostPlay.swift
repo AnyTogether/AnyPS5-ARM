@@ -305,10 +305,14 @@ extension AppModel {
             overlay = nil
         }
         let auto = !ps2 && preferences.retroHostOptions?[RetroResolution.ps1Key] == nil
-        if auto { startRetroAuto(play) }
-        let autoResolution: (@MainActor () -> String)? = auto ? { [weak self] in
-            "\(self?.retroAutoStartScale(play) ?? RetroAutoRules.firstScale)"
-        } : nil
+        var autoResolution: (@MainActor () -> String)?
+        if auto {
+            startRetroAuto(play)
+            autoResolution = { [weak self] in
+                guard let self else { return String(RetroAutoRules.firstScale) }
+                return String(self.retroAutoStartScale(play))
+            }
+        }
         Sounds.shared.play(.select)
         preferences.lastPlayed[game.id] = play.started
         sessionStart = play.started
