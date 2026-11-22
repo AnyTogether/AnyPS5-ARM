@@ -19,6 +19,8 @@ struct ModuleFacts {
     std::map<std::uint32_t, std::uint32_t> specializationDefaults;
     std::uint32_t clipDistanceLength = 0;
     bool clipDistanceBuiltIn = false;
+    bool cullDistanceBuiltIn = false;
+    bool cullDistanceCapability = false;
     std::size_t multiplies = 0;
     bool pushConstantVariable = false;
     std::set<std::uint32_t> pushDwordLoads;
@@ -40,6 +42,8 @@ ModuleFacts inspect(std::span<const std::uint32_t> words) {
         const auto count = words[at] >> 16u;
         if (op == spv::OpDecorate && count == 4 && words[at + 2] == spv::DecorationSpecId) specIds[words[at + 1]] = words[at + 3];
         if (op == spv::OpDecorate && count == 4 && words[at + 2] == spv::DecorationBuiltIn && words[at + 3] == spv::BuiltInClipDistance) clipVariables.insert(words[at + 1]);
+        if (op == spv::OpDecorate && count == 4 && words[at + 2] == spv::DecorationBuiltIn && words[at + 3] == spv::BuiltInCullDistance) facts.cullDistanceBuiltIn = true;
+        if (op == spv::OpCapability && count == 2 && words[at + 1] == spv::CapabilityCullDistance) facts.cullDistanceCapability = true;
         if (op == spv::OpSpecConstant && count == 4) specValues[words[at + 2]] = words[at + 3];
         if (op == spv::OpConstant && count == 4) constants[words[at + 2]] = words[at + 3];
         if (op == spv::OpTypeArray && count == 4) arrayLengths[words[at + 1]] = words[at + 3];
@@ -165,6 +169,22 @@ void clipDistanceCapacityTests(ShaderRecompiler::ShaderStage stage) {
     }
 }
 
+void cullDistanceWithoutDeviceSupportTests(ShaderRecompiler::ShaderStage stage) {
+    using namespace ShaderRecompiler;
+    static constexpr std::array<std::uint32_t, 7> vertex{0xf80008cfu, 0u, 0xf80008dfu, 0u, 0xf80008efu, 0u, 0xbf810000u};
+    static constexpr std::array<std::uint32_t, 9> domain{0xf8000941u, 0u, 0xf80008cfu, 0x05050505u, 0xf80008dfu, 0x05050505u, 0xf80008efu, 0x05050505u, 0xbf810000u};
+    static constexpr std::array<std::uint32_t, 4> withCull{spv::CapabilityShader, spv::CapabilityClipDistance, spv::CapabilityCullDistance, spv::CapabilityTessellation};
+    auto request = baseRequest(false, stage);
+    request.shader.code = stage == ShaderStage::TessellationEvaluation ? std::span<const std::uint32_t>(domain) : std::span<const std::uint32_t>(vertex);
+    request.context.vertex->paClVsOutCntl = 0x00400201u;
+    const auto folded = inspect(Recompile(request));
+    require(!folded.cullDistanceBuiltIn && !folded.cullDistanceCapability, "a target without CullDistance received a gl_CullDistance output");
+    require(folded.clipDistanceLength == 3u, "a target without CullDistance did not write the cull distance as a clip distance beside the guest clip distance and the all-zero position distance");
+    request.target.supportedCapabilities = withCull;
+    const auto native = inspect(Recompile(request));
+    require(native.cullDistanceBuiltIn && native.cullDistanceCapability && native.clipDistanceLength == 2u, "a target with CullDistance did not keep the guest cull distance");
+}
+
 }
 
 int main() {
@@ -179,6 +199,7 @@ int main() {
             preparedTransformTests(stage);
             pushedTransformTests(stage);
             clipDistanceCapacityTests(stage);
+            cullDistanceWithoutDeviceSupportTests(stage);
         }
         std::cout << "Depth range remap tests passed\n";
         return 0;

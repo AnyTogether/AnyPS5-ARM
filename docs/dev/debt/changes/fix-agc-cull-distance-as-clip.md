@@ -1,0 +1,5 @@
+# shader
+
+## change [Vertex clip and cull distances]
+
+- [Vertex clip and cull distances](../../../core/shader/recompiler/Translation/src/ShaderInputInfoBuilder.cpp) (libSceAgcDriver) - `PA_CL_VS_OUT_CNTL` enable bit `s` of `CLIP_DIST_ENA`/`CULL_DIST_ENA` is taken to select component `s` of the `pos1`/`pos2` exports, with the Vulkan array index counted by the enabled bits below it, and `VS_OUT_CCDIST0_VEC_ENA` as bit 22; this follows the recompiler's existing position-export mapping, not hardware or documentation. The guest clip distances share one `gl_ClipDistance` array with the all-zero clip position distance, which takes the index after them. A vertex program whose own code has no `pos1`..`pos3` export is compiled and prepared without these bits (`PositionExportLayout`), so registration and draws agree on its artifact; an export in a subroutine it calls is not seen by that scan. Without `CullDistance` (MoltenVK) cull enables count as clip enables: an all-negative primitive is dropped, one crossing zero is clipped, not drawn whole.
