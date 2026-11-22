@@ -60,6 +60,10 @@ env:
     guest_appcontent_addons_tests guest_appcontent_license_tests guest_user_service_tests
     guest_user_service_user_name_tests guest_user_service_user_kind_tests guest_appcontent_download_tests
     guest_user_service_lifecycle_tests guest_user_service_presets_tests guest_user_service_group_io_tests
+    guest_appcontent_entitlements_tests guest_user_service_shell_core_tests guest_user_service_kratos_tests
+    guest_user_service_profiles_bounds_tests guest_user_service_multi_login_event_bounds_tests
+    guest_user_service_login_list_tests guest_user_service_account_name_limits_tests
+    guest_user_service_initial_user_bounds_tests guest_user_service_age_level_guest_bounds_tests
     power_control_tests
   SMOKE_TESTS: online|remote_pad|appcontent|user_service|power_control
   # For another repository's build: of the tests SMOKE_TESTS matches (ctest's JSON on stdin), those
