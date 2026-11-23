@@ -1,11 +1,13 @@
 #include "prx/libkernel/include/Api.hpp"
 #include "prx/libkernel/Equeue/Equeue.hpp"
 #include "Equeue.hpp"
+#include "prx/libkernel/Semaphore/include/Ksem.hpp"
 #include "prx/libkernel/Time/include/Time.hpp"
 #include "prx/libc/include/General.hpp"
 #include "prx/libkernel/Socket/include/SocketRuntime.hpp"
 #include "prx/libkernel/File/include/File.hpp"
 #include "prx/libkernel/File/include/HostStreams.hpp"
+#include "prx/libkernel/File/include/RandomDevice.hpp"
 
 #include <algorithm>
 #include <bit>
@@ -1011,6 +1013,10 @@ static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* u
     if (!isSocket && !DescriptorIsOpen_nid_no_patch(fd)) {
         return SCE_KERNEL_ERROR_EBADF;
     }
+    // Upstream f9c7ef4e59: a ksem id now reports S_IFREG to fstat, but has no file events.
+    if (!isSocket && IsKsemDescriptor_nid_no_patch(fd)) {
+        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: ksem descriptor" : "sceKernelAddWriteEvent: ksem descriptor");
+    }
     std::int64_t available = 0;
     bool eof = false;
     const bool isPipe = !isSocket && filter == EVFILT_READ && !File::IsHostStream(fd) && GuestSockets::PipeReadState(fd, &available, &eof);
@@ -1027,6 +1033,7 @@ static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* u
 }
 
 int APS5_VABI sceKernelAddReadEvent(KernelEqueue eq, int fd, std::size_t size, void* udata) {
+    if (File::IsRandomDevice(fd)) return EqueuePin_nid_postfix(eq) ? SCE_KERNEL_ERROR_ENODEV : SCE_KERNEL_ERROR_EBADF;
     return AddDescriptorEvent(eq, fd, size, udata, EVFILT_READ);
 }
 
@@ -1035,6 +1042,7 @@ int APS5_VABI sceKernelDeleteReadEvent(KernelEqueue eq, int fd) {
 }
 
 int APS5_VABI sceKernelAddWriteEvent(KernelEqueue eq, int fd, std::size_t size, void* udata) {
+    if (File::IsRandomDevice(fd)) return EqueuePin_nid_postfix(eq) ? SCE_KERNEL_ERROR_ENODEV : SCE_KERNEL_ERROR_EBADF;
     return AddDescriptorEvent(eq, fd, size, udata, EVFILT_WRITE);
 }
 

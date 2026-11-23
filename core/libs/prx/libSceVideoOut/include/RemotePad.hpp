@@ -190,12 +190,18 @@ public:
     // guest is the player (2 to 4) held for a share play guest: it takes that one, or the lowest
     // free one after the first, never the first (the host's); 0 takes the lowest free one.
     int Seat(std::uint32_t device, bool wants, std::uint8_t guest = 0);
+    // A seat kept for one controller (upstream's ANYPS5_PAD_PLAYER_<n>_SERIAL): Seat passes over
+    // it, and only Claim takes it.
+    void Reserve(int player);
+    // The device takes that player when it asks and the seat is free; -1 otherwise.
+    int Claim(std::uint32_t device, bool wants, int player);
     int Leave(std::uint32_t device);
     int Of(std::uint32_t device) const;
     bool Held(int player) const;
 
 private:
     std::array<std::optional<std::uint32_t>, PAD_MAX_CONTROLLERS> holders;
+    std::array<bool, PAD_MAX_CONTROLLERS> reserved{};
 };
 
 constexpr std::uint32_t RemoteDevice(std::size_t channel) { return 0x80000000u | static_cast<std::uint32_t>(channel); }

@@ -462,16 +462,27 @@ bool Wants(const PadInputState& state) {
 
 int Seats::Seat(std::uint32_t device, bool wants, std::uint8_t guest) {
     if (const int held = Of(device); held >= 0 || !wants) return held;
-    if (guest >= 2 && guest <= holders.size() && !holders[guest - 1u]) {
+    if (guest >= 2 && guest <= holders.size() && !holders[guest - 1u] && !reserved[guest - 1u]) {
         holders[guest - 1u] = device;
         return guest - 1;
     }
     for (std::size_t player = guest >= 2 ? 1 : 0; player < holders.size(); ++player) {
-        if (holders[player]) continue;
+        if (holders[player] || reserved[player]) continue;
         holders[player] = device;
         return static_cast<int>(player);
     }
     return -1;
+}
+
+void Seats::Reserve(int player) {
+    if (player >= 0 && player < PAD_MAX_CONTROLLERS) reserved[static_cast<std::size_t>(player)] = true;
+}
+
+int Seats::Claim(std::uint32_t device, bool wants, int player) {
+    if (const int held = Of(device); held >= 0 || !wants) return held;
+    if (player < 0 || player >= PAD_MAX_CONTROLLERS || holders[static_cast<std::size_t>(player)]) return -1;
+    holders[static_cast<std::size_t>(player)] = device;
+    return player;
 }
 
 int Seats::Leave(std::uint32_t device) {

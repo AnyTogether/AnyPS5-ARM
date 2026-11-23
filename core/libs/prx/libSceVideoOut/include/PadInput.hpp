@@ -9,6 +9,7 @@
 #include "prx/libScePad/include/PadState.hpp"
 #include "prx/libScePad/include/Pad.hpp"
 #include "prx/libScePad/include/PadIdentify.hpp"
+#include "prx/libScePad/include/ControllerAssignment.hpp"
 #include "prx/libSceVideoOut/include/PadOutputPacing.hpp"
 #include "prx/libSceVideoOut/include/GyroAim.hpp"
 #include "prx/libSceVideoOut/include/RemotePad.hpp"
@@ -68,6 +69,9 @@ private:
         Pad::IdentifyScheduler identify;
         AgcDriver::PadKind kind = AgcDriver::PadKind::Unknown;
         std::string name;
+        // Its SDL serial, and the player its serial is configured for (ANYPS5_PAD_PLAYER_<n>_SERIAL), or -1.
+        std::string serial;
+        int reserved = -1;
     };
     struct Remote {
         std::unique_ptr<RemotePad::Channel> channel;
@@ -131,6 +135,7 @@ private:
     std::shared_ptr<const Pad::InputConfiguration> appliedMapping;
     Pad::KeyboardMouse keyboardMouse;
     Pad::IdentifyMode identifyMode = Pad::IdentifyMode::Off;
+    Pad::ControllerAssignment controllerAssignment = Pad::ControllerAssignment::FromEnvironment();
     std::vector<Controller> controllers;
     std::vector<Remote> remotes;
     RemotePad::Seats seats;
