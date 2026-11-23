@@ -83,7 +83,9 @@ class BlockerTests(unittest.TestCase):
                 name = line[2:].split(":", 1)[0]
                 if line.startswith("  ") and not line.startswith("   ") and line.rstrip().endswith(":") and name in owners:
                     owners[name].add(workflow.name)
-        self.assertEqual(owners, {"intake": {"pr-intake.yml"}, "labels": {"pr-labels.yml"}, "eligibility": {"build.yml"},
+        # The fork's anytogether-ci.yml names its filter job eligibility for the ci-gate convention
+        # (tools/check_conventions.py); its check shows as "Changed parts", so it is no bot check.
+        self.assertEqual(owners, {"intake": {"pr-intake.yml"}, "labels": {"pr-labels.yml"}, "eligibility": {"build.yml", "anytogether-ci.yml"},
                                   "report": {"progress-report.yml"}, "pr": {"conflict-label-pr.yml"}})
 
     def test_a_failing_progress_report_does_not_block(self):

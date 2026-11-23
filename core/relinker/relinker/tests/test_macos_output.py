@@ -193,7 +193,8 @@ def check_sprx_dependencies(relinker, directory):
     check(result.returncode == 0, f"sprx: relinker failed: {result.stdout}{result.stderr}")
     macho = check_structure("sprx", output.read_bytes())
     host = [dylib for dylib in macho.dylibs if dylib.startswith("@rpath/")]
-    check(host == ["@rpath/libkernel.prx", "@rpath/libSceLibcInternal.prx", "@rpath/libSceVideoOut.prx", "@rpath/libc.prx"], f"sprx: host dependencies {host}")
+    # Upstream 41c72beb93 adds libkernel_sys beside libkernel.
+    check(host == ["@rpath/libkernel.prx", "@rpath/libSceLibcInternal.prx", "@rpath/libSceVideoOut.prx", "@rpath/libc.prx", "@rpath/libkernel_sys.prx"], f"sprx: host dependencies {host}")
     check(len(host) == len(set(host)), f"sprx: duplicate load commands {host}")
     guest = MachO((base / "app0/sce_module/dep.prx.guest.prx").read_bytes())
     check(not any(dylib.endswith(".sprx") for dylib in guest.dylibs), f"sprx: guest module dependencies {guest.dylibs}")

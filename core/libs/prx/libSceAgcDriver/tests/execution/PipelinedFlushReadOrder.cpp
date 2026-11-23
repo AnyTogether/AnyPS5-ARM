@@ -210,7 +210,9 @@ void TestMultisampledSingleClearDrainsDrawPipeline() {
     auto* mapped = static_cast<std::uint8_t*>(mmap(reinterpret_cast<void*>(FixedBase), FixedBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0));
     if (mapped == MAP_FAILED) return;
 #else
-    return;
+    // macOS has no MAP_FIXED_NOREPLACE: the case is skipped, as before, and mapped is declared for the code below.
+    std::uint8_t* mapped = nullptr;
+    if (mapped == nullptr) return;
 #endif
 #endif
     struct FixedGuard {
