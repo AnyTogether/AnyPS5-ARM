@@ -54,10 +54,12 @@
 #elif defined(__APPLE__)
 #include <dlfcn.h>
 #include <execinfo.h>
+#include <fcntl.h>
 #include <mach/mach.h>
 #include <mach/mach_vm.h>
 #include <pthread.h>
 #include <sys/mman.h>
+#include <unistd.h>
 #else
 #include <cstdint>
 #include <dlfcn.h>

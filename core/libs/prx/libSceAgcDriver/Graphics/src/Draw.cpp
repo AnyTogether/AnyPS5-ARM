@@ -3113,7 +3113,7 @@ void pushMeshBuffers(const Context& context, VkCommandBuffer commands, VkPipelin
     context.Resolved(&DeviceFunctions::cmdPushDescriptorSet, "vkCmdPushDescriptorSetKHR")(commands, bindPoint, layout, ShaderRecompiler::MeshEmulationDescriptorSet, static_cast<std::uint32_t>(writes.size()), writes.data());
 }
 
-std::array<VkBuffer, 3> recordMeshEmulation(const Context& context, VkCommandBuffer commands, Recorder& recorder, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, const DrawInputs& inputs, const RecordedDraw& record, const ShaderResources& resources, const std::shared_ptr<ShaderResources::DrawBindings>& drawBindings, const std::shared_ptr<Buffer>& meshArguments, const std::function<void(std::uint32_t)>& countBarrier) {
+std::array<VkBuffer, 3> recordMeshEmulation(const Context& context, VkCommandBuffer commands, Recorder& recorder, const State& state, const Pm4::DrawParameters& draw, std::span<const CompiledShader> shaders, const DrawInputs& inputs, const BorrowedDraw& record, const ShaderResources& resources, const std::shared_ptr<ShaderResources::DrawBindings>& drawBindings, const std::shared_ptr<Buffer>& meshArguments, const std::function<void(std::uint32_t)>& countBarrier) {
     Require(record.pipeline->EmulatesMesh(), "an emulated mesh draw got a pipeline without its compute stage");
     const auto slots = ShaderRecompiler::EmulatedMeshSlots(*state.stages.mesh);
     const auto groups = static_cast<std::uint64_t>(inputs.meshGroups) * draw.instanceCount;
