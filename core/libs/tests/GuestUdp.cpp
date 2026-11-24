@@ -7,10 +7,12 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <initializer_list>
 #include <thread>
 #include <chrono>
+#include <source_location>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -19,7 +21,12 @@
 #include <unistd.h>
 #endif
 
-static void Require(bool value) { if (!value) std::abort(); }
+// The failing line goes to stderr: on macOS a check can fail where Linux and Windows pass.
+static void Require(bool value, std::source_location location = std::source_location::current()) {
+    if (value) return;
+    std::fprintf(stderr, "udp check failed at line %u\n", static_cast<unsigned>(location.line()));
+    std::abort();
+}
 
 static void CheckUnreachablePortIgnored() {
     const int closing = socket_nid_postfix(2, 2, 0);
@@ -606,8 +613,83 @@ static void CheckPointerFaults() {
     }
 }
 
+static void CheckSendReceiveFaults() {
+    constexpr int Fault = 14;
+    constexpr int WouldBlock = 35;
+    GuardedPage page;
+    const auto fails = [](std::int64_t result) { return result == -1 && *__error_nid_postfix() == Fault; };
+    for (const int type : {1, 2}) {
+        const int receiver = socket_nid_postfix(2, type | 0x20000000, 0);
+        const int sender = socket_nid_postfix(2, type, 0);
+        Require(receiver >= 0 && sender >= 0);
+        std::array<unsigned char, 16> address{16, 2, 0, 0, 127, 0, 0, 1};
+        Require(bind_nid_postfix(receiver, address.data(), address.size()) == 0);
+        std::uint32_t size = address.size();
+        Require(getsockname_nid_postfix(receiver, address.data(), &size) == 0);
+        if (type == 1) Require(listen_nid_postfix(receiver, 1) == 0);
+        Require(connect_nid_postfix(sender, address.data(), address.size()) == 0);
+        int connected = receiver;
+        if (type == 1) {
+            connected = -1;
+            for (int attempt = 0; attempt < 200 && connected < 0; ++attempt) {
+                connected = accept_nid_postfix(receiver, nullptr, nullptr);
+                if (connected < 0) std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+            Require(connected >= 0);
+        }
+        char peeked[1];
+        const auto settle = [&] {
+            for (int attempt = 0; attempt < 400 && recvfrom_nid_postfix(connected, peeked, 1, 2, nullptr, nullptr) < 0; ++attempt)
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        };
+
+        Require(fails(send_nid_postfix(sender, nullptr, 1, 0)));
+        Require(fails(send_nid_postfix(sender, reinterpret_cast<void*>(0x10), 1, 0)));
+        Require(fails(send_nid_postfix(sender, page.Unreadable(), 1, 0)));
+        Require(fails(send_nid_postfix(sender, page.Crossing(), 8, 0)));
+        Require(send_nid_postfix(sender, page.Crossing(), 4, 0) == 4);
+        for (int i = 0; i < 7; ++i) Require(send_nid_postfix(sender, "ok", 2, 0) == 2);
+        settle();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+        Require(fails(recv_nid_postfix(connected, reinterpret_cast<void*>(0x10), 2, 0)));
+        Require(fails(recv_nid_postfix(connected, page.Unreadable(), 2, 0)));
+        Require(fails(recv_nid_postfix(connected, page.ReadOnly(), 2, 0)));
+        char received[8]{};
+        Require(recv_nid_postfix(connected, received, sizeof(received), 0) >= 0);
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        while (recv_nid_postfix(connected, received, sizeof(received), 0) >= 0) {
+        }
+        Require(*__error_nid_postfix() == WouldBlock);
+
+        Require(send_nid_postfix(sender, "z", 1, 0) == 1);
+        settle();
+        *page.LastWritable() = 0;
+        Require(recv_nid_postfix(connected, page.LastWritable(), 2, 0) == 1 && *page.LastWritable() == 'z');
+        Require(recv_nid_postfix(connected, received, 2, 0) == -1 && *__error_nid_postfix() == WouldBlock);
+        // Not on macOS: a datagram whose copy into a recv buffer faults stays queued there, where
+        // FreeBSD drops it (upstream's docs/dev/debt/changes/fix-libkernel-send-recv-buffer-checks.md).
+#ifdef __APPLE__
+        constexpr bool faultedDatagramDropped = false;
+#else
+        constexpr bool faultedDatagramDropped = true;
+#endif
+        if (type == 2 && faultedDatagramDropped) {
+            Require(send_nid_postfix(sender, "ok", 2, 0) == 2);
+            settle();
+            Require(fails(recv_nid_postfix(connected, page.LastWritable(), 2, 0)));
+            Require(send_nid_postfix(sender, "y", 1, 0) == 1);
+            settle();
+            Require(recv_nid_postfix(connected, received, 2, 0) == 1 && received[0] == 'y');
+        }
+        if (type == 1) Require(close_nid_postfix(connected) == 0);
+        Require(close_nid_postfix(sender) == 0 && close_nid_postfix(receiver) == 0);
+    }
+}
+
 int main() {
     CheckPointerFaults();
+    CheckSendReceiveFaults();
     CheckAddressLengths(2);
     CheckAddressLengths(28);
     for (const int family : {2, 28})

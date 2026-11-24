@@ -106,6 +106,7 @@ struct SpirvEmitterState {
     bool splitSubgroup = false;
     bool spannedWave = false;
     bool spannedAnySubgroup = false;
+    bool spannedShuffleThroughMemory = false;
     std::uint32_t spannedExchangeVariable = 0;
     std::uint32_t spannedBallotVariable = 0;
     std::uint32_t spannedBallotParityVariable = 0;
@@ -291,6 +292,7 @@ struct SpirvEmitterState {
     std::vector<std::uint32_t> mergePendingVariables;
     std::uint32_t quadPixelUncovered = 0;
     std::uint32_t sampleMaskInputVariable = 0;
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> sampleMaskCopies;
     std::uint32_t quadSampleCoverage = 0;
     std::uint32_t sampleOrderWord = 0;
     std::uint32_t alphaCoverageVariable = 0;
@@ -331,6 +333,7 @@ public:
 
     void Emplace(const IrValue* value, std::uint32_t id) {
         if (Find(value) != nullptr) return;
+        if (added != nullptr) added->push_back(value);
         const std::uint32_t index = value->Id();
         if (index >= slots.size()) slots.resize(std::max<std::size_t>(std::size_t{index} + 1u, slots.size() * 2u));
         if (slots[index].key == nullptr) {
@@ -338,6 +341,10 @@ public:
             return;
         }
         overflow.emplace(value, id);
+    }
+
+    void RecordAdded(std::vector<const IrValue*>* values) {
+        added = values;
     }
 
     void Erase(const IrValue* value) {
@@ -357,6 +364,7 @@ private:
 
     std::vector<Slot> slots;
     std::unordered_map<const IrValue*, std::uint32_t> overflow;
+    std::vector<const IrValue*>* added = nullptr;
 };
 
 struct SpirvValueEmitContext {

@@ -92,11 +92,15 @@ PadInput::PadInput() : PadInput(Pad::LoadInputMapping(appTitleId())) {
 }
 
 static_assert(PAD_MAX_CONTROLLERS == AgcDriver::PadStatusSlots, "the pad status panel lists one line per controller slot");
+static_assert(PAD_MAX_CONTROLLERS == Pad::ControllerAssignmentSlots, "controller assignment must cover every pad slot");
 
 PadInput::PadInput(Pad::InputConfiguration configuration) : mappings(std::move(configuration)), appliedMapping(mappings.Snapshot()), keyboardMouse(*appliedMapping), gyro(GyroAim::FromEnvironment()), statusProvider{[this] { return statusSnapshot(); }}, port0Mode(PadScriptActive_nid_postfix() ? Port0Presence::Mode::Default : Port0Presence::ConfiguredMode()), port0(port0Mode, false) {
     static_cast<void>(Pad::RumblePercent());
     static_cast<void>(Pad::RumblePausesOnFocusLoss());
     identifyMode = Pad::IdentifyModeFromEnvironment();
+    for (int player = 0; player < PAD_MAX_CONTROLLERS; ++player) {
+        if (controllerAssignment.Configured(player)) seats.Reserve(player);
+    }
     if (gyro) {
         APS5_LOG_OUT("Pad: gyro aiming on (sensitivity %.1f, deadzone %.0f deg/s, %s)", gyro->sensitivity, gyro->deadzone,
             gyro->activation == GyroAim::Activation::Always ? "always" : gyro->activation == GyroAim::Activation::WhileL2 ? "while L2 is held" : "while touching");
@@ -138,6 +142,18 @@ void PadInput::openController(int deviceIndex) {
         APS5_LOG_ERR("Pad: could not open game controller %d: %s", deviceIndex, SDL_GetError());
         return;
     }
+    // Upstream's per-player serials (ANYPS5_PAD_PLAYER_<n>_SERIAL): a configured controller takes its
+    // player's seat on first use and the others pass over it; a second controller with a live serial is refused.
+    const char* controllerSerial = SDL_GameControllerGetSerial(handle);
+    const std::string serial = controllerSerial != nullptr ? controllerSerial : "";
+    const char* logSerial = std::getenv("ANYPS5_PAD_LOG_CONTROLLER_SERIAL");
+    if (logSerial != nullptr && std::strcmp(logSerial, "1") == 0) {
+        APS5_LOG_OUT("Pad: SDL controller %d serial: %s", deviceIndex, serial.empty() ? "<unavailable>" : serial.c_str());
+    }
+    if (!serial.empty() && std::any_of(controllers.begin(), controllers.end(), [&serial](const Controller& open) { return open.serial == serial; })) {
+        SDL_GameControllerClose(handle);
+        return;
+    }
     const char* name = SDL_GameControllerName(handle);
     APS5_LOG_OUT("Pad: connected game controller: %s (type %d, sensors accel=%d gyro=%d, touchpads=%d, led=%d, trigger rumble=%d)",
         name != nullptr ? name : "unknown", static_cast<int>(SDL_GameControllerGetType(handle)),
@@ -148,6 +164,8 @@ void PadInput::openController(int deviceIndex) {
     controller.id = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(handle));
     controller.kind = PadKindFromSdl(SDL_GameControllerGetType(handle));
     controller.name = name != nullptr ? name : "";
+    controller.serial = serial;
+    controller.reserved = controllerAssignment.ConfiguredSlot(serial);
     controllers.push_back(std::move(controller));
     openStatus(controllers.back());
     enableSensors(controllers.back(), true);
@@ -352,7 +370,7 @@ void PadInput::sampleControllers() {
             identify(controller, 0);
             continue;
         }
-        const int player = seats.Seat(id, RemotePad::Wants(controller.state));
+        const int player = controller.reserved >= 0 ? seats.Claim(id, RemotePad::Wants(controller.state), controller.reserved) : seats.Seat(id, RemotePad::Wants(controller.state));
         if (!seated && player >= 0) {
             controller.outputPending = true;
             controller.lightBar.Reset();

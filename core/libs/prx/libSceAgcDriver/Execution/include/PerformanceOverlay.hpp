@@ -164,6 +164,7 @@ struct OverlayMemory {
 struct OverlayDetails {
     std::optional<OverlayMemory> vram;
     std::optional<std::uint64_t> ram;
+    std::optional<int> cpuCelsius;
     VkExtent2D display{};
     VkExtent2D window{};
 };

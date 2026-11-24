@@ -323,7 +323,7 @@ void eraseTexture(TextureCache& cache, std::list<CachedTexture>::iterator it) {
             }
         }
     }
-    if (it->texture.use_count() > 1) noteReleased(it->texture, it->address);
+    if (it->accounted != 0 && it->texture.use_count() > 1) noteReleased(it->texture, it->address);
     cache.index.erase(it->key);
     cache.entries.erase(it);
     ++cache.erasures;
@@ -1048,6 +1048,9 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
         return cachedTexture(context, words, window, components, 0, depthCompare, VK_IMAGE_VIEW_TYPE_2D, layerRows);
     }
     if (guestBytes == 0) guestBytes = SurfaceGuestBytes(resource);
+    const auto residency = depthCompare || layerRows || SrgbExpandsToRgba8(context, resource.format) ? std::nullopt : MinLodResidentLevels(resource);
+    const bool residentLevels = residency.has_value() && residency->bytes < guestBytes;
+    if (residentLevels) guestBytes = residency->bytes;
     if (guestBytes >= (1ull << 30u)) {
         static std::atomic<std::uint64_t> large{0};
         const auto count = large.fetch_add(1) + 1;
@@ -1120,7 +1123,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     // import, recorded behind the producer, so no bytes are read or compared on the CPU and nothing
     // waits for the producer. A fast-cleared surface (keys) is viewed only through an image whose own
     // descriptor carries the DCC address (below); it stays a snapshot otherwise, its texels not read.
-    if ((!depthCompare || depthCopy) && !layerRows && source == nullptr && !clearThroughKeys && SampledFromStorageEligible(context, resource, guestBytes)) {
+    if ((!depthCompare || depthCopy) && !layerRows && source == nullptr && !clearThroughKeys && !residentLevels && SampledFromStorageEligible(context, resource, guestBytes)) {
 
         keys = scanKeys();
         if (*keys == DccKeys::Uncompressed) {
@@ -1286,7 +1289,7 @@ std::shared_ptr<Texture> cachedTexture(const Context& context, std::span<const s
     }
     const auto clear = source == nullptr ? SampledClearColor(context, resource, *keys, depthCompare) : std::nullopt;
     static const bool sampledImport = std::getenv("APS5_NO_SAMPLED_IMPORT") == nullptr;
-    const bool gpuWritten = sampledImport && source == nullptr && !clear && !depthCompare && !layerRows && !slabs.has_value() && *keys == DccKeys::Uncompressed && Recorder::SnapshotWriteOverlaps(address, bytes);
+    const bool gpuWritten = sampledImport && source == nullptr && !clear && !depthCompare && !layerRows && !residentLevels && !slabs.has_value() && *keys == DccKeys::Uncompressed && Recorder::SnapshotWriteOverlaps(address, bytes);
     const auto gpuSources = gpuWritten ? ExistingHostImportCopies(context, address, bytes) : std::vector<HostImportCopy>{};
     if (source != nullptr || clear.has_value() || !gpuSources.empty()) parkSnapshot(cache, recycled);
     CachedTexture entry{key, address, std::vector<std::byte>{}, nullptr, *keys, snapshotGeneration};
@@ -2444,7 +2447,7 @@ void ShaderResources::buildPrepare(std::span<const CompiledShader> shaders, cons
     for (const auto& shader : shaders) if (shader.registeredImageViews != nullptr) registeredImageViews.insert(registeredImageViews.end(), shader.registeredImageViews->begin(), shader.registeredImageViews->end());
     Require(registeredImageViewsCurrent(registeredImageViews), "AGC graphics: registered image range changed after resource capture");
     PerformanceTimer frameTiming("Resources.Prepare");
-    const auto stageStart = std::chrono::steady_clock::now();
+    const auto stageStart = BuildProfiled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     phaseStart = stageStart;
     if (BuildProfiled()) {
         auto& profile = ThreadBuilds();
@@ -2881,7 +2884,7 @@ void ShaderResources::buildComplete() {
     BuildLookups lookups;
     Require(!completed, "cannot update a published descriptor heap");
     Require(registeredImageViewsCurrent(registeredImageViews), "AGC graphics: registered image range changed after resource preparation");
-    const auto stageStart = std::chrono::steady_clock::now();
+    const auto stageStart = BuildProfiled() ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
     phaseStart = stageStart;
     try {
         // The lookups run in plan order: Revalidate walks the bindings the same way, and consecutive
@@ -5720,9 +5723,11 @@ std::optional<std::size_t> ShaderResources::shaderDataAllocation(const CompiledS
     Require(shader.program != nullptr, "missing compiled shader");
     const auto& program = *shader.program;
     if (program.bindings.size() != bindings.size()) return std::nullopt;
-    for (std::size_t index = 0; index < program.bindings.size(); ++index) {
-        if (program.bindings[index].role != ShaderRecompiler::DescriptorRole::ShaderData || bindings[index].allocations.size() != 1) continue;
-        const auto allocation = bindings[index].allocations.front();
+    for (const auto& binding : program.bindings) {
+        if (binding.role != ShaderRecompiler::DescriptorRole::ShaderData) continue;
+        const auto held = std::ranges::find_if(bindings, [&](const Binding& candidate) { return candidate.set < 0 && candidate.layout.binding == binding.binding; });
+        if (held == bindings.end() || held->allocations.size() != 1) return std::nullopt;
+        const auto allocation = held->allocations.front();
         if (allocations[allocation].guest || allocations[allocation].buffer == nullptr) return std::nullopt;
         return allocation;
     }
@@ -6104,7 +6109,7 @@ void ShaderResources::resolveImageBinding(const ShaderRecompiler::DescriptorBind
             continue;
         }
         const auto resource = record != nullptr && record->decoded ? record->resource : DecodeTextureResource(words);
-        const bool firstLayer = binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image2D && resource.dimension == TextureDimension::k2DArray;
+        const bool firstLayer = (binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image2D && resource.dimension == TextureDimension::k2DArray) || (binding.imageShape == ShaderRecompiler::DescriptorImageShape::Image1D && resource.dimension == TextureDimension::k1DArray && resource.baseArray == resource.depthOrLastArray);
         if (binding.imageShape.has_value() && !firstLayer && !MatchesGuestDimension(*binding.imageShape, resource.dimension)) throw std::runtime_error("AGC graphics: guest storage texture dimension disagrees with the shader's declared image shape (shape " + std::to_string(static_cast<int>(*binding.imageShape)) + ", dimension " + std::to_string(static_cast<int>(resource.dimension)) + ")");
         if (resource.dimension == TextureDimension::k2DMsaa) {
             Require(!(element < binding.imageAtomic.size() && binding.imageAtomic[element]) && !(element < binding.imageAtomic64.size() && binding.imageAtomic64[element]), "storage image atomics on a multisampled texture are not implemented");
@@ -6130,7 +6135,7 @@ void ShaderResources::resolveImageBinding(const ShaderRecompiler::DescriptorBind
         if (resource.dccAddress != 0) CompletePendingCpuWrites(context, resource.dccAddress, DccKeyBytes(guestBytes));
         // Images the shader only reads have nothing to store back.
         const bool written = element >= binding.imageWritten.size() || binding.imageWritten[element];
-        const bool stored = element < binding.imageWritten.size() && binding.imageWritten[element];
+        const bool stored = written;
         if (stored) claimStoredMultisampleMemory(context, resource, guestBytes, mip);
         // The same surface as the previous element: its image was just looked up and refreshed.
         if (sameAsPrevious && StorageDedupeEnabled()) storageTextures.push_back(storageTextures.back());
@@ -7200,14 +7205,17 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
     const auto maxSnapshotBytes = maxDrawSnapshotBytes;
     const auto uploadLimit = DrawUploadLimit();
     std::size_t totalSnapshotBytes = 0;
-    auto result = std::make_shared<DrawBindings>();
+    std::shared_ptr<DrawBindings> result;
     thread_local std::vector<std::size_t>* selectedSlot = nullptr;
     auto& selected = ShaderRecompiler::ThreadOwned(selectedSlot);
     selected.clear();
     std::array<std::uint64_t, 3> stamp{};
     bool stamped = false;
     const auto keep = [&](DrawBindings::Snapshot snapshot) {
-        if (result->snapshots.empty()) result->snapshots.reserve(allocations.size());
+        if (result == nullptr) {
+            result = std::make_shared<DrawBindings>();
+            result->snapshots.reserve(allocations.size());
+        }
         result->snapshots.push_back(std::move(snapshot));
     };
     const auto toldInData = [&](const MovedBuffer& entry, std::size_t data) {
@@ -7252,6 +7260,7 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
             std::uint64_t serial = 0;
             if (!HostImportView(context, override->address, override->size, view, serial)) return {};
             const auto begin = override->address - item.adjustment;
+            if (result == nullptr) result = std::make_shared<DrawBindings>();
             result->inPlace.push_back({index, view.buffer, view.offset, static_cast<std::size_t>(view.range)});
             result->inPlaceReads.push_back({begin, begin + GuestBufferMemory::ViewBytes(override->size, item.adjustment)});
             continue;
@@ -7364,10 +7373,12 @@ std::shared_ptr<ShaderResources::DrawBindings> ShaderResources::PrepareDrawBindi
         profile.calls = profile.prepared = profile.fastHits = profile.reusedHits = profile.copies = profile.copiedBytes = profile.wordBuffers = profile.descriptorWrites = profile.setsReused = 0;
         profile.snapshotUs = profile.collectUs = profile.copyUs = profile.allocateUs = profile.updateUs = profile.keepUs = profile.createUs = profile.memcpyUs = 0;
     };
-    if (selected.empty() && result->inPlace.empty() && !rebound) {
+    if (selected.empty() && (result == nullptr || result->inPlace.empty()) && !rebound) {
         note(0, 0, 0, 0, false);
         return {};
     }
+    // Upstream f2ca5a5cc4 allocates the bindings only once a snapshot or an in-place view is kept.
+    if (result == nullptr) result = std::make_shared<DrawBindings>();
     // The same snapshots as this object's previous draw: that draw's sets, written for them and never
     // updated since (the base descriptors are fixed at build), are bound again; a set may be bound by
     // any number of command buffers. The previous result holds its snapshot buffers, so equal
@@ -7683,13 +7694,18 @@ void ShaderResources::RunAccesses(std::vector<std::array<std::uint64_t, 3>>& out
 
 std::vector<std::pair<VkImage, bool>> ShaderResources::StorageImages() const {
     std::vector<std::pair<VkImage, bool>> images;
+    StorageImages(images);
+    return images;
+}
+
+void ShaderResources::StorageImages(std::vector<std::pair<VkImage, bool>>& out) const {
+    out.clear();
     for (std::size_t index = 0; index < storageTextures.size(); ++index) {
-        if (storageTextures[index] != nullptr) images.emplace_back(storageTextures[index]->Image(), storageWritten[index]);
+        if (storageTextures[index] != nullptr) out.emplace_back(storageTextures[index]->Image(), storageWritten[index]);
     }
     for (const auto& texture : textures) {
-        if (texture != nullptr && texture->StorageSource() != nullptr) images.emplace_back(texture->StorageSource()->Image(), false);
+        if (texture != nullptr && texture->StorageSource() != nullptr) out.emplace_back(texture->StorageSource()->Image(), false);
     }
-    return images;
 }
 
 bool ShaderResources::HasCachedStorageImages() const {
