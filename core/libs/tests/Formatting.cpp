@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdarg>
+#include <source_location>
 
 #if defined(__clang__) && !defined(_WIN32)
 #define __builtin_sysv_va_list va_list
@@ -29,8 +30,11 @@
 #define __builtin_sysv_va_end va_end
 #endif
 
-static void Require(bool condition) {
-    if (!condition) throw std::runtime_error("Formatting check failed");
+// The failing line goes to stderr: on macOS a check can fail where Linux and Windows pass.
+static void Require(bool condition, std::source_location location = std::source_location::current()) {
+    if (condition) return;
+    std::fprintf(stderr, "formatting check failed at line %u\n", static_cast<unsigned>(location.line()));
+    throw std::runtime_error("Formatting check failed");
 }
 
 static int APS5_VABI FormatList(char* buffer, size_t size, const char* format, ...) {

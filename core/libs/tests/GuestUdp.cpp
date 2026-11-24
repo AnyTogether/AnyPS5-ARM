@@ -7,10 +7,12 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <initializer_list>
 #include <thread>
 #include <chrono>
+#include <source_location>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -19,7 +21,12 @@
 #include <unistd.h>
 #endif
 
-static void Require(bool value) { if (!value) std::abort(); }
+// The failing line goes to stderr: on macOS a check can fail where Linux and Windows pass.
+static void Require(bool value, std::source_location location = std::source_location::current()) {
+    if (value) return;
+    std::fprintf(stderr, "udp check failed at line %u\n", static_cast<unsigned>(location.line()));
+    std::abort();
+}
 
 static void CheckUnreachablePortIgnored() {
     const int closing = socket_nid_postfix(2, 2, 0);
@@ -660,7 +667,14 @@ static void CheckSendReceiveFaults() {
         *page.LastWritable() = 0;
         Require(recv_nid_postfix(connected, page.LastWritable(), 2, 0) == 1 && *page.LastWritable() == 'z');
         Require(recv_nid_postfix(connected, received, 2, 0) == -1 && *__error_nid_postfix() == WouldBlock);
-        if (type == 2) {
+        // Not on macOS: a datagram whose copy into a recv buffer faults stays queued there, where
+        // FreeBSD drops it (upstream's docs/dev/debt/changes/fix-libkernel-send-recv-buffer-checks.md).
+#ifdef __APPLE__
+        constexpr bool faultedDatagramDropped = false;
+#else
+        constexpr bool faultedDatagramDropped = true;
+#endif
+        if (type == 2 && faultedDatagramDropped) {
             Require(send_nid_postfix(sender, "ok", 2, 0) == 2);
             settle();
             Require(fails(recv_nid_postfix(connected, page.LastWritable(), 2, 0)));
