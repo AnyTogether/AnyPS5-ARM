@@ -23,8 +23,15 @@ public struct ThreadSampler: Sendable {
         stackBottom = stackTop > size ? stackTop - size : 0
     }
 
-    /// The launcher's main thread, where the interface runs.
-    public static var main: ThreadSampler { ThreadSampler(pthread: pthread_main_thread_np()) }
+    /// The launcher's main thread, where the interface runs (nil off it, without
+    /// pthread_main_thread_np, which Swift's Darwin module does not bring).
+    public static var main: ThreadSampler? {
+        if Thread.isMainThread { return ThreadSampler(pthread: pthread_self()) }
+        typealias MainThread = @convention(c) () -> pthread_t?
+        guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "pthread_main_thread_np"),
+              let main = unsafeBitCast(symbol, to: MainThread.self)() else { return nil }
+        return ThreadSampler(pthread: main)
+    }
 
     /// The CPU time the thread has used, user and system, in ms.
     public func cpuMs() -> Int? {
@@ -110,7 +117,7 @@ public struct ThreadSampler: Sendable {
     }
 
     private typealias Demangle = @convention(c) (UnsafePointer<CChar>?, Int, UnsafeMutablePointer<CChar>?, UnsafeMutablePointer<Int>?, UInt32) -> UnsafeMutablePointer<CChar>?
-    nonisolated(unsafe) private static let demangler: Demangle? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "swift_demangle").map { unsafeBitCast($0, to: Demangle.self) }
+    private static let demangler: Demangle? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "swift_demangle").map { unsafeBitCast($0, to: Demangle.self) }
 
     static func demangled(_ name: UnsafePointer<CChar>) -> String {
         guard let demangler, let readable = demangler(name, strlen(name), nil, nil, 0) else { return String(cString: name) }

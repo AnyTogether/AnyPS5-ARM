@@ -386,7 +386,7 @@ public final class StallWatch: @unchecked Sendable {
     private var quiet: (at: TimeInterval, cpuMs: Int)?
 
     public init(health: LauncherHealth, started: Date, limit: TimeInterval = LauncherHealth.stall, interval: TimeInterval = 0.5, every: TimeInterval = 5,
-                sampler: ThreadSampler? = .main) {
+                sampler: ThreadSampler? = ThreadSampler.main) {
         self.health = health
         self.started = started
         self.interval = interval
