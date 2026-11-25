@@ -298,7 +298,8 @@ final class RetroHostCorePackageTests: XCTestCase {
         ])
         let host = store()
         try await installHost()
-        let other = try XCTUnwrap(try await releases().first { $0.tag == "v1.1.1" })
+        let listed = try await releases()
+        let other = try XCTUnwrap(listed.first { $0.tag == "v1.1.1" })
         let seen = RetroHostFakeGitHub.requests.count
         do {
             _ = try await host.fetchCore(other, .lrps2, configuration: RetroHostFakeGitHub.configuration)
