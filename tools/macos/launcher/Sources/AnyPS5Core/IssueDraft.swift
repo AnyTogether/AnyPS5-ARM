@@ -76,19 +76,25 @@ public struct IssueDraft: Sendable {
             what = "The launcher closed without being quit (a crash, or Force Quit). Last seen alive \(at) UTC."
         case .hang where problem.recovered == true:
             title = "Launcher stopped responding (\(seconds)s)"
-            what = "The interface did not answer for \(seconds) s from \(at) UTC, then went on."
+            what = stallRecovered(seconds: seconds, at: at)
         case .hang:
-            title = "Launcher stopped responding"
-            what = "The interface stopped answering at \(at) UTC and did not answer again (\(seconds)s or more) before it was closed."
+            title = "Launcher stopped responding (\(seconds)s+, never recovered)"
+            what = stallNeverRecovered(seconds: seconds, at: at)
         }
         func cut(_ line: String) -> String { line.count > lineLimit ? String(line.prefix(lineLimit)) + "…" : line }
         var error = problem.error.map { privacy.clean($0).components(separatedBy: "\n").prefix(40).map(cut).joined(separator: "\n") } ?? "None caught."
         var lines = problem.lines.map { cut(privacy.clean($0)) }
+        var thread = (problem.thread ?? []).map { cut(privacy.clean($0)) }
         while true {
-            let fields = [
+            var fields = [
                 Field(id: "what", label: "What happened", value: what + "\nWhat I was doing: "),
                 Field(id: "system", label: "System", value: privacy.clean(system.line)),
                 Field(id: "versions", label: "Version", value: privacy.clean("Launcher \(problem.version) (\(problem.platform))")),
+            ]
+            if problem.kind == .hang {
+                fields.append(Field(id: "thread", label: threadLabel, value: thread.isEmpty ? threadNone : thread.joined(separator: "\n")))
+            }
+            fields += [
                 Field(id: "error", label: "Uncaught error", value: error),
                 Field(id: "log", label: "Last seconds", value: lines.isEmpty ? "(none kept)" : lines.joined(separator: "\n")),
             ]
@@ -96,11 +102,27 @@ public struct IssueDraft: Sendable {
             if url.absoluteString.count <= maximumLength { return IssueDraft(title: title, fields: fields, url: url) }
             if !lines.isEmpty {
                 lines.removeFirst()
+            } else if thread.count > 4 {
+                // The outermost frames go next: where it is stuck is at the top.
+                thread.removeLast()
             } else {
                 error = String(error.prefix(error.count * 3 / 4)) + "…"
             }
         }
     }
+
+    /// What a stall's report says of it, the same words as AnyPS5 Desktop's.
+    static func stallRecovered(seconds: Int, at: String) -> String {
+        "The interface did not answer for \(seconds) s from \(at) UTC, then recovered by itself."
+    }
+
+    static func stallNeverRecovered(seconds: Int, at: String) -> String {
+        "The interface stopped answering at \(at) UTC and had not recovered \(seconds) s later, when the watchdog last looked before the launcher was closed."
+    }
+
+    static let threadLabel = "Interface thread while stuck"
+    /// A stall written before the watchdog sampled the interface's thread, or one it could not sample.
+    static let threadNone = "Not sampled."
 
     /// The newest log lines that fit: the oldest go first until the link is short enough.
     static func fit(repository: String, template: String, title: String, fixed: [Field], log: (id: String, label: String), after: [Field],

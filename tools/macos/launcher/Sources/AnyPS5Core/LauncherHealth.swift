@@ -27,9 +27,12 @@ public struct LauncherProblem: Codable, Equatable, Sendable {
     /// The process of the run that ended, and when it started: what macOS's report of it is found by.
     public var pid: Int32?
     public var started: Date?
+    /// What the watchdog saw of the interface's (main) thread a few seconds into the stall: whether
+    /// it was busy on the CPU or waiting, then its stack (ThreadSampler).
+    public var thread: [String]?
 
     public init(kind: Kind, at: Date, version: String, platform: String, stalledMs: Int? = nil, recovered: Bool? = nil, error: String? = nil, lines: [String] = [],
-                pid: Int32? = nil, started: Date? = nil) {
+                pid: Int32? = nil, started: Date? = nil, thread: [String]? = nil) {
         self.kind = kind
         self.at = at
         self.version = version
@@ -40,6 +43,7 @@ public struct LauncherProblem: Codable, Equatable, Sendable {
         self.lines = lines
         self.pid = pid
         self.started = started
+        self.thread = thread
     }
 
     /// A run that ended without quitting (a crash, or a stall it never came out of): macOS may
@@ -194,8 +198,12 @@ public final class LauncherHealth: @unchecked Sendable {
     }
 
     func writeStall(since: Date, length: TimeInterval, recovered: Bool, error: String?, lines: [String]) {
-        write(LauncherProblem(kind: .hang, at: since, version: version, platform: platform, stalledMs: Int(length * 1000), recovered: recovered ? true : nil,
-                              error: error, lines: lines), to: problemFile)
+        writeProblem(LauncherProblem(kind: .hang, at: since, version: version, platform: platform, stalledMs: Int(length * 1000), recovered: recovered ? true : nil,
+                                     error: error, lines: lines))
+    }
+
+    func writeProblem(_ problem: LauncherProblem) {
+        write(problem, to: problemFile)
     }
 
     private func read(_ file: URL) -> LauncherProblem? {
@@ -290,6 +298,9 @@ public struct StallDetector: Sendable {
         self.asleep = asleep
     }
 
+    /// How long the interface has not answered (nil before its first ping).
+    public func quietFor(_ now: TimeInterval) -> TimeInterval? { lastPing.map { now - $0 } }
+
     /// The interface answered: the length of the stall that ended, when one was reported.
     public mutating func ping(_ now: TimeInterval) -> TimeInterval? {
         let since = stalledSince
@@ -346,8 +357,11 @@ public struct Heartbeat: Sendable {
 }
 
 /// LauncherHealth's watchdog on a thread of its own, which keeps running while the main thread is
-/// stuck: it writes the stall to problem.json as soon as it is long, again with its length when it
-/// ends, and the run's marker every few seconds with what `ping` told it.
+/// stuck: it writes the stall to problem.json as soon as it is long, with what it saw of the main
+/// thread then (ThreadSampler), its length again every `every` seconds while it lasts and once more
+/// when it ends, and the run's marker every few seconds with what `ping` told it. While the
+/// interface answers it reads nothing of the main thread: a second without an answer (a fifth of
+/// the limit), it notes the thread's CPU time once, to tell a busy thread from a waiting one.
 public final class StallWatch: @unchecked Sendable {
     private let health: LauncherHealth
     private let started: Date
@@ -359,13 +373,25 @@ public final class StallWatch: @unchecked Sendable {
     private var ticks = 0
     private var closed = false
     private let interval: TimeInterval
+    private let every: TimeInterval
+    private let sampler: ThreadSampler?
     /// Wall-clock time of the last ping, for the report's "at".
     private var lastPingDate = Date()
+    /// The stall being reported (or the last one), as problem.json has it; `stalls` counts them,
+    /// so frames named late go to their own stall only.
+    private var stall: LauncherProblem?
+    private var stalls = 0
+    private var lastWrite: TimeInterval = 0
+    /// The main thread's CPU time a second into a silence, and when it was read.
+    private var quiet: (at: TimeInterval, cpuMs: Int)?
 
-    public init(health: LauncherHealth, started: Date, limit: TimeInterval = LauncherHealth.stall, interval: TimeInterval = 0.5) {
+    public init(health: LauncherHealth, started: Date, limit: TimeInterval = LauncherHealth.stall, interval: TimeInterval = 0.5, every: TimeInterval = 5,
+                sampler: ThreadSampler? = .main) {
         self.health = health
         self.started = started
         self.interval = interval
+        self.every = every
+        self.sampler = sampler
         detector = StallDetector(limit: limit, asleep: max(3, interval * 6))
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(50))
@@ -384,9 +410,16 @@ public final class StallWatch: @unchecked Sendable {
             if let lines { self.lines = Array(lines.suffix(LauncherHealth.keptLines)) }
             if let error, self.error == nil { self.error = error }
             self.detector.watching = watching
+            self.quiet = nil
             let since = self.detector.stalledSince
             if let length = self.detector.ping(now), since != nil {
-                self.health.writeStall(since: date.addingTimeInterval(-length), length: length, recovered: true, error: self.error, lines: self.lines)
+                var stall = self.stall ?? LauncherProblem(kind: .hang, at: date.addingTimeInterval(-length), version: self.health.version,
+                                                          platform: self.health.platform, lines: self.lines)
+                stall.stalledMs = Int(length * 1000)
+                stall.recovered = true
+                stall.error = self.error
+                self.stall = stall
+                self.health.writeProblem(stall)
             }
             self.lastPingDate = date
         }
@@ -404,14 +437,49 @@ public final class StallWatch: @unchecked Sendable {
     private func tick() {
         guard !closed else { return }
         let now = ProcessInfo.processInfo.systemUptime
+        if quiet == nil, detector.stalledSince == nil, detector.watching, let sampler, (detector.quietFor(now) ?? 0) >= detector.limit / 5, let cpu = sampler.cpuMs() {
+            quiet = (now, cpu)
+        }
         if detector.tick(now), let since = detector.stalledSince {
-            health.writeStall(since: lastPingDate, length: now - since, recovered: false, error: error, lines: lines)
+            stalls += 1
+            var stall = LauncherProblem(kind: .hang, at: lastPingDate, version: health.version, platform: health.platform, stalledMs: Int((now - since) * 1000),
+                                        error: error, lines: lines)
+            stall.thread = sample(sampledMs: Int((now - since) * 1000), now: now, stall: stalls)
+            self.stall = stall
+            health.writeProblem(stall)
+            lastWrite = now
+        } else if let since = detector.stalledSince, var stall, stall.recovered != true, now - lastWrite >= every {
+            // Still stuck: how long so far, for a run that never comes out of it.
+            stall.stalledMs = Int((now - since) * 1000)
+            self.stall = stall
+            health.writeProblem(stall)
+            lastWrite = now
         }
         // The marker every five seconds: what a crash report says the launcher was doing.
         ticks += 1
         if ticks % max(1, Int(5 / interval)) == 0 {
             health.writeMarker(started: started, alive: Date(), lines: lines, error: error)
         }
+    }
+
+    /// The main thread now: its headline and stack, the frames named on another queue (dladdr
+    /// takes dyld's lock, which a stuck main thread may hold) and written when they are.
+    private func sample(sampledMs: Int, now: TimeInterval, stall id: Int) -> [String]? {
+        guard let sampler else { return nil }
+        let cpu = sampler.cpuMs()
+        let used = quiet.flatMap { quiet in cpu.map { (cpuMs: $0 - quiet.cpuMs, windowMs: Int((now - quiet.at) * 1000)) } }
+        let headline = ThreadSampler.headline(sampledMs: sampledMs, cpuMs: used?.cpuMs, windowMs: used?.windowMs)
+        guard let addresses = sampler.addresses(), !addresses.isEmpty else { return [headline, ThreadSampler.stackUnread] }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let frames = ThreadSampler.describe(addresses)
+            self?.queue.async {
+                guard let self, !self.closed, self.stalls == id, var stall = self.stall else { return }
+                stall.thread = [headline, ThreadSampler.stackHeading] + frames
+                self.stall = stall
+                self.health.writeProblem(stall)
+            }
+        }
+        return [headline, ThreadSampler.stackUnnamed]
     }
 }
 

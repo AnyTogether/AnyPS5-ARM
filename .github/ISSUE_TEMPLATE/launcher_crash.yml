@@ -31,6 +31,12 @@ body:
     validations:
       required: true
   - type: textarea
+    id: thread
+    attributes:
+      label: Interface thread while stuck
+      description: For a freeze, what the launcher's watchdog saw of the interface's thread a few seconds in - whether it was busy on the CPU or waiting, and where (its stack, or what the system lets the launcher read of it).
+      render: text
+  - type: textarea
     id: error
     attributes:
       label: Uncaught error
