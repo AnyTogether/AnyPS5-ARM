@@ -77,9 +77,13 @@ public struct RetroHostDownload: Equatable, Sendable {
 ///
 /// ```text
 /// RetroHost/
-///     host/          the unpacked zip, with SHA256SUMS, SHA256SUMS.sig, the .files and
-///                    .release-tag (the tag it was published under) beside it
+///     host/          the unpacked host package, with SHA256SUMS, SHA256SUMS.sig, its .files and
+///                    .release-tag (the tag it was published under) beside it, and each core
+///                    package the player added (the PS2 emulator, LRPS2) unpacked beside it
+///                    with its own .files
 ///     host.new/      a host being unpacked (RetroHostRelease.install)
+///     host.lrps2.new/ a core package being unpacked before it goes beside the host
+///                    (RetroHostRelease.addCore)
 ///     host.old/      the host it replaces, until it can be removed
 ///     .downloads/    files on their way, kept to carry on after a stop
 /// ```
@@ -111,8 +115,8 @@ public struct RetroHostStore: Sendable {
     /// The host to start, when its files are there; it is checked before each start (`check()`). A
     /// host left in `host.old` by a launcher stopped in the middle of putting a new one in place is
     /// put back first (`RetroHostRelease.restore`). Its `ps2Core` is the release's LRPS2 when the
-    /// release's `.files` lists one, and nil otherwise, even with a stray `pcsx2_libretro` file in
-    /// the folder.
+    /// player added the LRPS2 package and its `.files` lists it, and nil otherwise, even with a stray
+    /// `pcsx2_libretro` file in the folder.
     public func installed() -> RetroHostInstall? {
         guard let target = system else { return nil }
         RetroHostRelease.restore(folder)
@@ -127,6 +131,24 @@ public struct RetroHostStore: Sendable {
 
     /// The installed host's version as its SHA256SUMS names it, for showing; not checked.
     public var version: RetroHostVersion? { system.flatMap { RetroHostRelease.installedVersion(folder, system: $0) } }
+
+    /// The core packages added beside the installed host (`RetroHostRelease.installedCores`); not
+    /// checked.
+    public var installedCores: Set<RetroHostCorePackage> {
+        system.map { RetroHostRelease.installedCores(folder, system: $0) } ?? []
+    }
+
+    /// The core packages the installed host's release has for this system, so the player can add
+    /// them (`RetroHostRelease.offeredCores`); none for a release from before LRPS2 shipped, such as
+    /// 1.0.0. Not checked.
+    public var offeredCores: Set<RetroHostCorePackage> {
+        system.map { RetroHostRelease.offeredCores(folder, system: $0) } ?? []
+    }
+
+    /// The tag the installed host was published under, as kept beside it; nil without one.
+    public var installedTag: String? {
+        (try? Data(contentsOf: folder.appendingPathComponent(RetroHostRelease.tagName))).flatMap { String(data: $0, encoding: .utf8) }
+    }
 
     /// The checks before a start (`RetroHostRelease.checkBeforeStart`); the host's file stays held
     /// in the result until the host it starts has exited.
@@ -195,12 +217,15 @@ public struct RetroHostStore: Sendable {
     /// signature is checked and its files match the signed sums; `putInPlace` then installs it.
     ///
     /// The signature comes first: SHA256SUMS and SHA256SUMS.sig are fetched and checked before
-    /// anything else, with the version they sign held to the release's tag, and this system's zip
-    /// and `.files` are fetched against the digests the signed sums give them. A release without a
-    /// signature, or without files for this system, is not available; there is no way to take it
-    /// unsigned. A redirect from https to plain http is refused. Files fetched before a stop are
-    /// kept, so the next try carries on. Cancelling the calling task stops it.
-    public func fetch(_ release: RetroHostUpstreamRelease?, configuration: URLSessionConfiguration = .default,
+    /// anything else, with the version they sign held to the release's tag, and this system's host
+    /// package (its zip and `.files`) is fetched against the digests the signed sums give them, with
+    /// the package of each of `cores` the release has, so the core packages the player added move
+    /// with the host. A release without a signature, or without files for this system, is not
+    /// available; there is no way to take it unsigned. A redirect from https to plain http is
+    /// refused. Files fetched before a stop are kept, so the next try carries on. Cancelling the
+    /// calling task stops it.
+    public func fetch(_ release: RetroHostUpstreamRelease?, cores: Set<RetroHostCorePackage> = [],
+                      configuration: URLSessionConfiguration = .default,
                       progress: @escaping @Sendable (_ received: Int64, _ total: Int64) -> Void = { _, _ in }) async throws -> RetroHostDownload {
         guard let target = system else { throw RetroHostDownloadError(.notAvailable, "no emulator host is released for this system") }
         guard let release, let signatureFiles = release.signatureFiles else {
@@ -224,8 +249,20 @@ public struct RetroHostStore: Sendable {
             forget(download)
             throw RetroHostDownloadError(failure.notReleased ? .notAvailable : .signature, "\(release.tag): \(failure.message)")
         }
+        let names = [signed.filesName, signed.zipName] + RetroHostCorePackage.allCases
+            .filter { cores.contains($0) && signed.cores.contains($0) }
+            .flatMap { [$0.filesName(signed.version, target), $0.zipName(signed.version, target)] }
+        try await fetchAssets(release, names, into: download, sums: signed.sums, configuration: configuration, progress: progress)
+        return RetroHostDownload(folder: download, tag: release.tag)
+    }
+
+    /// Fetches `names` of `release` into `download`, each against its digest in `sums`, with one
+    /// progress for them all.
+    private func fetchAssets(_ release: RetroHostUpstreamRelease, _ names: [String], into download: URL, sums: ReleaseSigning.Sums,
+                             configuration: URLSessionConfiguration,
+                             progress: @escaping @Sendable (_ received: Int64, _ total: Int64) -> Void) async throws {
         var assets: [RetroHostAsset] = []
-        for name in [signed.filesName, signed.zipName] {
+        for name in names {
             guard let asset = release.named(name) else { throw RetroHostDownloadError(.notAvailable, "\(release.tag) has no \(name)") }
             assets.append(asset)
         }
@@ -233,13 +270,67 @@ public struct RetroHostStore: Sendable {
         var before: Int64 = 0
         for asset in assets {
             let start = before
-            try await Self.get(asset, into: download, sha256: signed.sums.digest(for: asset.name), configuration: configuration) { fraction in
+            try await Self.get(asset, into: download, sha256: sums.digest(for: asset.name), configuration: configuration) { fraction in
                 progress(start + Int64(Double(asset.size) * fraction), total)
             }
             before += asset.size
         }
         try Task.checkCancellation()
+    }
+
+    /// Downloads `core`'s package from `release`, which must be the installed host's own (its tag
+    /// the one kept beside the host), into `.downloads/<tag>-<core>`, and gives that folder;
+    /// `putCoreInPlace` then adds it. Its zip and `.files` are fetched against the digests of the
+    /// installed host's SHA256SUMS, whose signature and tag are checked first, so no other
+    /// release's package is taken. A release without that package is not available.
+    public func fetchCore(_ release: RetroHostUpstreamRelease?, _ core: RetroHostCorePackage,
+                          configuration: URLSessionConfiguration = .default,
+                          progress: @escaping @Sendable (_ received: Int64, _ total: Int64) -> Void = { _, _ in }) async throws -> RetroHostDownload {
+        guard let target = system else { throw RetroHostDownloadError(.notAvailable, "no emulator host is released for this system") }
+        let installed: RetroHostSignedRelease
+        do {
+            installed = try RetroHostRelease.installedRelease(folder, keys: keys, system: target)
+        } catch let failure as RetroHostReleaseFailure {
+            throw RetroHostDownloadError(.signature, "the installed host: \(failure.message)")
+        }
+        guard let release, release.tag == "v\(installed.version)" else {
+            throw RetroHostDownloadError(.notAvailable, "the release of host \(installed.version) was not found")
+        }
+        guard installed.cores.contains(core) else {
+            throw RetroHostDownloadError(.notAvailable, "\(release.tag) has no \(core.name) package")
+        }
+        let download = downloads.appendingPathComponent("\(release.tag)-\(core.name)")
+        try FileManager.default.createDirectory(at: download, withIntermediateDirectories: true)
+        try await fetchAssets(release, [core.filesName(installed.version, target), core.zipName(installed.version, target)],
+                              into: download, sums: installed.sums, configuration: configuration, progress: progress)
         return RetroHostDownload(folder: download, tag: release.tag)
+    }
+
+    /// Adds what `fetchCore` downloaded beside the installed host, through
+    /// `RetroHostRelease.addCore`, which checks it all again from the files on disk. Stop the host
+    /// first.
+    public func putCoreInPlace(_ download: RetroHostDownload, _ core: RetroHostCorePackage) async throws {
+        do {
+            try await RetroHostRelease.addCore(download.folder, into: folder, core, keys: keys, system: system)
+        } catch let failure as RetroHostReleaseFailure {
+            throw RetroHostDownloadError(.badLayout, failure.message)
+        } catch {
+            throw RetroHostDownloadError(.badLayout, "\(core.name) could not be written: \(error.localizedDescription)")
+        }
+        forget(download.folder)
+    }
+
+    /// Removes `core`'s package from beside the installed host (`RetroHostRelease.removeCore`).
+    /// Stop the host first.
+    public func removeCore(_ core: RetroHostCorePackage) throws {
+        guard let target = system else { return }
+        do {
+            try RetroHostRelease.removeCore(folder, core, keys: keys, system: target)
+        } catch let failure as RetroHostReleaseFailure {
+            throw RetroHostDownloadError(.badLayout, failure.message)
+        } catch {
+            throw RetroHostDownloadError(.badLayout, "\(core.name) could not be removed: \(error.localizedDescription)")
+        }
     }
 
     /// One file of a release into `folder`, going on from what an earlier try kept (and tried
@@ -275,12 +366,14 @@ public struct RetroHostStore: Sendable {
 
     /// Installs what `fetch` downloaded in place of the installed host, through
     /// `RetroHostRelease.install`, which checks it all again from the files on disk before it
-    /// unpacks, its signed version against the tag included; gives its version. Stop the host
-    /// first.
-    public func putInPlace(_ download: RetroHostDownload) async throws -> RetroHostVersion {
+    /// unpacks, its signed version against the tag included; gives its version. Each of `cores` the
+    /// new release has is put in place in the same step; one it lacks is gone afterwards. Stop the
+    /// host first.
+    public func putInPlace(_ download: RetroHostDownload, cores: Set<RetroHostCorePackage> = []) async throws -> RetroHostVersion {
         let version: RetroHostVersion
         do {
-            version = try await RetroHostRelease.install(download.folder, into: folder, tag: download.tag, keys: keys, system: system)
+            version = try await RetroHostRelease.install(download.folder, into: folder, tag: download.tag, keys: keys, system: system,
+                                                         cores: cores)
         } catch let failure as RetroHostReleaseFailure {
             throw RetroHostDownloadError(.badLayout, failure.message)
         } catch {

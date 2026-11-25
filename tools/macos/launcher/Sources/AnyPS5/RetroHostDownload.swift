@@ -4,8 +4,9 @@ import Foundation
 /// The PS1 emulator host as a managed download, as on Windows and Linux (AnyPS5 Desktop's
 /// lib/ui/retro_host/retro_host_download_model.dart): Settings › Emulators offers it from the host
 /// repository's signed releases, the player selects it to download or update it, and it is
-/// checked on download and before every game (`RetroHostStore`). A debug build that runs the host
-/// `ANYPS5_RETRO_HOST` names offers none.
+/// checked on download and before every game (`RetroHostStore`). The PS2 emulator is a download of
+/// its own from the same release (`ps2`), which moves with the host. A debug build that runs the
+/// host `ANYPS5_RETRO_HOST` names offers none.
 @MainActor
 final class RetroHostDownloads {
     /// How far a download is: looking for the release, fetching its files, or checking them.
@@ -18,11 +19,13 @@ final class RetroHostDownloads {
         var fraction: Double { total > 0 ? min(1, Double(received) / Double(total)) : (phase == .checking ? 1 : 0) }
     }
 
-    private unowned let app: AppModel
+    unowned let app: AppModel
     let store: RetroHostStore
+    /// The PS2 emulator, LRPS2, added beside the installed host from its release.
+    private(set) lazy var ps2 = RetroHostCoreDownloads(host: self, core: .lrps2)
     /// Where the host's releases are read; nil where none can be (the tests, unless they give one).
-    private let releases: (@Sendable () async throws -> [RetroHostUpstreamRelease])?
-    private let configuration: URLSessionConfiguration
+    let releases: (@Sendable () async throws -> [RetroHostUpstreamRelease])?
+    let configuration: URLSessionConfiguration
 
     init(app: AppModel, store: RetroHostStore, releases: (@Sendable () async throws -> [RetroHostUpstreamRelease])?,
          configuration: URLSessionConfiguration) {
@@ -36,20 +39,26 @@ final class RetroHostDownloads {
     /// The installed host to start, as `RetroHostStore.installed()` last found it; checked before
     /// each start all the same.
     private(set) var installed: RetroHostInstall?
-    /// The installed host's version, for its row.
-    private var version: RetroHostVersion?
+    /// The installed host's version, for its rows.
+    private(set) var version: RetroHostVersion?
+    /// The core packages added beside the installed host, and those its release has, as the last
+    /// look found them (`RetroHostStore.installedCores`, `RetroHostStore.offeredCores`).
+    private(set) var installedCores: Set<RetroHostCorePackage> = []
+    private(set) var offeredCores: Set<RetroHostCorePackage> = []
 
     /// Reads the installed host from disk: when the model is made, and again only when its folder
-    /// may have changed (a new host put in place, or the installed one failing its check), not on
-    /// every play or Settings row.
+    /// may have changed (a new host put in place, a core package added or removed, or the installed
+    /// one failing its check), not on every play or Settings row.
     private func look() {
         installed = store.installed()
         version = installed == nil ? nil : store.version
+        installedCores = installed == nil ? [] : store.installedCores
+        offeredCores = installed == nil ? [] : store.offeredCores
     }
 
     /// `look()` once the model is made: where the host gained or lost LRPS2, the library is scanned
     /// again, as it lists PS2 cue sheets only while the host plays PS2 discs.
-    private func lookAgain() {
+    func lookAgain() {
         let ps2 = installed?.ps2Core != nil
         look()
         if (installed?.ps2Core != nil) != ps2, app.listsRetroGames {
@@ -66,14 +75,15 @@ final class RetroHostDownloads {
     private(set) var progress: Progress?
     private var task: Task<Void, Never>?
     var downloading: Bool { task != nil }
-    /// The new host is being put in place of the old: no host may start until it is. Set by the
-    /// download; the tests set it by hand.
+    /// The new host is being put in place of the old, or a core package is being added or removed:
+    /// no host may start until it is. Set by the download; the tests set it by hand.
     var installing = false
     /// The checked files are being written over the old host's: past the point of stopping, so the
     /// row no longer offers it (`cancel()` does nothing).
     private(set) var placing = false
     private var starts = 0
-    private var closed = false
+    /// The launcher is going (`close()`).
+    private(set) var closed = false
     /// The last half percent of the download the row was drawn at.
     private var shownStep = -1
 
@@ -104,12 +114,12 @@ final class RetroHostDownloads {
     }
 
     /// A game plays in a host, or one is starting.
-    private var hostInUse: Bool { starts > 0 || app.retroPlay != nil }
+    var hostInUse: Bool { starts > 0 || app.retroPlay != nil }
 
     /// Downloads the newest signed host, or a newer one than the installed host, checks it and puts
     /// it in place. Runs only when the player selected it; said to the player however it ends.
     func download() {
-        guard task == nil, !closed, let releases, store.system != nil else { return }
+        guard task == nil, !ps2.busy, !closed, let releases, store.system != nil else { return }
         if hostInUse { return app.show(TRetro.text(.retroHostDownloadCloseGame), symbol: "opticaldisc") }
         error = nil
         notYet = false
@@ -127,6 +137,7 @@ final class RetroHostDownloads {
             app.objectWillChange.send()
         }
         let before = store.version
+        let cores = store.installedCores
         do {
             let release = RetroHostStore.newest(try await releases())
             let offered = release.flatMap { RetroHostVersion($0.version) }
@@ -136,7 +147,7 @@ final class RetroHostDownloads {
             try Task.checkCancellation()
             let store = self.store
             shownStep = -1
-            let download = try await store.fetch(release, configuration: configuration) { received, total in
+            let download = try await store.fetch(release, cores: cores, configuration: configuration) { received, total in
                 Task { @MainActor [weak self] in
                     guard let self, self.task != nil, !self.placing else { return }
                     self.progress = Progress(phase: .download, received: received, total: total)
@@ -161,7 +172,7 @@ final class RetroHostDownloads {
             app.objectWillChange.send()
             let version: RetroHostVersion
             do {
-                version = try await store.putInPlace(download)
+                version = try await store.putInPlace(download, cores: cores)
             } catch {
                 lookAgain()
                 throw error
@@ -171,7 +182,8 @@ final class RetroHostDownloads {
             // The first host installed turns PS1 games in the host on: the player asked for it.
             if before == nil { app.setRetroHostPs1(true) }
             Sounds.shared.play(.unlocked)
-            app.show(TRetro.format(.retroHostReady, "\(version)"), symbol: "checkmark.circle.fill")
+            let dropped = cores.subtracting(store.installedCores)
+            app.show(TRetro.format(dropped.contains(.lrps2) ? .retroHostPs2Dropped : .retroHostReady, "\(version)"), symbol: "checkmark.circle.fill")
         } catch let failure as RetroHostDownloadError {
             switch failure.kind {
             case .cancelled:
@@ -211,6 +223,7 @@ final class RetroHostDownloads {
     func close() {
         closed = true
         cancel()
+        ps2.cancel()
     }
 
     /// Settings › Emulators' row for the download: one select to download the host, then how it
@@ -219,24 +232,9 @@ final class RetroHostDownloads {
     func rows(uncheckedHost: Bool) -> [PanelRow] {
         guard offered, !uncheckedHost else { return [] }
         if downloading {
-            let now = progress
-            let detail: String
-            if placing {
-                detail = TRetro.text(.retroHostChecking)
-            } else {
-                let step: String
-                switch now?.phase {
-                case .download where (now?.total ?? 0) > 0:
-                    step = TFiles.format(.filesProgress, (now?.received ?? 0).byteText, (now?.total ?? 0).byteText)
-                case .checking:
-                    step = TRetro.text(.retroHostChecking)
-                default:
-                    step = TRetro.text(.retroHostLooking)
-                }
-                detail = TRetro.format(.retroHostProgress, step)
-            }
-            return [PanelRow(id: "retro-host-download", title: TRetro.format(.retroHostDownloading, Int((now?.fraction ?? 0) * 100)),
-                             detail: detail, symbol: "arrow.down.circle", kind: .action(destructive: false) { [weak self] in self?.cancel() })]
+            return [Self.progressRow(id: "retro-host-download", title: .retroHostDownloading, progress: progress, placing: placing) { [weak self] in
+                self?.cancel()
+            }]
         }
         let detail: String
         if broken != nil {
@@ -253,14 +251,39 @@ final class RetroHostDownloads {
                          symbol: version == nil || broken != nil ? "arrow.down.circle" : "checkmark.seal",
                          kind: .action(destructive: false) { [weak self] in self?.download() })]
     }
+
+    /// A Settings › Emulators row for an emulator download under way, the host's or a core
+    /// package's: `title` (a text with the percentage) and how far it is, selected to stop it
+    /// (`cancel`) until its files are `placing`, past the point of stopping.
+    static func progressRow(id: String, title: TRetro.Key, progress: Progress?, placing: Bool,
+                            cancel: @escaping () -> Void) -> PanelRow {
+        let detail: String
+        if placing {
+            detail = TRetro.text(.retroHostChecking)
+        } else {
+            let step: String
+            switch progress?.phase {
+            case .download where (progress?.total ?? 0) > 0:
+                step = TFiles.format(.filesProgress, (progress?.received ?? 0).byteText, (progress?.total ?? 0).byteText)
+            case .checking:
+                step = TRetro.text(.retroHostChecking)
+            default:
+                step = TRetro.text(.retroHostLooking)
+            }
+            detail = TRetro.format(.retroHostProgress, step)
+        }
+        return PanelRow(id: id, title: TRetro.format(title, Int((progress?.fraction ?? 0) * 100)), detail: detail,
+                        symbol: "arrow.down.circle", kind: .action(destructive: false) { cancel() })
+    }
 }
 
 extension AppModel {
-    /// Settings › Emulators' rows for the emulator host: its download, or the notice that this
+    /// Settings › Emulators' rows for the emulator host: its download and, beside it, the PS2
+    /// emulator's download where the installed host's release has one, or the notice that this
     /// build runs an unchecked host, as on Windows and Linux.
     func retroHostSettingsRows() -> [PanelRow] {
         let unchecked = retroHostUnchecked != nil
-        var rows = retroHostDownload.rows(uncheckedHost: unchecked)
+        var rows = retroHostDownload.rows(uncheckedHost: unchecked) + retroHostDownload.ps2.rows(uncheckedHost: unchecked)
         if unchecked {
             rows.append(PanelRow(id: "retro-host-unchecked", title: TRetro.text(.retroHostUnchecked),
                                  detail: TRetro.text(.retroHostUncheckedDetail), symbol: "flask", kind: .info(""), wraps: true))

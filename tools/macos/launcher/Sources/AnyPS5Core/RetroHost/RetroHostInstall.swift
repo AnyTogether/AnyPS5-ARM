@@ -4,8 +4,9 @@ import Foundation
 /// launcher downloaded (`RetroHostStore.installed()`), checked before each start, or in a debug
 /// build (`RetroHostLocator`) the host `ANYPS5_RETRO_HOST` names (`locate`), which is not. As on
 /// Windows and Linux (AnyPS5 Desktop's lib/core/retro_host/retro_host_install.dart). The core is
-/// the SwanStation library beside the host, as a host release's zip holds the two. A host release
-/// with the `ps2` capability has LRPS2 beside them too, and so may an unchecked host: `ps2Core`.
+/// the SwanStation library beside the host, as a host package's zip holds the two. LRPS2 is beside
+/// them once the player added the release's LRPS2 package (protocol.md "Finding and checking the
+/// host", core packages), and may be beside an unchecked host: that is `ps2Core`.
 public struct RetroHostInstall: Equatable, Sendable {
     /// The environment variable that names the host in a debug build.
     public static let variable = "ANYPS5_RETRO_HOST"
@@ -14,7 +15,8 @@ public struct RetroHostInstall: Equatable, Sendable {
     public let host: String
     /// The SwanStation library, given to the host in `start`.
     public let core: String
-    /// The LRPS2 library a PS2 game is started with, or nil when this host has none beside it.
+    /// The LRPS2 library a PS2 game is started with, or nil when this host has none beside it: a
+    /// signed host whose LRPS2 package is not added, or an unchecked host built without it.
     public let ps2Core: String?
     /// A signed release's host: its files are checked before each start and held until the host
     /// has exited (`RetroHostStore.check()`, `RetroHostClient.start(checked:)`). False for the host

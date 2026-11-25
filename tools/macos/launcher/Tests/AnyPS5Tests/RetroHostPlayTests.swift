@@ -174,9 +174,20 @@ final class FakePlayHost: RetroHostSession, @unchecked Sendable {
 
     func input(port: Int, buttons: Int, leftX: Int, leftY: Int, rightX: Int, rightY: Int) {}
 
+    private var exits = true
+    /// Whether the host exits as soon as it is asked to shut down; when false it exits only once
+    /// `finish` is called, as a host still writing its files does.
+    var exitsOnShutdown: Bool {
+        get { locked { exits } }
+        set { locked { exits = newValue } }
+    }
+
     func shutdown() {
-        locked { shutdowns += 1 }
-        finish(.clean)
+        let exitsNow: Bool = locked {
+            shutdowns += 1
+            return exits
+        }
+        if exitsNow { finish(.clean) }
     }
 
     func close() async {}

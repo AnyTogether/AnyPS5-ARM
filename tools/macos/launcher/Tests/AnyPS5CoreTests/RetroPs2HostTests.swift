@@ -5,8 +5,8 @@ import XCTest
 /// PS2 games through the emulator host, as on Windows and Linux (AnyPS5 Desktop's
 /// test/core/retro_library_test.dart and retro_host_release_test.dart after #171): the PS2 disc
 /// kinds the host takes, the PS2 cue sheet listed only while the host plays PS2 discs, and the
-/// signed release with LRPS2 beside the host (Fixtures/RetroHostReleasePs2, Desktop's
-/// test/fixtures/retro_host_release_ps2), checked with the others.
+/// signed release whose LRPS2 package was added beside the host (Fixtures/RetroHostReleaseLrps2,
+/// Desktop's test/fixtures/retro_host_release_lrps2), checked with the others.
 final class RetroPs2HostTests: XCTestCase {
     private var base: URL!
 
@@ -70,11 +70,9 @@ final class RetroPs2HostTests: XCTestCase {
 
     // MARK: The signed release with LRPS2
 
-    private static let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/RetroHostReleasePs2")
-
     func testTheReleaseWithLrps2ChecksItWithTheOthersAndOffersIt() async throws {
         let host = base.appendingPathComponent("RetroHost/host")
-        _ = try await RetroHostRelease.install(Self.fixture, into: host, tag: "v1.0.0", keys: RetroHostReleaseFixture.keys, system: .macosArm64)
+        try await RetroHostReleaseFixture.installLrps2(into: host)
         XCTAssertTrue(RetroHostRelease.installedHasPs2Core(host, system: .macosArm64))
         let store = RetroHostStore(root: base.appendingPathComponent("RetroHost"), keys: RetroHostReleaseFixture.keys, system: .macosArm64)
         XCTAssertEqual(store.installed()?.ps2Core, host.appendingPathComponent("pcsx2_libretro.dylib").path)
