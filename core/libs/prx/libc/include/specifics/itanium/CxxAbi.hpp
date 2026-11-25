@@ -15,7 +15,18 @@ extern "C" int __cxa_thread_atexit(void (*)(void*), void*, void*) noexcept;
 namespace __cxxabiv1 {
 class __class_type_info : public std::type_info {
 public:
-    enum __sub_kind { __unknown = 0 };
+    // libc++abi declares no __sub_kind; these are libstdc++'s values (libsupc++/cxxabi.h), which
+    // the exception runtime's RTTI cast callbacks (Runtime.cpp) use for access paths.
+    enum __sub_kind {
+        __unknown = 0,
+        __not_contained,
+        __contained_ambig,
+        __contained_virtual_mask = 0x1,
+        __contained_public_mask = 0x2,
+        __contained_mask = 1 << 2,
+        __contained_private = __contained_mask,
+        __contained_public = __contained_mask | __contained_public_mask
+    };
     struct __upcast_result;
     struct __dyncast_result;
 };
