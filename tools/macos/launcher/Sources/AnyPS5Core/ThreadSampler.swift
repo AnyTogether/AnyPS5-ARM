@@ -60,7 +60,8 @@ public struct ThreadSampler: Sendable {
         let bottom = stackBottom, top = stackTop
         var count = 0
 
-        guard thread_suspend(thread) == KERN_SUCCESS else { return nil }
+        // A thread that held itself would never be let go.
+        guard thread != pthread_mach_thread_np(pthread_self()), thread_suspend(thread) == KERN_SUCCESS else { return nil }
         if thread_get_state(thread, flavor, words, &stateCount) == KERN_SUCCESS {
             let pc = raw.load(fromByteOffset: pcAt, as: UInt.self) & mask
             let lr = raw.load(fromByteOffset: lrAt, as: UInt.self) & mask
