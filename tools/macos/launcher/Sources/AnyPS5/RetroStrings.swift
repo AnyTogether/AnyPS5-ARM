@@ -34,6 +34,11 @@ enum TRetro {
         // PS2 games in the emulator host, where it has LRPS2 beside it.
         case retroHostPs2, retroHostPs2Detail, retroHostPs2BiosFolder, retroHostPs2BiosFolderDetail
         case retroHostPs2BiosDetail, retroHostNoPs2Detail
+        // The PS2 emulator as a download of its own beside the host (RetroHostCoreDownload.swift).
+        case retroHostPs2Download, retroHostPs2DownloadDetail, retroHostPs2Installed, retroHostPs2InstalledDetail
+        case retroHostPs2Downloading, retroHostPs2NotYet, retroHostPs2DownloadFailed, retroHostPs2Ready
+        case retroHostPs2Remove, retroHostPs2RemoveDetail, retroHostPs2Removed, retroHostPs2Dropped
+        case retroHostPs2RemoveFailed, retroHostPs2CloseGame
         // Save states in the game's menu, where the host lists `saveStates` (RetroHostPlay.swift).
         case retroMenuSaveState, retroMenuSaveStateDetail, retroMenuLoadState, retroMenuLoadStateDetail
         case retroMenuLoadStatePs1Detail, retroMenuNoStatesDetail, retroStateSlot, retroStateEmpty

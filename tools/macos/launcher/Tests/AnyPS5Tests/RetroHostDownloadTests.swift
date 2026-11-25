@@ -11,6 +11,8 @@ final class RetroHostTestGitHub: URLProtocol, @unchecked Sendable {
     static let api = URL(string: "https://api.github.example")!
 
     static func reset() { lock.withLock { files = [:]; asked = [] } }
+    /// `data` answered at `url`.
+    static func store(_ data: Data, at url: String) { lock.withLock { files[url] = data } }
     static var requests: [String] { lock.withLock { asked } }
 
     /// The recorded signed release (AnyPS5CoreTests/Fixtures/RetroHostRelease) under v1.0.0, or no

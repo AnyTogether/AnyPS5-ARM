@@ -12,6 +12,16 @@ enum RetroHostReleaseFixture {
     static let folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .appendingPathComponent("../Fixtures/RetroHostRelease").standardized
     static let version = "1.0.0"
+    /// A host release that ships LRPS2 in a package of its own, recorded in
+    /// Fixtures/RetroHostReleaseLrps2 (the same files as AnyPS5 Desktop's
+    /// test/fixtures/retro_host_release_lrps2): for each system the host package and the LRPS2
+    /// package (`…-<system>-lrps2.zip` and `.files`), packed by the host repository's
+    /// tools/package_release.py from host PR #22 and passing its `--check`, SHA256SUMS from its
+    /// `--sums`, signed by the fixture key. It has no source archive.
+    static let lrps2Folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("../Fixtures/RetroHostReleaseLrps2").standardized
+    /// The version the release with LRPS2 was packed as: adding a core is a minor version.
+    static let lrps2Version = "1.1.0"
 
     /// The fixture key's public half: the only key its release passes.
     static var keys: [ReleaseSigning.Key] {
@@ -42,20 +52,31 @@ enum RetroHostReleaseFixture {
     }
 
     /// The release's files by name, as published: those SHA256SUMS lists, SHA256SUMS and its
-    /// signature. With another `version`, the same files named for it and signed again by the
-    /// fixture key, as the host repository would publish a newer release of them.
-    static func files(version: String = version) throws -> [String: Data] {
-        let sums = try Data(contentsOf: folder.appendingPathComponent(ReleaseSigning.sumsName))
+    /// signature; with `ps2`, the release with the LRPS2 package (`lrps2Folder`). With another
+    /// `version`, the same files named for it and signed again by the fixture key, as the host
+    /// repository would publish a newer release of them.
+    static func files(version: String? = nil, ps2: Bool = false) throws -> [String: Data] {
+        let source = ps2 ? lrps2Folder : folder
+        let recorded = ps2 ? lrps2Version : Self.version
+        let version = version ?? recorded
+        let sums = try Data(contentsOf: source.appendingPathComponent(ReleaseSigning.sumsName))
         var files: [String: Data] = [:]
         for name in try ReleaseSigning.parseSums(sums).keys {
-            files[name.replacingOccurrences(of: "anyps5-retro-host-\(Self.version)-", with: "anyps5-retro-host-\(version)-")] =
-                try Data(contentsOf: folder.appendingPathComponent(name))
+            files[name.replacingOccurrences(of: "anyps5-retro-host-\(recorded)-", with: "anyps5-retro-host-\(version)-")] =
+                try Data(contentsOf: source.appendingPathComponent(name))
         }
-        let signedSums = version == Self.version ? sums : Self.sums(files)
+        let signedSums = version == recorded ? sums : Self.sums(files)
         files[ReleaseSigning.sumsName] = signedSums
-        files[ReleaseSigning.signatureName] = version == Self.version
-            ? try Data(contentsOf: folder.appendingPathComponent(ReleaseSigning.signatureName)) : try signature(signedSums)
+        files[ReleaseSigning.signatureName] = version == recorded
+            ? try Data(contentsOf: source.appendingPathComponent(ReleaseSigning.signatureName)) : try signature(signedSums)
         return files
+    }
+
+    /// The release with LRPS2 unpacked into `into` as a download leaves it, for `system`, that
+    /// package added beside the host too unless `addPs2` is false.
+    static func installLrps2(into: URL, system: RetroHostSystem = .macosArm64, addPs2: Bool = true) async throws {
+        _ = try await RetroHostRelease.install(lrps2Folder, into: into, tag: "v\(lrps2Version)", keys: keys, system: system,
+                                               cores: addPs2 ? [.lrps2] : [])
     }
 
     /// Writes `files` into a new folder of `parent`.

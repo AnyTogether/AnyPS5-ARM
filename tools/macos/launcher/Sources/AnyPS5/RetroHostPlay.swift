@@ -163,7 +163,9 @@ extension AppModel {
         scheduleRetroHostCheck()
     }
 
-    /// Settings › Emulators' rows of the host once one is found: the setting and the BIOS folder.
+    /// Settings › Emulators' rows of the host once one is found: the setting and the BIOS folder;
+    /// then the same two for PS2 where the host has LRPS2 beside it, with the row that removes the
+    /// PS2 emulator.
     func retroHostPlayRows() -> [PanelRow] {
         guard retroHostInstall != nil else { return [] }
         var rows = [PanelRow(id: "retro-host-ps1", title: TRetro.text(.retroHostPs1), detail: TRetro.text(.retroHostPs1Detail), symbol: "opticaldisc",
@@ -180,7 +182,7 @@ extension AppModel {
             rows.append(PanelRow(id: "retro-host-ps2-bios", title: TRetro.text(.retroHostPs2BiosFolder), detail: TRetro.text(.retroHostPs2BiosFolderDetail),
                                  symbol: "folder", kind: .action(destructive: false) { [weak self] in self?.openRetroBiosFolder(ps2: true) }))
         }
-        return rows
+        return rows + retroHostDownload.ps2.removeRows(uncheckedHost: retroHostUnchecked != nil)
     }
 
     /// Where the host looks for the PS1 BIOS: retro/system in the launcher's own folder.
