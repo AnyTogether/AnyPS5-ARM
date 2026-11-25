@@ -87,6 +87,7 @@ struct OpenFile {
 struct Descriptors {
     std::mutex mutex;
     std::map<int, std::shared_ptr<OpenFile>> files;
+    std::map<int, AppArchiveNode> materialized;
 };
 
 Descriptors& OpenDescriptors() {
@@ -222,20 +223,45 @@ void AppArchiveAttach_nid_no_patch(int descriptor, const AppArchiveNode& node) {
     if (node.Directory) throw std::invalid_argument("AppArchiveAttach: descriptor " + std::to_string(descriptor) + " cannot hold an app0.zar directory");
     auto file = std::make_shared<OpenFile>();
     file->node = node;
-    std::lock_guard lock(OpenDescriptors().mutex);
-    OpenDescriptors().files[descriptor] = std::move(file);
+    auto& descriptors = OpenDescriptors();
+    std::lock_guard lock(descriptors.mutex);
+    descriptors.files[descriptor] = std::move(file);
+    descriptors.materialized.erase(descriptor);
+}
+
+void AppArchiveAttachMaterialized_nid_no_patch(int descriptor, const AppArchiveNode& node) {
+    if (node.Directory) throw std::invalid_argument("AppArchiveAttachMaterialized: descriptor " + std::to_string(descriptor) + " cannot hold an app0.zar directory");
+    auto& descriptors = OpenDescriptors();
+    std::lock_guard lock(descriptors.mutex);
+    descriptors.files.erase(descriptor);
+    descriptors.materialized[descriptor] = node;
+}
+
+bool AppArchiveMaterializedDescriptor_nid_no_patch(int descriptor, AppArchiveNode* node) {
+    auto& descriptors = OpenDescriptors();
+    std::lock_guard lock(descriptors.mutex);
+    const auto found = descriptors.materialized.find(descriptor);
+    if (found == descriptors.materialized.end()) return false;
+    if (node != nullptr) *node = found->second;
+    return true;
 }
 
 void AppArchiveShare_nid_no_patch(int from, int to) {
-    std::lock_guard lock(OpenDescriptors().mutex);
-    const auto found = OpenDescriptors().files.find(from);
-    if (found == OpenDescriptors().files.end()) OpenDescriptors().files.erase(to);
-    else OpenDescriptors().files[to] = found->second;
+    auto& descriptors = OpenDescriptors();
+    std::lock_guard lock(descriptors.mutex);
+    const auto found = descriptors.files.find(from);
+    if (found == descriptors.files.end()) descriptors.files.erase(to);
+    else descriptors.files[to] = found->second;
+    const auto materialized = descriptors.materialized.find(from);
+    if (materialized == descriptors.materialized.end()) descriptors.materialized.erase(to);
+    else descriptors.materialized[to] = materialized->second;
 }
 
 void AppArchiveDetach_nid_no_patch(int descriptor) {
-    std::lock_guard lock(OpenDescriptors().mutex);
-    OpenDescriptors().files.erase(descriptor);
+    auto& descriptors = OpenDescriptors();
+    std::lock_guard lock(descriptors.mutex);
+    descriptors.files.erase(descriptor);
+    descriptors.materialized.erase(descriptor);
 }
 
 bool AppArchiveDescriptor_nid_no_patch(int descriptor, AppArchiveNode* node, std::uint64_t* position) {

@@ -533,9 +533,7 @@ int APS5_VABI sceNpGetGamePresenceStatusA(int userId, uint32_t* status) {
     call.Args([&](Online::Fields& in) { in.Int("userId", static_cast<std::int64_t>(userId)).Ptr("status", status); });
     if (!status || userId == USER_SERVICE_USER_ID_INVALID) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
     const uint32_t presence = NP_GAME_PRESENCE_STATUS_OFFLINE;
-    const int savedErrno = errno;
     const bool copied = GuestCopyOut_nid_no_patch(status, &presence, sizeof(presence));
-    errno = savedErrno;
     if (!copied) return call.Return(SCE_NP_ERROR_INVALID_ARGUMENT);
     return call.Return(0);
 }
@@ -1535,9 +1533,7 @@ int APS5_VABI sceNpGetSandboxInfo(void* sandbox_info) {
     std::array<char, 0x50> localInfo{};
     std::memcpy(localInfo.data(), Platform, sizeof(Platform));
     std::memcpy(localInfo.data() + 0x28, Environment, sizeof(Environment));
-    const int savedErrno = errno;
     const bool copied = GuestCopyOut_nid_no_patch(sandbox_info, localInfo.data(), localInfo.size());
-    errno = savedErrno;
     if (!copied) return SCE_NP_ERROR_INVALID_ARGUMENT;
     return 0;
 }

@@ -505,9 +505,9 @@ void PadInput::applyOutput(Controller& pad, const PadOutputState& outputState, i
     }
 }
 
-void PadInput::applyMappingSnapshot() {
+bool PadInput::applyMappingSnapshot() {
     auto snapshot = mappings.Snapshot();
-    if (snapshot == appliedMapping) return;
+    if (snapshot == appliedMapping) return false;
     appliedMapping = snapshot;
     keyboardMouse.Replace(*snapshot);
     // publish() sends each controller's aimed state, so it is redone from the newly mapped one.
@@ -516,6 +516,7 @@ void PadInput::applyMappingSnapshot() {
         controller.aimed = aimed(controller.aim, controller.aimedAt, controller.state);
     }
     static_cast<void>(keyboardMouse.PadChordRequests(firstPlayerControllerButtons()));
+    return true;
 }
 
 // Upstream's pad chords read its slot 0 controller; here the controllers that drive the first player
@@ -626,7 +627,7 @@ PadInputState PadInput::sampleController(SDL_GameController* controller) const {
 }
 
 void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
-    applyMappingSnapshot();
+    if (applyMappingSnapshot()) publish(window.FrameNumber());
     if (event.type == SDL_CONTROLLERDEVICEADDED) {
         openController(event.cdevice.which);
         return;
@@ -639,7 +640,9 @@ void PadInput::HandleEvent(const SDL_Event& event, DisplayWindow& window) {
     if (event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERBUTTONUP ||
         event.type == SDL_CONTROLLERAXISMOTION || event.type == SDL_CONTROLLERDEVICEREMAPPED) {
         sampleControllers();
-        if (event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERBUTTONUP) dispatchPadChords(window);
+        const bool trigger = event.type == SDL_CONTROLLERAXISMOTION &&
+            (event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERLEFT || event.caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+        if (event.type == SDL_CONTROLLERBUTTONDOWN || event.type == SDL_CONTROLLERBUTTONUP || trigger) dispatchPadChords(window);
         publish(window.FrameNumber());
         return;
     }
@@ -772,8 +775,8 @@ void PadInput::type(const RemotePad::TypedText& text) {
 }
 
 void PadInput::dispatchPadChords(DisplayWindow& window) {
-    if (ImeCapturesPad_nid_postfix() || ModalDialogCapturesInput_nid_postfix()) return;
     const auto requests = keyboardMouse.PadChordRequests(firstPlayerControllerButtons());
+    if (ImeCapturesPad_nid_postfix() || ModalDialogCapturesInput_nid_postfix()) return;
     const bool focused = window.Handle() != nullptr && SDL_GetKeyboardFocus() == window.Handle();
     applyRequests(requests, focused, window);
 }
@@ -794,7 +797,7 @@ void PadInput::applyRequests(const Pad::InputRequests& requests, bool windowFocu
 }
 
 void PadInput::Update(const DisplayWindow& window) {
-    applyMappingSnapshot();
+    const bool mappingChanged = applyMappingSnapshot();
     if (!hostFocusSynced && window.Handle() != nullptr) {
         hostFocusSynced = true;
         HostVolume volume;
@@ -832,7 +835,9 @@ void PadInput::Update(const DisplayWindow& window) {
     const bool changed = keyboardMouse.Advance(std::chrono::steady_clock::now());
     const bool captured = ImeCapturesPad_nid_postfix() || ModalDialogCapturesInput_nid_postfix();
     const bool captureChanged = std::exchange(padCaptured, captured) != captured;
-    if (!controllers.empty() || keyboardMouse.MouseMode() || changed || captured || captureChanged) publish(window.FrameNumber());
+    if (!controllers.empty() || keyboardMouse.MouseMode() || changed || captured || captureChanged || mappingChanged) {
+        publish(window.FrameNumber());
+    }
 }
 
 // While the on-screen keyboard (ImeCapturesPad) or a system dialog (ModalDialogCapturesInput) reads
