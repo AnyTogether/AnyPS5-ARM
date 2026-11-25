@@ -79,16 +79,33 @@ final class LauncherHealthTests: XCTestCase {
     func testTheWatchdogWritesAStallThatNeverEndsThenItsLength() throws {
         let health = health(pid: 100)
         _ = health.start()
-        let watch = StallWatch(health: health, started: Date(), limit: 0.3, interval: 0.05)
+        // The main thread (this test's) is what it samples: it waits in Thread.sleep below.
+        let watch = StallWatch(health: health, started: Date(), limit: 0.3, interval: 0.05, every: 0.1)
         watch.ping(watching: true, lines: ["20:00:01 Home"], error: nil)
         let file = health.problemFile
-        let deadline = Date().addingTimeInterval(5)
-        while !FileManager.default.fileExists(atPath: file.path) && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
-        let stuck = try JSONDecoder.health.decode(LauncherProblem.self, from: Data(contentsOf: file))
+        func written(_ awaited: (LauncherProblem) -> Bool) -> LauncherProblem? {
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline {
+                if let found = try? JSONDecoder.health.decode(LauncherProblem.self, from: Data(contentsOf: file)), awaited(found) { return found }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            return nil
+        }
+        // The main thread is stuck in this sleep when the watchdog samples it, 0.3 s in.
+        Thread.sleep(forTimeInterval: 1)
+        let stuck = try XCTUnwrap(written { _ in true })
         XCTAssertEqual(stuck.kind, .hang)
         XCTAssertNotEqual(stuck.recovered, true, "written while the interface is still stuck")
         XCTAssertEqual(stuck.lines, ["20:00:01 Home"])
-        Thread.sleep(forTimeInterval: 0.2)
+        // The frames are named off the watchdog's queue, then written.
+        let named = try XCTUnwrap(written { $0.thread?.contains(ThreadSampler.stackHeading) == true }, "the named frames were written")
+        let frames = named.thread ?? []
+        XCTAssertTrue(frames.first?.hasPrefix("Sampled 0 s into the freeze: waiting, not on the CPU (") == true, frames.joined(separator: "\n"))
+        XCTAssertTrue(frames[2].hasPrefix("0  libsystem_kernel.dylib"), frames.joined(separator: "\n"))
+        XCTAssertTrue(frames.contains { $0.contains("PackageTests") || $0.contains("LauncherHealthTests") }, "down to this test: \(frames.joined(separator: "\n"))")
+        // Still stuck: its length so far is written again, for a run that never comes out of it.
+        let longer = try XCTUnwrap(written { ($0.stalledMs ?? 0) >= 600 && $0.recovered != true }, "the length while it lasts")
+        XCTAssertEqual(longer.thread?.first, named.thread?.first, "the sample stays")
         watch.ping(watching: true, lines: nil, error: nil)
         var ended = stuck
         let until = Date().addingTimeInterval(5)
@@ -97,7 +114,8 @@ final class LauncherHealthTests: XCTestCase {
             ended = try JSONDecoder.health.decode(LauncherProblem.self, from: Data(contentsOf: file))
         }
         XCTAssertEqual(ended.recovered, true)
-        XCTAssertGreaterThanOrEqual(ended.stalledFor ?? 0, 0.3)
+        XCTAssertGreaterThanOrEqual(ended.stalledFor ?? 0, 0.6)
+        XCTAssertEqual(ended.thread, longer.thread, "the sample stays when it recovers")
         watch.closing()
     }
 
@@ -136,6 +154,7 @@ final class LauncherHealthTests: XCTestCase {
         let system = SystemInfo(model: "Mac15,7", chip: "Apple M3 Pro", memoryGB: 18, macOS: "15.6 (24G84)", displayHz: 120)
         let draft = IssueDraft.launcherProblem(problem, system: system, privacy: ReportPrivacy(home: "/Users/ada", names: ["ada", "ada's Mac"]))
         XCTAssertEqual(draft.title, "Launcher stopped responding (12s)")
+        XCTAssertTrue(draft.fields[0].value.hasPrefix("The interface did not answer for 12 s from 2026-09-21 14:13:20 UTC, then recovered by itself."), draft.fields[0].value)
         XCTAssertTrue(draft.url.absoluteString.hasPrefix("https://github.com/\(IssueDraft.launcherRepository)/issues/new?template=launcher_crash.yml"))
         XCTAssertLessThanOrEqual(draft.url.absoluteString.count, IssueDraft.maximumLength)
         XCTAssertFalse(draft.url.absoluteString.contains("ada"), "nothing of the user in the link")
@@ -144,9 +163,66 @@ final class LauncherHealthTests: XCTestCase {
         XCTAssertEqual(fields["versions"], "Launcher 0.2.26 (macOS)")
         XCTAssertTrue(fields["log"]?.hasSuffix("x") == true, "the newest lines kept")
         XCTAssertTrue(fields["error"]?.contains("NSRangeException") == true)
+        XCTAssertEqual(fields["thread"], "Not sampled.", "a stall from before the watchdog sampled")
         let crash = IssueDraft.launcherProblem(LauncherProblem(kind: .crash, at: Date(), version: "0.2.26", platform: "macOS"), system: system, privacy: ReportPrivacy(home: "/Users/ada"))
         XCTAssertEqual(crash.title, "Launcher crash")
         XCTAssertEqual(Dictionary(uniqueKeysWithValues: crash.fields.map { ($0.id, $0.value) })["error"], "None caught.")
+        XCTAssertFalse(crash.fields.contains { $0.id == "thread" }, "a crash has no freeze to sample")
+    }
+
+    func testAStallReportSaysHowLongItLastedWhetherItRecoveredAndWhatTheThreadDid() throws {
+        let system = SystemInfo(model: "Mac15,7", chip: "Apple M3 Pro", memoryGB: 18, macOS: "15.6 (24G84)", displayHz: 120)
+        let thread = [ThreadSampler.headline(sampledMs: 5_100, cpuMs: 12, windowMs: 4_000), ThreadSampler.stackHeading,
+                      "0  libsystem_kernel.dylib +0x1234  mach_msg2_trap + 8", "1  AnyPS5 +0x5678  AppModel.select(_:) + 40 in /Users/ada/x"]
+        let never = LauncherProblem(kind: .hang, at: Date(timeIntervalSince1970: 1_790_000_000), version: "0.2.41", platform: "macOS", stalledMs: 20_300,
+                                    thread: thread)
+        let draft = IssueDraft.launcherProblem(never, system: system, privacy: ReportPrivacy(home: "/Users/ada", names: ["ada"]))
+        XCTAssertEqual(draft.title, "Launcher stopped responding (20s+, never recovered)")
+        let fields = Dictionary(uniqueKeysWithValues: draft.fields.map { ($0.id, $0.value) })
+        XCTAssertTrue(fields["what"]?.hasPrefix("The interface stopped answering at 2026-09-21 14:13:20 UTC and had not recovered 20 s later, "
+                                                + "when the watchdog last looked before the launcher was closed.") == true, fields["what"] ?? "")
+        let sample = try XCTUnwrap(fields["thread"])
+        XCTAssertTrue(sample.hasPrefix("Sampled 5 s into the freeze: waiting, not on the CPU (12 ms of CPU time in the 4.0 s before).\nStack:\n0  libsystem_kernel.dylib"), sample)
+        XCTAssertTrue(sample.contains("AppModel.select(_:) + 40"))
+        XCTAssertFalse(sample.contains("ada"), "cleaned like every field")
+        XCTAssertEqual(draft.fields.map(\.label)[3], "Interface thread while stuck")
+    }
+
+    func testTheHeadlineTellsABusyThreadFromAWaitingOne() {
+        XCTAssertEqual(ThreadSampler.headline(sampledMs: 5_400, cpuMs: 3_950, windowMs: 4_000),
+                       "Sampled 5 s into the freeze: busy on the CPU (3950 ms of CPU time in the 4.0 s before).")
+        XCTAssertEqual(ThreadSampler.headline(sampledMs: 5_000, cpuMs: 12, windowMs: 4_250),
+                       "Sampled 5 s into the freeze: waiting, not on the CPU (12 ms of CPU time in the 4.3 s before).")
+        XCTAssertEqual(ThreadSampler.headline(sampledMs: 5_000, cpuMs: nil, windowMs: nil), "Sampled 5 s into the freeze.")
+    }
+
+    func testTheSamplerReadsTheStackOfAThreadThatWaits() throws {
+        final class Held: @unchecked Sendable {
+            var thread: pthread_t?
+            let ready = DispatchSemaphore(value: 0), release = DispatchSemaphore(value: 0)
+        }
+        let held = Held()
+        let thread = Thread {
+            held.thread = pthread_self()
+            held.ready.signal()
+            held.release.wait()
+        }
+        thread.start()
+        held.ready.wait()
+        Thread.sleep(forTimeInterval: 0.1)
+        let sampler = ThreadSampler(pthread: try XCTUnwrap(held.thread))
+        let before = try XCTUnwrap(sampler.cpuMs())
+        let addresses = try XCTUnwrap(sampler.addresses(), "held and read")
+        Thread.sleep(forTimeInterval: 0.2)
+        XCTAssertLessThan(try XCTUnwrap(sampler.cpuMs()) - before, 100, "a waiting thread uses no CPU")
+        held.release.signal()
+        let frames = ThreadSampler.describe(addresses)
+        let all = frames.joined(separator: "\n")
+        XCTAssertGreaterThan(frames.count, 3, all)
+        XCTAssertTrue(frames[0].hasPrefix("0  libsystem_kernel.dylib +0x"), "stuck in the kernel's wait: \(all)")
+        XCTAssertTrue(frames.contains { $0.contains("libdispatch.dylib") }, "the semaphore's wait, from lr: \(all)")
+        XCTAssertTrue(frames.contains { $0.contains("libsystem_pthread.dylib") }, "the frame records chain down to the thread's start: \(all)")
+        XCTAssertLessThanOrEqual(frames.count, ThreadSampler.frameLimit)
     }
 
     func testTheHeartbeatCountsOnlyTheTimeBeyondItsOwnBeat() {
