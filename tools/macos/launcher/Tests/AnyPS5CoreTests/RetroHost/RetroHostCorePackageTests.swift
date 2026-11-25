@@ -66,7 +66,9 @@ final class RetroHostCorePackageTests: XCTestCase {
                 XCTAssertTrue(listed.contains("anyps5-retro-host-1.1.0-\(name)\(ending)"), "\(name)\(ending)")
             }
         }
-        XCTAssertEqual(try Data(contentsOf: folder.appendingPathComponent(ReleaseSigning.signatureName)), try RetroHostReleaseFixture.signature(sums))
+        let signature = try Data(contentsOf: folder.appendingPathComponent(ReleaseSigning.signatureName))
+        XCTAssertEqual(try ReleaseSigning.verify(sums: sums, signature: signature, keys: keys).digests.count, listed.count,
+                       "signed by the fixture key")
         let host = try RetroHostRelease.parseFileList(try Data(contentsOf: folder.appendingPathComponent("anyps5-retro-host-1.1.0-macos-arm64.files")))
         XCTAssertNil(host[system.ps2Core], "LRPS2 is not in the host package")
         let package = try RetroHostRelease.parseFileList(try Data(contentsOf: folder.appendingPathComponent(listingName)))
