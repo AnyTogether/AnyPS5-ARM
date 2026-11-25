@@ -192,7 +192,7 @@ final class LauncherHealthTests: XCTestCase {
         XCTAssertEqual(ThreadSampler.headline(sampledMs: 5_400, cpuMs: 3_950, windowMs: 4_000),
                        "Sampled 5 s into the freeze: busy on the CPU (3950 ms of CPU time in the 4.0 s before).")
         XCTAssertEqual(ThreadSampler.headline(sampledMs: 5_000, cpuMs: 12, windowMs: 4_250),
-                       "Sampled 5 s into the freeze: waiting, not on the CPU (12 ms of CPU time in the 4.2 s before).")
+                       "Sampled 5 s into the freeze: waiting, not on the CPU (12 ms of CPU time in the 4.3 s before).")
         XCTAssertEqual(ThreadSampler.headline(sampledMs: 5_000, cpuMs: nil, windowMs: nil), "Sampled 5 s into the freeze.")
     }
 

@@ -132,7 +132,9 @@ public struct ThreadSampler: Sendable {
         guard let cpuMs, let windowMs, windowMs > 0 else { return at + "." }
         let used = max(0, cpuMs)
         let doing = used * 2 >= windowMs ? "busy on the CPU" : "waiting, not on the CPU"
-        return at + ": \(doing) (\(used) ms of CPU time in the \(String(format: "%.1f", Double(windowMs) / 1000)) s before)."
+        // Tenths of a second rounded half up, as AnyPS5 Desktop's: the same words for the same times.
+        let tenths = (windowMs + 50) / 100
+        return at + ": \(doing) (\(used) ms of CPU time in the \(tenths / 10).\(tenths % 10) s before)."
     }
 
     /// The stack's heading, then its frames.
