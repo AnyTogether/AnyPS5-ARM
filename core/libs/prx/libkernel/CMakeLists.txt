@@ -2654,6 +2654,11 @@ add_test_executable(guest_thermal_sensors_tests ${LIBS_INCLUDE_DIR}/tests/GuestT
     configure_windows_unwind(guest_kqueue_tests)
     add_test(NAME guest_kqueue COMMAND guest_kqueue_tests)
     set_tests_properties(guest_kqueue PROPERTIES TIMEOUT 20)
+    if(APPLE)
+        # Its timer checks fail when a wakeup comes late. On the shared macOS runner they failed every try
+        # on main after #179 (run 45683742864), which changed no kqueue code; run alone, as guest_short_sleep is.
+        set_tests_properties(guest_kqueue PROPERTIES RUN_SERIAL TRUE)
+    endif()
     add_test(NAME guest_kqueue_cleared_race COMMAND guest_kqueue_tests cleared-race)
     set_tests_properties(guest_kqueue_cleared_race PROPERTIES TIMEOUT 30)
     if(WIN32)
