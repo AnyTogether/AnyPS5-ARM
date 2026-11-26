@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Annuler et quitter",
   "quitAnyway": "Quitter quand même",
   "quitUnlocksDetail": "Annuler et quitter jette le travail. Pour arrêter et reprendre plus tard, revenez et utilisez Pause, en gardant le lanceur ouvert.",
-  "quitRemovingNote": "La suppression de jeux ne peut être ni mise en pause ni annulée."
+  "quitRemovingNote": "La suppression de jeux ne peut être ni mise en pause ni annulée.",
+  "settingsResetSection": "Tout rétablir",
+  "settingsResetSectionDetail": "Rétablit la valeur par défaut de chaque réglage de cette section.",
+  "settingsResetSectionDone": "Réglages rétablis par défaut"
 }

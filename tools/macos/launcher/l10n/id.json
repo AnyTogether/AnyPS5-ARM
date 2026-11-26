@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Batalkan dan keluar",
   "quitAnyway": "Tetap keluar",
   "quitUnlocksDetail": "Batalkan dan keluar membuang pekerjaan yang sudah ada. Untuk berhenti dan melanjutkan nanti, kembali lalu gunakan Jeda, dan biarkan launcher tetap terbuka.",
-  "quitRemovingNote": "Penghapusan game tidak dapat dijeda maupun dibatalkan."
+  "quitRemovingNote": "Penghapusan game tidak dapat dijeda maupun dibatalkan.",
+  "settingsResetSection": "Pulihkan semua",
+  "settingsResetSectionDetail": "Mengembalikan setiap pengaturan di bagian ini ke default-nya.",
+  "settingsResetSectionDone": "Pengaturan dikembalikan ke default"
 }

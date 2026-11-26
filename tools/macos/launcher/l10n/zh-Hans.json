@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "取消并退出",
   "quitAnyway": "仍然退出",
   "quitUnlocksDetail": "“取消并退出”会丢弃已完成的工作。若想先停下以后再继续，请返回并使用“暂停”，同时保持启动器打开。",
-  "quitRemovingNote": "移除游戏无法暂停，也无法取消。"
+  "quitRemovingNote": "移除游戏无法暂停，也无法取消。",
+  "settingsResetSection": "全部恢复",
+  "settingsResetSectionDetail": "将此部分的每项设置恢复为默认值。",
+  "settingsResetSectionDone": "设置已恢复为默认值"
 }

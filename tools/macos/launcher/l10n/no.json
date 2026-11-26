@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Avbryt og avslutt",
   "quitAnyway": "Avslutt likevel",
   "quitUnlocksDetail": "Avbryt og avslutt forkaster arbeidet. For å stoppe og fortsette senere, gå tilbake, bruk Sett på pause, og la oppstarteren stå åpen.",
-  "quitRemovingNote": "Fjerning av spill kan verken settes på pause eller avbrytes."
+  "quitRemovingNote": "Fjerning av spill kan verken settes på pause eller avbrytes.",
+  "settingsResetSection": "Gjenopprett alle",
+  "settingsResetSectionDetail": "Setter alle innstillinger i denne delen tilbake til standard.",
+  "settingsResetSectionDone": "Innstillinger gjenopprettet til standard"
 }

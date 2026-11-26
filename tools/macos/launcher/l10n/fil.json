@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Kanselahin at isara",
   "quitAnyway": "Isara pa rin",
   "quitUnlocksDetail": "Itinatapon ng Kanselahin at isara ang nagawa na. Para huminto at ituloy mamaya, bumalik, gamitin ang I-pause, at panatilihing bukas ang launcher.",
-  "quitRemovingNote": "Hindi maaaring i-pause o kanselahin ang pag-alis ng mga laro."
+  "quitRemovingNote": "Hindi maaaring i-pause o kanselahin ang pag-alis ng mga laro.",
+  "settingsResetSection": "Ibalik lahat",
+  "settingsResetSectionDetail": "Ibinabalik ang bawat setting sa seksyong ito sa default nito.",
+  "settingsResetSectionDone": "Naibalik sa default ang mga setting"
 }

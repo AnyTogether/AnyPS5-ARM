@@ -384,9 +384,11 @@ final class EmulatorGamesTests: XCTestCase {
         func categories() -> [String] { model.panelCategories().map(\.id) }
         XCTAssertFalse(categories().contains("emulators"))
         let library = try XCTUnwrap(model.panelCategories().first { $0.id == "library" })
-        XCTAssertEqual(library.rows.last?.id, "retroLibrary")
-        XCTAssertEqual(library.rows.last?.title, "Emulator games")
-        guard case .toggle(let on, let set) = library.rows.last?.kind else { return XCTFail("a switch") }
+        // Emulator games, then the section's Restore All.
+        XCTAssertEqual(library.rows.suffix(2).map(\.id), ["retroLibrary", "reset-library"])
+        let switchRow = library.rows[library.rows.count - 2]
+        XCTAssertEqual(switchRow.title, "Emulator games")
+        guard case .toggle(let on, let set) = switchRow.kind else { return XCTFail("a switch") }
         XCTAssertFalse(on)
 
         set(true)
@@ -395,7 +397,7 @@ final class EmulatorGamesTests: XCTestCase {
         XCTAssertEqual(categories().suffix(2), ["emulators", "about"], "Settings › Emulators, before About")
         XCTAssertNil(model.toast, "turning it on announces no new games")
         let emulators = try XCTUnwrap(model.panelCategories().first { $0.id == "emulators" })
-        XCTAssertEqual(emulators.rows.map(\.id), ["retro-ps1", "retro-ps2", "retro-ps3", "retro-show-folders"])
+        XCTAssertEqual(emulators.rows.map(\.id), ["retro-ps1", "retro-ps2", "retro-ps3", "retro-show-folders", "reset-emulators"])
         XCTAssertEqual(emulators.rows.prefix(3).map(\.title), ["DuckStation", "PCSX2", "RPCS3"])
         XCTAssertEqual(emulators.rows.first?.detail, "Choose an installed executable")
 

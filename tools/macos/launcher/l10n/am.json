@@ -2337,5 +2337,8 @@
   "quitCancelAndQuit": "ሰርዝና ውጣ",
   "quitAnyway": "ቢሆንም ውጣ",
   "quitUnlocksDetail": "ሰርዝና ውጣ የተሰራውን ሥራ ያጠፋል። አቁመው በኋላ ለመቀጠል ይመለሱ፣ ለአፍታ አቁምን ይጠቀሙ እና ማስጀመሪያውን ክፍት ይተዉት።",
-  "quitRemovingNote": "ጨዋታዎችን ማስወገድ ለአፍታ ማቆምም ሆነ መሰረዝ አይቻልም።"
+  "quitRemovingNote": "ጨዋታዎችን ማስወገድ ለአፍታ ማቆምም ሆነ መሰረዝ አይቻልም።",
+  "settingsResetSection": "ሁሉንም መልስ",
+  "settingsResetSectionDetail": "በዚህ ክፍል ያሉትን ሁሉንም ቅንብሮች ወደ ነባሪያቸው ይመልሳል።",
+  "settingsResetSectionDone": "ቅንብሮች ወደ ነባሪ ተመልሰዋል"
 }

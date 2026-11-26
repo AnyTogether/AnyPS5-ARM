@@ -470,7 +470,11 @@ extension AppModel {
         ]
         // Settings › Emulators while Emulator games is on, before About, as on Windows and Linux.
         if listsRetroGames { categories.insert(standaloneEmulatorSettings(), at: categories.count - 1) }
-        return categories
+        // Restore All, the last row of each section with preferences of its own (SettingsSectionReset.swift).
+        return categories.map { category in
+            guard Self.settingsSectionsWithReset.contains(category.id) else { return category }
+            return PanelCategory(id: category.id, title: category.title, symbol: category.symbol, rows: category.rows + [settingsSectionResetRow(category.id)])
+        }
     }
 
     private func gameRows(_ game: Game) -> [PanelRow] {

@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "取消並結束",
   "quitAnyway": "仍然結束",
   "quitUnlocksDetail": "「取消並結束」會捨棄已完成的工作。若想先停下之後再繼續，請返回並使用「暫停」，同時保持啟動器開啟。",
-  "quitRemovingNote": "移除遊戲無法暫停，也無法取消。"
+  "quitRemovingNote": "移除遊戲無法暫停，也無法取消。",
+  "settingsResetSection": "全部還原",
+  "settingsResetSectionDetail": "將此區段的每項設定還原為預設值。",
+  "settingsResetSectionDone": "設定已還原為預設值"
 }

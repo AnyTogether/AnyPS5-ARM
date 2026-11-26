@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Anulează și ieși",
   "quitAnyway": "Ieși oricum",
   "quitUnlocksDetail": "Anulează și ieși aruncă munca făcută. Ca să te oprești și să continui mai târziu, întoarce-te, folosește Pauză și ține launcherul deschis.",
-  "quitRemovingNote": "Eliminarea jocurilor nu poate fi pusă pe pauză și nici anulată."
+  "quitRemovingNote": "Eliminarea jocurilor nu poate fi pusă pe pauză și nici anulată.",
+  "settingsResetSection": "Restabilește tot",
+  "settingsResetSectionDetail": "Readuce fiecare setare din această secțiune la valoarea implicită.",
+  "settingsResetSectionDone": "Setări readuse la valorile implicite"
 }

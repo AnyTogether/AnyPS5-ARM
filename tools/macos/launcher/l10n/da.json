@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Annullér og afslut",
   "quitAnyway": "Afslut alligevel",
   "quitUnlocksDetail": "Annullér og afslut kasserer arbejdet. Hvis du vil stoppe og fortsætte senere, så gå tilbage, brug Sæt på pause, og lad launcheren være åben.",
-  "quitRemovingNote": "Fjernelse af spil kan hverken sættes på pause eller annulleres."
+  "quitRemovingNote": "Fjernelse af spil kan hverken sættes på pause eller annulleres.",
+  "settingsResetSection": "Gendan alle",
+  "settingsResetSectionDetail": "Sætter alle indstillinger i dette afsnit tilbage til standard.",
+  "settingsResetSectionDone": "Indstillinger gendannet til standard"
 }

@@ -2353,5 +2353,8 @@
   "quitCancelAndQuit": "Cancel and quit",
   "quitAnyway": "Quit anyway",
   "quitUnlocksDetail": "Cancel and quit throws the work away. To stop and go on later, go back and use Pause, and keep the launcher open.",
-  "quitRemovingNote": "Removing games can be neither paused nor cancelled."
+  "quitRemovingNote": "Removing games can be neither paused nor cancelled.",
+  "settingsResetSection": "Restore All",
+  "settingsResetSectionDetail": "Put every setting in this section back to its default.",
+  "settingsResetSectionDone": "Settings restored to defaults"
 }

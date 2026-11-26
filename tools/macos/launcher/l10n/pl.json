@@ -2339,5 +2339,8 @@
   "quitCancelAndQuit": "Anuluj i zakończ",
   "quitAnyway": "Zakończ mimo to",
   "quitUnlocksDetail": "Anuluj i zakończ wyrzuca pracę. Aby zatrzymać i kontynuować później, wróć i użyj Wstrzymaj, i trzymaj launcher otwarty.",
-  "quitRemovingNote": "Usuwania gier nie można ani wstrzymać, ani anulować."
+  "quitRemovingNote": "Usuwania gier nie można ani wstrzymać, ani anulować.",
+  "settingsResetSection": "Przywróć wszystko",
+  "settingsResetSectionDetail": "Przywraca domyślne wartości wszystkich ustawień w tej sekcji.",
+  "settingsResetSectionDone": "Przywrócono ustawienia domyślne"
 }
