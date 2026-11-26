@@ -197,8 +197,9 @@ final class RTMPPublisherTests: XCTestCase {
         let publisher = RTMPPublisher(endpoint: RTMPEndpoint(tls: false, host: "127.0.0.1", port: port, app: "live", streamKey: "k"), metadata: [],
                                       options: options(backoff: 0.01), onState: { state in states.withLock { $0.append(state) } })
         publisher.start()
-        XCTAssertTrue(waitFor(states, 20) { $0.contains { if case .failed = $0 { return true } else { return false } } })
-        XCTAssertEqual(states.value.filter { if case .reconnecting = $0 { return true } else { return false } }.count, 3)
+        // The states seen go in the messages: this has failed on CI with no reconnect in 20 s (#180).
+        XCTAssertTrue(waitFor(states, 20) { $0.contains { if case .failed = $0 { return true } else { return false } } }, "\(states.value)")
+        XCTAssertEqual(states.value.filter { if case .reconnecting = $0 { return true } else { return false } }.count, 3, "\(states.value)")
     }
 
     /// A network that cannot keep up: frames are dropped, not queued without end, and the
