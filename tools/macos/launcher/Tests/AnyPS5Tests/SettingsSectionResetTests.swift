@@ -149,8 +149,8 @@ final class SettingsSectionResetTests: XCTestCase {
         XCTAssertNil(model.preferences.glassTransparency)
         XCTAssertNil(model.preferences.glassArtwork)
         XCTAssertNil(model.preferences.fullScreen)
-        XCTAssertFalse(try category(model, "appearance").rows.contains { $0.id == "transparency" })
         XCTAssertEqual(focused(model), "reset-appearance")
+        XCTAssertFalse(model.panelCategories()[model.panelCategory].rows.contains { $0.id == "transparency" })
     }
 
     func testBatteryAndHeatHandTheBuiltInProfilesToThePolicyAtOnce() throws {
