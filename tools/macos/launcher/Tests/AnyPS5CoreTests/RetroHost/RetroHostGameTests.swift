@@ -136,15 +136,18 @@ final class RetroHostGameTests: XCTestCase {
         games.append(quick)
         await quick.start(Self.request)
         for _ in 0..<3 {
-            let asked = session.statusAsked
+            // Counted where the refresh begins: the game's own 5 ms asks go on until then, and a slow
+            // runner that starts the task late would count one of those as the refresh's.
+            let asked = RetroCount()
             let refreshed = RetroFlag()
             let refreshing = Task {
+                asked.value = session.statusAsked
                 await quick.refresh()
                 refreshed.set()
             }
             await settleRetro({ refreshed.value }, "answered within the time a few statuses take")
             await refreshing.value
-            XCTAssertLessThanOrEqual(session.statusAsked - asked, 2, "the one on its way, then its own")
+            XCTAssertLessThanOrEqual(session.statusAsked - asked.value, 2, "the one on its way, then its own")
         }
     }
 

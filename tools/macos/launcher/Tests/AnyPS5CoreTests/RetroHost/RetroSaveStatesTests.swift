@@ -88,6 +88,16 @@ final class RetroFlag: @unchecked Sendable {
     func set() { lock.withLock { on = true } }
 }
 
+/// A number a task writes, read by the test.
+final class RetroCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var number = 0
+    var value: Int {
+        get { lock.withLock { number } }
+        set { lock.withLock { number = newValue } }
+    }
+}
+
 /// Save states in the emulator host, as on Windows and Linux (AnyPS5 Desktop's
 /// test/core/retro_host/retro_state_slots_test.dart and test/ui/retro_host/retro_save_states_test.dart):
 /// the slots of a game's states folder and their pictures, the game's `saveState` and `loadState`
