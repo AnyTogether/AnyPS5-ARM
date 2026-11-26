@@ -630,6 +630,14 @@ final class AppModel: ObservableObject {
     /// Where the host's releases are read: GitHub in the running launcher, nothing in the tests
     /// unless they give one.
     var retroHostReleases: (@Sendable () async throws -> [RetroHostUpstreamRelease])?
+    /// Where Settings › About reads the launcher's contributors: GitHub in the running launcher,
+    /// nothing in the tests unless they give one (then the owner alone).
+    var contributorsSource: (@Sendable () async -> [GithubContributors.Person])?
+    /// The contributors once GitHub answered (AboutCredits.swift).
+    @Published var contributors: [GithubContributors.Person]?
+    var contributorsAsked = false
+    /// The face the keys and the pad are on in About's credits: 0 the owner, then the others.
+    @Published var contributorFace = 0
     /// How the host's files are fetched; the tests answer them from a fake GitHub.
     var retroHostSession: URLSessionConfiguration = .default
     /// The PS1 emulator host as a download in Settings › Emulators, made on first use.
@@ -918,6 +926,7 @@ final class AppModel: ObservableObject {
             SystemNotices.shared.start(gamePlaying: { [weak self] in self?.playing ?? false }, opened: { [weak self] in self?.bringLauncherFront() })
         }
         if persists { retroHostReleases = { try await RetroHostStore.releases() } }
+        if persists { contributorsSource = { await GithubContributors.fetch() } }
         if persists {
             // Online play's packets ride WebRTC data channels; their signals go out on the socket.
             OnlinePlayHost.configure(transport: { OnlinePeerMesh(context: $0) }, signal: { [weak self] to, device, session, kind, data in

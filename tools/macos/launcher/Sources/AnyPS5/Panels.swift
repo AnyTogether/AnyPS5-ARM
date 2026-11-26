@@ -19,6 +19,8 @@ struct PanelRow: Identifiable {
         case text(String, set: (String) -> Void)
         /// A pad action's keys and mouse buttons (ini sources); choosing it waits for a key.
         case keys([String], capturing: Bool, capture: () -> Void)
+        /// Settings › About's credits (AboutCredits.swift): ← and → go from face to face.
+        case credits(PanelCredits)
     }
 
     let id: String
@@ -412,7 +414,9 @@ extension AppModel {
                               symbol: "arrow.triangle.2.circlepath", kind: .action(destructive: false) { [weak self] in self?.checkForUpdatesNow() }))
         about += [
             PanelRow(id: "toolkit", title: T.text(.toolkitVersion), kind: .info(builtInToolkit.map { Toolkit.shortVersion($0.version) } ?? "—")),
-            PanelRow(id: "author", title: T.text(.madeBy), kind: .info("Utku Halis")),
+        ]
+        about += creditRows()
+        about += [
             PanelRow(id: "github", title: "GitHub", detail: "github.com/AnyTogether/AnyPS5-ARM", symbol: "chevron.left.forwardslash.chevron.right", kind: .action(destructive: false) {
                 NSWorkspace.shared.open(URL(string: "https://github.com/AnyTogether/AnyPS5-ARM")!)
             }),
@@ -849,6 +853,9 @@ extension AppModel {
         focusRow(focusedRow(in: rows), in: rows)
         if !rows[panelRow].focusable, let first = rows.firstIndex(where: \.focusable) { focusRow(first, in: rows) }
         let row = rows[panelRow]
+        // About's credits: ← and → go from face to face; past the first or the last, as any other row.
+        if case .credits(let credits) = row.kind, command == .left || command == .right,
+           stepCredits(credits, by: command == .right ? 1 : -1) { return true }
         // △ on a shortcut's row clears it.
         if command == .options, row.id.hasPrefix("shortcut-"), clearShortcut(row: row.id) { return true }
         // With the pad a choice changes only while it is edited (✕ starts, ✕ or ○ end); the
@@ -1053,6 +1060,9 @@ extension AppModel {
             run()
         case .keys(_, _, let capture):
             capture()
+        case .credits(let credits):
+            Sounds.shared.play(.select)
+            credits.open(credits.selected)
         case .text:
             // Select on a text row (and a click anywhere on it) puts the cursor in its field.
             startTyping(row.id)
@@ -1424,8 +1434,17 @@ struct RowView: View {
     @Environment(\.previewRender) private var previewRender
 
     var body: some View {
+        // The credits' faces carry the focus themselves: the row has no fill of its own.
+        if case .credits(let credits) = row.kind {
+            CreditsView(credits: credits, focused: focused)
+        } else {
+            standard
+        }
+    }
+
+    private var standard: some View {
         let foreground: Color = focused ? .black : .white
-        HStack(spacing: 14 * scale) {
+        return HStack(spacing: 14 * scale) {
             if let picture = row.picture, let image = NSImage(data: picture) {
                 Image(nsImage: image).resizable().interpolation(.high).aspectRatio(contentMode: .fill)
                     .frame(width: 44 * scale, height: 44 * scale).clipShape(RoundedRectangle(cornerRadius: 8 * scale, style: .continuous))
@@ -1517,6 +1536,8 @@ struct RowView: View {
             Text(value).font(.display(15 * scale, .medium)).opacity(0.7).textSelection(.enabled)
         case .keys(let sources, let capturing, _):
             KeyCaps(sources: sources, capturing: capturing, focused: focused, prompt: row.id.hasPrefix("shortcut-pad-") ? TH.text(.pressButtons) : nil)
+        case .credits:
+            EmptyView()
         case .text(let value, let set):
             if previewRender {
                 // A text field does not draw offscreen.
