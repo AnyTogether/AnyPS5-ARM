@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Batal dan keluar",
   "quitAnyway": "Keluar juga",
   "quitUnlocksDetail": "Batal dan keluar membuang kerja yang telah dibuat. Untuk berhenti dan sambung kemudian, kembali, gunakan Jeda dan biarkan pelancar terbuka.",
-  "quitRemovingNote": "Pembuangan permainan tidak boleh dijeda atau dibatalkan."
+  "quitRemovingNote": "Pembuangan permainan tidak boleh dijeda atau dibatalkan.",
+  "settingsResetSection": "Pulihkan semua",
+  "settingsResetSectionDetail": "Mengembalikan setiap tetapan dalam bahagian ini kepada lalainya.",
+  "settingsResetSectionDone": "Tetapan dipulihkan kepada lalai"
 }

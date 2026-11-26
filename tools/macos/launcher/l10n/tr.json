@@ -2353,5 +2353,8 @@
   "quitCancelAndQuit": "İptal et ve çık",
   "quitAnyway": "Yine de çık",
   "quitUnlocksDetail": "İptal et ve çık, yapılan işi siler. Durdurup sonra devam etmek için geri dön, Duraklat'ı kullan ve başlatıcıyı açık tut.",
-  "quitRemovingNote": "Oyunları kaldırma duraklatılamaz ve iptal edilemez."
+  "quitRemovingNote": "Oyunları kaldırma duraklatılamaz ve iptal edilemez.",
+  "settingsResetSection": "Tümünü sıfırla",
+  "settingsResetSectionDetail": "Bu bölümdeki her ayarı varsayılanına döndürür.",
+  "settingsResetSectionDone": "Ayarlar varsayılana döndü"
 }

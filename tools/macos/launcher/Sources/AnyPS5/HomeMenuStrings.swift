@@ -20,6 +20,7 @@ enum TH {
         case nowPlaying, nowPlayingIn, nowPlayingPausedIn, nowPlayingPrevious, nowPlayingNext, nowPlayingPlayPause
         case nowPlayingCard, nowPlayingCardDetail = "nowPlayingCardDetailMac", nowPlayingDenied = "nowPlayingDeniedMac", nowPlayingShare, nowPlayingShareDetail
         case friendsListening, friendsListeningBy
+        case settingsResetSection, settingsResetSectionDetail, settingsResetSectionDone
     }
 
     static func text(_ key: Key) -> String { T.string(key.rawValue) }

@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Cancelar y salir",
   "quitAnyway": "Salir igualmente",
   "quitUnlocksDetail": "Cancelar y salir tira el trabajo. Para parar y seguir más tarde, vuelve y usa Pausar, y deja el launcher abierto.",
-  "quitRemovingNote": "Eliminar juegos no se puede pausar ni cancelar."
+  "quitRemovingNote": "Eliminar juegos no se puede pausar ni cancelar.",
+  "settingsResetSection": "Restablecer todo",
+  "settingsResetSectionDetail": "Devuelve cada ajuste de esta sección a su valor predeterminado.",
+  "settingsResetSectionDone": "Ajustes restablecidos"
 }

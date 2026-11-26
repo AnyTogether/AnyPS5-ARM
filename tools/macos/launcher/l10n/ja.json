@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "キャンセルして終了",
   "quitAnyway": "とにかく終了",
   "quitUnlocksDetail": "「キャンセルして終了」は作業内容を破棄します。止めて後で続けるには、戻って「一時停止」を使い、ランチャーを開いたままにしてください。",
-  "quitRemovingNote": "ゲームの削除は一時停止もキャンセルもできません。"
+  "quitRemovingNote": "ゲームの削除は一時停止もキャンセルもできません。",
+  "settingsResetSection": "すべて元に戻す",
+  "settingsResetSectionDetail": "このセクションのすべての設定をデフォルトに戻します。",
+  "settingsResetSectionDone": "設定をデフォルトに戻しました"
 }

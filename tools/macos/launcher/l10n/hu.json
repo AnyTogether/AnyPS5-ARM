@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Megszakítás és kilépés",
   "quitAnyway": "Kilépés mégis",
   "quitUnlocksDetail": "A megszakítás és kilépés eldobja az elvégzett munkát. Ha meg akarsz állni és később folytatni, menj vissza, használd a Szünetet, és hagyd nyitva az indítót.",
-  "quitRemovingNote": "A játékok eltávolítása nem szüneteltethető, és nem is szakítható meg."
+  "quitRemovingNote": "A játékok eltávolítása nem szüneteltethető, és nem is szakítható meg.",
+  "settingsResetSection": "Összes visszaállítása",
+  "settingsResetSectionDetail": "A szakasz minden beállítását visszaállítja az alapértelmezettre.",
+  "settingsResetSectionDone": "Beállítások visszaállítva az alapértelmezettre"
 }

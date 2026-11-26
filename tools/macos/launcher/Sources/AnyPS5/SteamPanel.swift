@@ -43,6 +43,15 @@ extension AppModel {
 
     private func countSteam() { steam.inSteam = steamShortcuts?.ours().count ?? 0 }
 
+    /// Settings › Steam › Restore All: the account signed in last, no shortcut per game, full
+    /// screen from Steam. The shortcuts already in Steam stay until Add to Steam writes them again.
+    func restoreSteamDefaults() {
+        preferences.steamUser = nil
+        preferences.steamGames = nil
+        preferences.steamFullscreen = nil
+        countSteam()
+    }
+
     private func chooseSteamAccount(_ index: Int) {
         guard steam.accounts.indices.contains(index) else { return }
         let account = steam.accounts[index]

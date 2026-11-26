@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "취소하고 종료",
   "quitAnyway": "그래도 종료",
   "quitUnlocksDetail": "취소하고 종료하면 작업이 버려집니다. 멈췄다가 나중에 이어 하려면 돌아가 일시정지를 사용하고 런처를 열어 두세요.",
-  "quitRemovingNote": "게임 삭제는 일시정지하거나 취소할 수 없습니다."
+  "quitRemovingNote": "게임 삭제는 일시정지하거나 취소할 수 없습니다.",
+  "settingsResetSection": "모두 복원",
+  "settingsResetSectionDetail": "이 섹션의 모든 설정을 기본값으로 되돌립니다.",
+  "settingsResetSectionDone": "설정을 기본값으로 복원했습니다"
 }

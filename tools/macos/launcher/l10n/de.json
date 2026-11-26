@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Abbrechen und beenden",
   "quitAnyway": "Trotzdem beenden",
   "quitUnlocksDetail": "Abbrechen und beenden verwirft die Arbeit. Um später weiterzumachen, geh zurück und nutze Pausieren, und lass den Launcher geöffnet.",
-  "quitRemovingNote": "Das Entfernen von Spielen lässt sich weder pausieren noch abbrechen."
+  "quitRemovingNote": "Das Entfernen von Spielen lässt sich weder pausieren noch abbrechen.",
+  "settingsResetSection": "Alle zurücksetzen",
+  "settingsResetSectionDetail": "Setzt jede Einstellung in diesem Bereich auf ihren Standardwert zurück.",
+  "settingsResetSectionDone": "Einstellungen auf Standardwerte zurückgesetzt"
 }

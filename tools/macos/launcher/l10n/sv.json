@@ -2352,5 +2352,8 @@
   "quitCancelAndQuit": "Avbryt och avsluta",
   "quitAnyway": "Avsluta ändå",
   "quitUnlocksDetail": "Avbryt och avsluta kastar bort arbetet. Vill du stoppa och fortsätta senare, gå tillbaka, använd Pausa och låt startprogrammet vara öppet.",
-  "quitRemovingNote": "Borttagning av spel kan varken pausas eller avbrytas."
+  "quitRemovingNote": "Borttagning av spel kan varken pausas eller avbrytas.",
+  "settingsResetSection": "Återställ alla",
+  "settingsResetSectionDetail": "Återställer varje inställning i det här avsnittet till standard.",
+  "settingsResetSectionDone": "Inställningarna återställda till standard"
 }
