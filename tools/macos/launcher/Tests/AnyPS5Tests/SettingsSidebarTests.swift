@@ -64,6 +64,20 @@ final class SettingsSidebarTests: XCTestCase {
         return (visible.lowerBound <= wanted.lowerBound + 1 && wanted.upperBound <= visible.upperBound + 1, "category \(index) is at \(wanted) but the list shows \(visible)")
     }
 
+    /// The focused category's glow has room on both sides: the list reaches into the panel's
+    /// margins by as much as it pads the categories, so they stay where they were.
+    func testTheFocusedCategorysGlowHasRoomOnBothSides() throws {
+        let model = try LauncherFixture.model()
+        model.open(.settings)
+        let screen = try LauncherWindow(model, width: 1600, height: 900)
+        defer { screen.close() }
+        screen.wait(0.5)
+        let list = try sidebar(screen)
+        let room = SettingsPanel.glowRoom
+        XCTAssertEqual(screen.frame(list).width, 330 + 2 * room, accuracy: 1, "the list is the categories' column and the room on each side")
+        XCTAssertEqual(list.documentView?.bounds.width ?? 0, 330 + 2 * room, accuracy: 1)
+    }
+
     /// An arrow held down (or a stick): a move every few hundredths of a second.
     func testTheCategoriesFollowAHeldArrow() throws {
         let model = try LauncherFixture.model()
