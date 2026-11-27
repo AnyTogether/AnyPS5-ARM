@@ -180,6 +180,8 @@ struct Socket : KernelSocketPoll::NativeOwner {
 #if defined(_WIN32) || defined(__APPLE__)
     bool connecting = false;
     int connectFailure = 0;
+#endif
+#ifdef _WIN32
     std::mutex sendOrder;
     std::mutex passageMutex;
     std::deque<Passage> passages;
