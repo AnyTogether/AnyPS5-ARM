@@ -2435,7 +2435,10 @@ int main(int argc, char** argv) {
             const auto samples = static_cast<std::uint32_t>(std::stoul(argv[2]));
             Require(samples == 2u || samples == 4u || samples == 8u, "unsupported initial texture sample count");
             const auto context = AgcDriver::VulkanDeviceTestAccess::ContextOf(*device);
-            if ((context.limits.framebufferColorSampleCounts & samples) == 0u || (context.limits.sampledImageColorSampleCounts & samples) == 0u) return VulkanTestSkipped;
+            if ((context.limits.framebufferColorSampleCounts & samples) == 0u || (context.limits.sampledImageColorSampleCounts & samples) == 0u) {
+                std::printf("%s skipped, the device does not render or sample %u-sample color\n", argv[1] + 2, samples);
+                return VulkanTestSkipped;
+            }
             if (std::string_view(argv[1]) == "--texture-dcc-target") TextureDccTarget(*device, samples);
             else InitialTextureDcc(*device, samples);
             return 0;

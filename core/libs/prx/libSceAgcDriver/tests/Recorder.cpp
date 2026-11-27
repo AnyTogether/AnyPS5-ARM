@@ -12294,8 +12294,12 @@ bool repeatedNeighbourStoreTests(const Device& device, Recorder& recorder) {
 
 bool storageImportTouchTests(const Device& device, Recorder& recorder) {
     const auto& base = device.GetContext();
-    if (base.hostImportAlignment == 0 || !AgcDriver::GuestMemory::WriteWatched()) {
-        std::cout << "watched host imports unavailable: storage import touch not tested\n";
+    if (base.hostImportAlignment == 0) {
+        std::cout << "storage import touch skipped, host imports are unavailable\n";
+        return false;
+    }
+    if (!AgcDriver::GuestMemory::WriteWatched()) {
+        std::cout << "storage import touch skipped, host imports are compared, not watched\n";
         return false;
     }
     constexpr std::uint64_t offset = 0x2000;

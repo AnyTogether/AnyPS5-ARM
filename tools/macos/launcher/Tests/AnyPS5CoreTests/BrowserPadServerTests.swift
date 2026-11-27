@@ -261,7 +261,11 @@ final class BrowserPadServerTests: XCTestCase {
         XCTAssertEqual(again.open(port: port, origin: origin, cookie: cookie), 101)
         XCTAssertNotNil(again.next("welcome"))
         XCTAssertEqual(log.pairings.count, 1, "the session's key let it straight in")
-        XCTAssertNil(first.receive(seconds: 1), "the page it replaced is let go")
+        // The player number the first page's link sends on its first tick can be on the wire
+        // before the reload replaced it (CI run 46072361298); it is not traffic after the reload.
+        var leftover = first.receive(seconds: 1)
+        while leftover?["t"] as? String == "player" { leftover = first.receive(seconds: 1) }
+        XCTAssertNil(leftover, "the page it replaced is let go")
         Thread.sleep(forTimeInterval: 0.2)
         XCTAssertEqual(remote.connectedDeviceIDs.count, 1)
     }
