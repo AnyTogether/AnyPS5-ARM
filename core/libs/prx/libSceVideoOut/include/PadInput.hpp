@@ -100,6 +100,8 @@ private:
     void watchInputMapping(std::string titleId, Pad::InputMappingWatch watch);
     std::uint32_t firstPlayerControllerButtons() const;
     void setMouseMode(bool enabled);
+    void pauseMouseMode();
+    void showMouseModeStatus() const;
     void openAvailableControllers();
     void openController(int deviceIndex);
     void closeController(SDL_JoystickID id);
@@ -156,6 +158,7 @@ private:
     Port0Presence::Mode port0Mode;
     Port0Presence::Presence port0;
     bool padCaptured = false;
+    bool mouseModePaused = false;
     bool hostFocusSynced = false;
     // Bluetooth DualSense haptics (upstream's slot 0): the first player's controller.
     SDL_hid_device* haptics = nullptr;
