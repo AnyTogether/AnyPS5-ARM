@@ -159,6 +159,12 @@ def drain_replay_group(process):
                 os.killpg(process.pid, 0)
             except ProcessLookupError:
                 return
+            except PermissionError:
+                # macOS answers EPERM instead of ESRCH once every member left in the group is a
+                # zombie its new parent has not reaped yet: the SIGKILL above reached them all.
+                if sys.platform != "darwin":
+                    raise
+                return
             if time.monotonic() >= deadline:
                 raise RuntimeError("replay process group remains after termination")
             time.sleep(0.02)

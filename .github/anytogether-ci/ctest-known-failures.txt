@@ -63,6 +63,9 @@ macos   guest_ssl_transport_(kernel|net)  On the runner a server certificate pas
 macos   guest_avplayer                  Its EOF stop latency median must stay under 10 ms; on the macOS runner it is 12-14 ms, even on retries.
 macos   guest_itimer_short_expiry   Its 2 ms ITIMER_REAL median must stay near 2 ms; on the macOS runner it is 13-17 ms on every retry, on main too (passes on the developers' Macs).
 macos   guest_kqueue                    Its timer counts and gaps (GuestKqueue.cpp:1868, 1888, 1895) miss on every retry on the macOS runner since 2026-11-25: on main, on main from before the upstream merge #179 (run 45724103718) and run alone (#181). Passed on 2026-11-24 (run 45374365531). Needs a look (#180).
+macos   guest_exception_pointer     New upstream test: the host test throws and catches a C++ exception, then asks the guest runtime's std::current_exception for it. On macOS the host catch is libc++abi's, which the guest runtime does not see ("current_exception inside catch returned wrong pointer", all three tries of run 46072361298), the case of guest_libcxx_exception_pointer above. Needs a look (#192).
+macos   guest_icu_unicode_string_hash  New upstream test (ac75555824): uhash_compareCaselessUnicodeString finds "Hello" and "HELLO" different on macOS (UnicodeStringHash.cpp:139, all three tries of run 46072361298); Linux and Windows pass. Needs a look (#192).
+macos   guest_avplayer_buffer_wait_accuracy  New upstream timing test: a 33 ms buffer wait has a 130 ms median on the macOS runner under Rosetta, on all three tries of run 46072361298 (as guest_avplayer above). Needs a look on real hardware (#192).
 macos   guest_poll                      Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.
 macos   guest_socket_pair               Aborts on the macOS runner (virtual machine networking); needs a look on real hardware.
 

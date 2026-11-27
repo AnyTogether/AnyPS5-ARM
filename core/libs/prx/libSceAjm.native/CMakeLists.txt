@@ -33,6 +33,12 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/AjmLibrary.cmake)
 add_sce_ajm_library(libSceAjm.native ${CMAKE_CURRENT_SOURCE_DIR}/src/DriverQueries.cpp)
 if(MINGW)
     target_link_options(libSceAjm.native PRIVATE LINKER:--exclude-libs,ALL)
+elseif(APPLE)
+    # ld64 has no --exclude-libs, and Linux hides the static FFmpeg through the ffmpeg target. On
+    # macOS libSceAudiodec.native, which now links this prx (upstream a45b29e961), bound its own
+    # FFmpeg and LibAtrac9 calls to the copies exported here, which the patched prx no longer
+    # exports (patched_libraries: _av_frame_alloc). Only the prx's own API is exported.
+    target_link_options(libSceAjm.native PRIVATE "LINKER:-exported_symbol,*_nid_*" "LINKER:-exported_symbol,_sceAjm*")
 endif()
 
 if(BUILD_TESTING)
