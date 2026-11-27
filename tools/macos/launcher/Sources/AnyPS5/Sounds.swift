@@ -1,13 +1,14 @@
 import AVFoundation
+import AnyPS5Core
 
-/// Soft interface sounds, synthesized once: a short tick for moving (a quieter one when the
-/// pointer arrives on something), a rising pair for selecting, a falling one for going back and a
-/// low, dull knock when a direction has nowhere to go.
+/// Soft interface sounds, synthesized once (Tones): low and round, a short one for moving (a
+/// quieter one when the pointer arrives on something), a rising pair for selecting, a falling one
+/// for going back and a low, dull knock when a direction has nowhere to go.
 @MainActor
 final class Sounds {
     static let shared = Sounds()
 
-    enum Cue: String { case move, select, back, unlocked, ring, bump, hover }
+    typealias Cue = SoundCue
 
     var enabled = true
     /// Every cue asked for, sounds on or off: a command that asked for none and changed nothing
@@ -33,16 +34,9 @@ final class Sounds {
             engine.connect(player, to: engine.mainMixerNode, format: format)
         }
         engine.mainMixerNode.outputVolume = 0.32
-        buffers[.move] = tone([(1320, 0.0, 0.045)], decay: 70)
-        buffers[.select] = tone([(880, 0.0, 0.07), (1320, 0.05, 0.1)], decay: 32)
-        buffers[.back] = tone([(990, 0.0, 0.06), (660, 0.045, 0.09)], decay: 34)
-        buffers[.unlocked] = tone([(660, 0.0, 0.12), (990, 0.09, 0.14), (1320, 0.18, 0.3)], decay: 12)
-        // A friend calling: two soft trills.
-        buffers[.ring] = tone([(988, 0.0, 0.11), (1319, 0.1, 0.11), (988, 0.2, 0.11), (1319, 0.3, 0.16)], decay: 5)
-        // The end of a row: B3 and a fast decay, the quietest cue.
-        buffers[.bump] = tone([(247, 0.0, 0.06)], decay: 55, gain: 0.6)
-        // The pointer on something new: the move tick, about 3 dB lower.
-        buffers[.hover] = tone([(1320, 0.0, 0.045)], decay: 70, gain: 0.7)
+        for cue in Cue.allCases {
+            buffers[cue] = buffer(Tones.render(cue, rate: format.sampleRate))
+        }
     }
 
     func play(_ cue: Cue) {
@@ -61,25 +55,14 @@ final class Sounds {
         player.play()
     }
 
-    /// Sine partials (frequency, start, length in seconds) with an exponential decay.
-    private func tone(_ partials: [(Double, Double, Double)], decay: Double, gain: Double = 1) -> AVAudioPCMBuffer? {
-        let rate = format.sampleRate
-        let length = partials.map { $0.1 + $0.2 }.max() ?? 0.1
-        let frames = AVAudioFrameCount(rate * (length + 0.02))
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) else { return nil }
-        buffer.frameLength = frames
+    /// Mono samples on both sides.
+    private func buffer(_ samples: [Float]) -> AVAudioPCMBuffer? {
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count)) else { return nil }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
         guard let left = buffer.floatChannelData?[0], let right = buffer.floatChannelData?[1] else { return nil }
-        for frame in 0..<Int(frames) {
-            let time = Double(frame) / rate
-            var sample = 0.0
-            for (frequency, start, duration) in partials where time >= start && time < start + duration {
-                let local = time - start
-                let attack = min(1, local / 0.004)
-                sample += sin(2 * .pi * frequency * local) * attack * exp(-local * decay) * 0.5
-                sample += sin(4 * .pi * frequency * local) * attack * exp(-local * decay * 1.6) * 0.12
-            }
-            left[frame] = Float(sample * gain)
-            right[frame] = Float(sample * gain)
+        for (frame, sample) in samples.enumerated() {
+            left[frame] = sample
+            right[frame] = sample
         }
         return buffer
     }
