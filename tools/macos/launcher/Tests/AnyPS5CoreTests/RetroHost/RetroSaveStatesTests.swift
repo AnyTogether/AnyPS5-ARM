@@ -399,7 +399,7 @@ final class RetroSaveStatesTests: XCTestCase {
         await settleRetro({ session.methods.contains("saveState") })
         let loading = Task { await game.loadState(2) }
         await yieldRetro()
-        let option = Task { await game.setOption(key: "k", value: "v") }
+        let options = (0..<4).map { index in Task { await game.setOption(key: "k", value: "\(index)") } }
         await yieldRetro()
         let second = RetroGate()
         session.onCall = { [unowned session] method, _ in
@@ -410,13 +410,16 @@ final class RetroSaveStatesTests: XCTestCase {
         XCTAssertEqual(savedOutcome, .done)
         await settleRetro({ session.methods.last == "loadState" })
         await yieldRetro()
-        XCTAssertEqual(session.methods.last, "loadState", "the option waits for the load it was asked behind")
+        XCTAssertEqual(session.methods.last, "loadState", "the options wait for the load they were asked behind")
         second.open()
         let loadedOutcome = await loading.value
         XCTAssertEqual(loadedOutcome, .done)
-        let taken = await option.value
-        XCTAssertTrue(taken)
-        XCTAssertEqual(Array(session.methods.suffix(3)), ["saveState", "loadState", "option"])
+        for option in options {
+            let taken = await option.value
+            XCTAssertTrue(taken)
+        }
+        XCTAssertEqual(Array(session.methods.drop(while: { $0 != "saveState" })), ["saveState", "loadState", "option", "option", "option", "option"],
+                       "a call asked behind a waiting state call never goes before it, however the waiters wake")
     }
 
     func testAStateCallAskedOnceStopHasBegunIsNotNowWithoutACall() async throws {
