@@ -1133,6 +1133,10 @@ struct SettingsPanel: View {
     /// Settings itself has the search field (Find players and a hub use the same screen).
     private var searchable: Bool { model.overlay == .settings }
 
+    /// The room the categories' list leaves on each side of them, in the panel's own margins, for
+    /// the focused one's glow (Glass's ice chip): a scroll view cuts what it draws at its edges.
+    static let glowRoom: CGFloat = 16
+
     var body: some View {
         let categories = model.panelCategories()
         let current = categories.indices.contains(model.panelCategory) ? categories[model.panelCategory] : nil
@@ -1157,7 +1161,9 @@ struct SettingsPanel: View {
                         ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 6 * scale) { categoryRows(categories) }
                                 .padding(.vertical, 4 * scale)
+                                .padding(.horizontal, Self.glowRoom * scale)
                         }
+                        .padding(.horizontal, -Self.glowRoom * scale)
                         // By the category, not its place: a search that leaves other categories
                         // moves the list too. To the middle, as every other list does (the ends
                         // stay at the ends), so the selected one is whole with room around it.
