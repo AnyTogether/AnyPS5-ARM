@@ -93,11 +93,17 @@ public final class RetroHostGame: ObservableObject {
     /// `stop()` has begun: the client's `stopGame()` asks `status` until the game has ended, without
     /// waiting for a state call, so no `saveState` or `loadState` is sent from then on.
     private var stopping = false
-    /// A `saveState` or `loadState` is under way, until its reply: protocol.md "saveState and
-    /// loadState" says a launcher MUST NOT send another call after one until that reply has come, as
-    /// a call queued behind it in the host could otherwise be answered more than 5 seconds after it
-    /// was sent. Every other call of this game waits for it (`afterStateCall`); pings go on.
-    private var stateCallRunning = false
+    /// This game's calls through `stateCall` and `afterStateCall`, in the order they were asked, by
+    /// the ticket each took when it was asked: a call is here until it is sent, a `saveState` or
+    /// `loadState` until its reply. protocol.md "saveState and loadState" says a launcher MUST NOT
+    /// send another call after one until that reply has come, as a call queued behind it in the host
+    /// could otherwise be answered more than 5 seconds after it was sent. So every other call of this
+    /// game waits for the state calls asked before it, and a state call for every call asked before
+    /// it; pings go on. Each waiter looks for its own turn here when woken: a continuation resumes on
+    /// the global executor and only then hops back to the main actor, so waiters woken together come
+    /// back in no set order, and a call asked after a state call could otherwise go first.
+    private var turns: [(ticket: Int, state: Bool)] = []
+    private var ticketsTaken = 0
     /// This game's other calls that went out through `afterStateCall` and have not been answered: a
     /// state call waits for them before it is sent, as the session's calls reach the client's queue
     /// only after a hop off the main actor, so one asked just before it could otherwise go out after.
@@ -367,14 +373,12 @@ public final class RetroHostGame: ObservableObject {
     private func stateCall(_ method: String, _ slot: Int) async -> RetroStateOutcome {
         guard (0..<RetroStateFolder.slots).contains(slot) else { return .failed }
         guard loaded, savesStates, !stopping else { return .notNow }
-        while stateCallRunning { await waitTurn() }
-        guard loaded, !stopping else { return .notNow }
-        stateCallRunning = true
+        let ticket = takeTicket(state: true)
         defer {
-            stateCallRunning = false
+            leave(ticket)
             wakeTurns()
         }
-        while callsOut > 0 { await waitTurn() }
+        while turns.first?.ticket != ticket || callsOut > 0 { await waitTurn() }
         guard loaded, !stopping else { return .notNow }
         let outcome: RetroStateOutcome
         do {
@@ -389,10 +393,12 @@ public final class RetroHostGame: ObservableObject {
         return outcome
     }
 
-    /// Sends `send` once no `saveState` or `loadState` is under way, and counts it as out until its
-    /// reply, so a state call asked meanwhile waits for it.
+    /// Sends `send` once every `saveState` and `loadState` asked before it has been answered, and
+    /// counts it as out until its reply, so a state call asked meanwhile waits for it.
     private func afterStateCall<T>(_ send: () async throws -> T) async rethrows -> T {
-        while stateCallRunning { await waitTurn() }
+        let ticket = takeTicket(state: false)
+        while turns.contains(where: { $0.state && $0.ticket < ticket }) { await waitTurn() }
+        leave(ticket)
         callsOut += 1
         defer {
             callsOut -= 1
@@ -400,6 +406,14 @@ public final class RetroHostGame: ObservableObject {
         }
         return try await send()
     }
+
+    private func takeTicket(state: Bool) -> Int {
+        ticketsTaken += 1
+        turns.append((ticketsTaken, state))
+        return ticketsTaken
+    }
+
+    private func leave(_ ticket: Int) { turns.removeAll { $0.ticket == ticket } }
 
     private func waitTurn() async {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in turnWaiters.append(continuation) }
