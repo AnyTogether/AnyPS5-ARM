@@ -12352,7 +12352,7 @@ bool storageImportTouchTests(const Device& device, Recorder& recorder) {
             recorder.Submit();
             device.WaitQueue();
             recorder.Sync();
-            std::cout << "host imports are compared, not watched: storage import touch not tested\n";
+            std::cout << "storage import touch skipped, host imports are compared, not watched\n";
             return false;
         }
         const auto clear = [&](const VkClearColorValue& value) {
