@@ -155,6 +155,7 @@ struct DrawUserPatch {
 
 struct DrawRelocationPending {
     std::uint64_t key = 0, alias = 0, identity = 0;
+    std::weak_ptr<const DrawEntry> donor;
 };
 
 struct DrawRelocationTrial {

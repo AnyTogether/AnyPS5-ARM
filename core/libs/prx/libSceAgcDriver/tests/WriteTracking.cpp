@@ -919,6 +919,39 @@ void CheckRewatch() {
     GuestArena::GuestArenaRelease_nid_postfix(memory, 4 * Block);
 }
 
+enum class LostDriverStore { Piece, PossiblePiece, Whole, PossibleWhole };
+
+void CheckRewatchKeepsDriverStores(LostDriverStore kind) {
+    constexpr std::size_t Page = 4096;
+    constexpr std::size_t Bytes = 2 * Block;
+    void* memory = GuestArena::GuestArenaAllocate_nid_postfix(Bytes, Block);
+    GuestArena::GuestArenaCommit_nid_postfix(memory, Bytes, PAGE_READWRITE, 16384);
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    Require(Watched(base, Bytes), "the rewatched driver store fixture is not watched");
+    std::memset(memory, 0x11, Bytes);
+    BumpCollectEpoch();
+    const auto taken = CollectWritesUncached(base, Bytes);
+    Require(taken != 0, "the rewatched driver store fixture was not collected");
+    const auto stored = base + 2 * Page;
+    const auto rewatched = base + 9 * Page;
+    switch (kind) {
+        case LostDriverStore::Piece: Require(MarkWritten(stored + 8, 16) != 0, "the driver store was not stamped"); break;
+        case LostDriverStore::PossiblePiece: Require(MarkPossiblyWritten(stored + 8, 16) != 0, "the possible driver store was not stamped"); break;
+        case LostDriverStore::Whole: Require(MarkWritten(base, Block) != 0, "the whole-block driver store was not stamped"); break;
+        case LostDriverStore::PossibleWhole: Require(MarkPossiblyWritten(base, Block) != 0, "the possible whole-block driver store was not stamped"); break;
+    }
+    Require(!UnchangedSince(stored, Page, taken) && StoredOver(stored, Page, taken), "the driver store does not read as a store before the rewatch");
+    Unwatch(rewatched, Page);
+    Require(!Watched(rewatched, Page), "the rewatched page did not leave the write watch");
+    const std::array<std::pair<std::uint64_t, std::uint64_t>, 1> span{{{rewatched, rewatched + Page}}};
+    Rewatch(span);
+    Require(Watched(base, Bytes), "the page did not return to the write watch");
+    Require(!UnchangedSince(stored, Page, taken), "rewatching another page of the block made a driver store read as unchanged");
+    Require(StoredOver(stored, Page, taken), "rewatching another page of the block made a driver store read as not stored over");
+    GuestArena::GuestArenaReset_nid_postfix(memory, Bytes);
+    GuestArena::GuestArenaRelease_nid_postfix(memory, Bytes);
+}
+
 using RewatchSpan = std::array<std::pair<std::uint64_t, std::uint64_t>, 1>;
 
 RewatchSpan BlockSpan(std::uint64_t address, std::size_t bytes) {
@@ -1931,10 +1964,45 @@ void CheckImportWindow() {
     Require(changed[1] == BlockWritten && WrittenSince(base + Block, Block, synced) && cpu[1] == 1, "a store of new bytes within an import window was missed");
     Require(changed[2] == BlockUnchanged && cpu[2] == 0, "a block the import window did not touch reads as written");
     Require(cpu[0] == 1, "a page an import window resolved no longer counts as possibly touched by the CPU");
+    bytes[0x2010] = 0x44;
+    static_cast<void>(CollectWritesUncached(base, 3 * Block));
+    Require(!StoredOver(base, 4096, synced), "a neighbouring store made an unchanged import-window page read as stored");
+    Require(StoredOver(base + 0x2000, 4096, synced), "a store beside an unchanged import-window page was missed");
+    Require(!UnchangedSinceLastCollect(base, 4096, synced), "an unchanged import-window page lost its possible CPU touch");
+    bytes[0x200] = 0x11;
+    static_cast<void>(CollectWritesUncached(base, 3 * Block));
+    Require(StoredOver(base, 4096, synced), "a same-value CPU store after an import-window touch was missed");
     const auto after = CollectWritesUncached(base, 3 * Block);
     bytes[0x100] = 0x33;
     static_cast<void>(CollectWritesUncached(base, 3 * Block));
     Require(!UnchangedSince(base, Block, after), "a store after the import window was missed");
+}
+
+void CheckImportWindowTouchIsNotAStore() {
+    void* memory = AllocateWatched(2 * Block);
+    const auto base = reinterpret_cast<std::uint64_t>(memory);
+    auto* bytes = static_cast<volatile std::uint8_t*>(memory);
+    std::memset(memory, 0x11, 2 * Block);
+    const auto synced = CollectWritesUncached(base, 2 * Block);
+    Require(synced != 0, "the import window touch block is not collected");
+    Require(ImportWatched(base, 2 * Block, [&] {
+        bytes[0x100] = 0x11;
+        bytes[Block + 0x100] = 0x22;
+        return true;
+    }, true, false), "the import window touch import failed");
+    static_cast<void>(CollectWritesUncached(base, 2 * Block));
+    Require(!UnchangedSinceLastCollect(base, 4096, synced), "a page an import window resolved no longer counts as possibly touched by the CPU");
+    Require(StoreUnchangedSinceLastCollect(base, 4096, synced) && StoreUnchangedSinceLastCollect(base + 0x100, 1, synced), "a page an import window resolved without changing its bytes reads as stored");
+    Require(StoreUnchangedSinceLastCollect(base + 4096, Block - 4096, synced), "pages the import window did not touch read as stored");
+    Require(!StoreUnchangedSinceLastCollect(base + Block, 4096, synced), "a store of new bytes within an import window reads as unstored");
+    bytes[0x2010] = 0x44;
+    static_cast<void>(CollectWritesUncached(base, 2 * Block));
+    Require(StoreUnchangedSinceLastCollect(base, 4096, synced) && StoreUnchangedSinceLastCollect(base + 0x100, 1, synced), "a store to another page of its block made an import window touch read as stored");
+    Require(!StoreUnchangedSinceLastCollect(base + 0x2000, 4096, synced) && !StoreUnchangedSinceLastCollect(base + 0x2010, 1, synced), "a store beside an import window touch reads as unstored");
+    bytes[0x200] = 0x11;
+    static_cast<void>(CollectWritesUncached(base, 2 * Block));
+    Require(!StoreUnchangedSinceLastCollect(base, 4096, synced) && !StoreUnchangedSinceLastCollect(base + 0x100, 1, synced), "a same-value store after an import window touch reads as unstored");
+    Require(StoreUnchangedSinceLastCollect(base + 4096, 4096, synced) && StoreUnchangedSinceLastCollect(base + 0x3000, Block - 0x3000, synced), "a store after the import window marked other pages as stored");
 }
 
 #if defined(__APPLE__) || defined(__linux__)
@@ -2011,7 +2079,7 @@ void CheckImportWindowOtherThread() {
         });
         store.join();
         return true;
-    }), "the other-thread import window import failed");
+    }, true, false), "the other-thread import window import failed");
     const std::array<std::uint64_t, 2> generations{synced, synced};
     std::array<std::uint8_t, 2> changed{};
     std::array<std::uint8_t, 2> cpu{};
@@ -2793,6 +2861,7 @@ int main(int argc, char** argv) {
         CheckDeferredSharedImports();
         CheckPrivateMappingReuse();
         CheckRewatch();
+        for (const auto kind : {LostDriverStore::Piece, LostDriverStore::PossiblePiece, LostDriverStore::Whole, LostDriverStore::PossibleWhole}) CheckRewatchKeepsDriverStores(kind);
         CheckUntrackedHint();
         CheckHostHoleInChild(HostHoleMode, ChildHostHole());
         CheckHostHoleInChild(MetadataCommitMode, ProbedHostHole());
@@ -2804,6 +2873,7 @@ int main(int argc, char** argv) {
         CheckWidenedCollectBesideUncommittedPages();
 #endif
         CheckImportWindow();
+        CheckImportWindowTouchIsNotAStore();
         CheckImportWindowZeroPages();
         CheckImportWindowOtherThread();
         CheckImportWindowOverUnwatchedBlock();

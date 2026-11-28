@@ -245,7 +245,8 @@ void KernelEqueuePrivate::GatherInterests(WaitSet& wait, std::uintptr_t waker, b
             continue;
         }
         const int descriptor = static_cast<int>(e.event.ident);
-        if (!GuestSockets::IsOpen(descriptor) || reinterpret_cast<std::uintptr_t>(e.filter.data) > 1) {
+        // A socket under its low watermark is already readable to the host, so it is polled again instead.
+        if (!GuestSockets::IsOpen(descriptor) || e.lowWater > 1) {
             wait.repoll = true;
             continue;
         }
@@ -551,6 +552,7 @@ int KernelEqueuePrivate::AddEvent(const KernelEqueueEvent& event) {
         }
         it->deadlineNs = event.deadlineNs;
         it->intervalNs = event.intervalNs;
+        it->lowWater = event.lowWater;
         it->event.udata = event.event.udata;
         for (auto& pending : it->pendingEvents) {
             pending.udata = event.event.udata;
@@ -988,24 +990,6 @@ namespace {
 
 constexpr std::uint16_t Fifo = 0010000;
 
-std::size_t LowWatermark(const KernelEqueueEvent* e) {
-    return reinterpret_cast<std::uintptr_t>(e->filter.data);
-}
-
-// A socket is ready once the bytes it can read or write reach the low watermark, or at EOF.
-bool PollSocket(KernelEqueueEvent* e) {
-    std::int64_t data = 0;
-    bool eof = false;
-    if (!GuestSockets::Ready(static_cast<int>(e->event.ident), e->event.filter == EVFILT_WRITE, &data, &eof)) {
-        return false;
-    }
-    const std::size_t watermark = LowWatermark(e);
-    if (!eof && watermark > 1 && static_cast<std::uint64_t>(data) < watermark) return false;
-    e->event.data = static_cast<intptr_t>(data);
-    e->event.flags = static_cast<uint16_t>(eof ? (e->event.flags | EV_EOF) : (e->event.flags & ~EV_EOF));
-    return true;
-}
-
 }
 
 static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* udata, int16_t filter) {
@@ -1019,16 +1003,34 @@ static int AddDescriptorEvent(KernelEqueue eq, int fd, std::size_t size, void* u
     }
     std::int64_t available = 0;
     bool eof = false;
-    const bool isPipe = !isSocket && filter == EVFILT_READ && !File::IsHostStream(fd) && GuestSockets::PipeReadState(fd, &available, &eof);
+    bool writable = false;
+    const bool isPipe = !isSocket && !File::IsHostStream(fd) && (filter == EVFILT_READ ? GuestSockets::PipeReadState(fd, &available, &eof) : GuestSockets::PipeWriteState(fd, &available, &eof, &writable));
+    // Files follow FreeBSD's vnode filters (FileEvent); a device is always readable with data 0.
     if (!isSocket && !isPipe) {
         FileStat stat{};
-        if (filter == EVFILT_WRITE && sceKernelFstat(fd, &stat) == 0 && (stat.st_mode & FileTypeMask) == Fifo) NotImplemented_nid_no_patch("sceKernelAddWriteEvent: pipe or FIFO descriptor");
+        if (filter == EVFILT_WRITE && sceKernelFstat(fd, &stat) == 0 && (stat.st_mode & FileTypeMask) == Fifo) NotImplemented_nid_no_patch("sceKernelAddWriteEvent: FIFO descriptor that is not the write end of a guest pipe");
         if (size > 1) NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: low watermark on a file" : "sceKernelAddWriteEvent: low watermark on a file");
         return EqueueAddEvent_nid_postfix(eq, FileEvent(fd, filter, EV_ADD, udata));
     }
+    if (isPipe && filter == EVFILT_WRITE && eof) {
+        const auto owner = EqueuePin_nid_postfix(eq);
+        if (!owner) {
+            return SCE_KERNEL_ERROR_EBADF;
+        }
+        if (!owner->HasEvent(static_cast<uintptr_t>(fd), EVFILT_WRITE)) {
+            return SCE_KERNEL_ERROR_EPIPE;
+        }
+    }
+    if (isSocket && size > 1 && GuestSockets::Type(fd) != 1) {
+        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: low watermark above 1 on a socket that is not a stream" : "sceKernelAddWriteEvent: low watermark above 1 on a socket that is not a stream");
+    }
+    if (isSocket && size > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max())) {
+        NotImplemented_nid_no_patch(filter == EVFILT_READ ? "sceKernelAddReadEvent: low watermark above INT64_MAX on a socket" : "sceKernelAddWriteEvent: low watermark above INT64_MAX on a socket");
+    }
     auto event = EqueueDescriptorEvent(fd, filter, EV_ADD, udata);
-    event.filter.data = reinterpret_cast<void*>(static_cast<std::uintptr_t>(isPipe ? 1u : size));
-    event.filter.pollFunc = PollSocket;
+    if (isSocket) {
+        event.lowWater = size > 1 ? static_cast<std::int64_t>(size) : 0;
+    }
     return EqueueAddEvent_nid_postfix(eq, event);
 }
 
